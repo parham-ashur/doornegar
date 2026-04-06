@@ -4,6 +4,7 @@ import Link from "next/link";
 import { ArrowLeft, ArrowRight, AlertTriangle, Eye, TrendingUp } from "lucide-react";
 import StoryCard from "@/components/story/StoryCard";
 import { getTrendingStories, getBlindspotStories } from "@/lib/api";
+import type { StoryBrief } from "@/lib/types";
 
 export default async function HomePage({
   params: { locale },
@@ -14,8 +15,8 @@ export default async function HomePage({
   const isRtl = locale === "fa";
   const Arrow = isRtl ? ArrowLeft : ArrowRight;
 
-  let trendingStories = [];
-  let blindspotStories = [];
+  let trendingStories: StoryBrief[] = [];
+  let blindspotStories: StoryBrief[] = [];
 
   try {
     trendingStories = await getTrendingStories(6);

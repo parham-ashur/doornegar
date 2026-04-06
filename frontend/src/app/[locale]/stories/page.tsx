@@ -2,6 +2,7 @@ import { getTranslations } from "next-intl/server";
 import { Newspaper } from "lucide-react";
 import StoryCard from "@/components/story/StoryCard";
 import { getStories } from "@/lib/api";
+import type { StoryBrief } from "@/lib/types";
 
 export default async function StoriesPage({
   params: { locale },
@@ -13,7 +14,7 @@ export default async function StoriesPage({
   const t = await getTranslations();
   const page = parseInt(searchParams.page || "1", 10);
 
-  let stories = [];
+  let stories: StoryBrief[] = [];
   let total = 0;
 
   try {

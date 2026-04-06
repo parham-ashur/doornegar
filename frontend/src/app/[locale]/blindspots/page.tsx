@@ -2,6 +2,7 @@ import { getTranslations } from "next-intl/server";
 import { AlertTriangle, EyeOff } from "lucide-react";
 import StoryCard from "@/components/story/StoryCard";
 import { getBlindspotStories } from "@/lib/api";
+import type { StoryBrief } from "@/lib/types";
 
 export default async function BlindspotsPage({
   params: { locale },
@@ -10,7 +11,7 @@ export default async function BlindspotsPage({
 }) {
   const t = await getTranslations();
 
-  let stories = [];
+  let stories: StoryBrief[] = [];
   try {
     stories = await getBlindspotStories(50);
   } catch {
