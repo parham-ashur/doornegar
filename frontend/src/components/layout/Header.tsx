@@ -57,8 +57,9 @@ export default function Header() {
           ))}
         </nav>
 
-        {/* Language toggle + mobile menu */}
+        {/* Mobile menu */}
         <div className="flex items-center gap-2">
+          {/* Language toggle hidden — Farsi only for now
           <button
             onClick={switchLocale}
             className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800"
@@ -66,6 +67,7 @@ export default function Header() {
             <Globe className="h-4 w-4" />
             {t("common.language")}
           </button>
+          */}
 
           <button
             onClick={() => setMobileOpen(!mobileOpen)}

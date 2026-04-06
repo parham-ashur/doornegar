@@ -4,6 +4,8 @@ import { locales, defaultLocale } from "./i18n";
 export default createMiddleware({
   locales,
   defaultLocale,
+  // Always redirect to Farsi — no locale prefix needed
+  localePrefix: "as-needed",
 });
 
 export const config = {
