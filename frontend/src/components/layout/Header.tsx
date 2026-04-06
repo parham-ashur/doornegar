@@ -27,6 +27,7 @@ export default function Header() {
     { href: `/${locale}/stories`, label: t("nav.stories") },
     { href: `/${locale}/sources`, label: t("nav.sources") },
     { href: `/${locale}/blindspots`, label: t("nav.blindspots") },
+    { href: `/${locale}/dashboard`, label: locale === "fa" ? "داشبورد" : "Dashboard" },
   ];
 
   return (

@@ -129,26 +129,45 @@ async def run_full_pipeline(db: AsyncSession = Depends(get_db)):
 
 @router.get("/debug/llm")
 async def debug_llm():
-    """Test if the LLM API key works."""
+    """Test if the LLM API keys work."""
     from app.config import settings
     result = {
         "has_anthropic_key": bool(settings.anthropic_api_key),
-        "key_prefix": settings.anthropic_api_key[:15] + "..." if settings.anthropic_api_key else "NONE",
+        "anthropic_prefix": settings.anthropic_api_key[:15] + "..." if settings.anthropic_api_key else "NONE",
         "has_openai_key": bool(settings.openai_api_key),
-        "model": settings.bias_scoring_model,
+        "openai_prefix": settings.openai_api_key[:10] + "..." if settings.openai_api_key else "NONE",
     }
+
+    # Test OpenAI first
+    if settings.openai_api_key:
+        try:
+            import openai
+            client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
+            resp = await client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": "Say 'hello' in one word"}],
+                max_tokens=10,
+            )
+            result["openai_test"] = "OK"
+            result["openai_response"] = resp.choices[0].message.content
+        except Exception as e:
+            result["openai_test"] = "FAILED"
+            result["openai_error"] = str(e)
+
+    # Test Anthropic
     if settings.anthropic_api_key:
         try:
             import anthropic
             client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
             msg = await client.messages.create(
                 model=settings.bias_scoring_model,
-                max_tokens=50,
+                max_tokens=10,
                 messages=[{"role": "user", "content": "Say 'hello' in one word"}],
             )
-            result["test"] = "OK"
-            result["response"] = msg.content[0].text
+            result["anthropic_test"] = "OK"
+            result["anthropic_response"] = msg.content[0].text
         except Exception as e:
-            result["test"] = "FAILED"
-            result["error"] = str(e)
+            result["anthropic_test"] = "FAILED"
+            result["anthropic_error"] = str(e)
+
     return result

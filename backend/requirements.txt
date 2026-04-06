@@ -17,3 +17,4 @@ scikit-learn>=1.4
 beautifulsoup4>=4.12
 numpy>=1.26
 anthropic>=0.30
+openai>=1.30

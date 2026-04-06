@@ -170,15 +170,15 @@ async def score_unscored_articles(db: AsyncSession, batch_size: int = 20) -> dic
 async def _call_llm(prompt: str) -> str:
     """Call the configured LLM and return the response text.
 
-    Tries Anthropic first, falls back to OpenAI.
+    Tries OpenAI first (more reliable), falls back to Anthropic.
     """
-    if settings.anthropic_api_key:
-        return await _call_anthropic(prompt)
-    elif settings.openai_api_key:
+    if settings.openai_api_key:
         return await _call_openai(prompt)
+    elif settings.anthropic_api_key:
+        return await _call_anthropic(prompt)
     else:
         raise RuntimeError(
-            "No LLM API key configured. Set ANTHROPIC_API_KEY or OPENAI_API_KEY."
+            "No LLM API key configured. Set OPENAI_API_KEY or ANTHROPIC_API_KEY."
         )
 
 

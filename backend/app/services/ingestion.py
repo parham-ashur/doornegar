@@ -172,13 +172,39 @@ async def ingest_all_sources(db: AsyncSession) -> dict:
     )
     sources = result.scalars().all()
 
-    total_stats = {"found": 0, "new": 0, "errors": 0, "sources": len(sources)}
+    total_stats = {"found": 0, "new": 0, "errors": 0, "scraped": 0, "sources": len(sources)}
     for source in sources:
         logger.info(f"Ingesting source: {source.slug}")
         source_stats = await ingest_source(source, db)
         total_stats["found"] += source_stats["found"]
         total_stats["new"] += source_stats["new"]
         total_stats["errors"] += source_stats["errors"]
+
+        # Fallback: if RSS failed, try scraping
+        if source_stats["found"] == 0 and source_stats["errors"] > 0:
+            try:
+                from app.services.scraper import scrape_source
+                scraped = await scrape_source(source.slug)
+                for article_data in scraped:
+                    stmt = (
+                        insert(Article)
+                        .values(
+                            source_id=source.id,
+                            title_original=article_data["title"],
+                            url=article_data["url"],
+                            language=detect_language(article_data["title"]),
+                            published_at=article_data.get("published_at"),
+                        )
+                        .on_conflict_do_nothing(index_elements=["url"])
+                        .returning(Article.id)
+                    )
+                    result = await db.execute(stmt)
+                    if result.scalar_one_or_none() is not None:
+                        total_stats["scraped"] += 1
+                if scraped:
+                    logger.info(f"Scraped {len(scraped)} articles from {source.slug}")
+            except Exception as e:
+                logger.warning(f"Scraping fallback failed for {source.slug}: {e}")
 
     await db.commit()
     logger.info(
