@@ -1,4 +1,4 @@
-import { getTranslations } from "next-intl/server";
+import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { ArrowLeft, ArrowRight, AlertTriangle, Newspaper } from "lucide-react";
 import CoverageBar from "@/components/common/CoverageBar";
@@ -14,6 +14,7 @@ export default async function StoryDetailPage({
 }: {
   params: { locale: string; id: string };
 }) {
+  setRequestLocale(locale);
   const t = await getTranslations();
   const isRtl = locale === "fa";
   const BackArrow = isRtl ? ArrowRight : ArrowLeft;

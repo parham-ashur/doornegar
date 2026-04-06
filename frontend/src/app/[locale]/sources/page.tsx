@@ -1,4 +1,4 @@
-import { getTranslations } from "next-intl/server";
+import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { Radio, Shield, MapPin } from "lucide-react";
 import SourceBadge from "@/components/source/SourceBadge";
@@ -10,6 +10,7 @@ export default async function SourcesPage({
 }: {
   params: { locale: string };
 }) {
+  setRequestLocale(locale);
   const t = await getTranslations();
 
   let sources: Source[] = [];

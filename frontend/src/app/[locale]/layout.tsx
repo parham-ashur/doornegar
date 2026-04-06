@@ -1,4 +1,5 @@
-import { NextIntlClientProvider, useMessages } from "next-intl";
+import { NextIntlClientProvider } from "next-intl";
+import { setRequestLocale, getMessages } from "next-intl/server";
 import { notFound } from "next/navigation";
 import { locales } from "@/i18n";
 import Header from "@/components/layout/Header";
@@ -9,16 +10,17 @@ export function generateStaticParams() {
   return locales.map((locale) => ({ locale }));
 }
 
-export default function LocaleLayout({
+export default async function LocaleLayout({
   children,
   params: { locale },
 }: {
   children: React.ReactNode;
   params: { locale: string };
 }) {
+  setRequestLocale(locale);
   if (!locales.includes(locale as any)) notFound();
 
-  const messages = useMessages();
+  const messages = await getMessages();
   const isRtl = locale === "fa";
 
   return (

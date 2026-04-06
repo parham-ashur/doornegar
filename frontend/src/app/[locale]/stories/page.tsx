@@ -1,4 +1,4 @@
-import { getTranslations } from "next-intl/server";
+import { getTranslations, setRequestLocale } from "next-intl/server";
 import { Newspaper } from "lucide-react";
 import StoryCard from "@/components/story/StoryCard";
 import { getStories } from "@/lib/api";
@@ -11,6 +11,7 @@ export default async function StoriesPage({
   params: { locale: string };
   searchParams: { page?: string };
 }) {
+  setRequestLocale(locale);
   const t = await getTranslations();
   const page = parseInt(searchParams.page || "1", 10);
 

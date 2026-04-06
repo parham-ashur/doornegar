@@ -1,5 +1,5 @@
 import { useTranslations } from "next-intl";
-import { getTranslations } from "next-intl/server";
+import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { ArrowLeft, ArrowRight, AlertTriangle, Eye, TrendingUp } from "lucide-react";
 import StoryCard from "@/components/story/StoryCard";
@@ -11,6 +11,7 @@ export default async function HomePage({
 }: {
   params: { locale: string };
 }) {
+  setRequestLocale(locale);
   const t = await getTranslations();
   const isRtl = locale === "fa";
   const Arrow = isRtl ? ArrowLeft : ArrowRight;

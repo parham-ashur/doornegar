@@ -1,4 +1,4 @@
-import { getTranslations } from "next-intl/server";
+import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { ArrowLeft, ArrowRight, ExternalLink, MapPin, Radio, Shield } from "lucide-react";
 import SourceBadge from "@/components/source/SourceBadge";
@@ -9,6 +9,7 @@ export default async function SourceProfilePage({
 }: {
   params: { locale: string; slug: string };
 }) {
+  setRequestLocale(locale);
   const t = await getTranslations();
   const isRtl = locale === "fa";
   const BackArrow = isRtl ? ArrowRight : ArrowLeft;
