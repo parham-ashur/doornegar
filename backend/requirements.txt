@@ -17,7 +17,4 @@ pgvector>=0.3
 scikit-learn>=1.4
 beautifulsoup4>=4.12
 numpy>=1.26
-sentence-transformers>=3.0
-torch>=2.2
-transformers>=4.40
 anthropic>=0.30
