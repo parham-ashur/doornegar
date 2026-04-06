@@ -234,21 +234,163 @@ Development: /design, /test-app, /nlp-debug, /devlog, /explain
 
 ---
 
-## Current Status & Next Steps
+## 2026-04-06 — Backend Deployment & First Data
 
-### What's working:
-- Frontend is live on Vercel (empty data — waiting for backend)
-- Backend code is complete (all 4 phases of backend logic)
-- GitHub repo connected to both Vercel and Railway
+### Railway Backend — Live After 8 Deployment Fixes
 
-### Immediate next steps:
-1. Get Railway backend deployment working (current blocker: image size fixed, awaiting redeploy)
-2. Once backend is live → connect frontend to backend API URL → site shows real data
-3. Run first pipeline: ingest RSS → process → cluster → score
-4. Phase 4: Community rating tool (frontend + backend)
+The backend deployment required 8 iterations to resolve:
 
-### Pending for later:
-- Regenerate all API keys/passwords (shared in chat — security risk)
-- Buy doornegar.org domain when ready
-- Set up Telegram API credentials for social monitoring
-- Consider security hardening for Iranian context
+1. **pyproject.toml** — `setuptools.backends._legacy` didn't exist in Python 3.11 on Railway → fixed to `setuptools.build_meta`
+2. **Dockerfile** — was doing `pip install -e ".[dev]"` before copying source → switched to `requirements.txt`
+3. **Image too large** (5.8 GB) — PyTorch + sentence-transformers exceeded Railway's 4GB free tier limit → removed, switched to TF-IDF fallback for embeddings
+4. **PYTHONPATH** — Alembic couldn't find `app` module → added `ENV PYTHONPATH=/app`
+5. **No migration files** — `alembic upgrade head` had nothing to run → created manual `001_initial.py` migration
+6. **TelegramPost.embedding** — SQLAlchemy required type annotation for `mapped_column` → removed field (not needed for MVP)
+7. **nixpacks.toml override** — Railway was using nixpacks config instead of Dockerfile CMD → deleted nixpacks.toml
+8. **Startup hang** — `manage.py seed` hung during container startup → moved seeding to FastAPI lifespan event
+
+**Result:** Backend live at `doornegar-production.up.railway.app`
+
+### First Data Pipeline Run
+
+Successfully ran the pipeline:
+- **Ingestion:** 130 articles found, 80 new from 3 working sources
+- **NLP Processing:** 80 articles processed (keywords, TF-IDF embeddings)
+- **Clustering:** 12 stories created, 10 articles merged into existing stories
+- **Bias Scoring:** Failed — API key issue (see below)
+
+### Source Status
+
+| Source | Status | Articles |
+|--------|--------|----------|
+| BBC Persian | Working | 30 |
+| Iran International | Working (URL fixed to /fa/feed) | 50 |
+| IranWire | Working | 50 |
+| DW Persian | Failed (timeout/redirect) | 0 |
+| Radio Zamaneh | Failed (timeout/redirect) | 0 |
+| Press TV | Geo-blocked | 0 |
+| Tasnim, Fars, ISNA, Mehr | Geo-blocked | 0 |
+
+### Issues Found & Fixed
+
+- **pgvector** — Neon free tier didn't have pgvector extension ready → replaced `Vector(384)` column with `JSONB` for embedding storage
+- **Iran International RSS** — Discovered they DO have RSS at `/fa/feed` (was configured with empty `rss_urls`)
+- **User-Agent blocking** — Some feeds blocked custom User-Agent → changed to browser-like UA
+- **Anthropic API key** — Invalid (401 error). User switching to OpenAI GPT-4o-mini instead
+- **Railway outage** — Railway had a global outage (April 6, 15:17 UTC), pausing deploys
+
+---
+
+## 2026-04-06 — Major Frontend Redesign + Features
+
+### NYTimes-Style Homepage
+- Replaced generic hero with editorial newspaper layout
+- Large hero story (2/3 width) with dark overlay and bold headline
+- Secondary stories sidebar (1/3 width)
+- Masthead with project name and tagline
+
+### New Components (4)
+- **SourceSpectrum** — Media logos positioned on left↔right political axis, color-coded by alignment, clickable
+- **TopicSpectrumView** — Story detail shows 3 columns: Left (Opposition/Diaspora) | Center (Independent) | Right (Pro-Establishment) with articles grouped by category
+- **FactCheckBarometer** — 5-level visual barometer (Misleading → Verified), shows "Not yet assessed" as placeholder
+- **Monitoring Dashboard** — Full admin page with feed status table, pipeline trigger buttons, stats cards
+
+### Language Change
+- Switched to **Farsi only** for MVP — removed language toggle from header
+- English pages still exist at /en/ but hidden from navigation
+- RTL-first design approach
+
+### Backend Improvements
+- **Scraping fallback** — When RSS fails, automatically tries HTML scraping (DW Persian, Radio Zamaneh, Press TV)
+- **Bias scoring** — Now prefers OpenAI (GPT-4o-mini) over Anthropic when both keys present
+- **Error handling** — Admin endpoints return error details instead of generic 500
+- **Debug endpoint** — `/admin/debug/llm` tests both OpenAI and Anthropic keys separately
+
+### Architecture Diagram
+- Created interactive HTML architecture diagram at `docs/architecture.html`
+- Shows all components, data flows, and deployment topology
+
+---
+
+## 2026-04-06 — Phase 4: Invite-Only Rating System
+
+### Design Decision
+Rating system is **invite-only**, not public crowdsourcing. Only trusted individuals selected by the project owner can rate articles. This prevents manipulation by state actors and prioritizes trust over scale.
+
+### Backend (4 new files)
+- **`services/auth.py`** — JWT authentication, bcrypt password hashing, token creation/validation
+- **`api/v1/auth.py`** — Login endpoint (POST /auth/login). No public signup.
+- **`api/v1/ratings.py`** — Rating CRUD: get next blind article, submit rating, history, public stats
+- **`services/rating_aggregation.py`** — Combines AI + human scores (60% human weight, 40% AI weight)
+- **Admin rater management** — Create account, list raters, deactivate (added to admin.py)
+
+### Frontend
+- **Rating page (`/fa/rate`)** — Full Farsi interface:
+  - Login screen for invited raters ("فقط ارزیابان دعوت‌شده")
+  - Blind article display (source HIDDEN)
+  - 5 rating sliders: political alignment, factuality, tone, emotional language
+  - Framing label tags (12 options, multi-select)
+  - Optional notes field
+  - Submit → success screen → next article flow
+  - Tracks time spent per article
+- **"ارزیابی" link** added to navigation
+
+### How to Create a Rater
+```
+curl -X POST "https://doornegar-production.up.railway.app/api/v1/admin/raters/create?username=NAME&email=EMAIL&password=PASS&rater_level=trained"
+```
+
+### Rating Flow
+```
+Admin creates account → Rater logs in → Sees blind article → Rates on 5 dimensions → Submit → Next
+```
+
+---
+
+## 2026-04-06 — Legal & Organizational Research
+
+Created local (non-GitHub) legal folder at `/legal/` with 8 documents:
+- Nonprofit structure options in France (Association loi 1901 recommended)
+- Step-by-step registration (free, 4-8 weeks)
+- Grant opportunities (EED, NED, OTF, GNI, RSF, and 10+ more)
+- Tax benefits (66% donor deduction, VAT exemption)
+- Legal concerns (scraping legality, GDPR, defamation, Iran sanctions)
+- Benefits of France base (RSF in Paris, Sciences Po, INALCO, constitutional press freedom)
+- Timeline and action plan
+
+---
+
+## Current Status (End of Day — 2026-04-06)
+
+### What's Live
+- **Frontend:** https://frontend-tau-six-36.vercel.app (Vercel, auto-deploys)
+- **Backend:** https://doornegar-production.up.railway.app (Railway, currently in outage)
+- **GitHub:** https://github.com/parham-ashur/doornegar (20 commits)
+- **Database:** Neon PostgreSQL with 10 tables, 10 sources seeded, 130 articles, 12 stories
+
+### Project Stats
+- **Total files:** ~110 (backend + frontend)
+- **Backend:** 55 Python files across models, schemas, API, services, NLP, workers
+- **Frontend:** 30+ TypeScript/React files across pages, components, lib
+- **Slash commands:** 15 custom commands for project management
+- **Git commits:** 20
+
+### What Works
+- RSS ingestion (3/10 sources: BBC Persian, Iran International, IranWire)
+- NLP processing (keywords, TF-IDF embeddings, Persian normalization)
+- Story clustering (cosine similarity + connected components)
+- Blind spot detection (state-only vs diaspora-only coverage)
+- Monitoring dashboard with pipeline controls
+- NYTimes-style homepage with media spectrum
+- Invite-only rating system (backend + frontend)
+
+### What Needs Fixing
+- **OpenAI API key** — Added to Railway variables but deploy pending (Railway outage)
+- **Bias scoring** — Will work once OpenAI key deploys
+- **DW Persian, Radio Zamaneh feeds** — Need scraping fallback to kick in
+- **State media** — Geo-blocked, accepted for MVP
+- **Telegram integration** — API credentials added, awaiting deploy
+
+### Security Reminder
+- Rotate all cloud service credentials before public launch
+- See local security plan for details
