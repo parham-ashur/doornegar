@@ -175,19 +175,27 @@ async def debug_llm():
 
 # === Rater Management (Admin Only) ===
 
+from pydantic import BaseModel as _BaseModel
+
+class _CreateRaterRequest(_BaseModel):
+    username: str
+    email: str
+    password: str
+    display_name: str | None = None
+    rater_level: str = "trained"
+
 @router.post("/raters/create")
 async def create_rater_account(
-    username: str,
-    email: str,
-    password: str,
-    display_name: str = None,
-    rater_level: str = "trained",
+    request: _CreateRaterRequest,
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new rater account. Admin-only — no public signup."""
     from app.services.auth import create_rater
     try:
-        user = await create_rater(db, username, email, password, display_name, rater_level)
+        user = await create_rater(
+            db, request.username, request.email, request.password,
+            request.display_name, request.rater_level,
+        )
         return {
             "status": "ok",
             "user_id": str(user.id),

@@ -17,12 +17,14 @@ from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=12)
 
 ALGORITHM = "HS256"
 
 
 def hash_password(password: str) -> str:
+    # Truncate to 72 bytes (bcrypt limit)
+    password = password[:72]
     return pwd_context.hash(password)
 
 
