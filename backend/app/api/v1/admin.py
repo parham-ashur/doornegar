@@ -125,3 +125,30 @@ async def run_full_pipeline(db: AsyncSession = Depends(get_db)):
         results["bias_scoring"] = {"error": str(e)}
 
     return {"status": "ok", "results": results}
+
+
+@router.get("/debug/llm")
+async def debug_llm():
+    """Test if the LLM API key works."""
+    from app.config import settings
+    result = {
+        "has_anthropic_key": bool(settings.anthropic_api_key),
+        "key_prefix": settings.anthropic_api_key[:15] + "..." if settings.anthropic_api_key else "NONE",
+        "has_openai_key": bool(settings.openai_api_key),
+        "model": settings.bias_scoring_model,
+    }
+    if settings.anthropic_api_key:
+        try:
+            import anthropic
+            client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+            msg = await client.messages.create(
+                model=settings.bias_scoring_model,
+                max_tokens=50,
+                messages=[{"role": "user", "content": "Say 'hello' in one word"}],
+            )
+            result["test"] = "OK"
+            result["response"] = msg.content[0].text
+        except Exception as e:
+            result["test"] = "FAILED"
+            result["error"] = str(e)
+    return result
