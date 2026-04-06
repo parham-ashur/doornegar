@@ -173,3 +173,82 @@ Telegram Channels → Fetch posts → Extract URLs → Match to articles → Lin
 ### Also created:
 - **CLAUDE.md** — Project guide for Claude with conventions, setup, API reference
 - **DEVLOG.md** — This file, tracking all development progress
+
+---
+
+## 2026-04-06 — Phase 3 Frontend + Deployment
+
+### Frontend (Complete)
+
+**30 files created for Next.js 14 bilingual frontend:**
+
+Pages (7):
+- Homepage with hero, trending stories, blind spot alerts
+- Story feed with pagination and coverage bars
+- Story detail — the core page: side-by-side article comparison, framing matrix, bias analysis, Telegram reactions
+- Source directory with state↔diaspora spectrum visualization
+- Source profile with metadata, IRGC badges, classification
+- Blind spots page — state-only vs diaspora-only stories
+- Full bilingual layout (Persian RTL + English LTR)
+
+Components (7):
+- BiasSpectrum — gradient bar with position marker
+- CoverageBar — stacked colored segments per source type
+- SourceBadge — colored pills with alignment label + IRGC shield
+- StoryCard — card with coverage bar and blind spot badge
+- StoryComparison — side-by-side articles with bias scores
+- FramingTable — sources × framing labels matrix
+- SocialPanel — Telegram reaction panel with sentiment bar
+
+Design system:
+- Fonts: Vazirmatn (Persian), IBM Plex Sans (English)
+- Colors: red (state), amber (semi-state), emerald (independent), blue (diaspora)
+- Dark mode support
+- 70+ translated strings in fa.json and en.json
+
+### Deployment
+
+**Frontend deployed to Vercel:**
+- URL: https://frontend-tau-six-36.vercel.app
+- Auto-deploys from GitHub on push
+- Build fixes: date-fns-jalali version, TypeScript types, next-intl setRequestLocale
+
+**Backend deployment to Railway (in progress):**
+- Fixed: pyproject.toml build-backend, Dockerfile using requirements.txt
+- Fixed: Image too large (5.8GB) — removed PyTorch/sentence-transformers
+- Switched embeddings to TF-IDF fallback (lightweight, sufficient for MVP)
+- Cloud services configured: Neon (PostgreSQL), Upstash (Redis)
+
+### Skills/Commands Created (15 total)
+
+Operations: /status, /pipeline, /setup, /deploy
+Content: /add-source, /add-channel, /test-feed
+Analysis: /bias-check, /export, /research
+Development: /design, /test-app, /nlp-debug, /devlog, /explain
+
+### Other
+
+- Created CLAUDE.md project guide
+- Initialized git repo, pushed to github.com/parham-ashur/doornegar
+- Installed GitHub CLI (gh) for authentication
+
+---
+
+## Current Status & Next Steps
+
+### What's working:
+- Frontend is live on Vercel (empty data — waiting for backend)
+- Backend code is complete (all 4 phases of backend logic)
+- GitHub repo connected to both Vercel and Railway
+
+### Immediate next steps:
+1. Get Railway backend deployment working (current blocker: image size fixed, awaiting redeploy)
+2. Once backend is live → connect frontend to backend API URL → site shows real data
+3. Run first pipeline: ingest RSS → process → cluster → score
+4. Phase 4: Community rating tool (frontend + backend)
+
+### Pending for later:
+- Regenerate all API keys/passwords (shared in chat — security risk)
+- Buy doornegar.org domain when ready
+- Set up Telegram API credentials for social monitoring
+- Consider security hardening for Iranian context
