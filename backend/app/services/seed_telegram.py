@@ -64,6 +64,47 @@ INITIAL_CHANNELS = [
         "language": "fa",
         "description": "Radio Zamaneh Telegram channel",
     },
+    # New channels
+    {
+        "username": "dwfarsi",
+        "title": "دویچه‌وله فارسی",
+        "channel_type": "news",
+        "political_leaning": "neutral",
+        "language": "fa",
+        "description": "DW Persian Telegram channel",
+    },
+    {
+        "username": "presstv",
+        "title": "Press TV",
+        "channel_type": "news",
+        "political_leaning": "pro_regime",
+        "language": "en",
+        "description": "Press TV state-funded English channel",
+    },
+    {
+        "username": "rfipersian",
+        "title": "آر‌اف‌آی فارسی",
+        "channel_type": "news",
+        "political_leaning": "neutral",
+        "language": "fa",
+        "description": "RFI Farsi Telegram channel",
+    },
+    {
+        "username": "radiofarda",
+        "title": "رادیو فردا",
+        "channel_type": "news",
+        "political_leaning": "opposition",
+        "language": "fa",
+        "description": "Radio Farda (RFE/RL) Telegram channel",
+    },
+    {
+        "username": "zeitoons",
+        "title": "زیتون",
+        "channel_type": "commentary",
+        "political_leaning": "reformist",
+        "language": "fa",
+        "description": "Zeitoons independent media — civil society focus",
+    },
 ]
 
 

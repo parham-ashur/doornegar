@@ -242,3 +242,22 @@ async def deactivate_rater(username: str, db: AsyncSession = Depends(get_db)):
     user.is_active = False
     await db.commit()
     return {"status": "ok", "username": username, "is_active": False}
+
+
+@router.post("/cluster-llm/trigger")
+async def trigger_llm_clustering(db: AsyncSession = Depends(get_db)):
+    """Cluster articles using LLM topic extraction (more accurate, costs ~$0.001/article)."""
+    try:
+        from app.services.topic_clustering import cluster_with_llm
+        stats = await cluster_with_llm(db)
+        return {"status": "ok", "stats": stats}
+    except Exception as e:
+        logger.exception("LLM clustering failed")
+        return {"status": "error", "error": str(e)}
+
+
+@router.get("/costs")
+async def get_llm_costs():
+    """Get current session LLM cost tracking."""
+    from app.services.llm_utils import get_session_stats
+    return get_session_stats()
