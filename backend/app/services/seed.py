@@ -29,7 +29,7 @@ INITIAL_SOURCES = [
         "name_fa": "ایران اینترنشنال",
         "slug": "iran-international",
         "website_url": "https://www.iranintl.com",
-        "rss_urls": [],  # No RSS — will use HTML scraping
+        "rss_urls": ["https://www.iranintl.com/fa/feed"],
         "state_alignment": "diaspora",
         "irgc_affiliated": False,
         "production_location": "outside_iran",

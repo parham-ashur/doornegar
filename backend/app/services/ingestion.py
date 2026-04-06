@@ -29,7 +29,7 @@ async def fetch_feed(feed_url: str) -> feedparser.FeedParserDict | None:
         async with httpx.AsyncClient(
             timeout=settings.ingestion_timeout_seconds,
             follow_redirects=True,
-            headers={"User-Agent": "Doornegar/0.1 (Media Transparency Platform)"},
+            headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"},
         ) as client:
             response = await client.get(feed_url)
             response.raise_for_status()
