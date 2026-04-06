@@ -1,0 +1,73 @@
+{
+  "app": {
+    "name": "دورنگر",
+    "tagline": "شفافیت رسانه‌ای ایران",
+    "description": "یک قدم به عقب بردارید و ببینید رسانه‌ها چگونه خبر را شکل می‌دهند"
+  },
+  "nav": {
+    "home": "خانه",
+    "stories": "خبرها",
+    "sources": "رسانه‌ها",
+    "blindspots": "نقاط کور",
+    "about": "درباره ما"
+  },
+  "home": {
+    "hero_title": "خبر را از زاویه‌ای دیگر ببینید",
+    "hero_subtitle": "مقایسه پوشش خبری رسانه‌های داخل و خارج ایران",
+    "trending": "خبرهای داغ",
+    "blindspot_alert": "هشدار نقطه کور",
+    "blindspot_desc": "خبرهایی که فقط یک طرف پوشش داده است",
+    "view_all": "مشاهده همه"
+  },
+  "story": {
+    "sources_covered": "{count} رسانه",
+    "articles": "مقالات",
+    "comparison": "مقایسه",
+    "bias_analysis": "تحلیل سوگیری",
+    "social_reaction": "واکنش شبکه‌های اجتماعی",
+    "covered_by": "پوشش توسط",
+    "state_only": "فقط رسانه‌های دولتی",
+    "diaspora_only": "فقط رسانه‌های برون‌مرزی",
+    "blind_spot": "نقطه کور",
+    "framing": "چارچوب‌بندی",
+    "no_stories": "هنوز خبری وجود ندارد"
+  },
+  "source": {
+    "state": "دولتی",
+    "semi_state": "نیمه‌دولتی",
+    "independent": "مستقل",
+    "diaspora": "برون‌مرزی",
+    "irgc": "وابسته به سپاه",
+    "inside_iran": "داخل ایران",
+    "outside_iran": "خارج از ایران",
+    "credibility": "اعتبار",
+    "factional": "جناح سیاسی"
+  },
+  "bias": {
+    "political_alignment": "گرایش سیاسی",
+    "pro_regime": "حکومتی",
+    "reformist": "اصلاح‌طلب",
+    "opposition": "اپوزیسیون",
+    "center": "میانه",
+    "tone": "لحن",
+    "factuality": "واقعیت‌محوری",
+    "emotional_language": "زبان احساسی",
+    "framing": "چارچوب‌بندی"
+  },
+  "social": {
+    "telegram_reactions": "واکنش‌های تلگرام",
+    "posts": "پست",
+    "views": "بازدید",
+    "sentiment": "احساسات",
+    "positive": "مثبت",
+    "negative": "منفی",
+    "neutral": "خنثی"
+  },
+  "common": {
+    "loading": "در حال بارگذاری...",
+    "error": "خطایی رخ داد",
+    "retry": "تلاش مجدد",
+    "back": "بازگشت",
+    "language": "English"
+  }
+}

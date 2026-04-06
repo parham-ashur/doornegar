@@ -1,0 +1,69 @@
+from pydantic_settings import BaseSettings
+
+
+class Settings(BaseSettings):
+    # App
+    app_name: str = "Doornegar"
+    environment: str = "development"
+    debug: bool = True
+    api_v1_prefix: str = "/api/v1"
+    port: int = 8000
+
+    # Database — supports both local and cloud (Neon) URLs
+    # Neon gives postgresql:// URLs; we convert to postgresql+asyncpg://
+    database_url: str = "postgresql+asyncpg://doornegar:doornegar_dev@localhost:5432/doornegar"
+
+    # Redis — supports both local and cloud (Upstash) URLs
+    redis_url: str = "redis://localhost:6379/0"
+
+    # Auth
+    secret_key: str = "dev-secret-change-in-production"
+    access_token_expire_minutes: int = 60 * 24 * 7  # 1 week
+
+    # CORS — allowed frontend origins
+    cors_origins: str = "http://localhost:3000"
+
+    # Ingestion
+    ingestion_interval_minutes: int = 15
+    ingestion_timeout_seconds: int = 30
+    max_articles_per_feed: int = 50
+
+    # LLM
+    anthropic_api_key: str = ""
+    openai_api_key: str = ""
+    bias_scoring_model: str = "claude-haiku-4-5-20251001"
+
+    # NLP
+    embedding_model: str = "paraphrase-multilingual-MiniLM-L12-v2"
+    clustering_similarity_threshold: float = 0.7
+    story_merge_threshold: float = 0.75
+
+    # Telegram
+    telegram_api_id: int = 0
+    telegram_api_hash: str = ""
+    telegram_fetch_interval_minutes: int = 30
+
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+
+    @property
+    def async_database_url(self) -> str:
+        """Convert database URL to async driver format for SQLAlchemy."""
+        url = self.database_url
+        # Neon/Supabase give postgresql:// — convert to asyncpg
+        if url.startswith("postgresql://"):
+            url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        elif url.startswith("postgres://"):
+            url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+        # Add sslmode for cloud databases
+        if "neon.tech" in url or "supabase" in url:
+            if "?" not in url:
+                url += "?ssl=require"
+        return url
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        """Parse comma-separated CORS origins."""
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+
+settings = Settings()

@@ -1,0 +1,66 @@
+@import url("https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --color-state: #dc2626;
+    --color-semi-state: #d97706;
+    --color-independent: #059669;
+    --color-diaspora: #2563eb;
+  }
+
+  html[dir="rtl"] {
+    font-family: "Vazirmatn", "Tahoma", sans-serif;
+  }
+
+  html[dir="ltr"] {
+    font-family: "IBM Plex Sans", system-ui, sans-serif;
+  }
+
+  body {
+    @apply bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100;
+  }
+}
+
+@layer components {
+  /* Bias spectrum gradient */
+  .bias-gradient {
+    background: linear-gradient(
+      to right,
+      var(--color-state) 0%,
+      #eab308 35%,
+      #6b7280 50%,
+      #059669 65%,
+      var(--color-diaspora) 100%
+    );
+  }
+
+  /* Source alignment badge base */
+  .badge {
+    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium;
+  }
+
+  .badge-state {
+    @apply badge bg-state-light text-state-dark dark:bg-red-900/30 dark:text-red-300;
+  }
+
+  .badge-semi-state {
+    @apply badge bg-semi-state-light text-semi-state-dark dark:bg-amber-900/30 dark:text-amber-300;
+  }
+
+  .badge-independent {
+    @apply badge bg-independent-light text-independent-dark dark:bg-emerald-900/30 dark:text-emerald-300;
+  }
+
+  .badge-diaspora {
+    @apply badge bg-diaspora-light text-diaspora-dark dark:bg-blue-900/30 dark:text-blue-300;
+  }
+
+  /* Card base */
+  .card {
+    @apply rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md dark:border-slate-800 dark:bg-slate-900;
+  }
+}

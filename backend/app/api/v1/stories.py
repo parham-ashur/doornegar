@@ -1,0 +1,137 @@
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from app.database import get_db
+from app.models.article import Article
+from app.models.bias_score import BiasScore
+from app.models.source import Source
+from app.models.story import Story
+from app.schemas.bias import BiasScoreResponse
+from app.schemas.story import (
+    StoryArticleWithBias,
+    StoryBrief,
+    StoryDetail,
+    StoryListResponse,
+)
+
+router = APIRouter()
+
+
+@router.get("", response_model=StoryListResponse)
+async def list_stories(
+    topic: str | None = None,
+    blindspots_only: bool = False,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    query = select(Story)
+    count_query = select(func.count(Story.id))
+
+    if blindspots_only:
+        query = query.where(Story.is_blindspot.is_(True))
+        count_query = count_query.where(Story.is_blindspot.is_(True))
+
+    total = (await db.execute(count_query)).scalar() or 0
+
+    query = query.order_by(Story.trending_score.desc(), Story.first_published_at.desc().nullslast())
+    query = query.offset((page - 1) * page_size).limit(page_size)
+
+    result = await db.execute(query)
+    stories = result.scalars().all()
+
+    return StoryListResponse(
+        stories=[StoryBrief.model_validate(s) for s in stories],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get("/trending", response_model=list[StoryBrief])
+async def trending_stories(
+    limit: int = Query(10, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Story)
+        .order_by(Story.trending_score.desc())
+        .limit(limit)
+    )
+    stories = result.scalars().all()
+    return [StoryBrief.model_validate(s) for s in stories]
+
+
+@router.get("/blindspots", response_model=list[StoryBrief])
+async def blindspot_stories(
+    limit: int = Query(20, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Story)
+        .where(Story.is_blindspot.is_(True))
+        .order_by(Story.first_published_at.desc().nullslast())
+        .limit(limit)
+    )
+    stories = result.scalars().all()
+    return [StoryBrief.model_validate(s) for s in stories]
+
+
+@router.get("/{story_id}", response_model=StoryDetail)
+async def get_story(story_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(Story)
+        .options(
+            selectinload(Story.articles)
+            .selectinload(Article.source),
+            selectinload(Story.articles)
+            .selectinload(Article.bias_scores),
+        )
+        .where(Story.id == story_id)
+    )
+    story = result.scalar_one_or_none()
+    if not story:
+        raise HTTPException(status_code=404, detail="Story not found")
+
+    articles_with_bias = []
+    for article in story.articles:
+        article_data = StoryArticleWithBias(
+            **{k: v for k, v in ArticleBriefDict(article).items()},
+            source_name_en=article.source.name_en if article.source else None,
+            source_name_fa=article.source.name_fa if article.source else None,
+            source_slug=article.source.slug if article.source else None,
+            source_state_alignment=article.source.state_alignment if article.source else None,
+            bias_scores=[BiasScoreResponse.model_validate(bs) for bs in article.bias_scores],
+        )
+        articles_with_bias.append(article_data)
+
+    story_data = StoryBrief.model_validate(story)
+    return StoryDetail(
+        **story_data.model_dump(),
+        summary_en=story.summary_en,
+        summary_fa=story.summary_fa,
+        articles=articles_with_bias,
+    )
+
+
+def ArticleBriefDict(article: Article) -> dict:
+    """Helper to convert Article ORM to dict for ArticleBrief fields."""
+    return {
+        "id": article.id,
+        "source_id": article.source_id,
+        "story_id": article.story_id,
+        "title_original": article.title_original,
+        "title_en": article.title_en,
+        "title_fa": article.title_fa,
+        "url": article.url,
+        "summary": article.summary,
+        "image_url": article.image_url,
+        "author": article.author,
+        "language": article.language,
+        "published_at": article.published_at,
+        "ingested_at": article.ingested_at,
+    }
