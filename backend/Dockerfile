@@ -11,4 +11,4 @@ ENV PYTHONPATH=/app
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "alembic upgrade head && python manage.py seed && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "alembic upgrade head 2>&1 && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
