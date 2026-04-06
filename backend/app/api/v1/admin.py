@@ -171,3 +171,74 @@ async def debug_llm():
             result["anthropic_error"] = str(e)
 
     return result
+
+
+# === Rater Management (Admin Only) ===
+
+@router.post("/raters/create")
+async def create_rater_account(
+    username: str,
+    email: str,
+    password: str,
+    display_name: str = None,
+    rater_level: str = "trained",
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a new rater account. Admin-only — no public signup."""
+    from app.services.auth import create_rater
+    try:
+        user = await create_rater(db, username, email, password, display_name, rater_level)
+        return {
+            "status": "ok",
+            "user_id": str(user.id),
+            "username": user.username,
+            "rater_level": user.rater_level,
+        }
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@router.get("/raters")
+async def list_raters(db: AsyncSession = Depends(get_db)):
+    """List all rater accounts and their stats."""
+    from sqlalchemy import select
+    from app.models.user import User
+
+    result = await db.execute(
+        select(User).where(User.is_rater.is_(True)).order_by(User.created_at.desc())
+    )
+    raters = result.scalars().all()
+
+    return {
+        "raters": [
+            {
+                "id": str(r.id),
+                "username": r.username,
+                "display_name": r.display_name,
+                "email": r.email,
+                "rater_level": r.rater_level,
+                "total_ratings": r.total_ratings,
+                "reliability_score": r.rater_reliability_score,
+                "is_active": r.is_active,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in raters
+        ],
+        "total": len(raters),
+    }
+
+
+@router.post("/raters/{username}/deactivate")
+async def deactivate_rater(username: str, db: AsyncSession = Depends(get_db)):
+    """Deactivate a rater account."""
+    from sqlalchemy import select, update
+    from app.models.user import User
+
+    result = await db.execute(select(User).where(User.username == username))
+    user = result.scalar_one_or_none()
+    if not user:
+        return {"status": "error", "error": "User not found"}
+
+    user.is_active = False
+    await db.commit()
+    return {"status": "ok", "username": username, "is_active": False}
