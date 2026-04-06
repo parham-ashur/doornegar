@@ -92,7 +92,7 @@ class TelegramPost(Base):
     )
     framing_labels: Mapped[dict] = mapped_column(JSONB, default=list)
     keywords: Mapped[dict] = mapped_column(JSONB, default=list)
-    embedding = mapped_column("embedding_vector", nullable=True)  # For matching to stories
+    # embedding field removed for MVP — not needed without sentence-transformers
 
     # Flags
     shares_news_link: Mapped[bool] = mapped_column(
