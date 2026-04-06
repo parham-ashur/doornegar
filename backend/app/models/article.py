@@ -1,7 +1,6 @@
 import uuid
 from datetime import datetime
 
-from pgvector.sqlalchemy import Vector
 from sqlalchemy import DateTime, Float, ForeignKey, Index, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -35,7 +34,8 @@ class Article(Base):
     categories: Mapped[dict] = mapped_column(JSONB, default=list)
 
     # NLP outputs
-    embedding = mapped_column(Vector(384), nullable=True)
+    # embedding stored as JSON array for MVP (pgvector not required)
+    embedding: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     keywords: Mapped[dict] = mapped_column(JSONB, default=list)
     named_entities: Mapped[dict] = mapped_column(JSONB, default=list)
     sentiment_score: Mapped[float | None] = mapped_column(Float, nullable=True)
