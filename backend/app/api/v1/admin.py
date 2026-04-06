@@ -1,38 +1,53 @@
 """Admin endpoints for managing ingestion and NLP pipeline."""
 
+import logging
+import traceback
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.ingestion_log import IngestionLog
-from app.services.bias_scoring import score_unscored_articles
-from app.services.clustering import cluster_articles
-from app.services.ingestion import ingest_all_sources
-from app.services.nlp_pipeline import process_unprocessed_articles
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.post("/ingest/trigger")
 async def trigger_ingestion(db: AsyncSession = Depends(get_db)):
     """Manually trigger RSS feed ingestion."""
-    stats = await ingest_all_sources(db)
-    return {"status": "ok", "stats": stats}
+    try:
+        from app.services.ingestion import ingest_all_sources
+        stats = await ingest_all_sources(db)
+        return {"status": "ok", "stats": stats}
+    except Exception as e:
+        logger.exception("Ingestion failed")
+        return {"status": "error", "error": str(e), "traceback": traceback.format_exc()[-500:]}
 
 
 @router.post("/nlp/trigger")
 async def trigger_nlp_processing(db: AsyncSession = Depends(get_db)):
     """Manually trigger NLP processing on unprocessed articles."""
-    stats = await process_unprocessed_articles(db)
-    return {"status": "ok", "stats": stats}
+    try:
+        from app.services.nlp_pipeline import process_unprocessed_articles
+        stats = await process_unprocessed_articles(db)
+        return {"status": "ok", "stats": stats}
+    except Exception as e:
+        logger.exception("NLP processing failed")
+        return {"status": "error", "error": str(e), "traceback": traceback.format_exc()[-500:]}
 
 
 @router.post("/cluster/trigger")
 async def trigger_clustering(db: AsyncSession = Depends(get_db)):
     """Manually trigger story clustering."""
-    stats = await cluster_articles(db)
-    return {"status": "ok", "stats": stats}
+    try:
+        from app.services.clustering import cluster_articles
+        stats = await cluster_articles(db)
+        return {"status": "ok", "stats": stats}
+    except Exception as e:
+        logger.exception("Clustering failed")
+        return {"status": "error", "error": str(e), "traceback": traceback.format_exc()[-500:]}
 
 
 @router.post("/bias/trigger")
@@ -41,8 +56,13 @@ async def trigger_bias_scoring(
     db: AsyncSession = Depends(get_db),
 ):
     """Manually trigger LLM bias scoring on unscored articles."""
-    stats = await score_unscored_articles(db, batch_size=batch_size)
-    return {"status": "ok", "stats": stats}
+    try:
+        from app.services.bias_scoring import score_unscored_articles
+        stats = await score_unscored_articles(db, batch_size=batch_size)
+        return {"status": "ok", "stats": stats}
+    except Exception as e:
+        logger.exception("Bias scoring failed")
+        return {"status": "error", "error": str(e), "traceback": traceback.format_exc()[-500:]}
 
 
 @router.get("/ingest/log")
@@ -77,15 +97,31 @@ async def get_ingestion_log(
 
 @router.post("/pipeline/run-all")
 async def run_full_pipeline(db: AsyncSession = Depends(get_db)):
-    """Run the full pipeline: ingest → NLP → cluster → score.
-
-    Useful for initial setup and testing.
-    """
+    """Run the full pipeline: ingest → NLP → cluster → score."""
     results = {}
 
-    results["ingestion"] = await ingest_all_sources(db)
-    results["nlp"] = await process_unprocessed_articles(db)
-    results["clustering"] = await cluster_articles(db)
-    results["bias_scoring"] = await score_unscored_articles(db)
+    try:
+        from app.services.ingestion import ingest_all_sources
+        results["ingestion"] = await ingest_all_sources(db)
+    except Exception as e:
+        results["ingestion"] = {"error": str(e)}
+
+    try:
+        from app.services.nlp_pipeline import process_unprocessed_articles
+        results["nlp"] = await process_unprocessed_articles(db)
+    except Exception as e:
+        results["nlp"] = {"error": str(e)}
+
+    try:
+        from app.services.clustering import cluster_articles
+        results["clustering"] = await cluster_articles(db)
+    except Exception as e:
+        results["clustering"] = {"error": str(e)}
+
+    try:
+        from app.services.bias_scoring import score_unscored_articles
+        results["bias_scoring"] = await score_unscored_articles(db)
+    except Exception as e:
+        results["bias_scoring"] = {"error": str(e)}
 
     return {"status": "ok", "results": results}
