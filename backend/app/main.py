@@ -1,8 +1,11 @@
 import logging
 from contextlib import asynccontextmanager
 
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select, update
 
 from app.api.v1.router import api_router
@@ -65,6 +68,11 @@ app.add_middleware(
 )
 
 app.include_router(api_router, prefix=settings.api_v1_prefix)
+
+# Serve locally saved images
+_static_dir = Path(__file__).parent.parent / "static" / "images"
+_static_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/images", StaticFiles(directory=str(_static_dir)), name="images")
 
 
 @app.get("/health")

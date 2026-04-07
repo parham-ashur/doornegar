@@ -122,6 +122,28 @@ async def ingest_source(source: Source, db: AsyncSession) -> dict:
                     image_url = entry["media_content"][0].get("url")
                 elif "enclosures" in entry and entry["enclosures"]:
                     image_url = entry["enclosures"][0].get("href")
+                # Try media:thumbnail
+                if not image_url and "media_thumbnail" in entry and entry["media_thumbnail"]:
+                    image_url = entry["media_thumbnail"][0].get("url")
+                # Try entry.image (some feeds use <image> tag)
+                if not image_url:
+                    img_field = entry.get("image")
+                    if isinstance(img_field, dict) and img_field.get("href"):
+                        image_url = img_field["href"]
+                    elif isinstance(img_field, str) and img_field.strip():
+                        image_url = img_field.strip()
+                # Try og:image from link tags in feed
+                if not image_url and "links" in entry:
+                    for link in entry["links"]:
+                        if link.get("type", "").startswith("image/"):
+                            image_url = link.get("href")
+                            break
+                # Fallback: extract first <img> from summary or content HTML
+                if not image_url:
+                    image_url = _extract_image_from_html(
+                        entry.get("summary", ""),
+                        entry.get("content", []),
+                    )
 
                 language = detect_language(title)
                 published_at = parse_published_date(entry)
@@ -212,3 +234,66 @@ async def ingest_all_sources(db: AsyncSession) -> dict:
         f"from {total_stats['sources']} sources"
     )
     return total_stats
+
+
+import re
+
+# Patterns in image URLs that indicate non-article images
+_SKIP_PATTERNS = (
+    "logo", "icon", "favicon", "avatar", "pixel", "tracking",
+    "spacer", "blank", "transparent", "1x1", "badge", "sprite",
+    "ads", "widget", "button", "spinner", "gravatar", "emoji",
+)
+
+
+def _extract_image_from_html(summary: str, content_list: list) -> str | None:
+    """Extract the first likely article image from RSS summary or content HTML.
+
+    Checks both the summary field and the content list (used by Atom feeds).
+    Skips tiny icons, tracking pixels, and logos.
+    """
+    # Combine HTML sources to search
+    html_parts = []
+    if summary:
+        html_parts.append(summary)
+    if content_list:
+        for content_item in content_list:
+            if isinstance(content_item, dict):
+                html_parts.append(content_item.get("value", ""))
+            elif isinstance(content_item, str):
+                html_parts.append(content_item)
+
+    html_text = " ".join(html_parts)
+    if not html_text or "<img" not in html_text.lower():
+        return None
+
+    # Use regex to avoid importing BeautifulSoup in the hot ingestion path
+    img_tags = re.findall(r'<img[^>]+>', html_text, re.IGNORECASE)
+    for img_tag in img_tags[:10]:  # only check first 10 images
+        # Extract src attribute
+        src_match = re.search(r'src=["\']([^"\']+)["\']', img_tag, re.IGNORECASE)
+        if not src_match:
+            continue
+        src = src_match.group(1).strip()
+        if not src or src.startswith("data:"):
+            continue
+
+        src_lower = src.lower()
+
+        # Skip known non-article image patterns
+        if any(p in src_lower for p in _SKIP_PATTERNS):
+            continue
+
+        # Skip tiny images by checking width/height attributes
+        width_match = re.search(r'width=["\']?(\d+)', img_tag, re.IGNORECASE)
+        height_match = re.search(r'height=["\']?(\d+)', img_tag, re.IGNORECASE)
+        if width_match and int(width_match.group(1)) < 100:
+            continue
+        if height_match and int(height_match.group(1)) < 100:
+            continue
+
+        # Must be an absolute URL (RSS feeds usually have absolute URLs)
+        if src.startswith(("http://", "https://")):
+            return src
+
+    return None

@@ -14,6 +14,7 @@ from app.models import (  # noqa: F401
     BiasScore,
     CommunityRating,
     IngestionLog,
+    RaterFeedback,
     SocialSentimentSnapshot,
     Source,
     Story,

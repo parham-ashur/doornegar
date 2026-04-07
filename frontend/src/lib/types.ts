@@ -70,6 +70,10 @@ export interface StoryBrief {
   topics: string[];
   first_published_at: string | null;
   trending_score: number;
+  image_url: string | null;
+  state_pct: number;
+  diaspora_pct: number;
+  independent_pct: number;
 }
 
 export interface StoryArticleWithBias extends ArticleBrief {
@@ -101,3 +105,23 @@ export interface SocialSentiment {
 }
 
 export type StateAlignment = "state" | "semi_state" | "independent" | "diaspora";
+
+export interface SideBiasScores {
+  tone: number | null;
+  factuality: number | null;
+  emotional_language: number | null;
+  framing: string | null;
+}
+
+export interface StoryAnalysis {
+  summary_fa: string | null;
+  state_summary_fa: string | null;
+  diaspora_summary_fa: string | null;
+  independent_summary_fa: string | null;
+  bias_explanation_fa: string | null;
+  scores: {
+    state: SideBiasScores | null;
+    diaspora: SideBiasScores | null;
+    independent: SideBiasScores | null;
+  } | null;
+}

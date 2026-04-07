@@ -47,3 +47,9 @@ celerybeat.pid
 .pytest_cache/
 htmlcov/
 .coverage
+
+# Telegram session files
+*.session
+
+# Local images
+backend/static/images/

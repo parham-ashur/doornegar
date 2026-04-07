@@ -1,7 +1,6 @@
 "use client";
 
-import { useLocale } from "next-intl";
-import { cn, alignmentLabels } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import type { StateAlignment } from "@/lib/types";
 
 interface CoverageBarProps {
@@ -12,10 +11,24 @@ interface CoverageBarProps {
 }
 
 const segmentColors: Record<StateAlignment, string> = {
-  state: "bg-state",
-  semi_state: "bg-semi-state",
-  independent: "bg-independent",
-  diaspora: "bg-diaspora",
+  state: "bg-red-500",
+  semi_state: "bg-orange-500",
+  independent: "bg-emerald-500",
+  diaspora: "bg-blue-500",
+};
+
+const segmentLabels: Record<StateAlignment, string> = {
+  state: "حکومتی",
+  semi_state: "نیمه‌دولتی",
+  independent: "مستقل",
+  diaspora: "برون‌مرزی",
+};
+
+const segmentTextColors: Record<StateAlignment, string> = {
+  state: "text-red-600 dark:text-red-400",
+  semi_state: "text-orange-600 dark:text-orange-400",
+  independent: "text-emerald-600 dark:text-emerald-400",
+  diaspora: "text-blue-600 dark:text-blue-400",
 };
 
 export default function CoverageBar({
@@ -24,17 +37,14 @@ export default function CoverageBar({
   height = "md",
   className,
 }: CoverageBarProps) {
-  const locale = useLocale();
   const total = segments.reduce((sum, s) => sum + s.count, 0);
-
   if (total === 0) return null;
 
-  const heights = { sm: "h-2", md: "h-3", lg: "h-4" };
+  const heights = { sm: "h-1.5", md: "h-2", lg: "h-3" };
 
   return (
     <div className={cn("w-full", className)}>
-      {/* Stacked bar */}
-      <div className={cn("flex overflow-hidden rounded-full", heights[height])}>
+      <div className={cn("flex overflow-hidden bg-slate-200 dark:bg-slate-800", heights[height])}>
         {segments.map((segment) => {
           const pct = (segment.count / total) * 100;
           if (pct === 0) return null;
@@ -43,24 +53,19 @@ export default function CoverageBar({
               key={segment.alignment}
               className={cn(segmentColors[segment.alignment], "transition-all")}
               style={{ width: `${pct}%` }}
-              title={`${alignmentLabels[segment.alignment][locale === "fa" ? "fa" : "en"]}: ${segment.count}`}
             />
           );
         })}
       </div>
 
-      {/* Labels */}
       {showLabels && (
-        <div className="mt-1.5 flex flex-wrap gap-3 text-xs">
+        <div className="mt-1.5 flex flex-wrap gap-3 text-[10px]">
           {segments
             .filter((s) => s.count > 0)
             .map((segment) => (
-              <div key={segment.alignment} className="flex items-center gap-1">
-                <div className={cn("h-2.5 w-2.5 rounded-full", segmentColors[segment.alignment])} />
-                <span className="text-slate-600 dark:text-slate-400">
-                  {alignmentLabels[segment.alignment][locale === "fa" ? "fa" : "en"]}
-                  {" "}({segment.count})
-                </span>
+              <div key={segment.alignment} className={cn("flex items-center gap-1 font-medium", segmentTextColors[segment.alignment])}>
+                <div className={cn("h-1.5 w-1.5", segmentColors[segment.alignment])} />
+                {segmentLabels[segment.alignment]} ({segment.count})
               </div>
             ))}
         </div>

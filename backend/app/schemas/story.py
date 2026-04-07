@@ -22,6 +22,10 @@ class StoryBrief(BaseModel):
     topics: list[str]
     first_published_at: datetime | None = None
     trending_score: float
+    image_url: str | None = None
+    state_pct: int = 0
+    diaspora_pct: int = 0
+    independent_pct: int = 0
 
     model_config = {"from_attributes": True}
 
@@ -45,3 +49,19 @@ class StoryListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class BiasScores(BaseModel):
+    tone: float | None = None
+    factuality: float | None = None
+    emotional_language: float | None = None
+    framing: str | None = None
+
+class StoryAnalysisResponse(BaseModel):
+    story_id: uuid.UUID
+    summary_fa: str | None = None
+    state_summary_fa: str | None = None
+    diaspora_summary_fa: str | None = None
+    independent_summary_fa: str | None = None
+    bias_explanation_fa: str | None = None
+    scores: dict[str, BiasScores | None] | None = None

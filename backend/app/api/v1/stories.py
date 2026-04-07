@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -5,6 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.config import settings
 from app.database import get_db
 from app.models.article import Article
 from app.models.bias_score import BiasScore
@@ -12,11 +14,15 @@ from app.models.source import Source
 from app.models.story import Story
 from app.schemas.bias import BiasScoreResponse
 from app.schemas.story import (
+    StoryAnalysisResponse,
     StoryArticleWithBias,
     StoryBrief,
     StoryDetail,
     StoryListResponse,
 )
+from app.services.story_analysis import generate_story_analysis
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -55,30 +61,113 @@ async def list_stories(
 @router.get("/trending", response_model=list[StoryBrief])
 async def trending_stories(
     limit: int = Query(10, ge=1, le=50),
+    min_articles: int = Query(5, ge=1),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
         select(Story)
+        .options(selectinload(Story.articles).selectinload(Article.source))
+        .where(Story.article_count >= min_articles)
         .order_by(Story.trending_score.desc())
         .limit(limit)
     )
     stories = result.scalars().all()
-    return [StoryBrief.model_validate(s) for s in stories]
+    return [_story_brief_with_extras(s) for s in stories]
 
 
 @router.get("/blindspots", response_model=list[StoryBrief])
 async def blindspot_stories(
     limit: int = Query(20, ge=1, le=50),
+    min_articles: int = Query(5, ge=1),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
         select(Story)
-        .where(Story.is_blindspot.is_(True))
+        .options(selectinload(Story.articles).selectinload(Article.source))
+        .where(Story.is_blindspot.is_(True), Story.article_count >= min_articles)
         .order_by(Story.first_published_at.desc().nullslast())
         .limit(limit)
     )
     stories = result.scalars().all()
-    return [StoryBrief.model_validate(s) for s in stories]
+    return [_story_brief_with_extras(s) for s in stories]
+
+
+@router.get("/{story_id}/analysis", response_model=StoryAnalysisResponse)
+async def get_story_analysis(story_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    """Return the saved analysis instantly. Full JSON is stored in summary_en."""
+    import json as _json
+    result = await db.execute(select(Story).where(Story.id == story_id))
+    story = result.scalar_one_or_none()
+    if not story:
+        raise HTTPException(status_code=404, detail="Story not found")
+
+    # Full analysis is stored as JSON in summary_en
+    extra = {}
+    if story.summary_en:
+        try:
+            extra = _json.loads(story.summary_en)
+        except Exception:
+            pass
+
+    return StoryAnalysisResponse(
+        story_id=story.id,
+        summary_fa=story.summary_fa,
+        state_summary_fa=extra.get("state_summary_fa"),
+        diaspora_summary_fa=extra.get("diaspora_summary_fa"),
+        independent_summary_fa=extra.get("independent_summary_fa"),
+        bias_explanation_fa=extra.get("bias_explanation_fa"),
+        scores=extra.get("scores"),
+    )
+
+
+@router.post("/{story_id}/summarize", response_model=StoryAnalysisResponse)
+async def summarize_story(story_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    """Force-generate a new summary using OpenAI."""
+    result = await db.execute(
+        select(Story)
+        .options(selectinload(Story.articles).selectinload(Article.source))
+        .where(Story.id == story_id)
+    )
+    story = result.scalar_one_or_none()
+    if not story:
+        raise HTTPException(status_code=404, detail="Story not found")
+    if not story.articles:
+        raise HTTPException(status_code=400, detail="No articles")
+
+    articles_info = [
+        {
+            "title": a.title_original or a.title_fa or a.title_en or "",
+            "content": (a.content_text or a.summary or "")[:1500],
+            "source_name_fa": a.source.name_fa if a.source else "نامشخص",
+            "state_alignment": a.source.state_alignment if a.source else "",
+        }
+        for a in story.articles
+    ]
+    try:
+        analysis = await generate_story_analysis(story, articles_info)
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    import json as _json
+    story.summary_fa = analysis.get("summary_fa")
+    # Store full analysis as JSON in summary_en
+    story.summary_en = _json.dumps({
+        "state_summary_fa": analysis.get("state_summary_fa"),
+        "diaspora_summary_fa": analysis.get("diaspora_summary_fa"),
+        "independent_summary_fa": analysis.get("independent_summary_fa"),
+        "bias_explanation_fa": analysis.get("bias_explanation_fa"),
+        "scores": analysis.get("scores"),
+    }, ensure_ascii=False)
+    await db.commit()
+    return StoryAnalysisResponse(
+        story_id=story.id,
+        summary_fa=analysis.get("summary_fa"),
+        state_summary_fa=analysis.get("state_summary_fa"),
+        diaspora_summary_fa=analysis.get("diaspora_summary_fa"),
+        independent_summary_fa=analysis.get("independent_summary_fa"),
+        bias_explanation_fa=analysis.get("bias_explanation_fa"),
+        scores=analysis.get("scores"),
+    )
 
 
 @router.get("/{story_id}", response_model=StoryDetail)
@@ -116,6 +205,37 @@ async def get_story(story_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
         summary_fa=story.summary_fa,
         articles=articles_with_bias,
     )
+
+
+def _story_brief_with_extras(story: Story) -> StoryBrief:
+    """Build StoryBrief with image_url and coverage percentages."""
+    brief = StoryBrief.model_validate(story)
+    # First article image
+    for article in story.articles:
+        if article.image_url:
+            brief.image_url = article.image_url
+            break
+    # Coverage percentages
+    total = len(story.articles)
+    if total > 0:
+        state = 0
+        diaspora = 0
+        independent = 0
+        for a in story.articles:
+            if a.source:
+                align = a.source.state_alignment
+                if align in ("state", "semi_state"):
+                    state += 1
+                elif align == "diaspora":
+                    diaspora += 1
+                else:
+                    independent += 1
+            else:
+                independent += 1
+        brief.state_pct = round(state * 100 / total)
+        brief.diaspora_pct = round(diaspora * 100 / total)
+        brief.independent_pct = round(independent * 100 / total)
+    return brief
 
 
 def ArticleBriefDict(article: Article) -> dict:

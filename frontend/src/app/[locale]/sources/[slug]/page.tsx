@@ -1,6 +1,6 @@
-import { getTranslations, setRequestLocale } from "next-intl/server";
+import { setRequestLocale } from "next-intl/server";
 import Link from "next/link";
-import { ArrowLeft, ArrowRight, ExternalLink, MapPin, Radio, Shield } from "lucide-react";
+import { ArrowLeft, ExternalLink, MapPin, Shield } from "lucide-react";
 import SourceBadge from "@/components/source/SourceBadge";
 import { getSource } from "@/lib/api";
 
@@ -10,54 +10,54 @@ export default async function SourceProfilePage({
   params: { locale: string; slug: string };
 }) {
   setRequestLocale(locale);
-  const t = await getTranslations();
-  const isRtl = locale === "fa";
-  const BackArrow = isRtl ? ArrowRight : ArrowLeft;
 
   let source;
   try {
     source = await getSource(slug);
   } catch {
     return (
-      <div className="mx-auto max-w-7xl px-4 py-16 text-center">
-        <p className="text-slate-500">{t("common.error")}</p>
+      <div dir="rtl" className="mx-auto max-w-7xl px-4 py-16 text-center">
+        <p className="text-slate-400">خطا در بارگذاری اطلاعات رسانه</p>
       </div>
     );
   }
 
-  const name = locale === "fa" ? source.name_fa : source.name_en;
-  const description = locale === "fa" ? source.description_fa : source.description_en;
+  const alignmentLabels: Record<string, string> = {
+    state: "حکومتی",
+    semi_state: "نیمه‌دولتی",
+    independent: "مستقل",
+    diaspora: "برون‌مرزی",
+  };
 
-  const factionalLabels: Record<string, { en: string; fa: string }> = {
-    hardline: { en: "Hardline", fa: "اصولگرای تندرو" },
-    principlist: { en: "Principlist", fa: "اصولگرا" },
-    reformist: { en: "Reformist", fa: "اصلاح‌طلب" },
-    moderate: { en: "Moderate", fa: "میانه‌رو" },
-    opposition: { en: "Opposition", fa: "اپوزیسیون" },
-    monarchist: { en: "Monarchist", fa: "سلطنت‌طلب" },
-    left: { en: "Left", fa: "چپ" },
+  const factionalLabels: Record<string, string> = {
+    hardline: "اصولگرای تندرو",
+    principlist: "اصولگرا",
+    reformist: "اصلاح‌طلب",
+    moderate: "میانه‌رو",
+    opposition: "اپوزیسیون",
+    monarchist: "سلطنت‌طلب",
+    left: "چپ",
   };
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8">
+    <div dir="rtl" className="mx-auto max-w-3xl px-4 py-8">
       <Link
         href={`/${locale}/sources`}
-        className="mb-6 inline-flex items-center gap-1 text-sm text-slate-500 hover:text-diaspora"
+        className="mb-6 inline-flex items-center gap-1 text-sm text-slate-400 hover:text-blue-400"
       >
-        <BackArrow className="h-4 w-4" />
-        {t("common.back")}
+        <ArrowLeft className="h-4 w-4 rotate-180" />
+        بازگشت
       </Link>
 
       {/* Header */}
-      <div className="card mb-6">
+      <div className="bg-slate-900/80 ring-1 ring-white/[0.06] rounded-2xl p-5 mb-6">
         <div className="flex items-start justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
-              {name}
+            <h1 className="text-2xl font-bold text-white">
+              {source.name_fa}
             </h1>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-              {/* Show the other language name */}
-              {locale === "fa" ? source.name_en : source.name_fa}
+            <p className="mt-1 text-sm text-slate-400">
+              {source.name_en}
             </p>
           </div>
           <SourceBadge
@@ -66,9 +66,9 @@ export default async function SourceProfilePage({
           />
         </div>
 
-        {description && (
-          <p className="mt-4 text-sm text-slate-600 dark:text-slate-400">
-            {description}
+        {source.description_fa && (
+          <p className="mt-4 text-sm text-slate-400">
+            {source.description_fa}
           </p>
         )}
 
@@ -76,7 +76,7 @@ export default async function SourceProfilePage({
           href={source.website_url}
           target="_blank"
           rel="noopener noreferrer"
-          className="mt-4 inline-flex items-center gap-1 text-sm text-diaspora hover:underline"
+          className="mt-4 inline-flex items-center gap-1 text-sm text-blue-400 hover:underline"
         >
           {source.website_url}
           <ExternalLink className="h-3.5 w-3.5" />
@@ -85,91 +85,73 @@ export default async function SourceProfilePage({
 
       {/* Metadata grid */}
       <div className="grid gap-4 sm:grid-cols-2">
-        <div className="card">
-          <h3 className="mb-3 text-sm font-semibold text-slate-500 dark:text-slate-400">
-            {locale === "fa" ? "طبقه‌بندی" : "Classification"}
+        <div className="bg-slate-900/80 ring-1 ring-white/[0.06] rounded-2xl p-5">
+          <h3 className="mb-3 text-sm font-semibold text-slate-400">
+            طبقه‌بندی
           </h3>
           <dl className="space-y-2.5 text-sm">
             <div className="flex justify-between">
-              <dt className="text-slate-500 dark:text-slate-400">
-                {locale === "fa" ? "نوع رسانه" : "Media Type"}
-              </dt>
-              <dd className="font-medium text-slate-900 dark:text-white">
-                {t(`source.${source.state_alignment}`)}
+              <dt className="text-slate-400">نوع رسانه</dt>
+              <dd className="font-medium text-white">
+                {alignmentLabels[source.state_alignment] || source.state_alignment}
               </dd>
             </div>
             <div className="flex justify-between">
-              <dt className="text-slate-500 dark:text-slate-400">
-                {locale === "fa" ? "مکان" : "Location"}
-              </dt>
-              <dd className="flex items-center gap-1 font-medium text-slate-900 dark:text-white">
+              <dt className="text-slate-400">مکان</dt>
+              <dd className="flex items-center gap-1 font-medium text-white">
                 <MapPin className="h-3.5 w-3.5" />
                 {source.production_location === "inside_iran"
-                  ? t("source.inside_iran")
-                  : t("source.outside_iran")}
+                  ? "داخل ایران"
+                  : "خارج از ایران"}
               </dd>
             </div>
             {source.factional_alignment && (
               <div className="flex justify-between">
-                <dt className="text-slate-500 dark:text-slate-400">
-                  {t("source.factional")}
-                </dt>
-                <dd className="font-medium text-slate-900 dark:text-white">
-                  {factionalLabels[source.factional_alignment]?.[
-                    locale === "fa" ? "fa" : "en"
-                  ] || source.factional_alignment}
+                <dt className="text-slate-400">جناح سیاسی</dt>
+                <dd className="font-medium text-white">
+                  {factionalLabels[source.factional_alignment] || source.factional_alignment}
                 </dd>
               </div>
             )}
             {source.irgc_affiliated && (
               <div className="flex justify-between">
-                <dt className="text-slate-500 dark:text-slate-400">
-                  {locale === "fa" ? "وابستگی" : "Affiliation"}
-                </dt>
-                <dd className="flex items-center gap-1 font-medium text-red-600 dark:text-red-400">
+                <dt className="text-slate-400">وابستگی</dt>
+                <dd className="flex items-center gap-1 font-medium text-red-400">
                   <Shield className="h-3.5 w-3.5" />
-                  {t("source.irgc")}
+                  وابسته به سپاه
                 </dd>
               </div>
             )}
           </dl>
         </div>
 
-        <div className="card">
-          <h3 className="mb-3 text-sm font-semibold text-slate-500 dark:text-slate-400">
-            {locale === "fa" ? "اطلاعات فنی" : "Technical Info"}
+        <div className="bg-slate-900/80 ring-1 ring-white/[0.06] rounded-2xl p-5">
+          <h3 className="mb-3 text-sm font-semibold text-slate-400">
+            اطلاعات فنی
           </h3>
           <dl className="space-y-2.5 text-sm">
             <div className="flex justify-between">
-              <dt className="text-slate-500 dark:text-slate-400">
-                {locale === "fa" ? "زبان" : "Language"}
-              </dt>
-              <dd className="font-medium text-slate-900 dark:text-white">
+              <dt className="text-slate-400">زبان</dt>
+              <dd className="font-medium text-white">
                 {source.language === "fa"
                   ? "فارسی"
                   : source.language === "en"
-                  ? "English"
-                  : "Both"}
+                  ? "انگلیسی"
+                  : "دوزبانه"}
               </dd>
             </div>
             <div className="flex justify-between">
-              <dt className="text-slate-500 dark:text-slate-400">
-                {locale === "fa" ? "فید RSS" : "RSS Feeds"}
-              </dt>
-              <dd className="font-medium text-slate-900 dark:text-white">
+              <dt className="text-slate-400">فید RSS</dt>
+              <dd className="font-medium text-white">
                 {source.rss_urls.length > 0
                   ? source.rss_urls.length
-                  : locale === "fa"
-                  ? "اسکرپ"
-                  : "Scraping"}
+                  : "اسکرپ"}
               </dd>
             </div>
             {source.credibility_score != null && (
               <div className="flex justify-between">
-                <dt className="text-slate-500 dark:text-slate-400">
-                  {t("source.credibility")}
-                </dt>
-                <dd className="font-medium text-slate-900 dark:text-white">
+                <dt className="text-slate-400">اعتبار</dt>
+                <dd className="font-medium text-white">
                   {Math.round(source.credibility_score * 100)}%
                 </dd>
               </div>

@@ -9,6 +9,7 @@ ID and hash (free from https://my.telegram.org).
 
 import logging
 import re
+import uuid
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
@@ -20,6 +21,7 @@ from sqlalchemy.orm import selectinload
 from app.config import settings
 from app.models.article import Article
 from app.models.social import SocialSentimentSnapshot, TelegramChannel, TelegramPost
+from app.models.source import Source
 from app.models.story import Story
 from app.nlp.persian import extract_keywords, normalize
 
@@ -39,11 +41,13 @@ async def _get_telegram_client():
         from telethon import TelegramClient
 
         _client = TelegramClient(
-            "doornegar_bot",
+            "doornegar_session",
             settings.telegram_api_id,
             settings.telegram_api_hash,
         )
-        await _client.start()
+        await _client.connect()
+        if not await _client.is_user_authorized():
+            raise RuntimeError("Telegram session not authorized. Run phone auth first.")
         logger.info("Telegram client connected")
         return _client
     except ImportError:
@@ -328,6 +332,168 @@ async def compute_story_social_sentiment(story_id, db: AsyncSession) -> dict | N
         "neutral": neutral,
         "framing_distribution": framing_dist,
     }
+
+
+# ---------------------------------------------------------------------------
+# Telegram-post → Article conversion
+# ---------------------------------------------------------------------------
+
+# Maps Telegram channel usernames to Source slugs.
+# Only channels whose posts should become first-class articles are listed.
+CHANNEL_SOURCE_MAP: dict[str, str] = {
+    "bbcpersian": "bbc-persian",
+    "Tasnimnews": "tasnim",
+    "farsna": "fars-news",
+    "khabaronline_ir": "khabar-online",
+    "presstv": "press-tv",
+    "radiofarda": "radio-farda",
+    "radiozamaneh": "radio-zamaneh",
+    "zeitoons": "zeitoons",
+    "iranintl": "iran-international",
+}
+
+# Minimum text length (in characters) for a post to be worth converting.
+_MIN_POST_LENGTH = 50
+
+
+def _clean_post_text(text: str) -> str:
+    """Strip markdown artefacts from a Telegram post for use as article text.
+
+    * Replaces ``[label](url)`` with just ``label``
+    * Removes bare URLs
+    * Removes ``@channel`` / ``@username`` mentions
+    """
+    if not text:
+        return ""
+    # Markdown links → label only
+    cleaned = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+    # Bare URLs
+    cleaned = re.sub(r"https?://\S+", "", cleaned)
+    # @mentions
+    cleaned = re.sub(r"@\w+", "", cleaned)
+    # Collapse whitespace
+    cleaned = re.sub(r"[ \t]+", " ", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
+def _extract_title(cleaned_text: str, max_length: int = 100) -> str:
+    """Derive a title from the cleaned post text.
+
+    Uses the first sentence or first ``max_length`` characters, whichever
+    is shorter.
+    """
+    if not cleaned_text:
+        return ""
+    # Try to grab the first line / sentence
+    first_line = cleaned_text.split("\n")[0].strip()
+    # If the first line is reasonably short, use it as-is
+    if 0 < len(first_line) <= max_length:
+        return first_line
+    # Otherwise truncate at a word boundary
+    truncated = first_line[:max_length]
+    last_space = truncated.rfind(" ")
+    if last_space > max_length // 2:
+        truncated = truncated[:last_space]
+    return truncated + "…"
+
+
+async def convert_telegram_posts_to_articles(db: AsyncSession) -> dict:
+    """Convert Telegram posts into Article records so they enter the
+    clustering / NLP / bias-scoring pipeline.
+
+    Posts are matched to a Source via ``CHANNEL_SOURCE_MAP``.  Duplicate
+    detection relies on the Article ``url`` unique constraint (constructed
+    as ``https://t.me/{username}/{message_id}``).
+
+    Returns ``{"checked": int, "created": int, "skipped_no_source": int,
+               "skipped_short": int, "skipped_duplicate": int}``.
+    """
+    stats = {
+        "checked": 0,
+        "created": 0,
+        "skipped_no_source": 0,
+        "skipped_short": 0,
+        "skipped_duplicate": 0,
+    }
+
+    # --- Pre-load source lookup (slug → Source) ---
+    source_result = await db.execute(select(Source))
+    sources_by_slug: dict[str, Source] = {
+        s.slug: s for s in source_result.scalars().all()
+    }
+
+    # --- Pre-load channels (id → TelegramChannel) ---
+    channel_result = await db.execute(select(TelegramChannel))
+    channels_by_id: dict[uuid.UUID, TelegramChannel] = {
+        c.id: c for c in channel_result.scalars().all()
+    }
+
+    # --- Get all posts; we'll filter out already-converted ones via URL ---
+    posts_result = await db.execute(
+        select(TelegramPost).order_by(TelegramPost.date.asc())
+    )
+    posts = posts_result.scalars().all()
+
+    for post in posts:
+        stats["checked"] += 1
+
+        # Resolve channel username
+        channel = channels_by_id.get(post.channel_id)
+        if channel is None:
+            stats["skipped_no_source"] += 1
+            continue
+
+        # Must have enough text
+        raw_text = post.text or ""
+        if len(raw_text) < _MIN_POST_LENGTH:
+            stats["skipped_short"] += 1
+            continue
+
+        # Map channel → source
+        source_slug = CHANNEL_SOURCE_MAP.get(channel.username)
+        if source_slug is None:
+            stats["skipped_no_source"] += 1
+            continue
+        source = sources_by_slug.get(source_slug)
+        if source is None:
+            stats["skipped_no_source"] += 1
+            continue
+
+        # Build article fields
+        cleaned = _clean_post_text(raw_text)
+        title = _extract_title(cleaned)
+        if not title:
+            stats["skipped_short"] += 1
+            continue
+
+        article_url = f"https://t.me/{channel.username}/{post.message_id}"
+        summary = cleaned[:200] if cleaned else None
+
+        stmt = (
+            insert(Article)
+            .values(
+                source_id=source.id,
+                title_original=title,
+                title_fa=title,
+                url=article_url,
+                content_text=cleaned,
+                summary=summary,
+                language=channel.language or "fa",
+                published_at=post.date,
+            )
+            .on_conflict_do_nothing(index_elements=["url"])
+            .returning(Article.id)
+        )
+        result = await db.execute(stmt)
+        if result.scalar_one_or_none() is not None:
+            stats["created"] += 1
+        else:
+            stats["skipped_duplicate"] += 1
+
+    await db.commit()
+    logger.info(f"Telegram → Article conversion: {stats}")
+    return stats
 
 
 async def _build_article_url_map(db: AsyncSession) -> dict:

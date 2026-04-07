@@ -24,7 +24,7 @@ INITIAL_CHANNELS = [
         "description": "Official BBC Persian Telegram channel",
     },
     {
-        "username": "iranaborigen",
+        "username": "iranintl",
         "title": "Iran International ایران اینترنشنال",
         "channel_type": "news",
         "political_leaning": "opposition",
@@ -32,7 +32,7 @@ INITIAL_CHANNELS = [
         "description": "Iran International news channel",
     },
     {
-        "username": "tasaborgen",
+        "username": "Tasnimnews",
         "title": "Tasnim News",
         "channel_type": "news",
         "political_leaning": "pro_regime",
@@ -40,7 +40,7 @@ INITIAL_CHANNELS = [
         "description": "Tasnim News Agency (IRGC-affiliated)",
     },
     {
-        "username": "faraborgen",
+        "username": "farsna",
         "title": "Fars News",
         "channel_type": "news",
         "political_leaning": "pro_regime",
@@ -49,29 +49,12 @@ INITIAL_CHANNELS = [
     },
     # Commentary/analysis channels
     {
-        "username": "iranwirefarsi",
-        "title": "IranWire فارسی",
-        "channel_type": "commentary",
-        "political_leaning": "opposition",
-        "language": "fa",
-        "description": "IranWire independent news and analysis",
-    },
-    {
         "username": "radiozamaneh",
         "title": "رادیو زمانه",
         "channel_type": "news",
         "political_leaning": "reformist",
         "language": "fa",
         "description": "Radio Zamaneh Telegram channel",
-    },
-    # New channels
-    {
-        "username": "dwfarsi",
-        "title": "دویچه‌وله فارسی",
-        "channel_type": "news",
-        "political_leaning": "neutral",
-        "language": "fa",
-        "description": "DW Persian Telegram channel",
     },
     {
         "username": "presstv",
@@ -80,14 +63,6 @@ INITIAL_CHANNELS = [
         "political_leaning": "pro_regime",
         "language": "en",
         "description": "Press TV state-funded English channel",
-    },
-    {
-        "username": "rfipersian",
-        "title": "آر‌اف‌آی فارسی",
-        "channel_type": "news",
-        "political_leaning": "neutral",
-        "language": "fa",
-        "description": "RFI Farsi Telegram channel",
     },
     {
         "username": "radiofarda",
@@ -104,6 +79,14 @@ INITIAL_CHANNELS = [
         "political_leaning": "reformist",
         "language": "fa",
         "description": "Zeitoons independent media — civil society focus",
+    },
+    {
+        "username": "khabaronline_ir",
+        "title": "خبرآنلاین",
+        "channel_type": "news",
+        "political_leaning": "moderate",
+        "language": "fa",
+        "description": "Khabar Online news channel — inside Iran",
     },
 ]
 

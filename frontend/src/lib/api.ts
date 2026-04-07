@@ -54,6 +54,13 @@ export async function getStory(id: string) {
   return fetchAPI<import("./types").StoryDetail>(`/api/v1/stories/${id}`);
 }
 
+// Story Analysis
+export async function getStoryAnalysis(storyId: string) {
+  return fetchAPI<import("./types").StoryAnalysis>(
+    `/api/v1/stories/${storyId}/analysis`
+  );
+}
+
 // Social
 export async function getStorySocial(storyId: string) {
   return fetchAPI<{

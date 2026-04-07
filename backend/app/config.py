@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 60 * 24 * 7  # 1 week
 
     # CORS — allowed frontend origins
-    cors_origins: str = "http://localhost:3000"
+    cors_origins: str = "http://localhost:3000,http://localhost:3001"
 
     # Ingestion
     ingestion_interval_minutes: int = 15
@@ -35,8 +35,8 @@ class Settings(BaseSettings):
 
     # NLP
     embedding_model: str = "paraphrase-multilingual-MiniLM-L12-v2"
-    clustering_similarity_threshold: float = 0.7
-    story_merge_threshold: float = 0.75
+    clustering_similarity_threshold: float = 0.45
+    story_merge_threshold: float = 0.55
 
     # Telegram
     telegram_api_id: int = 0

@@ -59,13 +59,20 @@ async def score():
 
 
 async def telegram():
-    """Fetch posts from tracked Telegram channels."""
+    """Fetch posts from tracked Telegram channels and convert to articles."""
     from app.database import async_session
-    from app.services.telegram_service import ingest_all_channels
+    from app.services.telegram_service import (
+        convert_telegram_posts_to_articles,
+        ingest_all_channels,
+    )
 
     async with async_session() as db:
         stats = await ingest_all_channels(db)
         print(f"Telegram ingestion stats: {stats}")
+
+        print("Converting Telegram posts to articles...")
+        convert_stats = await convert_telegram_posts_to_articles(db)
+        print(f"Telegram → Article conversion: {convert_stats}")
 
 
 async def pipeline():
@@ -77,23 +84,23 @@ async def pipeline():
     from app.services.nlp_pipeline import process_unprocessed_articles
 
     async with async_session() as db:
-        print("Step 1/5: Ingesting RSS feeds...")
+        print("Step 1/6: Ingesting RSS feeds...")
         stats = await ingest_all_sources(db)
         print(f"  → {stats}")
 
-        print("Step 2/5: NLP processing...")
+        print("Step 2/6: NLP processing...")
         stats = await process_unprocessed_articles(db)
         print(f"  → {stats}")
 
-        print("Step 3/5: Clustering stories...")
+        print("Step 3/6: Clustering stories...")
         stats = await cluster_articles(db)
         print(f"  → {stats}")
 
-        print("Step 4/5: Bias scoring...")
+        print("Step 4/6: Bias scoring...")
         stats = await score_unscored_articles(db)
         print(f"  → {stats}")
 
-        print("Step 5/5: Telegram ingestion...")
+        print("Step 5/6: Telegram ingestion...")
         try:
             from app.services.telegram_service import ingest_all_channels
             stats = await ingest_all_channels(db)
@@ -101,7 +108,76 @@ async def pipeline():
         except Exception as e:
             print(f"  → Skipped (Telegram not configured): {e}")
 
+        print("Step 6/6: Converting Telegram posts to articles...")
+        try:
+            from app.services.telegram_service import convert_telegram_posts_to_articles
+            stats = await convert_telegram_posts_to_articles(db)
+            print(f"  → {stats}")
+        except Exception as e:
+            print(f"  → Skipped: {e}")
+
         print("Pipeline complete!")
+
+
+async def summarize():
+    """Pre-generate summaries and bias analysis for all stories."""
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    from app.database import async_session
+    from app.models.article import Article
+    from app.models.story import Story
+    from app.services.story_analysis import generate_story_analysis
+
+    async with async_session() as db:
+        result = await db.execute(
+            select(Story)
+            .options(selectinload(Story.articles).selectinload(Article.source))
+            .where(Story.summary_fa.is_(None))
+            .order_by(Story.article_count.desc())
+        )
+        stories = list(result.scalars().all())
+        print(f"Generating summaries for {len(stories)} stories...")
+
+        success = 0
+        for story in stories:
+            articles_info = [
+                {
+                    "title": a.title_original or a.title_fa or a.title_en or "",
+                    "content": (a.content_text or a.summary or "")[:1500],
+                    "source_name_fa": a.source.name_fa if a.source else "نامشخص",
+                    "state_alignment": a.source.state_alignment if a.source else "",
+                }
+                for a in story.articles
+            ]
+            try:
+                analysis = await generate_story_analysis(story, articles_info)
+                story.summary_fa = analysis.get("summary_fa")
+                import json as _json
+                story.summary_en = _json.dumps({
+                    "state_summary_fa": analysis.get("state_summary_fa"),
+                    "diaspora_summary_fa": analysis.get("diaspora_summary_fa"),
+                    "independent_summary_fa": analysis.get("independent_summary_fa"),
+                    "bias_explanation_fa": analysis.get("bias_explanation_fa"),
+                    "scores": analysis.get("scores"),
+                }, ensure_ascii=False)
+                await db.commit()
+                success += 1
+                print(f"  ✓ {story.title_fa[:50]}")
+            except Exception as e:
+                print(f"  ✗ {story.title_fa[:50]}: {e}")
+
+        print(f"Done: {success}/{len(stories)} summaries generated")
+
+
+async def download_images():
+    """Download all article images locally for reliable serving."""
+    from app.database import async_session
+    from app.services.image_downloader import download_all_article_images
+
+    async with async_session() as db:
+        stats = await download_all_article_images(db)
+        print(f"Image download stats: {stats}")
 
 
 async def status():
@@ -164,6 +240,8 @@ if __name__ == "__main__":
         "score": score,
         "telegram": telegram,
         "pipeline": pipeline,
+        "summarize": summarize,
+        "download-images": download_images,
         "status": status,
     }
 

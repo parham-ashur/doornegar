@@ -1,5 +1,6 @@
 from app.models.article import Article
 from app.models.bias_score import BiasScore
+from app.models.feedback import RaterFeedback
 from app.models.ingestion_log import IngestionLog
 from app.models.rating import CommunityRating
 from app.models.social import SocialSentimentSnapshot, TelegramChannel, TelegramPost
@@ -12,6 +13,7 @@ __all__ = [
     "BiasScore",
     "CommunityRating",
     "IngestionLog",
+    "RaterFeedback",
     "SocialSentimentSnapshot",
     "Source",
     "Story",

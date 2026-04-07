@@ -50,17 +50,10 @@ export function formatRelativeTime(dateStr: string, locale: string): string {
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-export function biasAlignmentLabel(value: number, locale: string): string {
-  if (locale === "fa") {
-    if (value < -0.6) return "حکومتی";
-    if (value < -0.2) return "نزدیک به حکومت";
-    if (value <= 0.2) return "میانه";
-    if (value <= 0.6) return "نزدیک به اپوزیسیون";
-    return "اپوزیسیون";
-  }
-  if (value < -0.6) return "Pro-regime";
-  if (value < -0.2) return "Leans pro-regime";
-  if (value <= 0.2) return "Center";
-  if (value <= 0.6) return "Leans opposition";
-  return "Opposition";
+export function biasAlignmentLabel(value: number, _locale?: string): string {
+  if (value < -0.6) return "حکومتی";
+  if (value < -0.2) return "نزدیک به حکومت";
+  if (value <= 0.2) return "میانه";
+  if (value <= 0.6) return "نزدیک به اپوزیسیون";
+  return "اپوزیسیون";
 }
