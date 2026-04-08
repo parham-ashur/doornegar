@@ -1,17 +1,253 @@
 """Admin endpoints for managing ingestion and NLP pipeline."""
 
 import logging
+import os
+import re
 import traceback
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.models.article import Article
+from app.models.bias_score import BiasScore
 from app.models.ingestion_log import IngestionLog
+from app.models.social import TelegramChannel, TelegramPost
+from app.models.source import Source
+from app.models.story import Story
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+# Path to maintenance log (relative to backend/)
+MAINTENANCE_LOG_PATH = Path(__file__).parent.parent.parent.parent / "maintenance.log"
+
+
+def _parse_maintenance_log() -> dict:
+    """Read last maintenance run info from maintenance.log."""
+    info = {"last_run": None, "last_result": "unknown", "next_run_approx": None}
+    if not MAINTENANCE_LOG_PATH.exists():
+        return info
+
+    try:
+        # Read last 200 lines to find the most recent run
+        lines = MAINTENANCE_LOG_PATH.read_text(encoding="utf-8", errors="replace").splitlines()
+        last_lines = lines[-200:] if len(lines) > 200 else lines
+
+        last_start = None
+        last_complete = None
+        has_error = False
+
+        for line in last_lines:
+            if "Maintenance started at" in line:
+                # Extract timestamp from log line: 2026-04-08 11:35:03,085 [INFO] ...
+                m = re.match(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", line)
+                if m:
+                    last_start = m.group(1)
+                    has_error = False  # reset for new run
+            if "Maintenance complete in" in line:
+                m = re.match(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", line)
+                if m:
+                    last_complete = m.group(1)
+            if "[ERROR]" in line:
+                has_error = True
+
+        if last_start:
+            try:
+                dt = datetime.strptime(last_start, "%Y-%m-%d %H:%M:%S")
+                dt = dt.replace(tzinfo=timezone.utc)
+                info["last_run"] = dt.isoformat()
+                # Approximate next run: 4 hours after last
+                info["next_run_approx"] = (dt + timedelta(hours=4)).isoformat()
+            except ValueError:
+                pass
+
+        if last_complete:
+            info["last_result"] = "success" if not has_error else "partial_success"
+        elif last_start:
+            info["last_result"] = "in_progress_or_incomplete"
+
+    except Exception as e:
+        logger.warning(f"Could not parse maintenance log: {e}")
+
+    return info
+
+
+@router.get("/dashboard")
+async def get_dashboard(db: AsyncSession = Depends(get_db)):
+    """Comprehensive dashboard data: counts, maintenance status, costs, issues."""
+
+    # --- Data counts ---
+    now = datetime.now(timezone.utc)
+    day_ago = now - timedelta(hours=24)
+
+    total_articles = (await db.execute(select(func.count(Article.id)))).scalar() or 0
+    articles_24h = (await db.execute(
+        select(func.count(Article.id)).where(Article.ingested_at >= day_ago)
+    )).scalar() or 0
+    with_fa_title = (await db.execute(
+        select(func.count(Article.id)).where(Article.title_fa.isnot(None))
+    )).scalar() or 0
+    without_fa_title = total_articles - with_fa_title
+
+    total_stories = (await db.execute(select(func.count(Story.id)))).scalar() or 0
+    visible_stories = (await db.execute(
+        select(func.count(Story.id)).where(Story.article_count >= 5)
+    )).scalar() or 0
+    stories_with_summary = (await db.execute(
+        select(func.count(Story.id)).where(Story.summary_fa.isnot(None))
+    )).scalar() or 0
+    hidden_stories = total_stories - visible_stories
+
+    total_channels = (await db.execute(select(func.count(TelegramChannel.id)))).scalar() or 0
+    active_channels = (await db.execute(
+        select(func.count(TelegramChannel.id)).where(TelegramChannel.is_active.is_(True))
+    )).scalar() or 0
+    total_posts = (await db.execute(select(func.count(TelegramPost.id)))).scalar() or 0
+    posts_24h = (await db.execute(
+        select(func.count(TelegramPost.id)).where(TelegramPost.date >= day_ago)
+    )).scalar() or 0
+
+    total_sources = (await db.execute(select(func.count(Source.id)))).scalar() or 0
+    state_sources = (await db.execute(
+        select(func.count(Source.id)).where(Source.state_alignment == "state")
+    )).scalar() or 0
+    diaspora_sources = (await db.execute(
+        select(func.count(Source.id)).where(Source.state_alignment == "diaspora")
+    )).scalar() or 0
+    independent_sources = (await db.execute(
+        select(func.count(Source.id)).where(Source.state_alignment == "independent")
+    )).scalar() or 0
+    other_sources = total_sources - state_sources - diaspora_sources - independent_sources
+
+    total_bias = (await db.execute(select(func.count(BiasScore.id)))).scalar() or 0
+    bias_pct = round(total_bias * 100 / max(total_articles, 1))
+
+    # --- Maintenance info ---
+    maintenance = _parse_maintenance_log()
+
+    # --- Issues detection ---
+    issues = []
+    actions_needed = []
+
+    if without_fa_title > 0:
+        severity = "warning" if without_fa_title > 50 else "info"
+        issues.append({
+            "severity": severity,
+            "message": f"{without_fa_title} articles without Farsi title",
+        })
+        if without_fa_title > 50:
+            actions_needed.append("Run: python manage.py process (translate remaining titles)")
+
+    # Freshness check
+    latest_ingested = (await db.execute(
+        select(func.max(Article.ingested_at))
+    )).scalar()
+    if latest_ingested:
+        hours_ago = (now - latest_ingested).total_seconds() / 3600
+        if hours_ago > 24:
+            issues.append({
+                "severity": "error",
+                "message": f"Last ingestion: {hours_ago:.0f}h ago (>24h — stale data)",
+            })
+            actions_needed.append("Run: python manage.py ingest (fetch new articles)")
+        elif hours_ago > 6:
+            issues.append({
+                "severity": "warning",
+                "message": f"Last ingestion: {hours_ago:.0f}h ago",
+            })
+        else:
+            issues.append({
+                "severity": "info",
+                "message": f"Data fresh: last ingested {hours_ago:.1f}h ago",
+            })
+        freshness_hours = hours_ago
+    else:
+        issues.append({"severity": "error", "message": "No articles ingested yet"})
+        freshness_hours = None
+        actions_needed.append("Run: python manage.py pipeline (initial setup)")
+
+    # Stories without summary
+    missing_summaries = visible_stories - stories_with_summary
+    if missing_summaries > 0:
+        issues.append({
+            "severity": "warning",
+            "message": f"{missing_summaries} visible stories without summary",
+        })
+        actions_needed.append("Run: python manage.py summarize (generate summaries)")
+
+    # Low bias coverage
+    if bias_pct < 20 and total_articles > 100:
+        issues.append({
+            "severity": "info",
+            "message": f"Bias score coverage: {bias_pct}% of articles",
+        })
+        actions_needed.append("Run: python manage.py score (score more articles)")
+
+    return {
+        "data": {
+            "articles": {
+                "total": total_articles,
+                "last_24h": articles_24h,
+                "with_farsi_title": with_fa_title,
+                "without_farsi_title": without_fa_title,
+            },
+            "stories": {
+                "total": total_stories,
+                "visible": visible_stories,
+                "with_summary": stories_with_summary,
+                "hidden": hidden_stories,
+            },
+            "telegram": {
+                "channels": total_channels,
+                "active": active_channels,
+                "total_posts": total_posts,
+                "posts_24h": posts_24h,
+            },
+            "sources": {
+                "total": total_sources,
+                "state": state_sources,
+                "diaspora": diaspora_sources,
+                "independent": independent_sources,
+                "other": other_sources,
+            },
+            "bias_scores": {
+                "total": total_bias,
+                "coverage_pct": bias_pct,
+            },
+        },
+        "maintenance": maintenance,
+        "api_costs": {
+            "note": "برای هزینه دقیق داشبورد OpenAI را بررسی کنید",
+            "estimated_monthly": "$15-25",
+            "clustering_per_run": "~$0.02",
+            "summary_per_story": "~$0.01",
+        },
+        "issues": issues,
+        "actions_needed": actions_needed,
+        "freshness_hours": freshness_hours,
+    }
+
+
+@router.post("/maintenance/run")
+async def run_maintenance_endpoint():
+    """Trigger a maintenance run (ingest, process, cluster, summarize, fix)."""
+    try:
+        import sys
+        # Ensure backend dir is in path so auto_maintenance can import app.*
+        backend_dir = str(Path(__file__).parent.parent.parent.parent)
+        if backend_dir not in sys.path:
+            sys.path.insert(0, backend_dir)
+
+        from auto_maintenance import run_maintenance
+        results = await run_maintenance()
+        return {"status": "ok", "results": results}
+    except Exception as e:
+        logger.exception("Maintenance run failed")
+        return {"status": "error", "error": str(e), "traceback": traceback.format_exc()[-500:]}
 
 
 @router.post("/ingest/trigger")
@@ -252,6 +488,42 @@ async def deactivate_rater(username: str, db: AsyncSession = Depends(get_db)):
     return {"status": "ok", "username": username, "is_active": False}
 
 
+class _EditStoryRequest(_BaseModel):
+    title_fa: str | None = None
+    title_en: str | None = None
+    summary_fa: str | None = None
+    priority: int | None = None
+
+@router.patch("/stories/{story_id}")
+async def edit_story(story_id: str, request: _EditStoryRequest, db: AsyncSession = Depends(get_db)):
+    """Edit a story's title or summary. Admin-only."""
+    from sqlalchemy import select
+    from app.models.story import Story
+    import uuid
+
+    result = await db.execute(select(Story).where(Story.id == uuid.UUID(story_id)))
+    story = result.scalar_one_or_none()
+    if not story:
+        return {"status": "error", "error": "Story not found"}
+
+    if request.title_fa is not None:
+        story.title_fa = request.title_fa
+    if request.title_en is not None:
+        story.title_en = request.title_en
+    if request.summary_fa is not None:
+        story.summary_fa = request.summary_fa
+    if request.priority is not None:
+        story.priority = request.priority
+    await db.commit()
+
+    return {
+        "status": "ok",
+        "story_id": str(story.id),
+        "title_fa": story.title_fa,
+        "title_en": story.title_en,
+    }
+
+
 @router.post("/cluster-llm/trigger")
 async def trigger_llm_clustering(db: AsyncSession = Depends(get_db)):
     """Cluster articles using LLM topic extraction (more accurate, costs ~$0.001/article)."""
@@ -269,3 +541,51 @@ async def get_llm_costs():
     """Get current session LLM cost tracking."""
     from app.services.llm_utils import get_session_stats
     return get_session_stats()
+
+
+# === Social Media Posting ===
+
+@router.get("/social/preview")
+async def preview_social_posts(db: AsyncSession = Depends(get_db)):
+    """Preview what would be posted to social media (review before posting)."""
+    from app.services.social_posting import get_post_preview, get_platform_status
+    try:
+        queue = await get_post_preview(db)
+        platforms = await get_platform_status()
+        return {"status": "ok", "posts": queue, "count": len(queue), "platforms": platforms}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+class _SocialPostRequest(_BaseModel):
+    story_id: str
+    platform: str  # telegram, twitter, instagram, whatsapp, bluesky, linkedin
+
+@router.post("/social/post")
+async def post_to_social(request: _SocialPostRequest, db: AsyncSession = Depends(get_db)):
+    """Post a specific story to any social media platform."""
+    from app.services.social_posting import get_post_preview, post_story
+
+    queue = await get_post_preview(db, limit=20)
+    post_data = next((p for p in queue if p["story_id"] == request.story_id), None)
+
+    if not post_data:
+        return {"status": "error", "error": "Story not found or already posted"}
+
+    text = post_data["posts"].get(request.platform)
+    if not text:
+        return {"status": "error", "error": f"No post generated for {request.platform}"}
+
+    kwargs = {}
+    if request.platform == "instagram":
+        kwargs["image_url"] = post_data.get("image_url")
+
+    result = await post_story(request.story_id, request.platform, text, **kwargs)
+    return {"status": "ok", "result": result}
+
+
+@router.get("/social/status")
+async def social_platform_status():
+    """Check which social platforms are configured."""
+    from app.services.social_posting import get_platform_status
+    return await get_platform_status()

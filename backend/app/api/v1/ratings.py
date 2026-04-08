@@ -68,13 +68,23 @@ async def get_next_article_to_rate(
         return {"status": "no_articles", "message": "No more articles to rate"}
 
     # Return article WITHOUT source info (blind rating)
+    import re
+    def _strip_source(text: str | None) -> str | None:
+        if not text:
+            return text
+        # Remove "| source name" attribution
+        text = re.sub(r"\|\s*[^\n]+$", "", text, flags=re.MULTILINE)
+        # Remove @mentions
+        text = re.sub(r"@\w+", "", text)
+        return text.strip()
+
     return {
         "status": "ok",
         "article": {
             "id": str(article.id),
-            "title": article.title_original,
-            "summary": article.summary,
-            "content_text": article.content_text,
+            "title": _strip_source(article.title_fa or article.title_original),
+            "summary": _strip_source(article.summary),
+            "content_text": _strip_source(article.content_text),
             "language": article.language,
             "published_at": article.published_at.isoformat() if article.published_at else None,
             # Source is intentionally HIDDEN for blind rating

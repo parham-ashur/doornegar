@@ -44,6 +44,7 @@ class Story(Base):
         DateTime(timezone=True), nullable=True
     )
     trending_score: Mapped[float] = mapped_column(Float, default=0.0)
+    priority: Mapped[int] = mapped_column(Integer, default=0, comment="Manual priority: higher = more prominent. 0=auto")
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

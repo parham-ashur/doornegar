@@ -2,12 +2,13 @@ import { setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { ArrowRight, Newspaper } from "lucide-react";
 import SourceSpectrum from "@/components/source/SourceSpectrum";
-import FramingTable from "@/components/story/FramingTable";
 import StoryAnalysisPanel from "@/components/story/StoryAnalysisPanel";
 import ArticleFilterList from "@/components/story/ArticleFilterList";
 import TelegramPanel from "@/components/story/TelegramPanel";
 import FeedbackProvider from "@/components/feedback/FeedbackProvider";
 import SummaryRating from "@/components/feedback/SummaryRating";
+import EditableTitle from "@/components/feedback/EditableTitle";
+import PriorityControl from "@/components/feedback/PriorityControl";
 import { getStory, getSources } from "@/lib/api";
 import { formatRelativeTime } from "@/lib/utils";
 
@@ -57,10 +58,6 @@ export default async function StoryDetailPage({
   const coveringSlugs = new Set(story.articles.map((a) => a.source_slug).filter(Boolean));
   const coveringSources = allSources.filter((s) => coveringSlugs.has(s.slug));
 
-  // Framing data
-  const hasFraming = story.articles.some((a) =>
-    a.bias_scores?.some((bs) => bs.framing_labels && bs.framing_labels.length > 0)
-  );
 
   return (
     <FeedbackProvider>
@@ -77,8 +74,10 @@ export default async function StoryDetailPage({
       {/* Header */}
       <div className="mb-6 pb-6 border-b border-slate-200 dark:border-slate-800">
         <h1 className="text-2xl font-black leading-snug text-slate-900 dark:text-white md:text-3xl">
-          {title}
+          <EditableTitle storyId={id} initialTitle={title} />
         </h1>
+
+        <PriorityControl storyId={id} initialPriority={story.trending_score > 0 ? 0 : 0} />
 
         <div className="mt-3 flex flex-wrap items-center gap-4 text-sm text-slate-500">
           <span className="flex items-center gap-1">
@@ -147,14 +146,6 @@ export default async function StoryDetailPage({
             </div>
           )}
 
-          {hasFraming && story.articles.length > 1 && (
-            <div>
-              <h3 className="text-sm font-black text-slate-900 dark:text-white mb-4 pb-2 border-b border-slate-200 dark:border-slate-800">
-                چارچوب‌بندی
-              </h3>
-              <FramingTable articles={story.articles} />
-            </div>
-          )}
         </div>
       </div>
     </div>

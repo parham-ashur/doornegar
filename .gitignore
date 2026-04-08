@@ -53,3 +53,9 @@ htmlcov/
 
 # Local images
 backend/static/images/
+
+# Database backups
+backups/
+frontend/.env.vercel
+maintenance.log
+maintenance_error.log

@@ -8,7 +8,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from jose import JWTError, jwt
-from passlib.context import CryptContext
+import bcrypt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,19 +17,19 @@ from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=12)
-
 ALGORITHM = "HS256"
 
 
 def hash_password(password: str) -> str:
-    # Truncate to 72 bytes (bcrypt limit)
-    password = password[:72]
-    return pwd_context.hash(password)
+    pwd_bytes = password[:72].encode("utf-8")
+    return bcrypt.hashpw(pwd_bytes, bcrypt.gensalt(rounds=12)).decode("utf-8")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    return bcrypt.checkpw(
+        plain_password[:72].encode("utf-8"),
+        hashed_password.encode("utf-8"),
+    )
 
 
 def create_access_token(user_id: str, username: str, rater_level: str) -> str:

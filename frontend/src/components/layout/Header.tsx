@@ -14,8 +14,6 @@ export default function Header() {
     { href: `/${locale}/stories`, label: "خبرها" },
     { href: `/${locale}/sources`, label: "رسانه‌ها" },
     { href: `/${locale}/blindspots`, label: "نقاط کور" },
-    { href: `/${locale}/rate`, label: "ارزیابی" },
-    { href: `/${locale}/dashboard`, label: "داشبورد" },
   ];
 
   return (

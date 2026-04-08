@@ -68,7 +68,7 @@ async def trending_stories(
         select(Story)
         .options(selectinload(Story.articles).selectinload(Article.source))
         .where(Story.article_count >= min_articles)
-        .order_by(Story.trending_score.desc())
+        .order_by(Story.priority.desc(), Story.trending_score.desc())
         .limit(limit)
     )
     stories = result.scalars().all()

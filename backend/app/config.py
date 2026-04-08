@@ -42,6 +42,29 @@ class Settings(BaseSettings):
     telegram_api_id: int = 0
     telegram_api_hash: str = ""
     telegram_fetch_interval_minutes: int = 30
+    telegram_channel_username: str = ""  # Your Doornegar public channel
+
+    # Twitter/X
+    twitter_api_key: str = ""
+    twitter_api_secret: str = ""
+    twitter_access_token: str = ""
+    twitter_access_token_secret: str = ""
+
+    # Instagram (Meta Business API)
+    instagram_access_token: str = ""
+    instagram_business_account_id: str = ""
+
+    # WhatsApp Business API
+    whatsapp_phone_number_id: str = ""
+    whatsapp_access_token: str = ""
+
+    # Bluesky
+    bluesky_handle: str = ""
+    bluesky_app_password: str = ""
+
+    # LinkedIn
+    linkedin_access_token: str = ""
+    linkedin_org_id: str = ""
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

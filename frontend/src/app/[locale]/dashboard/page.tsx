@@ -1,235 +1,320 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import {
-  Activity, CheckCircle, Clock,
-  Database, Newspaper, RefreshCw, XCircle,
+  Activity, AlertTriangle, CheckCircle, Circle, CreditCard,
+  Database, ListChecks, MessageSquare, Newspaper, RefreshCw,
+  Settings, Wrench, XCircle, BarChart3,
 } from "lucide-react";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-interface IngestionLog {
-  id: string;
-  source_id: string;
-  feed_url: string;
-  status: string;
-  articles_found: number;
-  articles_new: number;
-  error_message: string | null;
-  started_at: string | null;
-  completed_at: string | null;
+interface DashboardData {
+  data: {
+    articles: { total: number; last_24h: number; with_farsi_title: number; without_farsi_title: number };
+    stories: { total: number; visible: number; with_summary: number; hidden: number };
+    telegram: { channels: number; active: number; total_posts: number; posts_24h: number };
+    sources: { total: number; state: number; diaspora: number; independent: number; other: number };
+    bias_scores: { total: number; coverage_pct: number };
+  };
+  maintenance: { last_run: string | null; last_result: string; next_run_approx: string | null };
+  api_costs: { note: string; estimated_monthly: string; clustering_per_run: string; summary_per_story: string };
+  issues: { severity: string; message: string }[];
+  actions_needed: string[];
+  freshness_hours: number | null;
 }
 
-const alignmentLabels: Record<string, string> = {
-  state: "حکومتی",
-  semi_state: "نیمه‌دولتی",
-  independent: "مستقل",
-  diaspora: "برون‌مرزی",
-};
+function freshnessColor(h: number | null) {
+  if (h === null) return "bg-red-500";
+  if (h <= 6) return "bg-emerald-500";
+  if (h <= 24) return "bg-amber-500";
+  return "bg-red-500";
+}
+
+function freshnessLabel(h: number | null) {
+  if (h === null) return "No data";
+  if (h <= 1) return "Up to date";
+  return `${h.toFixed(0)}h ago`;
+}
+
+function severityIcon(s: string) {
+  if (s === "error") return <XCircle className="h-4 w-4 shrink-0 text-red-500" />;
+  if (s === "warning") return <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />;
+  return <Circle className="h-4 w-4 shrink-0 text-blue-500" />;
+}
+
+function formatDate(iso: string | null) {
+  if (!iso) return "Unknown";
+  try { return new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }); }
+  catch { return iso; }
+}
+
+function resultLabel(r: string) {
+  return { success: "Success", partial_success: "Partial", in_progress_or_incomplete: "In progress", unknown: "Unknown" }[r] || r;
+}
+
+function resultColor(r: string) {
+  if (r === "success") return "text-emerald-600 dark:text-emerald-400";
+  if (r === "partial_success") return "text-amber-600 dark:text-amber-400";
+  return "text-slate-500";
+}
+
+function StatCard({ icon, label, value, sub, iconBg }: { icon: React.ReactNode; label: string; value: string | number; sub?: string; iconBg: string }) {
+  return (
+    <div className="border border-slate-200 dark:border-slate-800 p-5 flex items-center gap-3">
+      <div className={`p-2 ${iconBg}`}>{icon}</div>
+      <div>
+        <p className="text-2xl font-bold text-slate-900 dark:text-white">{value}</p>
+        <p className="text-xs text-slate-500">{label}</p>
+        {sub && <p className="text-[10px] text-slate-400 mt-0.5">{sub}</p>}
+      </div>
+    </div>
+  );
+}
+
+const ADMIN_PASS = "doornegar2026";
 
 export default function DashboardPage() {
-  const [logs, setLogs] = useState<IngestionLog[]>([]);
-  const [sources, setSources] = useState<any[]>([]);
-  const [stories, setStories] = useState<any>({ total: 0 });
+  const [authed, setAuthed] = useState(false);
+  const [passInput, setPassInput] = useState("");
+  const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState<string | null>(null);
 
-  async function fetchData() {
-    setLoading(true);
-    try {
-      const [logRes, srcRes, storyRes] = await Promise.all([
-        fetch(`${API}/api/v1/admin/ingest/log?limit=20`).then((r) => r.json()),
-        fetch(`${API}/api/v1/sources`).then((r) => r.json()),
-        fetch(`${API}/api/v1/stories?page_size=1`).then((r) => r.json()),
-      ]);
-      setLogs(logRes.logs || []);
-      setSources(srcRes.sources || []);
-      setStories(storyRes);
-    } catch (e) {
-      console.error("خطا در دریافت اطلاعات داشبورد", e);
+  useEffect(() => {
+    if (typeof window !== "undefined" && localStorage.getItem("doornegar_admin") === "true") {
+      setAuthed(true);
     }
-    setLoading(false);
+  }, []);
+
+  if (!authed) {
+    return (
+      <div className="mx-auto max-w-sm px-4 py-24">
+        <h1 className="text-xl font-bold text-slate-900 dark:text-white mb-4">Admin Dashboard</h1>
+        <p className="text-sm text-slate-500 mb-4">Enter admin password to access the dashboard.</p>
+        <form onSubmit={(e) => {
+          e.preventDefault();
+          if (passInput === ADMIN_PASS) {
+            localStorage.setItem("doornegar_admin", "true");
+            setAuthed(true);
+          } else {
+            alert("Wrong password");
+          }
+        }}>
+          <input
+            type="password"
+            value={passInput}
+            onChange={(e) => setPassInput(e.target.value)}
+            placeholder="Password"
+            className="w-full border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white px-3 py-2 text-sm mb-3 focus:outline-none focus:border-blue-500"
+          />
+          <button type="submit" className="w-full bg-slate-900 dark:bg-white text-white dark:text-slate-900 py-2 text-sm font-medium hover:opacity-90">
+            Access Dashboard
+          </button>
+        </form>
+      </div>
+    );
   }
 
-  useEffect(() => {
-    fetchData();
+  const fetchDashboard = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API}/api/v1/admin/dashboard`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setDashboard(await res.json());
+    } catch (e: any) {
+      setError(e.message || "Unknown error");
+    }
+    setLoading(false);
   }, []);
+
+  useEffect(() => { fetchDashboard(); }, [fetchDashboard]);
 
   async function triggerPipeline(step: string) {
     setRunning(step);
     try {
-      const res = await fetch(`${API}/api/v1/admin/${step}/trigger`, { method: "POST" });
+      const url = step === "maintenance" ? `${API}/api/v1/admin/maintenance/run` : `${API}/api/v1/admin/${step}/trigger`;
+      const res = await fetch(url, { method: "POST" });
       const data = await res.json();
       alert(JSON.stringify(data, null, 2));
-      fetchData();
-    } catch (e: any) {
-      alert(`خطا: ${e.message}`);
-    }
+      fetchDashboard();
+    } catch (e: any) { alert(`Error: ${e.message}`); }
     setRunning(null);
   }
 
-  // Group logs by source
-  const sourceMap = new Map(sources.map((s: any) => [s.id, s]));
-  const latestBySource = new Map<string, IngestionLog>();
-  logs.forEach((log) => {
-    if (!latestBySource.has(log.source_id)) {
-      latestBySource.set(log.source_id, log);
-    }
-  });
+  if (loading && !dashboard) {
+    return (
+      <div className="mx-auto max-w-7xl px-4 py-8">
+        <div className="flex items-center gap-3 text-slate-500">
+          <RefreshCw className="h-5 w-5 animate-spin" />
+          Loading dashboard...
+        </div>
+      </div>
+    );
+  }
 
-  const successCount = Array.from(latestBySource.values()).filter((l) => l.status === "success").length;
-  const errorCount = Array.from(latestBySource.values()).filter((l) => l.status === "error").length;
-  const totalArticles = logs.reduce((sum, l) => sum + l.articles_new, 0);
+  if (error && !dashboard) {
+    return (
+      <div className="mx-auto max-w-7xl px-4 py-8">
+        <div className="border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-900/10 p-5 text-red-700 dark:text-red-400">
+          <p className="font-semibold">Connection error</p>
+          <p className="text-sm mt-1">{error}</p>
+          <button onClick={fetchDashboard} className="mt-3 border border-red-300 dark:border-red-700 px-4 py-1.5 text-sm hover:bg-red-100 dark:hover:bg-red-900/20">
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!dashboard) return null;
+  const d = dashboard.data;
 
   return (
-    <div dir="rtl" className="mx-auto max-w-7xl px-4 py-8">
+    <div className="mx-auto max-w-7xl px-4 py-8">
+      {/* Header */}
       <div className="mb-8 flex items-center justify-between">
         <div>
-          <h1 className="flex items-center gap-2 text-2xl font-bold text-white">
-            <Activity className="h-6 w-6 text-blue-400" />
-            داشبورد مانیتورینگ
+          <h1 className="flex items-center gap-2 text-2xl font-bold text-slate-900 dark:text-white">
+            <Activity className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+            Admin Dashboard
           </h1>
-          <p className="mt-1 text-sm text-slate-400">
-            وضعیت سیستم و مدیریت خطاها
+          <p className="mt-1 text-sm text-slate-500 flex items-center gap-2">
+            System status & maintenance
+            <span className="inline-flex items-center gap-1">
+              <span className={`inline-block h-2 w-2 rounded-full ${freshnessColor(dashboard.freshness_hours)}`} />
+              <span className="text-xs">{freshnessLabel(dashboard.freshness_hours)}</span>
+            </span>
           </p>
         </div>
-        <button
-          onClick={fetchData}
-          className="flex items-center gap-2 rounded-lg bg-slate-900/80 ring-1 ring-white/[0.06] px-4 py-2 text-sm font-medium text-slate-300 hover:ring-white/10 transition-colors"
-        >
+        <button onClick={fetchDashboard} className="flex items-center gap-2 border border-slate-200 dark:border-slate-700 px-4 py-2 text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-          بروزرسانی
+          Refresh
         </button>
       </div>
 
-      {/* Stats cards */}
-      <div className="mb-8 grid gap-4 sm:grid-cols-4">
-        <div className="bg-slate-900/80 ring-1 ring-white/[0.06] rounded-2xl p-5 flex items-center gap-3">
-          <div className="rounded-lg bg-emerald-500/20 p-2">
-            <CheckCircle className="h-5 w-5 text-emerald-400" />
-          </div>
-          <div>
-            <p className="text-2xl font-bold text-white">{successCount}</p>
-            <p className="text-xs text-slate-400">فیدهای فعال</p>
-          </div>
-        </div>
-        <div className="bg-slate-900/80 ring-1 ring-white/[0.06] rounded-2xl p-5 flex items-center gap-3">
-          <div className="rounded-lg bg-red-500/20 p-2">
-            <XCircle className="h-5 w-5 text-red-400" />
-          </div>
-          <div>
-            <p className="text-2xl font-bold text-white">{errorCount}</p>
-            <p className="text-xs text-slate-400">خطا</p>
-          </div>
-        </div>
-        <div className="bg-slate-900/80 ring-1 ring-white/[0.06] rounded-2xl p-5 flex items-center gap-3">
-          <div className="rounded-lg bg-blue-500/20 p-2">
-            <Newspaper className="h-5 w-5 text-blue-400" />
-          </div>
-          <div>
-            <p className="text-2xl font-bold text-white">{totalArticles}</p>
-            <p className="text-xs text-slate-400">مقالات جدید</p>
+      {/* Stat Cards */}
+      <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard icon={<Newspaper className="h-5 w-5 text-blue-600 dark:text-blue-400" />} iconBg="bg-blue-100 dark:bg-blue-900/20" label="Total Articles" value={d.articles.total.toLocaleString()} sub={`${d.articles.last_24h} in last 24h`} />
+        <StatCard icon={<Database className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />} iconBg="bg-emerald-100 dark:bg-emerald-900/20" label="Visible Stories" value={d.stories.visible} sub={`${d.stories.total} total (${d.stories.hidden} hidden)`} />
+        <StatCard icon={<MessageSquare className="h-5 w-5 text-purple-600 dark:text-purple-400" />} iconBg="bg-purple-100 dark:bg-purple-900/20" label="Telegram Posts" value={d.telegram.total_posts.toLocaleString()} sub={`${d.telegram.posts_24h} in 24h · ${d.telegram.active} active channels`} />
+        <StatCard icon={<BarChart3 className="h-5 w-5 text-amber-600 dark:text-amber-400" />} iconBg="bg-amber-100 dark:bg-amber-900/20" label="Bias Scores" value={d.bias_scores.total} sub={`${d.bias_scores.coverage_pct}% coverage`} />
+      </div>
+
+      {/* Maintenance + Costs */}
+      <div className="mb-6 grid gap-4 sm:grid-cols-2">
+        <div className="border border-slate-200 dark:border-slate-800 p-5">
+          <h2 className="mb-4 text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+            <Wrench className="h-4 w-4 text-slate-400" /> Last Maintenance
+          </h2>
+          <div className="space-y-3 text-sm">
+            <div className="flex justify-between"><span className="text-slate-500">Last run</span><span className="text-slate-900 dark:text-slate-200">{formatDate(dashboard.maintenance.last_run)}</span></div>
+            <div className="flex justify-between"><span className="text-slate-500">Result</span><span className={resultColor(dashboard.maintenance.last_result)}>{resultLabel(dashboard.maintenance.last_result)}</span></div>
+            <div className="flex justify-between"><span className="text-slate-500">Next run (approx)</span><span className="text-slate-900 dark:text-slate-200">{formatDate(dashboard.maintenance.next_run_approx)}</span></div>
           </div>
         </div>
-        <div className="bg-slate-900/80 ring-1 ring-white/[0.06] rounded-2xl p-5 flex items-center gap-3">
-          <div className="rounded-lg bg-purple-500/20 p-2">
-            <Database className="h-5 w-5 text-purple-400" />
-          </div>
-          <div>
-            <p className="text-2xl font-bold text-white">{stories.total || 0}</p>
-            <p className="text-xs text-slate-400">موضوعات</p>
+
+        <div className="border border-slate-200 dark:border-slate-800 p-5">
+          <h2 className="mb-4 text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+            <CreditCard className="h-4 w-4 text-slate-400" /> API Costs
+          </h2>
+          <div className="space-y-3 text-sm">
+            <div className="flex justify-between"><span className="text-slate-500">Est. monthly</span><span className="font-mono text-slate-900 dark:text-slate-200">{dashboard.api_costs.estimated_monthly}</span></div>
+            <div className="flex justify-between"><span className="text-slate-500">Per clustering run</span><span className="font-mono text-slate-900 dark:text-slate-200">{dashboard.api_costs.clustering_per_run}</span></div>
+            <div className="flex justify-between"><span className="text-slate-500">Per story summary</span><span className="font-mono text-slate-900 dark:text-slate-200">{dashboard.api_costs.summary_per_story}</span></div>
+            <p className="text-xs text-slate-400 pt-1 border-t border-slate-200 dark:border-slate-800">{dashboard.api_costs.note}</p>
           </div>
         </div>
       </div>
 
-      {/* Pipeline controls */}
-      <div className="mb-8 bg-slate-900/80 ring-1 ring-white/[0.06] rounded-2xl p-5">
-        <h2 className="mb-4 text-sm font-semibold text-white">
-          اجرای خط‌لوله
+      {/* Issues */}
+      {dashboard.issues.length > 0 && (
+        <div className="mb-6 border border-slate-200 dark:border-slate-800 p-5">
+          <h2 className="mb-4 text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 text-amber-500" /> Issues & Warnings
+          </h2>
+          <div className="space-y-2">
+            {dashboard.issues.map((issue, i) => (
+              <div key={i} className="flex items-center gap-3 p-3 text-sm border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50">
+                {severityIcon(issue.severity)}
+                <span className="text-slate-700 dark:text-slate-300">{issue.message}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Actions */}
+      {dashboard.actions_needed.length > 0 && (
+        <div className="mb-6 border border-slate-200 dark:border-slate-800 p-5">
+          <h2 className="mb-4 text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+            <ListChecks className="h-4 w-4 text-blue-500" /> Actions Needed
+          </h2>
+          <ul className="space-y-2">
+            {dashboard.actions_needed.map((action, i) => (
+              <li key={i} className="flex items-start gap-3 text-sm">
+                <CheckCircle className="h-4 w-4 shrink-0 text-slate-400 mt-0.5" />
+                <span className="text-slate-600 dark:text-slate-400 font-mono text-xs">{action}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Pipeline Controls */}
+      <div className="border border-slate-200 dark:border-slate-800 p-5">
+        <h2 className="mb-4 text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+          <Settings className="h-4 w-4 text-slate-400" /> Pipeline Controls
         </h2>
         <div className="flex flex-wrap gap-3">
           {[
-            { key: "ingest", label: "دریافت خبر" },
-            { key: "nlp", label: "پردازش NLP" },
-            { key: "cluster", label: "خوشه‌بندی" },
-            { key: "bias", label: "امتیاز سوگیری" },
+            { key: "ingest", label: "Ingest" },
+            { key: "nlp", label: "NLP Process" },
+            { key: "cluster", label: "Cluster" },
+            { key: "bias", label: "Bias Score" },
           ].map(({ key, label }) => (
-            <button
-              key={key}
-              onClick={() => triggerPipeline(key)}
-              disabled={running !== null}
-              className="flex items-center gap-2 rounded-lg ring-1 ring-white/[0.06] bg-slate-800 px-4 py-2 text-sm font-medium text-slate-300 transition-colors hover:bg-slate-700 hover:ring-white/10 disabled:opacity-50"
-            >
-              {label}
-              {running === key && <RefreshCw className="h-3 w-3 animate-spin" />}
+            <button key={key} onClick={() => triggerPipeline(key)} disabled={running !== null}
+              className="flex items-center gap-2 border border-slate-200 dark:border-slate-700 px-4 py-2 text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
+              {label} {running === key && <RefreshCw className="h-3 w-3 animate-spin" />}
             </button>
+          ))}
+          <button onClick={() => triggerPipeline("maintenance")} disabled={running !== null}
+            className="flex items-center gap-2 border border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/10 px-4 py-2 text-sm text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/20 disabled:opacity-50">
+            <Wrench className="h-4 w-4" /> Run Maintenance {running === "maintenance" && <RefreshCw className="h-3 w-3 animate-spin" />}
+          </button>
+        </div>
+      </div>
+
+      {/* Sources */}
+      <div className="mt-6 border border-slate-200 dark:border-slate-800 p-5">
+        <h2 className="mb-4 text-sm font-semibold text-slate-900 dark:text-white">Source Distribution</h2>
+        <div className="flex flex-wrap gap-4 text-sm">
+          {[
+            { label: "State", count: d.sources.state, color: "bg-red-500" },
+            { label: "Diaspora", count: d.sources.diaspora, color: "bg-blue-500" },
+            { label: "Independent", count: d.sources.independent, color: "bg-emerald-500" },
+            { label: "Other", count: d.sources.other, color: "bg-slate-400" },
+          ].map(({ label, count, color }) => (
+            <div key={label} className="flex items-center gap-2">
+              <span className={`inline-block h-3 w-3 rounded-full ${color}`} />
+              <span className="text-slate-500">{label}:</span>
+              <span className="font-bold text-slate-900 dark:text-white">{count}</span>
+            </div>
           ))}
         </div>
       </div>
 
-      {/* Feed status table */}
-      <div className="bg-slate-900/80 ring-1 ring-white/[0.06] rounded-2xl p-5 overflow-x-auto">
-        <h2 className="mb-4 text-sm font-semibold text-white">
-          وضعیت فیدها
-        </h2>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-white/[0.06] text-xs text-slate-400">
-              <th className="pb-2 pe-4 text-start">رسانه</th>
-              <th className="pb-2 px-2 text-center">وضعیت</th>
-              <th className="pb-2 px-2 text-center">نوع</th>
-              <th className="pb-2 px-2 text-center">یافته</th>
-              <th className="pb-2 px-2 text-center">جدید</th>
-              <th className="pb-2 ps-4 text-start">خطا</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sources.map((source: any) => {
-              const log = latestBySource.get(source.id);
-              const isSuccess = log?.status === "success";
-              const isError = log?.status === "error";
-
-              return (
-                <tr
-                  key={source.id}
-                  className="border-b border-white/[0.04]"
-                >
-                  <td className="py-2.5 pe-4 font-medium text-slate-200">
-                    {source.name_fa}
-                  </td>
-                  <td className="py-2.5 px-2 text-center">
-                    {isSuccess && <CheckCircle className="mx-auto h-4 w-4 text-emerald-400" />}
-                    {isError && <XCircle className="mx-auto h-4 w-4 text-red-400" />}
-                    {!log && <Clock className="mx-auto h-4 w-4 text-slate-500" />}
-                  </td>
-                  <td className="py-2.5 px-2 text-center">
-                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                      source.state_alignment === "state" ? "bg-red-500/20 text-red-400 ring-1 ring-red-500/30" :
-                      source.state_alignment === "semi_state" ? "bg-amber-500/20 text-amber-400 ring-1 ring-amber-500/30" :
-                      source.state_alignment === "independent" ? "bg-emerald-500/20 text-emerald-400 ring-1 ring-emerald-500/30" :
-                      "bg-blue-500/20 text-blue-400 ring-1 ring-blue-500/30"
-                    }`}>
-                      {alignmentLabels[source.state_alignment] || source.state_alignment}
-                    </span>
-                  </td>
-                  <td className="py-2.5 px-2 text-center text-slate-400">
-                    {log?.articles_found ?? "—"}
-                  </td>
-                  <td className="py-2.5 px-2 text-center text-slate-400">
-                    {log?.articles_new ?? "—"}
-                  </td>
-                  <td className="py-2.5 ps-4 text-xs text-red-400">
-                    {log?.error_message
-                      ? log.error_message.length > 60
-                        ? log.error_message.slice(0, 60) + "..."
-                        : log.error_message
-                      : ""}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      {/* Architecture link */}
+      <div className="mt-6 border border-slate-200 dark:border-slate-800 p-5 flex items-center justify-between">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-900 dark:text-white">System Architecture</h2>
+          <p className="text-xs text-slate-500 mt-1">Interactive map of all components, files, and data flows</p>
+        </div>
+        <a href="./dashboard/architecture" className="border border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/10 px-4 py-2 text-sm text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/20">
+          View Architecture →
+        </a>
       </div>
     </div>
   );

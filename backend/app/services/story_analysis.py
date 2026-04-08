@@ -37,9 +37,9 @@ STORY_ANALYSIS_PROMPT = """\
   "independent_summary_fa": "دیدگاه مستقل در ۲-۳ جمله. اگر موجود نیست: null",
   "bias_explanation_fa": "مقایسه مختصر تفاوت چارچوب‌بندی و لحن بین طرف‌ها در ۲-۳ جمله.",
   "scores": {{
-    "state": {{"tone": -2تا2, "factuality": 1تا5, "emotional_language": 1تا5, "framing": "مقاومت|پیروزی|قربانی|تهدید|بحران|خنثی"}},
-    "diaspora": {{"tone": -2تا2, "factuality": 1تا5, "emotional_language": 1تا5, "framing": "..."}},
-    "independent": {{"tone": -2تا2, "factuality": 1تا5, "emotional_language": 1تا5, "framing": "..."}}
+    "state": {{"tone": -2تا2, "factuality": 1تا5, "emotional_language": 1تا5, "framing": ["از این لیست انتخاب کن: مقاومت، پیروزی، قربانی، تهدید، بحران، امنیت، حقوق بشر، اقتصادی، دخالت خارجی، خنثی"]}},
+    "diaspora": {{"tone": -2تا2, "factuality": 1تا5, "emotional_language": 1تا5, "framing": ["..."]}},
+    "independent": {{"tone": -2تا2, "factuality": 1تا5, "emotional_language": 1تا5, "framing": ["..."]}}
   }}
 }}
 

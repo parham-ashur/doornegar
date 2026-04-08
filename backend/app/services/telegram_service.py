@@ -371,6 +371,8 @@ def _clean_post_text(text: str) -> str:
     cleaned = re.sub(r"https?://\S+", "", cleaned)
     # @mentions
     cleaned = re.sub(r"@\w+", "", cleaned)
+    # Remove trailing source attribution like "| رادیو زمانه"
+    cleaned = re.sub(r"\|\s*[^\n]+$", "", cleaned, flags=re.MULTILINE)
     # Collapse whitespace
     cleaned = re.sub(r"[ \t]+", " ", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)

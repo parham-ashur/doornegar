@@ -22,6 +22,7 @@ class StoryBrief(BaseModel):
     topics: list[str]
     first_published_at: datetime | None = None
     trending_score: float
+    priority: int = 0
     image_url: str | None = None
     state_pct: int = 0
     diaspora_pct: int = 0

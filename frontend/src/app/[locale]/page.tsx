@@ -28,11 +28,13 @@ async function fetchSummary(storyId: string): Promise<string | null> {
 
 function Meta({ story }: { story: StoryBrief }) {
   return (
-    <p className="mt-1.5 text-[11px] text-slate-400 dark:text-slate-500">
-      {story.source_count} رسانه · {story.article_count} مقاله
-      {story.state_pct > 0 && <span className="text-red-500 mr-2">حکومتی {story.state_pct}٪</span>}
-      {story.independent_pct > 0 && <span className="text-emerald-600 mr-2">مستقل {story.independent_pct}٪</span>}
-      {story.diaspora_pct > 0 && <span className="text-blue-600 mr-2">برون‌مرزی {story.diaspora_pct}٪</span>}
+    <p className="mt-1.5 text-[11px] text-slate-400 dark:text-slate-500" dir="rtl">
+      <span>{story.source_count} رسانه</span>
+      <span>{" · "}</span>
+      <span>{story.article_count} مقاله</span>
+      {story.state_pct > 0 && <span className="text-red-500 mr-2">{" · "}حکومتی {story.state_pct}٪</span>}
+      {story.independent_pct > 0 && <span className="text-emerald-600 mr-2">{" · "}مستقل {story.independent_pct}٪</span>}
+      {story.diaspora_pct > 0 && <span className="text-blue-600 mr-2">{" · "}برون‌مرزی {story.diaspora_pct}٪</span>}
     </p>
   );
 }
@@ -45,14 +47,19 @@ export default async function HomePage({
   setRequestLocale(locale);
   const stories = await fetchAPI<StoryBrief[]>("/api/v1/stories/trending?limit=20") || [];
 
-  const sorted = [...stories].sort((a, b) => b.article_count - a.article_count);
+  // API returns stories sorted by priority desc, then trending_score desc
+  const sorted = [...stories];
   const hero = sorted[0];
-  const leftTextStories = sorted.slice(1, 4);   // 3 text-only stories on the left
-  const row2Stories = sorted.slice(4, 8);        // 4 stories with images + summaries
-  const midRow = sorted.slice(8, 10);            // 2 text-only stories
-  const bottomLeft = sorted.slice(10, 12);       // 2 text+image stories
-  const bottomRight = sorted.slice(12, 16);      // 4 small grid stories
-  const bottomTextRow = sorted.slice(16, 18);    // 2 text-only stories under thumbnails
+  const leftTextStories = sorted.slice(1, 4);
+  const row2Stories = sorted.slice(4, 8);
+  const remaining = sorted.slice(8);
+  const shortTitle = remaining.filter(s => (s.title_fa?.length || 100) <= 45);
+  const midRow = (shortTitle.length >= 3 ? shortTitle : remaining).slice(0, 3);
+  const midRowIds = new Set(midRow.map(s => s.id));
+  const afterMid = remaining.filter(s => !midRowIds.has(s.id));
+  const bottomLeft = afterMid.slice(0, 2);
+  const bottomRight = afterMid.slice(2, 6);
+  const bottomTextRow = afterMid.slice(6, 8);
 
   // Fetch summaries
   const heroSummary = hero ? await fetchSummary(hero.id) : null;
@@ -93,10 +100,10 @@ export default async function HomePage({
               </h1>
               <Meta story={hero} />
               {heroSummary && (
-                <p className="mt-4 text-[13px] leading-7 text-slate-500 dark:text-slate-400 line-clamp-4">
-                  {heroSummary}
-                  <span className="text-blue-600 dark:text-blue-400 mr-1"> ادامه ←</span>
-                </p>
+                <div className="mt-4">
+                  <p className="text-[12px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-4">{heroSummary}</p>
+                  <span className="text-[12px] text-blue-600 dark:text-blue-400 mt-1 inline-block">ادامه ←</span>
+                </div>
               )}
             </Link>
           </div>
@@ -121,14 +128,12 @@ export default async function HomePage({
               href={`/${locale}/stories/${s.id}`}
               className={`group block ${i > 0 ? "pt-4 mt-4 border-t border-slate-200 dark:border-slate-800" : ""}`}
             >
-              <h3 className="text-[13px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400">
+              <h3 className="text-[13px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 overflow-hidden text-ellipsis whitespace-nowrap">
                 {s.title_fa}
               </h3>
               <p className="mt-1 text-[10px] text-slate-400">{s.source_count} رسانه · {s.article_count} مقاله</p>
               {leftSummaries[s.id] && (
-                <p className="mt-1.5 text-[11px] leading-5 text-slate-400 dark:text-slate-500 line-clamp-2">
-                  {leftSummaries[s.id]}
-                </p>
+                <p className="mt-1.5 text-[12px] leading-5 text-slate-400 dark:text-slate-500 line-clamp-2">{leftSummaries[s.id]}</p>
               )}
             </Link>
           ))}
@@ -149,14 +154,11 @@ export default async function HomePage({
                 <div className="aspect-[4/3] w-full overflow-hidden bg-slate-100 dark:bg-slate-800 mb-3">
                   <SafeImage src={s.image_url} className="h-full w-full object-cover" />
                 </div>
-                <h3 className="text-[14px] font-extrabold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
+                <h3 className="text-[14px] font-extrabold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 overflow-hidden text-ellipsis whitespace-nowrap">
                   {s.title_fa}
                 </h3>
                 <Meta story={s} />
-                <p className="mt-2 text-[12px] leading-5 text-slate-400 dark:text-slate-500 line-clamp-2">
-                  {summary || s.title_fa}
-                  <span className="text-blue-600 dark:text-blue-400 mr-1"> ادامه ←</span>
-                </p>
+                <p className="mt-2 text-[12px] leading-5 text-slate-400 dark:text-slate-500 line-clamp-2">{summary || s.title_fa}</p>
               </Link>
             );
           })}
@@ -165,11 +167,11 @@ export default async function HomePage({
 
       {/* ── ROW 3: 2-col text-only ── */}
       {midRow.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 border-b border-slate-200 dark:border-slate-800">
+        <div className="grid grid-cols-1 sm:grid-cols-3 border-b border-slate-200 dark:border-slate-800">
           {midRow.map((s, i) => (
             <Link key={s.id} href={`/${locale}/stories/${s.id}`}
-              className={`group block py-7 ${i > 0 ? "sm:pr-8 sm:border-r border-slate-200 dark:border-slate-800" : "sm:pl-8"}`}>
-              <h3 className="text-[15px] font-extrabold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400">
+              className={`group block py-7 ${i > 0 ? "sm:pr-6 sm:border-r border-slate-200 dark:border-slate-800" : ""} ${i < midRow.length - 1 ? "sm:pl-6" : ""}`}>
+              <h3 className="text-[15px] font-extrabold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-1">
                 {s.title_fa}
               </h3>
               <Meta story={s} />
@@ -191,10 +193,10 @@ export default async function HomePage({
                   </h3>
                   <Meta story={s} />
                   {bottomSummaries[s.id] && (
-                    <p className="mt-2 text-[12px] leading-5 text-slate-400 dark:text-slate-500 line-clamp-6">
-                      {bottomSummaries[s.id]}
-                      <span className="text-blue-600 dark:text-blue-400 mr-1"> ادامه ←</span>
-                    </p>
+                    <div className="mt-2">
+                      <p className="text-[12px] leading-5 text-slate-400 dark:text-slate-500 line-clamp-6">{bottomSummaries[s.id]}</p>
+                      <span className="text-[11px] text-blue-600 dark:text-blue-400 mt-0.5 inline-block">ادامه ←</span>
+                    </div>
                   )}
                 </div>
                 <div className="sm:col-span-3 aspect-[16/10] overflow-hidden bg-slate-100 dark:bg-slate-800">
@@ -212,7 +214,7 @@ export default async function HomePage({
                   <div className="aspect-[4/3] overflow-hidden bg-slate-100 dark:bg-slate-800">
                     <SafeImage src={s.image_url} className="h-full w-full object-cover" />
                   </div>
-                  <h3 className="mt-2 text-[14px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-3">
+                  <h3 className="mt-2 text-[14px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
                     {s.title_fa}
                   </h3>
                 </Link>

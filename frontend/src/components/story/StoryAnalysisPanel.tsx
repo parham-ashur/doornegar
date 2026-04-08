@@ -4,29 +4,6 @@ import { useEffect, useState } from "react";
 import { Sparkles, Loader2 } from "lucide-react";
 import type { StoryAnalysis } from "@/lib/types";
 
-const framingLabels: Record<string, string> = {
-  "مقاومت": "مقاومت",
-  "پیروزی": "پیروزی",
-  "قربانی": "قربانی",
-  "تهدید": "تهدید",
-  "بحران": "بحران",
-  "خنثی": "خنثی",
-};
-
-function ScoreBar({ label, value, max, color }: { label: string; value: number | null; max: number; color: string }) {
-  if (value === null || value === undefined) return null;
-  const pct = Math.max(0, Math.min(100, ((value + (max === 4 ? 2 : 0)) / max) * 100));
-  return (
-    <div className="flex items-center gap-2 text-[11px]">
-      <span className="w-20 text-slate-500 dark:text-slate-400">{label}</span>
-      <div className="flex-1 h-1.5 bg-slate-200 dark:bg-slate-800">
-        <div className={`h-full ${color}`} style={{ width: `${pct}%` }} />
-      </div>
-      <span className="w-6 text-left text-slate-600 dark:text-slate-300 font-medium">{value}</span>
-    </div>
-  );
-}
-
 function SidePanel({ title, summary, scores, color }: {
   title: string;
   summary: string | null;
@@ -35,24 +12,19 @@ function SidePanel({ title, summary, scores, color }: {
 }) {
   if (!summary && !scores) return null;
   return (
-    <div className="border-t border-slate-200 dark:border-slate-800 pt-4">
+    <div className="border-t border-slate-200 dark:border-slate-800 pt-4 flex flex-col">
       <h4 className={`text-xs font-bold mb-2 ${color}`}>{title}</h4>
       {summary && (
-        <p className="text-[13px] leading-6 text-slate-600 dark:text-slate-400 mb-3">{summary}</p>
+        <p className="text-[13px] leading-6 text-slate-600 dark:text-slate-400">{summary}</p>
       )}
-      {scores && (
-        <div className="space-y-1.5">
-          <ScoreBar label="لحن" value={scores.tone} max={4} color="bg-amber-500" />
-          <ScoreBar label="مستندسازی" value={scores.factuality} max={5} color="bg-emerald-500" />
-          <ScoreBar label="احساسی‌بودن" value={scores.emotional_language} max={5} color="bg-red-400" />
-          {scores.framing && (
-            <div className="flex items-center gap-2 text-[11px]">
-              <span className="w-20 text-slate-500 dark:text-slate-400">چارچوب</span>
-              <span className="px-2 py-0.5 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-medium">
-                {scores.framing}
-              </span>
-            </div>
-          )}
+      {scores?.framing && (
+        <div className="mt-auto pt-3 flex items-center gap-1.5 flex-wrap text-[11px]">
+          <span className="text-slate-500 dark:text-slate-400">چارچوب‌بندی:</span>
+          {(Array.isArray(scores.framing) ? scores.framing : [scores.framing]).map((f, i) => (
+            <span key={i} className="px-2 py-0.5 border border-slate-300 dark:border-slate-700 font-medium text-slate-700 dark:text-slate-300">
+              {f}
+            </span>
+          ))}
         </div>
       )}
     </div>
