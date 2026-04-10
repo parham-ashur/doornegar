@@ -7,7 +7,7 @@ import type { StoryAnalysis } from "@/lib/types";
 function SidePanel({ title, summary, scores, color }: {
   title: string;
   summary: string | null;
-  scores: { tone: number | null; factuality: number | null; emotional_language: number | null; framing: string | null } | null;
+  scores: { tone: number | null; factuality: number | null; emotional_language: number | null; framing: string | string[] | null } | null;
   color: string;
 }) {
   if (!summary) return null;

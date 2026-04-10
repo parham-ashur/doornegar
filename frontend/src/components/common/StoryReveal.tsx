@@ -130,7 +130,7 @@ export default function StoryReveal({ story, scrollArticles, locale, summary }: 
       >
         <Link href={`/${locale}/stories/${story.id}`} className="group flex flex-col h-full">
           <div className="aspect-[3/2] overflow-hidden bg-slate-100 dark:bg-slate-800">
-            <SafeImage src={story.image_url} className="h-full w-full object-cover" />
+            <SafeImage src={story.image_url ?? null} className="h-full w-full object-cover" />
           </div>
           <div className="mt-2">
             <h3 className="text-[13px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
