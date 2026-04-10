@@ -1,6 +1,6 @@
 # Doornegar - System Architecture
 
-## Component Diagram
+## Component Diagram (Current + Planned)
 
 ```
                           +------------------+
@@ -9,41 +9,66 @@
                           +--------+---------+
                                    |
                                    v
-                    +-----------------------------+
-                    |     Frontend (Next.js 14)   |
-                    |     Vercel / localhost:3000  |
-                    |  - Bilingual (FA/EN)        |
-                    |  - RTL support              |
-                    |  - Radix UI + Tailwind      |
-                    |  - Recharts (bias charts)   |
-                    +-------------+---------------+
-                                  |
-                                  | REST API calls
-                                  v
-                    +-----------------------------+
-                    |    Backend (FastAPI)         |
-                    |    Railway / localhost:8000  |
-                    |  - REST API (17+ endpoints) |
-                    |  - Async SQLAlchemy          |
-                    |  - Pydantic schemas          |
-                    +--+--------+--------+--------+
-                       |        |        |
-            +----------+    +---+---+    +----------+
-            |               |       |               |
-            v               v       v               v
-  +-----------------+ +----------+ +----------+ +------------------+
-  | PostgreSQL 16   | | Redis 7  | | Anthropic| | Telegram API     |
-  | Neon / Docker   | | Upstash  | | Claude   | | (Telethon)       |
-  |                 | | / Docker | | Haiku    | |                  |
-  | - Articles      | |          | |          | | - 15 channels    |
-  | - Stories       | | - Celery | | - Bias   | | - Post ingestion |
-  | - Sources       | |   queue  | |   scoring| | - Sentiment      |
-  | - Bias scores   | | - Cache  | | - Story  | |   analysis       |
-  | - Telegram      | |          | |   summary| |                  |
-  | - pgvector      | |          | |          | |                  |
-  |   (embeddings)  | |          | |          | |                  |
-  +-----------------+ +----------+ +----------+ +------------------+
+                   +-------------------------------+
+                   |  Cloudflare (PLANNED)         |
+                   |  - DDoS protection (L3/L4/L7) |
+                   |  - Bot Fight Mode             |
+                   |  - WAF (free ruleset)         |
+                   |  - Edge rate limiting         |
+                   |  - Global CDN cache           |
+                   +---------------+---------------+
+                                   |
+            +----------------------+------------------------+
+            |                                               |
+            v                                               v
+  +-------------------+                      +------------------------+
+  | Frontend          |                      | Backend API            |
+  | Vercel            |                      | Railway (FastAPI)      |
+  | Next.js 14        |                      |                        |
+  | - Bilingual RTL   |                      | - slowapi rate limits  |
+  | - Radix UI        |                      |   (200/min, 2000/hr)   |
+  | - Tailwind        |   REST JSON          | - 1 MB req body limit  |
+  | - SafeImage       | -------------------> | - Admin token auth     |
+  | - WelcomeModal    |                      | - Security headers     |
+  | - DoornegarAnim   |                      | - 60+ endpoints        |
+  +---------+---------+                      +--+--------+--------+---+
+            |                                   |        |        |
+            |                                   |        |        |
+            | Image <img src>                   |        |        |
+            v                                   v        v        v
+  +-----------------+        +-------------+ +-------+ +-----+ +-------+
+  | Cloudflare R2   |        | PostgreSQL  | | Redis | | LLM | | Tele- |
+  | (S3-compatible) | <----- | 16+pgvector | |       | | APIs| | gram  |
+  |                 | upload | Neon        | |Upstash| |     | | API   |
+  | pub-*.r2.dev    |  765   |             | |       | |     | |       |
+  | - Article imgs  | images | Articles    | |Celery | |OAI  | |16 ch. |
+  | - CDN cached    |        | Stories     | | queue | |Anth.| |       |
+  | - Permanent     |        | Sources     | |       | |     | |       |
+  | - Cheap egress  |        | BiasScores  | |       | |     | |       |
+  +-----------------+        | Topics      | |       | |     | |       |
+                             | Media dims  | |       | |     | |       |
+                             | Telegram    | |       | |     | |       |
+                             | pgvector    | |       | |     | |       |
+                             +-------------+ +-------+ +-----+ +-------+
+
+                   +-------------------------------+
+                   |  UptimeRobot (PLANNED)        |
+                   |  - Pings /health every 5 min  |
+                   |  - Email alerts on failure    |
+                   +-------------------------------+
 ```
+
+**Security defense-in-depth layers (current → planned):**
+
+1. **Edge (Cloudflare — planned)**: DDoS, bot detection, WAF, edge rate limiting
+2. **App (slowapi — done)**: 200/min default, per-endpoint overrides, 10/hour on LLM
+3. **Auth (admin token — done)**: All mutation endpoints require `ADMIN_TOKEN`
+4. **Cost caps (done + planned)**:
+   - `max_tokens=4096` per LLM call (done)
+   - 10/hour rate limit on LLM endpoints (done)
+   - Hard spending cap on OpenAI dashboard (**TODO**)
+5. **Data (done)**: Neon PostgreSQL, R2 for images, all secrets in env vars
+6. **Monitoring (planned)**: UptimeRobot for outages, Sentry for errors
 
 ## Data Flow
 

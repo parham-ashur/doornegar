@@ -4,6 +4,69 @@ All notable changes to the Doornegar project are documented here, organized by w
 
 ---
 
+## April 10, 2026
+
+### Infrastructure
+- **Cloudflare R2 integration** for permanent image storage (replaces expiring Telegram CDN URLs)
+- Uploaded 765 images to R2 bucket `doornegar-images` with permanent public URLs
+- New management commands: `fill-images`, `check-images`, `migrate-images-to-r2`
+- Both commands auto-run as steps 7/8 in the full pipeline
+- Image downloader (`app/services/image_downloader.py`) now uses S3-compatible API via aioboto3
+- API prefers R2 URLs over remote sources in `_story_brief_with_extras`
+
+### Security Hardening
+- Added `slowapi` rate limiting: 200/min, 2000/hour per IP default
+- Per-endpoint overrides: `/trending` 120/min, `/blindspots` 60/min, `/{id}/analysis` 120/min
+- LLM endpoints (`summarize`, lab `analyze`, `generate-analysts`) now admin-only + 10/hour cap
+- Lab `POST/PUT/DELETE` endpoints all require admin auth (were previously unprotected)
+- 1 MB max request body size middleware
+- Real client IP resolution from `CF-Connecting-IP` / `X-Forwarded-For` headers
+- `Permissions-Policy` header added (geolocation/microphone/camera disabled)
+- `get_story_analysis`, `trending_stories`, `blindspot_stories` now accept `Request` param for rate limiting
+
+### Homepage & UX
+- `StoryReveal` animation component (scroll through article titles → reveal story thumbnail)
+- `AnalystTicker` in hero box (rotating quotes from lab analysts)
+- `PageAtmosphere` ambient effects (parallax, scroll entrance, breathing dividers) — time-of-day tint removed (caused grey cast on images)
+- `DoornegarAnimation` footer component (day-seeded geometric figures)
+- `WelcomeModal` for first-time visitors with looping SVG animation (article scatter → stack → summary lines)
+- Uses `sessionStorage` (resets on tab close) + `?welcome=1` URL override for testing
+- Static thumbnail replacing 3 text stories in hero sidebar
+- Row 2 redesigned as hero-thumb layout (thumbnail + big image + title)
+- Row 4 thumbnails: side percentages on a separate line
+- Homepage text sizes increased ~10% across the board
+- Header nav hidden (`خانه/خبرها/رسانه‌ها/نقاط کور/آزمایشگاه`) — kept in code, commented out
+- Header clock now shows "تهران · [date] · [time]" on the left
+- Images smaller than 120×80 filtered as low-quality placeholders
+
+### Story Detail Page
+- Interactive `DimensionPlot` with 8 media dimensions, Farsi descriptions, 1→5 scale legends
+- Full media names displayed (no more truncation)
+- Scrollable article list (height synced with sidebar via ResizeObserver)
+- Sticky sidebar
+- Back button removed (pointed to removed /stories page)
+
+### Content
+- Expanded to 28 news sources (+10) and 16 Telegram channels (+7)
+- 8-dimension media scoring: editorial_independence, funding_transparency, operational_constraint, source_diversity, viewpoint_pluralism, factional_capture, audience_accountability, crisis_behavior
+- 33 duplicate stories merged (ceasefire, Israel-Lebanon, Arbaeen clusters)
+- Fixed 10 broken RSS feeds; state media now via Telegram only
+- Clustering FK constraint fix (moves TelegramPost/RaterFeedback before story deletion)
+
+### Error Handling / PWA
+- `not-found.tsx` (404) with blindspot metaphor
+- `error.tsx` with scattered-lines SVG animation
+- `loading.tsx` with drifting-lines skeleton
+- `manifest.json` and `robots.txt` added
+- Privacy notice in footer
+
+### Deployment Status
+- Pushed to GitHub main (commits `b1541a6` + `0e5a272`)
+- **Railway backend returning 502 after redeploy** — needs R2 env vars set manually before it can start
+- Vercel frontend redeployed but partially showing stale data because Railway is down
+
+---
+
 ## April 7, 2026 (Evening Session)
 
 ### Features Added

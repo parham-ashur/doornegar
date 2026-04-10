@@ -186,6 +186,98 @@ See `MIGRATION_PLAN.md` for the complete migration procedure.
 
 ---
 
+## 4a. Setting Up Cloudflare (edge protection)
+
+Goal: put Cloudflare between users and Railway/Vercel for DDoS protection, bot detection, WAF, and caching.
+
+### Prerequisites
+- A custom domain (e.g. `doornegar.com`) — buy from Namecheap/Porkbun (~$10/year)
+- Cloudflare account (free tier is enough)
+
+### Steps
+
+1. **Add site to Cloudflare**: cloudflare.com → Add a site → enter domain → Free plan
+2. **Update nameservers**: Cloudflare shows 2 nameservers → set them at your registrar (Namecheap/Porkbun) → wait 5-15 min
+3. **Configure DNS records in Cloudflare**:
+   - Type `CNAME`, name `@` or `doornegar.com`, target `cname.vercel-dns.com`, **Proxy status: Proxied** (orange cloud ON)
+   - Type `CNAME`, name `api`, target `doornegar-production.up.railway.app`, **Proxied**
+4. **Add custom domain on Railway**: Railway dashboard → backend service → Settings → Domains → Add `api.doornegar.com`
+5. **Add custom domain on Vercel**: Vercel dashboard → frontend project → Settings → Domains → Add `doornegar.com`
+6. **Update frontend env var**: Vercel → Settings → Environment Variables → `NEXT_PUBLIC_API_URL=https://api.doornegar.com` → Redeploy
+
+### Security settings to enable (Cloudflare dashboard)
+
+| Setting | Location | Value |
+|---------|----------|-------|
+| SSL/TLS mode | SSL/TLS → Overview | **Full (strict)** |
+| Always Use HTTPS | SSL/TLS → Edge Certificates | **On** |
+| Bot Fight Mode | Security → Bots | **On** |
+| WAF Managed Rules | Security → WAF → Managed rules | Enable **Free managed ruleset** |
+| Rate limiting rule | Security → WAF → Rate limiting rules | 100 req / 1 min / IP → Challenge |
+| Browser Integrity Check | Security → Settings | **On** |
+| Challenge Passage | Security → Settings | 30 min |
+| Security Level | Security → Settings | **Medium** |
+
+### Emergency: "Under Attack" mode
+If you notice unusual traffic or your site is being hammered:
+- Cloudflare dashboard → Security → Settings → Security Level → **Under Attack**
+- This shows a JS challenge page to all visitors — stops bots instantly
+- Turn it back to Medium once the attack stops
+
+---
+
+## 4b. Setting Up UptimeRobot (outage monitoring)
+
+Goal: get an email within 5 minutes of the site going down.
+
+### Steps
+
+1. Sign up at https://uptimerobot.com (free plan = 50 monitors, 5-min interval)
+2. **Add first monitor**:
+   - Monitor Type: HTTPS
+   - Friendly Name: `Doornegar Backend`
+   - URL: `https://api.doornegar.com/health` (or Railway URL if no custom domain yet)
+   - Monitoring Interval: 5 minutes
+   - Alert Contact: your email
+   - Save
+3. **Add second monitor**:
+   - Monitor Type: HTTPS
+   - Friendly Name: `Doornegar Frontend`
+   - URL: `https://doornegar.com` (or Vercel URL)
+   - Same settings
+4. **Optional**: add a Telegram alert — create a bot via @BotFather, add the token to UptimeRobot alert contacts
+5. **Test**: temporarily stop the backend and confirm you get an email within 5-10 min
+
+### Expected alerts
+- **Down**: backend not responding → email within 5 min
+- **SSL expiring**: certificate expires in <30 days → email weekly warning
+- **Up**: after a downtime, confirmation email when service recovers
+
+---
+
+## 4c. OpenAI Spending Protection
+
+Goal: ensure a runaway LLM abuse cannot bankrupt the project.
+
+### Steps
+
+1. Log in to https://platform.openai.com
+2. Go to Settings → Billing → **Limits**
+3. Set **Hard limit**: $30/month (adjust based on expected usage)
+4. Set **Soft limit**: $15/month (email warning)
+5. Under API keys, confirm only the production key is active
+6. If compromised: revoke key immediately and generate new one
+
+### Current cost baseline (as of 2026-04-10)
+- ~$0.01 per clustering run (100 articles) via GPT-4o-mini
+- ~$0.005 per story summary
+- ~$0.003 per bias score
+- Monthly total: historically $1-5
+
+A hard cap at $30 gives 6x safety margin while still keeping the site useful.
+
+---
+
 ## 5. Monitoring the System
 
 ### Check if the backend is healthy

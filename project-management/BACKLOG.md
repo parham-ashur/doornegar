@@ -1,94 +1,114 @@
 # Doornegar - Backlog
 
-**Last updated**: April 7, 2026
+**Last updated**: 2026-04-10
 
-## Must Have (MVP)
+## Must Have (before public launch)
 
-These items are needed for a functional, reliable production system:
+### Immediate (blocks launch)
+- [ ] **Set R2 env vars on Railway** (R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME, R2_PUBLIC_URL) — backend is 502 without these
+- [ ] **Set SECRET_KEY and ADMIN_TOKEN on Railway** (generate random 32+ char strings)
+- [ ] **Set OpenAI hard spending limit** ($30/month) on platform.openai.com/usage
+- [ ] **Rotate exposed R2 API token** (shared in chat) after deployment works
+- [ ] Rotate Neon DB password, Upstash Redis password, Anthropic API key (shared in chat previously)
 
-- [ ] Run full pipeline on production database (Neon has old/stale data)
-- [ ] Set up Celery workers for automated pipeline scheduling (currently manual)
-- [ ] Fix truncated DATABASE_URL and REDIS_URL in production .env
+### Security & Operations
+- [ ] **Cloudflare CDN/WAF in front of Railway** — single biggest security win
+  - Requires a custom domain (~$10/year)
+  - Gives: DDoS protection, bot detection, WAF, rate limiting at edge, analytics
+  - See RUNBOOK for setup steps
+- [ ] **UptimeRobot monitoring** — free, pings /health every 5 min, emails on outage
+- [ ] **Railway max-instance limit** — prevent runaway scaling costs
+- [ ] Celery workers for automated pipeline (currently manual)
+- [ ] Automated daily database backup (Neon → local/S3)
+- [ ] Sentry error tracking (free tier)
+
+### Content
+- [ ] Bias scoring for all articles (currently only partial coverage)
+- [ ] Content review of LLM-generated summaries (spot-check for accuracy)
 - [ ] Add more Iranian media sources (geo-blocked ones via proxy)
-- [ ] Bias scoring for all articles (currently only 86/1094 scored -- ~8% coverage)
-- [ ] Ensure pipeline runs automatically every 15-30 minutes
-- [ ] Production error handling (graceful failures, retries for RSS timeouts)
-- [ ] Rate limiting on public API endpoints
-- [ ] Admin authentication for pipeline trigger endpoints
 
 ## Should Have
 
-These improve quality and usability significantly:
-
-- [ ] Cloud image storage (Vercel Blob or S3) instead of local files
-- [ ] Auto-translate all English titles to Farsi
+### UX Improvements
+- [ ] Test thoroughly on actual mobile device
+- [ ] Search functionality (full-text search)
+- [ ] Pagination or infinite scroll on story lists
+- [ ] Story detail: timeline of when each outlet published
 - [ ] Improve LLM clustering precision (avoid merging unrelated events)
-- [ ] Email-based rater invitation system (Phase 4 prep)
-- [ ] Mobile-responsive refinements
-- [ ] Search functionality (full-text search across articles/stories)
-- [ ] Pagination improvements (infinite scroll or load-more)
-- [ ] Story detail page: show timeline of when each outlet published
-- [ ] Source reliability scores (based on historical accuracy)
-- [ ] Article deduplication (some RSS feeds publish duplicates)
+
+### Phase 4 Prep (Rating System)
+- [ ] Create first admin rater account
+- [ ] Email-based invite system for new raters
+- [ ] Rating UI polish
 
 ## Nice to Have
 
-These are enhancements for future phases:
-
-- [ ] Live Telegram channel monitoring (real-time updates via WebSocket)
-- [ ] Push notifications for breaking news
-- [ ] Public API documentation (Swagger/OpenAPI auto-generated)
+- [ ] Live Telegram channel monitoring (real-time via WebSocket)
 - [ ] Analytics dashboard (cost tracking, usage metrics, pipeline stats)
-- [ ] Multi-language support (full English version of the site)
-- [ ] Community voting on bias scores
-- [ ] RSS feed for Doornegar itself (so others can subscribe)
-- [ ] Export stories as PDF reports
-- [ ] Comparison tool (select 2+ articles side-by-side)
-- [ ] Historical trend analysis (how coverage of a topic evolves over weeks)
-- [ ] Social media sharing (Open Graph images for stories)
-- [ ] Dark mode toggle
+- [ ] Full English translation (site currently Farsi-only)
+- [ ] Community voting on bias scores (public)
+- [ ] Export stories as PDF
+- [ ] Dark mode toggle (currently system-based only)
 
-## Phase 4: Private Rating System (Not Started)
+## Phase 5: Cloudflare + Monitoring (Next Up)
 
-This is the next major feature phase. Key decisions already made:
+**Goal**: Make the site resilient to attacks and get visibility into outages.
 
-- Rating is **invite-only**, NOT public
-- Parham personally selects trusted raters
-- Raters evaluate bias scores and article analysis quality
-- This helps calibrate and improve the AI bias scoring
+### Setup checklist
+- [ ] Purchase domain (e.g. `doornegar.com`) from Namecheap / Porkbun
+- [ ] Sign up for Cloudflare (free tier)
+- [ ] Add domain to Cloudflare, update nameservers at registrar
+- [ ] DNS records:
+  - `doornegar.com` → CNAME to Vercel (proxied, orange cloud ON)
+  - `api.doornegar.com` → CNAME to Railway (proxied, orange cloud ON)
+- [ ] Add custom domain in Railway dashboard for backend
+- [ ] Add custom domain in Vercel dashboard for frontend
+- [ ] Update `NEXT_PUBLIC_API_URL=https://api.doornegar.com` in Vercel env
+- [ ] Cloudflare settings:
+  - SSL/TLS → Full (strict)
+  - Security → Bots → Enable Bot Fight Mode
+  - Security → WAF → Enable Free Managed Ruleset
+  - Rules → Rate limiting → 100 req/min per IP → challenge
+  - Speed → Cache → Aggressive
+- [ ] UptimeRobot:
+  - Create free account (uptimerobot.com)
+  - Add monitor: HTTPS, `https://api.doornegar.com/health`, check every 5 min
+  - Add email alert
+  - Add second monitor for the frontend homepage
+- [ ] Test "Under Attack" mode toggle (one-click WAF lockdown)
+- [ ] Document DNS/domain credentials in a password manager
 
-Tasks:
-- [ ] Design rater invitation flow
-- [ ] Build rater authentication (email + invite code)
-- [ ] Create rating UI (agree/disagree with AI bias score, add notes)
-- [ ] Store ratings in database
-- [ ] Dashboard showing rater activity and agreement rates
-- [ ] Use rater feedback to improve bias scoring prompts
-
-## Phase 5: OVHcloud Migration (Not Started)
+## Phase 6: OVHcloud Migration (Future)
 
 See `MIGRATION_PLAN.md` for the full step-by-step plan.
 
-- [ ] Purchase OVHcloud VPS
-- [ ] Set up Docker + Nginx + SSL
-- [ ] Migrate database from Neon
-- [ ] Deploy all services
-- [ ] Configure domain/DNS
-- [ ] Set up backups and monitoring
-- [ ] Decommission old cloud services
+- [ ] Purchase OVHcloud VPS (EU region, ~10€/mo)
+- [ ] Set up Docker + Nginx + Certbot
+- [ ] Migrate database from Neon (`pg_dump`/`pg_restore`)
+- [ ] Move Celery + Telegram worker to VPS
+- [ ] Update DNS: `api.doornegar.com` → VPS IP
+- [ ] Keep R2 for images (portable across providers)
+- [ ] Keep Vercel for frontend (free CDN)
+- [ ] Decommission Railway + Upstash
 
 ## Completed
 
 - [x] Phase 1: Backend models, RSS ingestion, NLP pipeline
 - [x] Phase 2: Story clustering, bias scoring, Telegram integration
 - [x] Phase 3: Next.js bilingual frontend with RTL support
-- [x] 18 news sources seeded
-- [x] 15 Telegram channels configured
-- [x] 1,094 articles ingested
-- [x] 132 stories clustered
-- [x] 132 story summaries generated (AI)
-- [x] 86 bias scores generated (AI)
-- [x] Image downloading service
-- [x] Deployed backend to Railway
-- [x] Deployed frontend to Vercel
-- [x] Connected to Neon PostgreSQL and Upstash Redis
+- [x] 28 news sources seeded (was 18)
+- [x] 16 Telegram channels configured (was 15)
+- [x] 8-dimension media scoring system
+- [x] Homepage redesign (hero, StoryReveal, AnalystTicker, PageAtmosphere)
+- [x] Welcome modal with looping animation
+- [x] Error/loading/404 pages with themed animations
+- [x] Admin token authentication on all mutation endpoints
+- [x] Rate limiting (slowapi, 200/min default + per-endpoint overrides)
+- [x] Request size limits, security headers, CORS restrictions
+- [x] LLM endpoints protected (admin-only + 10/hour cap)
+- [x] Cloudflare R2 image storage (765 images uploaded)
+- [x] Image quality filtering (SafeImage)
+- [x] Footer animation with day-seeded geometric figures
+- [x] Story detail page: interactive DimensionPlot, scrollable article list
+- [x] Navigation hidden from menu (kept in code)
+- [x] Pushed to GitHub and deployed (commits b1541a6, 0e5a272)

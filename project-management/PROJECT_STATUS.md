@@ -1,86 +1,114 @@
 # Doornegar - Project Status
 
-**Last updated**: 2026-04-10 11:55 (auto-maintenance)
+**Last updated**: 2026-04-10
 
 ## What is Doornegar?
 
 Doornegar (دورنگر) is a free, bilingual (Persian/English) media transparency platform for Iranian news. Think of it like Ground News, but specifically designed for the Iranian media landscape. It:
 
-- Aggregates articles from ~18 Iranian news outlets (state, diaspora, independent)
+- Aggregates articles from 28 Iranian news outlets (state, diaspora, independent)
 - Groups related articles into "stories" so you can see how different outlets cover the same event
 - Uses AI to score each article for political bias, framing, and tone
-- Tracks Telegram channels to capture social media reactions
-- Shows "blind spots" -- stories that only one type of outlet is covering
+- Tracks 16 Telegram channels (including state media that geo-block RSS)
+- Scores each source on 8 media dimensions (editorial independence, factional capture, etc.)
+- Shows "blind spots" — stories that only one type of outlet is covering
+- Has a "lab" feature for topic-based analysis with news and debate modes
 
 ## Current State
 
 ### What works
 
-- RSS feed ingestion from 18 news sources
-- NLP processing pipeline (text normalization, embedding generation, keyword extraction)
-- Story clustering using vector similarity (articles grouped into 132 stories)
-- LLM-powered bias scoring (using Claude Haiku)
-- AI-generated story summaries with per-perspective breakdowns (state vs diaspora vs independent)
-- Telegram channel tracking and post ingestion
-- Full bilingual Next.js frontend with RTL support
-- Jalali (Persian) date display
-- Story detail pages with bias visualization (radar charts, bar charts)
-- Image downloading and local serving
-- API with 17+ endpoints
+- RSS feed ingestion from 28 news sources
+- Telegram ingestion from 16 channels (covers state media that geo-block RSS)
+- NLP pipeline (text normalization, embedding generation, keyword extraction)
+- Story clustering via LLM (GPT-4o-mini) with incremental matching
+- LLM-powered bias scoring (Claude Haiku)
+- AI-generated per-perspective summaries (state vs diaspora vs independent)
+- 8-dimension media scoring system per source
+- **Cloudflare R2 image storage** (permanent, CDN-backed, replaces expiring Telegram URLs)
+- Bilingual Next.js frontend with RTL support, Jalali dates
+- Homepage redesign with hero layout, DoornegarAnimation, welcome modal
+- Story detail page with interactive DimensionPlot and scrollable article list
+- Lab feature (topic-based analysis, news/debate modes, analyst perspectives)
+- Error/loading/404 pages with themed SVG animations
+- Admin token auth on all mutation endpoints
+- Rate limiting (slowapi): 200/min default, 10/hour on LLM endpoints
+- Request size limits (1 MB), security headers, CORS restrictions
+- Automated `fill-images` and `check-images` commands in the pipeline
 
 ### What needs work
 
-- Only 86 out of 1094 articles have bias scores (need to run scoring on the rest)
-- Production database (Neon) may have stale data -- need to re-run pipeline
-- Celery workers not yet running in production (pipeline is manual)
-- Some Iranian state news sites are geo-blocked and need proxy configuration
-- No automated scheduling yet (pipeline runs manually via `python manage.py pipeline`)
+- Cloudflare CDN/WAF not yet in front of Railway backend (biggest security win remaining)
+- UptimeRobot / monitoring not configured
+- Custom domain not yet purchased
+- OpenAI hard spending limit not yet set
+- Celery workers not yet automated in production (pipeline is manual)
+- Image quality threshold might need tuning (currently 120×80)
+- State media RSS feeds geo-blocked — relying on Telegram as workaround
 
 ## Data Metrics
 
-These numbers are from the **local development database** as of April 7, 2026:
+From local development DB, April 10, 2026:
 
 | Metric | Count |
 |--------|-------|
-| News sources | 18 |
-| Articles ingested | 3,452 |
-| Stories (clusters) | 432 |
-| Stories with 5+ articles | 55 |
-| Stories with AI summaries | 105 |
-| Bias scores | 86 |
-| Telegram channels tracked | 15 |
-| Telegram posts collected | 2,067 |
+| News sources | 28 |
+| Articles ingested | ~1,300+ |
+| Stories (visible, ≥2 sources) | 294 |
+| Stories with AI summaries | 294 |
+| Images stored in R2 | 765 |
+| Telegram channels tracked | 16 |
+| Media dimension scores | 28 sources × 8 dimensions |
 
 ## Infrastructure
 
 | Service | Provider | Purpose | Status |
 |---------|----------|---------|--------|
-| Backend API | Railway | FastAPI server | Deployed |
+| Backend API | Railway | FastAPI server | Deployed (502 as of 2026-04-10 — needs env vars + restart) |
 | PostgreSQL | Neon | Primary database with pgvector | Connected |
-| Redis | Upstash | Celery task queue, caching | Connected |
+| Redis | Upstash | Celery task queue | Connected |
 | Frontend | Vercel | Next.js web app | Deployed |
-| Telegram API | Telegram | Social media monitoring | Configured (15 channels) |
-| LLM (bias scoring) | Anthropic (Claude Haiku) | Article analysis | Working |
-| Local Docker | Docker Compose | Development: PostgreSQL + Redis | Working |
+| Image storage | **Cloudflare R2** | S3-compatible object storage for article images | **Live — 765 images uploaded** |
+| LLM bias scoring | Anthropic (Claude Haiku) | Article analysis | Working |
+| LLM analysis/clustering | OpenAI (GPT-4o-mini) | Story summaries, clustering | Working |
+| Telegram API | Telethon | 16 channels monitored | Configured |
 
 ### URLs
 
-- **Frontend (production)**: Deployed on Vercel (check Vercel dashboard for URL)
-- **Backend API (production)**: Deployed on Railway (check Railway dashboard for URL)
+- **Frontend (production)**: `https://frontend-tau-six-36.vercel.app`
+- **Backend API (production)**: `https://doornegar-production.up.railway.app`
+- **R2 public URL**: `https://pub-65f981ecf095486aaea3482ec613d9b1.r2.dev`
 - **Local frontend**: http://localhost:3000
 - **Local backend**: http://localhost:8000
-- **API docs**: http://localhost:8000/docs (Swagger UI)
+- **API docs**: http://localhost:8000/docs
 
 ## Tech Stack
 
-- **Backend**: Python 3.12, FastAPI, SQLAlchemy 2 (async), Celery, asyncpg
+- **Backend**: Python 3.12, FastAPI, SQLAlchemy 2 (async), asyncpg, slowapi, aioboto3
 - **Database**: PostgreSQL 16 with pgvector extension
 - **Cache/Queue**: Redis 7
-- **Frontend**: Next.js 14, React 18, Tailwind CSS, next-intl (i18n), Radix UI
+- **Frontend**: Next.js 14, React 18, Tailwind CSS, next-intl
 - **NLP**: sentence-transformers (paraphrase-multilingual-MiniLM-L12-v2), 384-dim embeddings
-- **AI**: Anthropic Claude Haiku for bias scoring and story summarization
-- **Charts**: Recharts for bias visualization
-- **Dates**: date-fns-jalali for Persian calendar
+- **AI**: Anthropic Claude Haiku, OpenAI GPT-4o-mini
+- **Object storage**: Cloudflare R2 (S3-compatible)
+- **Dates**: date-fns-jalali
+
+## Security Posture
+
+| Layer | Protection |
+|-------|-----------|
+| Secrets | `.env` gitignored, all credentials via env vars |
+| Admin endpoints | Token-based auth (`ADMIN_TOKEN`) |
+| LLM cost abuse | Admin-only + 10/hour rate limit + `max_tokens=4096` per call |
+| Request flood | slowapi: 200/min, 2000/hour default (per IP via CF-Connecting-IP) |
+| Memory exhaustion | 1 MB max request body |
+| CORS | Restricted to specific frontend origins |
+| Headers | X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy |
+| DDoS (edge) | **Not yet — needs Cloudflare proxy in front of Railway** |
+| Bot protection | **Not yet — needs Cloudflare Bot Fight Mode** |
+| WAF | **Not yet — needs Cloudflare managed ruleset** |
+| Uptime monitoring | **Not yet — needs UptimeRobot** |
+| OpenAI hard cap | **Not yet — needs to be set in OpenAI dashboard** |
 
 ## Project Phases
 
@@ -89,5 +117,7 @@ These numbers are from the **local development database** as of April 7, 2026:
 | Phase 1 | Backend: models, ingestion, NLP pipeline | Done |
 | Phase 2 | Backend: clustering, bias scoring, Telegram | Done |
 | Phase 3 | Frontend: Next.js bilingual UI | Done |
-| Phase 4 | Private rating system (invite-only) | Not started |
-| Phase 5 | OVHcloud VPS migration | Not started |
+| Phase 4 | Private rating system (invite-only) | Code deployed, no raters yet |
+| Phase 5 | R2 image storage + security hardening | **Done (2026-04-10)** |
+| Phase 6 | Cloudflare CDN/WAF + UptimeRobot + OpenAI caps | **Next** |
+| Phase 7 | OVHcloud VPS migration | Not started |
