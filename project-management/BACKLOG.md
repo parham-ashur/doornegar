@@ -43,6 +43,13 @@
 
 ## Nice to Have
 
+- [ ] **Next.js 14 → 15/16 upgrade** — currently on 14.2.35 (stable but aging). Upgrade path:
+  - Use `npx @next/codemod@canary upgrade latest` for automated migration
+  - Review breaking changes in async request APIs (`cookies()`, `headers()`, `params`, `searchParams` become Promises)
+  - Test all pages with RTL layout, next-intl, and static generation
+  - Evaluate Turbopack for faster dev builds (stable in 15+)
+  - Check next-intl compatibility with new version
+  - Not urgent — current version works and gets security patches
 - [ ] Live Telegram channel monitoring (real-time via WebSocket)
 - [ ] Analytics dashboard (cost tracking, usage metrics, pipeline stats)
 - [ ] Full English translation (site currently Farsi-only)
