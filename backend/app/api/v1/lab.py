@@ -1,12 +1,14 @@
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.api.v1.admin import require_admin
 from app.database import get_db
+from app.rate_limit import limiter as _limiter
 from app.models.article import Article
 from app.models.source import Source
 from app.models.topic import Topic, TopicArticle
@@ -96,7 +98,7 @@ async def list_topics(
     )
 
 
-@router.post("/topics", response_model=TopicBrief)
+@router.post("/topics", response_model=TopicBrief, dependencies=[Depends(require_admin)])
 async def create_topic_endpoint(
     body: TopicCreate,
     db: AsyncSession = Depends(get_db),
@@ -173,7 +175,7 @@ async def get_topic(topic_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     )
 
 
-@router.put("/topics/{topic_id}", response_model=TopicBrief)
+@router.put("/topics/{topic_id}", response_model=TopicBrief, dependencies=[Depends(require_admin)])
 async def update_topic(
     topic_id: uuid.UUID,
     body: TopicUpdate,
@@ -194,7 +196,7 @@ async def update_topic(
     return _topic_to_brief(topic)
 
 
-@router.delete("/topics/{topic_id}")
+@router.delete("/topics/{topic_id}", dependencies=[Depends(require_admin)])
 async def deactivate_topic(topic_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Topic).where(Topic.id == topic_id))
     topic = result.scalar_one_or_none()
@@ -206,7 +208,7 @@ async def deactivate_topic(topic_id: uuid.UUID, db: AsyncSession = Depends(get_d
     return {"status": "deactivated"}
 
 
-@router.post("/topics/{topic_id}/match")
+@router.post("/topics/{topic_id}/match", dependencies=[Depends(require_admin)])
 async def trigger_match(
     topic_id: uuid.UUID,
     days: int = Query(7, ge=1, le=30),
@@ -222,8 +224,9 @@ async def trigger_match(
     return {"matched": linked, "total_articles": topic.article_count}
 
 
-@router.post("/topics/{topic_id}/analyze", response_model=TopicDetail)
-async def trigger_analysis(topic_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+@router.post("/topics/{topic_id}/analyze", response_model=TopicDetail, dependencies=[Depends(require_admin)])
+@_limiter.limit("10/hour")
+async def trigger_analysis(request: Request, topic_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Topic)
         .options(
@@ -271,8 +274,9 @@ async def trigger_analysis(topic_id: uuid.UUID, db: AsyncSession = Depends(get_d
     return await get_topic(topic_id, db)
 
 
-@router.post("/topics/{topic_id}/generate-analysts")
-async def generate_analysts(topic_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+@router.post("/topics/{topic_id}/generate-analysts", dependencies=[Depends(require_admin)])
+@_limiter.limit("10/hour")
+async def generate_analysts(request: Request, topic_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Topic).where(Topic.id == topic_id))
     topic = result.scalar_one_or_none()
     if not topic:

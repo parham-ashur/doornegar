@@ -1,11 +1,12 @@
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.api.v1.admin import require_admin
 from app.config import settings
 from app.database import get_db
 from app.models.article import Article
@@ -21,6 +22,7 @@ from app.schemas.story import (
     StoryListResponse,
 )
 from app.services.story_analysis import generate_story_analysis
+from app.rate_limit import limiter as _limiter
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +61,9 @@ async def list_stories(
 
 
 @router.get("/trending", response_model=list[StoryBrief])
+@_limiter.limit("120/minute")
 async def trending_stories(
+    request: Request,
     limit: int = Query(10, ge=1, le=50),
     min_articles: int = Query(4, ge=1),
     db: AsyncSession = Depends(get_db),
@@ -76,7 +80,9 @@ async def trending_stories(
 
 
 @router.get("/blindspots", response_model=list[StoryBrief])
+@_limiter.limit("60/minute")
 async def blindspot_stories(
+    request: Request,
     limit: int = Query(20, ge=1, le=50),
     min_articles: int = Query(4, ge=1),
     db: AsyncSession = Depends(get_db),
@@ -93,7 +99,8 @@ async def blindspot_stories(
 
 
 @router.get("/{story_id}/analysis", response_model=StoryAnalysisResponse)
-async def get_story_analysis(story_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+@_limiter.limit("120/minute")
+async def get_story_analysis(request: Request, story_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     """Return the saved analysis instantly. Full JSON is stored in summary_en."""
     import json as _json
     result = await db.execute(select(Story).where(Story.id == story_id))
@@ -120,9 +127,14 @@ async def get_story_analysis(story_id: uuid.UUID, db: AsyncSession = Depends(get
     )
 
 
-@router.post("/{story_id}/summarize", response_model=StoryAnalysisResponse)
-async def summarize_story(story_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
-    """Force-generate a new summary using OpenAI."""
+@router.post(
+    "/{story_id}/summarize",
+    response_model=StoryAnalysisResponse,
+    dependencies=[Depends(require_admin)],
+)
+@_limiter.limit("10/hour")
+async def summarize_story(request: Request, story_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    """Force-generate a new summary using OpenAI. Admin-only to prevent cost abuse."""
     result = await db.execute(
         select(Story)
         .options(selectinload(Story.articles).selectinload(Article.source))
