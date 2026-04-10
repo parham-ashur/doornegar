@@ -447,7 +447,7 @@ export default function DoornegarAnimation({ size = "footer" }: { size?: Size })
   const name = getTodayName();
 
   return (
-    <div className="relative group cursor-default">
+    <div className="relative group cursor-default doornegar-tooltip-wrapper">
       <canvas
         ref={canvasRef}
         className={sizeClasses[size]}
@@ -455,9 +455,20 @@ export default function DoornegarAnimation({ size = "footer" }: { size?: Size })
         role="img"
         aria-label="تصویر انتزاعی روزانه دورنگر"
       />
-      <span className="absolute -bottom-6 left-1/2 -translate-x-1/2 px-2 py-0.5 text-[10px] font-medium text-slate-500 dark:text-slate-400 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 opacity-0 group-hover:opacity-100 transition-opacity duration-300 whitespace-nowrap pointer-events-none">
+      <span className="doornegar-tooltip absolute -bottom-6 left-1/2 -translate-x-1/2 px-2 py-0.5 text-[10px] font-medium text-slate-500 dark:text-slate-400 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 whitespace-nowrap pointer-events-none">
         {name}
       </span>
+      <style>{`
+        .doornegar-tooltip {
+          opacity: 0;
+          transition: opacity 0.3s;
+        }
+        @media (hover: hover) and (pointer: fine) {
+          .doornegar-tooltip-wrapper:hover .doornegar-tooltip {
+            opacity: 1;
+          }
+        }
+      `}</style>
     </div>
   );
 }

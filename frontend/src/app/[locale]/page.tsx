@@ -209,11 +209,22 @@ export default async function HomePage({
   summaryIds.forEach((id, i) => { allSummaries[id] = summaryResults[i]; });
 
   return (
-    <div dir="rtl" className="mx-auto max-w-7xl px-6 lg:px-8">
+    <div dir="rtl" className="mx-auto max-w-7xl px-0 md:px-6 lg:px-8">
 
       {/* ════════════════════════════════════════════ */}
-      {/* SECTION 1: Original hero layout             */}
+      {/* MOBILE LAYOUT (phones only, below md)        */}
       {/* ════════════════════════════════════════════ */}
+      <MobileHome
+        hero={hero}
+        stories={sorted}
+        summaries={allSummaries}
+        locale={locale}
+      />
+
+      {/* ════════════════════════════════════════════ */}
+      {/* DESKTOP LAYOUT (tablet and up)                */}
+      {/* ════════════════════════════════════════════ */}
+      <div className="hidden md:block">
 
       {/* ROW 1: Hero */}
       <div className="grid grid-cols-1 lg:grid-cols-12 border-b border-slate-200 dark:border-slate-800 py-8 gap-8">
@@ -475,6 +486,115 @@ export default async function HomePage({
           );
         }
         return null;
+      })}
+      </div>
+    </div>
+  );
+}
+
+
+// ─── Mobile-only home layout (phones) ─────────────────────────────
+function MobileHome({
+  hero,
+  stories,
+  summaries,
+  locale,
+}: {
+  hero: StoryBrief | undefined;
+  stories: StoryBrief[];
+  summaries: Record<string, string | null>;
+  locale: string;
+}) {
+  if (!hero) return null;
+
+  // Data slicing for mobile: hero + alternating blocks of (4 thumbnails, 3 text)
+  const after = stories.slice(1);
+  const blocks: { type: "thumbs" | "text"; items: StoryBrief[] }[] = [];
+  let cursor = 0;
+  const pattern: { type: "thumbs" | "text"; size: number }[] = [
+    { type: "thumbs", size: 4 },
+    { type: "text", size: 3 },
+    { type: "thumbs", size: 4 },
+    { type: "text", size: 3 },
+    { type: "thumbs", size: 4 },
+  ];
+  for (const step of pattern) {
+    const chunk = after.slice(cursor, cursor + step.size);
+    if (chunk.length === 0) break;
+    blocks.push({ type: step.type, items: chunk });
+    cursor += chunk.length;
+  }
+
+  return (
+    <div className="md:hidden">
+      {/* Pattern 1: Hero with text on top of image */}
+      <Link
+        href={`/${locale}/stories/${hero.id}`}
+        className="relative block border-b border-slate-200 dark:border-slate-800"
+      >
+        <div className="aspect-[4/3] overflow-hidden bg-slate-100 dark:bg-slate-800">
+          <SafeImage src={hero.image_url} className="h-full w-full object-cover" />
+        </div>
+        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-4 pt-16">
+          <h1 className="text-[22px] font-black leading-snug text-white line-clamp-3">
+            {hero.title_fa}
+          </h1>
+          <p className="mt-2 text-[11px] text-white/80">
+            {hero.source_count} رسانه · {hero.article_count} مقاله
+            {hero.state_pct > 0 && <span className="mr-2 text-red-300"> · حکومتی {hero.state_pct}٪</span>}
+            {hero.independent_pct > 0 && <span className="mr-2 text-emerald-300"> · مستقل {hero.independent_pct}٪</span>}
+            {hero.diaspora_pct > 0 && <span className="mr-2 text-blue-300"> · برون‌مرزی {hero.diaspora_pct}٪</span>}
+          </p>
+        </div>
+      </Link>
+
+      {/* Alternating pattern blocks */}
+      {blocks.map((block, bi) => {
+        if (block.type === "thumbs") {
+          return (
+            <div
+              key={`m${bi}`}
+              className="grid grid-cols-2 gap-4 p-4 border-b border-slate-200 dark:border-slate-800"
+            >
+              {block.items.map((s) => (
+                <Link key={s.id} href={`/${locale}/stories/${s.id}`} className="group block">
+                  <div className="aspect-[4/3] overflow-hidden bg-slate-100 dark:bg-slate-800 mb-2">
+                    <SafeImage src={s.image_url} className="h-full w-full object-cover" />
+                  </div>
+                  <h3 className="text-[13px] font-bold leading-snug line-clamp-2 text-slate-900 dark:text-white">
+                    {s.title_fa}
+                  </h3>
+                  <p className="mt-1 text-[10px] text-slate-400">
+                    {s.source_count} رسانه · {s.article_count} مقاله
+                  </p>
+                </Link>
+              ))}
+            </div>
+          );
+        }
+        // text pattern
+        return (
+          <div
+            key={`m${bi}`}
+            className="divide-y divide-slate-200 dark:divide-slate-800 border-b border-slate-200 dark:border-slate-800"
+          >
+            {block.items.map((s) => (
+              <Link key={s.id} href={`/${locale}/stories/${s.id}`} className="block py-4 px-4">
+                <h3 className="text-[15px] font-extrabold leading-snug text-slate-900 dark:text-white">
+                  {s.title_fa}
+                </h3>
+                <p className="mt-1 text-[11px] text-slate-400">
+                  {s.source_count} رسانه · {s.article_count} مقاله
+                </p>
+                {summaries[s.id] && (
+                  <p className="mt-2 text-[12px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">
+                    {summaries[s.id]}
+                  </p>
+                )}
+              </Link>
+            ))}
+          </div>
+        );
       })}
     </div>
   );
