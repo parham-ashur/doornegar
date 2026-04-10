@@ -33,6 +33,12 @@ class Source(Base):
         comment="hardline | principlist | reformist | moderate | opposition | monarchist | left",
     )
 
+    # Media dimensions (1-5 scale each)
+    # editorial_independence, funding_transparency, operational_constraint,
+    # source_diversity, viewpoint_pluralism, factional_capture,
+    # audience_accountability, crisis_behavior
+    media_dimensions: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
     # Metadata
     language: Mapped[str] = mapped_column(String(5), default="fa")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)

@@ -61,7 +61,7 @@ async def list_stories(
 @router.get("/trending", response_model=list[StoryBrief])
 async def trending_stories(
     limit: int = Query(10, ge=1, le=50),
-    min_articles: int = Query(5, ge=1),
+    min_articles: int = Query(4, ge=1),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
@@ -78,7 +78,7 @@ async def trending_stories(
 @router.get("/blindspots", response_model=list[StoryBrief])
 async def blindspot_stories(
     limit: int = Query(20, ge=1, le=50),
-    min_articles: int = Query(5, ge=1),
+    min_articles: int = Query(4, ge=1),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
@@ -207,14 +207,43 @@ async def get_story(story_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     )
 
 
+def _is_bad_image(url: str) -> bool:
+    """Filter out obviously bad image URLs (tracking pixels, placeholders, tiny icons)."""
+    if not url or len(url) < 10:
+        return True
+    lower = url.lower()
+    # Common bad patterns
+    bad_patterns = [
+        "pixel", "1x1", "blank.", "spacer.", "transparent.",
+        "placeholder", "default.jpg", "default.png", "no-image",
+        "logo-", "/logo.", "/icon.", "favicon",
+        ".svg",  # SVGs are usually logos/icons
+    ]
+    return any(p in lower for p in bad_patterns)
+
+
 def _story_brief_with_extras(story: Story) -> StoryBrief:
     """Build StoryBrief with image_url and coverage percentages."""
+    from app.config import settings
+
     brief = StoryBrief.model_validate(story)
-    # First article image
-    for article in story.articles:
-        if article.image_url:
-            brief.image_url = article.image_url
-            break
+    # Pick best image: prefer permanent-storage URLs (R2 or local), skip bad URLs
+    all_candidates = [
+        a.image_url for a in story.articles
+        if a.image_url and not _is_bad_image(a.image_url)
+    ]
+    # Stable storage URLs (R2 public URL or local /images/) are preferred
+    stable = [
+        c for c in all_candidates
+        if c.startswith("/images/")
+        or (settings.r2_public_url and c.startswith(settings.r2_public_url))
+    ]
+    if stable:
+        brief.image_url = stable[0]
+    elif all_candidates:
+        # Fallback: prefer longer URLs (often higher res)
+        all_candidates.sort(key=len, reverse=True)
+        brief.image_url = all_candidates[0]
     # Coverage percentages
     total = len(story.articles)
     if total > 0:

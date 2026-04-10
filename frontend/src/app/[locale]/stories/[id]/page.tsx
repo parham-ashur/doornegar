@@ -1,7 +1,9 @@
 import { setRequestLocale } from "next-intl/server";
+import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowRight, Newspaper } from "lucide-react";
+import { Newspaper } from "lucide-react";
 import SourceSpectrum from "@/components/source/SourceSpectrum";
+import DimensionPlot from "@/components/story/DimensionPlot";
 import StoryAnalysisPanel from "@/components/story/StoryAnalysisPanel";
 import ArticleFilterList from "@/components/story/ArticleFilterList";
 import TelegramPanel from "@/components/story/TelegramPanel";
@@ -11,6 +13,30 @@ import EditableTitle from "@/components/feedback/EditableTitle";
 import PriorityControl from "@/components/feedback/PriorityControl";
 import { getStory, getSources } from "@/lib/api";
 import { formatRelativeTime } from "@/lib/utils";
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ locale: string; id: string }>;
+}): Promise<Metadata> {
+  const { id } = await params;
+  try {
+    const story = await getStory(id);
+    const title = story.title_fa || story.title_en;
+    const description = story.summary_fa || `${story.source_count} رسانه · ${story.article_count} مقاله`;
+    return {
+      title: `${title} — دورنگر`,
+      description,
+      openGraph: {
+        title,
+        description,
+        ...(story.articles?.[0]?.url ? {} : {}),
+      },
+    };
+  } catch {
+    return { title: "دورنگر" };
+  }
+}
 
 export default async function StoryDetailPage({
   params,
@@ -62,15 +88,6 @@ export default async function StoryDetailPage({
   return (
     <FeedbackProvider>
     <div dir="rtl" className="mx-auto max-w-7xl px-4 py-8">
-      {/* Back */}
-      <Link
-        href={`/${locale}/stories`}
-        className="mb-6 inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors"
-      >
-        <ArrowRight className="h-4 w-4" />
-        بازگشت
-      </Link>
-
       {/* Header */}
       <div className="mb-6 pb-6 border-b border-slate-200 dark:border-slate-800">
         <h1 className="text-2xl font-black leading-snug text-slate-900 dark:text-white md:text-3xl">
@@ -123,20 +140,20 @@ export default async function StoryDetailPage({
       </div>
 
       {/* Main layout */}
-      <div className="grid gap-8 lg:grid-cols-3">
+      <div className="grid gap-8 lg:grid-cols-3 lg:items-start">
         {/* Articles (2/3) */}
         <div className="lg:col-span-2">
           <h2 className="mb-4 text-base font-black text-slate-900 dark:text-white border-b border-slate-200 dark:border-slate-800 pb-3">
             مقالات مرتبط
           </h2>
-          <ArticleFilterList articles={story.articles} storyId={id} />
+          <ArticleFilterList articles={story.articles} storyId={id} sidebarSync />
 
           {/* Telegram reactions */}
           <TelegramPanel storyId={id} />
         </div>
 
         {/* Sidebar (1/3) */}
-        <div className="space-y-6 lg:border-r border-slate-200 dark:border-slate-800 lg:pr-6">
+        <div className="space-y-6 lg:border-r border-slate-200 dark:border-slate-800 lg:pr-6 lg:sticky lg:top-4" id="story-sidebar">
           {coveringSources.length > 0 && (
             <div>
               <h3 className="text-sm font-black text-slate-900 dark:text-white mb-4 pb-2 border-b border-slate-200 dark:border-slate-800">
@@ -144,6 +161,10 @@ export default async function StoryDetailPage({
               </h3>
               <SourceSpectrum sources={coveringSources} locale="fa" showFeedback />
             </div>
+          )}
+
+          {coveringSources.length > 0 && (
+            <DimensionPlot sources={coveringSources} />
           )}
 
         </div>

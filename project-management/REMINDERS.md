@@ -1,6 +1,6 @@
 # Reminders & Action Items
 
-Last updated: 2026-04-08
+Last updated: 2026-04-10
 
 ## Daily Tasks (run every day)
 - [ ] Run `python manage.py telegram` — fetch new Telegram posts

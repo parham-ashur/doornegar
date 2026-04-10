@@ -10,7 +10,7 @@ function SidePanel({ title, summary, scores, color }: {
   scores: { tone: number | null; factuality: number | null; emotional_language: number | null; framing: string | null } | null;
   color: string;
 }) {
-  if (!summary && !scores) return null;
+  if (!summary) return null;
   return (
     <div className="border-t border-slate-200 dark:border-slate-800 pt-4 flex flex-col">
       <h4 className={`text-xs font-bold mb-2 ${color}`}>{title}</h4>

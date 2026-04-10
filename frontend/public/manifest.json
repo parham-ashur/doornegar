@@ -1,0 +1,11 @@
+{
+  "name": "دورنگر — شفافیت رسانه‌ای ایران",
+  "short_name": "دورنگر",
+  "description": "مقایسه پوشش خبری رسانه‌های داخل و خارج ایران",
+  "start_url": "/fa",
+  "display": "standalone",
+  "theme_color": "#0a0e1a",
+  "background_color": "#ffffff",
+  "lang": "fa",
+  "dir": "rtl"
+}

@@ -24,7 +24,7 @@ INITIAL_CHANNELS = [
         "description": "Official BBC Persian Telegram channel",
     },
     {
-        "username": "iranintl",
+        "username": "iranintl_fa",
         "title": "Iran International ایران اینترنشنال",
         "channel_type": "news",
         "political_leaning": "opposition",

@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://doornegar.vercel.app/sitemap.xml
+
+# Block lab/experimental pages from indexing
+Disallow: /*/lab/
+Disallow: /*/dashboard/
+Disallow: /*/rate/

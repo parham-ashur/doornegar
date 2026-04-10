@@ -469,14 +469,14 @@ async def step_archive_stale():
     from app.models.article import Article
 
     stats = {"archived": 0, "recounted": 0}
-    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=60)
 
     async with async_session() as db:
-        # Find stories not updated in 30 days with low article count
+        # Find stories not updated in 60 days with low article count AND no linked articles
         result = await db.execute(
             select(Story).where(
                 Story.last_updated_at < cutoff,
-                Story.article_count < 5,
+                Story.article_count < 3,
             )
         )
         stale = list(result.scalars().all())

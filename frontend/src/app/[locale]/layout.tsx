@@ -5,6 +5,8 @@ import type { Metadata } from "next";
 import { locales } from "@/i18n";
 import Header from "@/components/layout/Header";
 import Footer from "@/components/layout/Footer";
+import PageAtmosphere from "@/components/common/PageAtmosphere";
+import WelcomeModal from "@/components/common/WelcomeModal";
 import "@/styles/globals.css";
 
 export const metadata: Metadata = {
@@ -57,8 +59,10 @@ export default async function LocaleLayout({
     <html lang={locale} dir={isRtl ? "rtl" : "ltr"}>
       <head>
         <meta charSet="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
         <link rel="icon" href="/favicon.ico" />
+        <link rel="manifest" href="/manifest.json" />
+        <meta name="theme-color" content="#0a0e1a" />
       </head>
       <body className={`min-h-screen bg-white text-slate-900 dark:bg-[#0a0e1a] dark:text-slate-100 ${isRtl ? "font-persian" : "font-latin"}`}>
         <NextIntlClientProvider locale={locale} messages={messages}>
@@ -66,6 +70,8 @@ export default async function LocaleLayout({
             <Header />
             <main className="flex-1">{children}</main>
             <Footer />
+            <PageAtmosphere />
+            <WelcomeModal />
           </div>
         </NextIntlClientProvider>
       </body>

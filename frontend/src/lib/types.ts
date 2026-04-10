@@ -13,6 +13,7 @@ export interface Source {
   language: string;
   is_active: boolean;
   credibility_score: number | null;
+  media_dimensions: Record<string, number> | null;
   description_en: string | null;
   description_fa: string | null;
   created_at: string;
@@ -125,4 +126,72 @@ export interface StoryAnalysis {
     diaspora: SideBiasScores | null;
     independent: SideBiasScores | null;
   } | null;
+}
+
+// ─── Lab / Topics ──────────────────────────────
+
+export interface TopicBrief {
+  id: string;
+  title_fa: string;
+  title_en: string | null;
+  slug: string;
+  mode: "news" | "debate";
+  is_auto: boolean;
+  article_count: number;
+  is_active: boolean;
+  image_url: string | null;
+  has_articles: boolean;
+  has_analysts: boolean;
+  analysis_fa: string | null;
+  analyzed_at: string | null;
+  created_at: string;
+}
+
+export interface AnalystPerspective {
+  name_fa: string;
+  platform: string;
+  followers: string;
+  political_leaning: string;
+  quote_fa: string;
+}
+
+export interface TopicArticleInfo {
+  id: string;
+  title_fa: string | null;
+  title_en: string | null;
+  url: string | null;
+  source_name_fa: string | null;
+  source_state_alignment: string | null;
+  match_confidence: number | null;
+  match_method: string | null;
+  published_at: string | null;
+}
+
+export interface DebatePosition {
+  position_fa: string;
+  argument_fa: string;
+  supporting_sources: string[];
+  strength: number;
+}
+
+export interface TopicAnalysis {
+  // News mode
+  summary_fa?: string | null;
+  state_summary_fa?: string | null;
+  diaspora_summary_fa?: string | null;
+  independent_summary_fa?: string | null;
+  bias_explanation_fa?: string | null;
+  scores?: Record<string, SideBiasScores | null> | null;
+  // Debate mode
+  topic_summary_fa?: string | null;
+  positions?: DebatePosition[];
+  key_disagreements_fa?: string[];
+  conclusion_fa?: string | null;
+}
+
+export interface TopicDetail extends TopicBrief {
+  description_fa: string | null;
+  analysis: TopicAnalysis | null;
+  analysts: AnalystPerspective[];
+  articles: TopicArticleInfo[];
 }

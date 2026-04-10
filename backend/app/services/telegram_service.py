@@ -349,7 +349,15 @@ CHANNEL_SOURCE_MAP: dict[str, str] = {
     "radiofarda": "radio-farda",
     "radiozamaneh": "radio-zamaneh",
     "zeitoons": "zeitoons",
-    "iranintl": "iran-international",
+    "iranintl_fa": "iran-international",
+    # New channels from media ecosystem map
+    "irnews": "irna",
+    "isna94": "isna",
+    "iribnews": "irib",
+    "SharghDaily": "shargh",
+    "EtemadOnline": "etemad",
+    "hammihanonline": "hammihan",
+    "mashreghnews_channel": "mashregh",
 }
 
 # Minimum text length (in characters) for a post to be worth converting.

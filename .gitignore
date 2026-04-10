@@ -59,3 +59,4 @@ backups/
 frontend/.env.vercel
 maintenance.log
 maintenance_error.log
+.env.backup

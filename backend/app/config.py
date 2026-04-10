@@ -5,7 +5,7 @@ class Settings(BaseSettings):
     # App
     app_name: str = "Doornegar"
     environment: str = "development"
-    debug: bool = True
+    debug: bool = False
     api_v1_prefix: str = "/api/v1"
     port: int = 8000
 
@@ -17,7 +17,8 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
 
     # Auth
-    secret_key: str = "dev-secret-change-in-production"
+    secret_key: str = ""  # MUST be set via SECRET_KEY env var
+    admin_token: str = ""  # Set ADMIN_TOKEN env var for admin API access
     access_token_expire_minutes: int = 60 * 24 * 7  # 1 week
 
     # CORS — allowed frontend origins
@@ -65,6 +66,13 @@ class Settings(BaseSettings):
     # LinkedIn
     linkedin_access_token: str = ""
     linkedin_org_id: str = ""
+
+    # Cloudflare R2 (S3-compatible object storage for images)
+    r2_account_id: str = ""
+    r2_access_key_id: str = ""
+    r2_secret_access_key: str = ""
+    r2_bucket_name: str = "doornegar-images"
+    r2_public_url: str = ""  # e.g. https://pub-xxx.r2.dev
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

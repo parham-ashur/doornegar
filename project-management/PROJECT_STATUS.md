@@ -1,6 +1,6 @@
 # Doornegar - Project Status
 
-**Last updated**: 2026-04-08 16:02 (auto-maintenance)
+**Last updated**: 2026-04-10 11:55 (auto-maintenance)
 
 ## What is Doornegar?
 
@@ -43,13 +43,13 @@ These numbers are from the **local development database** as of April 7, 2026:
 | Metric | Count |
 |--------|-------|
 | News sources | 18 |
-| Articles ingested | 1,959 |
-| Stories (clusters) | 282 |
-| Stories with 5+ articles | 45 |
-| Stories with AI summaries | 219 |
+| Articles ingested | 3,452 |
+| Stories (clusters) | 432 |
+| Stories with 5+ articles | 55 |
+| Stories with AI summaries | 105 |
 | Bias scores | 86 |
 | Telegram channels tracked | 15 |
-| Telegram posts collected | 1,064 |
+| Telegram posts collected | 2,067 |
 
 ## Infrastructure
 

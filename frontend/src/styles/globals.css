@@ -82,4 +82,28 @@
   .glass {
     @apply bg-white/80 backdrop-blur-xl border border-slate-200 shadow-sm dark:bg-slate-900/60 dark:border-white/[0.06] dark:shadow-lg dark:shadow-black/20;
   }
+
+  /* Thin scrollbar for article lists */
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: theme("colors.slate.300") transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 4px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: theme("colors.slate.300");
+    border-radius: 2px;
+  }
+  @media (prefers-color-scheme: dark) {
+    .scrollbar-thin {
+      scrollbar-color: theme("colors.slate.700") transparent;
+    }
+    .scrollbar-thin::-webkit-scrollbar-thumb {
+      background: theme("colors.slate.700");
+    }
+  }
 }

@@ -521,6 +521,24 @@ async def _merge_hidden_stories(db: AsyncSession) -> int:
                 .where(Article.story_id == victim.id)
                 .values(story_id=keeper.id)
             )
+            # Move telegram posts and feedback to keeper, clear snapshots
+            from app.models.social import TelegramPost, SocialSentimentSnapshot
+            from app.models.feedback import RaterFeedback
+            await db.execute(
+                update(TelegramPost)
+                .where(TelegramPost.story_id == victim.id)
+                .values(story_id=keeper.id)
+            )
+            await db.execute(
+                update(RaterFeedback)
+                .where(RaterFeedback.story_id == victim.id)
+                .values(story_id=keeper.id)
+            )
+            from sqlalchemy import delete
+            await db.execute(
+                delete(SocialSentimentSnapshot)
+                .where(SocialSentimentSnapshot.story_id == victim.id)
+            )
             # Delete the victim story
             await db.delete(victim)
             total_merged += 1

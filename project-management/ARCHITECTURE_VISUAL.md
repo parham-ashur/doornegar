@@ -538,12 +538,17 @@ flowchart TD
 - Manual operations via `manage.py` or the Admin API can trigger the same steps on demand.
 
 
+
+
+
+
+
+
+
 ---
 
-## Auto-detected changes (2026-04-08 16:02)
+## Auto-detected changes (2026-04-10 11:55)
 
-**New service files**: image_downloader.py, llm_utils.py, rating_aggregation.py, scraper.py, seed_telegram.py, social_posting.py
-
-**New model files**: bias_score.py, ingestion_log.py
+**New service files**: topic_service.py
 
 > These files were detected but not yet documented in the diagrams above. Update the diagrams to include them.

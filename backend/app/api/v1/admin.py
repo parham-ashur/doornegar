@@ -7,11 +7,25 @@ import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import get_db
+
+
+async def require_admin(authorization: str = Header("")) -> None:
+    """Simple token-based admin auth. Set ADMIN_TOKEN env var."""
+    admin_token = getattr(settings, "admin_token", "") or ""
+    if not admin_token:
+        # No token configured — block all admin access in production
+        if settings.environment == "production":
+            raise HTTPException(status_code=403, detail="Admin access disabled")
+        return  # Allow in development
+    token = authorization.replace("Bearer ", "").strip()
+    if token != admin_token:
+        raise HTTPException(status_code=401, detail="Invalid admin token")
 from app.models.article import Article
 from app.models.bias_score import BiasScore
 from app.models.ingestion_log import IngestionLog
@@ -19,7 +33,7 @@ from app.models.social import TelegramChannel, TelegramPost
 from app.models.source import Source
 from app.models.story import Story
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_admin)])
 logger = logging.getLogger(__name__)
 
 # Path to maintenance log (relative to backend/)
@@ -247,7 +261,7 @@ async def run_maintenance_endpoint():
         return {"status": "ok", "results": results}
     except Exception as e:
         logger.exception("Maintenance run failed")
-        return {"status": "error", "error": str(e), "traceback": traceback.format_exc()[-500:]}
+        return {"status": "error", "error": str(e), "detail": "Check server logs"}
 
 
 @router.post("/ingest/trigger")
@@ -259,7 +273,7 @@ async def trigger_ingestion(db: AsyncSession = Depends(get_db)):
         return {"status": "ok", "stats": stats}
     except Exception as e:
         logger.exception("Ingestion failed")
-        return {"status": "error", "error": str(e), "traceback": traceback.format_exc()[-500:]}
+        return {"status": "error", "error": str(e), "detail": "Check server logs"}
 
 
 @router.post("/nlp/trigger")
@@ -271,7 +285,7 @@ async def trigger_nlp_processing(db: AsyncSession = Depends(get_db)):
         return {"status": "ok", "stats": stats}
     except Exception as e:
         logger.exception("NLP processing failed")
-        return {"status": "error", "error": str(e), "traceback": traceback.format_exc()[-500:]}
+        return {"status": "error", "error": str(e), "detail": "Check server logs"}
 
 
 @router.post("/cluster/trigger")
@@ -283,7 +297,7 @@ async def trigger_clustering(db: AsyncSession = Depends(get_db)):
         return {"status": "ok", "stats": stats}
     except Exception as e:
         logger.exception("Clustering failed")
-        return {"status": "error", "error": str(e), "traceback": traceback.format_exc()[-500:]}
+        return {"status": "error", "error": str(e), "detail": "Check server logs"}
 
 
 @router.post("/bias/trigger")
@@ -298,7 +312,7 @@ async def trigger_bias_scoring(
         return {"status": "ok", "stats": stats}
     except Exception as e:
         logger.exception("Bias scoring failed")
-        return {"status": "error", "error": str(e), "traceback": traceback.format_exc()[-500:]}
+        return {"status": "error", "error": str(e), "detail": "Check server logs"}
 
 
 @router.get("/ingest/log")

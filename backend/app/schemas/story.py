@@ -56,7 +56,7 @@ class BiasScores(BaseModel):
     tone: float | None = None
     factuality: float | None = None
     emotional_language: float | None = None
-    framing: str | None = None
+    framing: str | list[str] | None = None
 
 class StoryAnalysisResponse(BaseModel):
     story_id: uuid.UUID

@@ -38,12 +38,6 @@ export async function getStories(page = 1, pageSize = 20) {
   }>(`/api/v1/stories?page=${page}&page_size=${pageSize}`);
 }
 
-export async function getTrendingStories(limit = 10) {
-  return fetchAPI<import("./types").StoryBrief[]>(
-    `/api/v1/stories/trending?limit=${limit}`
-  );
-}
-
 export async function getBlindspotStories(limit = 20) {
   return fetchAPI<import("./types").StoryBrief[]>(
     `/api/v1/stories/blindspots?limit=${limit}`
@@ -54,19 +48,3 @@ export async function getStory(id: string) {
   return fetchAPI<import("./types").StoryDetail>(`/api/v1/stories/${id}`);
 }
 
-// Story Analysis
-export async function getStoryAnalysis(storyId: string) {
-  return fetchAPI<import("./types").StoryAnalysis>(
-    `/api/v1/stories/${storyId}/analysis`
-  );
-}
-
-// Social
-export async function getStorySocial(storyId: string) {
-  return fetchAPI<{
-    story_id: string;
-    posts: any[];
-    sentiment: import("./types").SocialSentiment | null;
-    total_posts: number;
-  }>(`/api/v1/social/stories/${storyId}/social`);
-}

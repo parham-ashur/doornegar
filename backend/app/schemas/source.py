@@ -22,6 +22,7 @@ class SourceResponse(SourceBase):
     logo_url: str | None = None
     is_active: bool
     credibility_score: float | None = None
+    media_dimensions: dict | None = None
     description_en: str | None = None
     description_fa: str | None = None
     created_at: datetime
