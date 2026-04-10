@@ -85,10 +85,19 @@ class Settings(BaseSettings):
             url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
         elif url.startswith("postgres://"):
             url = url.replace("postgres://", "postgresql+asyncpg://", 1)
-        # Add sslmode for cloud databases
-        if "neon.tech" in url or "supabase" in url:
-            if "?" not in url:
-                url += "?ssl=require"
+
+        # asyncpg doesn't understand sslmode/channel_binding (those are libpq params)
+        # Strip them and enforce SSL via ssl=require for cloud DBs
+        from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+        parts = urlsplit(url)
+        query_params = [
+            (k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
+            if k not in ("sslmode", "channel_binding")
+        ]
+        is_cloud = "neon.tech" in parts.netloc or "supabase" in parts.netloc
+        if is_cloud and not any(k == "ssl" for k, _ in query_params):
+            query_params.append(("ssl", "require"))
+        url = urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query_params), parts.fragment))
         return url
 
     @property
