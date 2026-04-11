@@ -60,3 +60,8 @@ frontend/.env.vercel
 maintenance.log
 maintenance_error.log
 .env.backup
+
+# Stray / local-only artifacts
+.Rhistory
+backend/.Rhistory
+backend/model_comparison_results.md
