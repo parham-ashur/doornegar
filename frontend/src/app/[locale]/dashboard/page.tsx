@@ -338,7 +338,7 @@ export default function DashboardPage() {
           </h2>
           <p className="text-xs text-slate-500 mt-1">
             Elapsed: <span className="font-mono">{Math.floor(maintElapsed / 60)}:{String(maintElapsed % 60).padStart(2, "0")}</span>
-            {running === "maintenance" && " · estimated 2-5 minutes"}
+            {running === "maintenance" && " · full run with backlog can take 30-60 min (gpt-5-mini is slow but accurate)"}
           </p>
         </div>
 
