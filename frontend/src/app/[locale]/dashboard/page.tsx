@@ -316,6 +316,28 @@ export default function DashboardPage() {
           View Architecture →
         </a>
       </div>
+
+      {/* Source Suggestions link */}
+      <div className="mt-6 border border-slate-200 dark:border-slate-800 p-5 flex items-center justify-between">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Source Suggestions</h2>
+          <p className="text-xs text-slate-500 mt-1">Review suggestions submitted by visitors via the public form</p>
+        </div>
+        <a href="./dashboard/suggestions" className="border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/10 px-4 py-2 text-sm text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/20">
+          Review Suggestions →
+        </a>
+      </div>
+
+      {/* Improvement Feedback link */}
+      <div className="mt-6 border border-slate-200 dark:border-slate-800 p-5 flex items-center justify-between">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Improvement Feedback</h2>
+          <p className="text-xs text-slate-500 mt-1">Todo list of content/design suggestions from raters</p>
+        </div>
+        <a href="./dashboard/improvements" className="border border-purple-300 dark:border-purple-700 bg-purple-50 dark:bg-purple-900/10 px-4 py-2 text-sm text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900/20">
+          View Todo List →
+        </a>
+      </div>
     </div>
   );
 }
