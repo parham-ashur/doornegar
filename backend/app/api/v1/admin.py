@@ -42,13 +42,56 @@ MAINTENANCE_LOG_PATH = Path(__file__).parent.parent.parent.parent / "maintenance
 
 
 def _parse_maintenance_log() -> dict:
-    """Read last maintenance run info from maintenance.log."""
+    """Return last maintenance run info.
+
+    Primary source: in-memory STATE from app.services.maintenance_state
+    (populated by auto_maintenance.run_maintenance via begin_step/end_step).
+    This is accurate for runs started via the web service's
+    POST /admin/maintenance/run endpoint.
+
+    Fallback: maintenance.log file (only works in local dev; the file
+    never gets written reliably on Railway because the FileHandler
+    attachment relies on logging.basicConfig running first).
+    """
     info = {"last_run": None, "last_result": "unknown", "next_run_approx": None}
+
+    # ── 1. In-memory state (preferred) ──────────────────────────────
+    try:
+        from app.services import maintenance_state as _ms
+
+        state = _ms.STATE
+        status = state.get("status")
+        started = state.get("started_at")
+        finished = state.get("finished_at")
+
+        if status == "running" and started:
+            info["last_run"] = started
+            info["last_result"] = "in_progress_or_incomplete"
+            return info
+
+        if status in ("success", "error") and started:
+            info["last_run"] = started
+            if status == "success":
+                # Check if any steps errored (partial success)
+                any_error = any(s.get("status") != "ok" for s in state.get("steps", []))
+                info["last_result"] = "partial_success" if any_error else "success"
+            else:
+                info["last_result"] = "partial_success"  # error at run level
+            # Approximate next run: cron fires daily, so +24h from start
+            try:
+                dt = datetime.fromisoformat(started.replace("Z", "+00:00"))
+                info["next_run_approx"] = (dt + timedelta(hours=24)).isoformat()
+            except (ValueError, AttributeError):
+                pass
+            return info
+    except Exception as e:
+        logger.warning(f"Could not read in-memory maintenance state: {e}")
+
+    # ── 2. File fallback (only works in local dev) ──────────────────
     if not MAINTENANCE_LOG_PATH.exists():
         return info
 
     try:
-        # Read last 200 lines to find the most recent run
         lines = MAINTENANCE_LOG_PATH.read_text(encoding="utf-8", errors="replace").splitlines()
         last_lines = lines[-200:] if len(lines) > 200 else lines
 
@@ -58,11 +101,10 @@ def _parse_maintenance_log() -> dict:
 
         for line in last_lines:
             if "Maintenance started at" in line:
-                # Extract timestamp from log line: 2026-04-08 11:35:03,085 [INFO] ...
                 m = re.match(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", line)
                 if m:
                     last_start = m.group(1)
-                    has_error = False  # reset for new run
+                    has_error = False
             if "Maintenance complete in" in line:
                 m = re.match(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", line)
                 if m:
@@ -75,8 +117,7 @@ def _parse_maintenance_log() -> dict:
                 dt = datetime.strptime(last_start, "%Y-%m-%d %H:%M:%S")
                 dt = dt.replace(tzinfo=timezone.utc)
                 info["last_run"] = dt.isoformat()
-                # Approximate next run: 4 hours after last
-                info["next_run_approx"] = (dt + timedelta(hours=4)).isoformat()
+                info["next_run_approx"] = (dt + timedelta(hours=24)).isoformat()
             except ValueError:
                 pass
 
