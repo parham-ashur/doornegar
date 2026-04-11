@@ -202,34 +202,58 @@ export default function DashboardPage() {
     );
   }
 
+  // Poll maintenance status every 5s while running (fire-and-forget pattern)
+  useEffect(() => {
+    if (running !== "maintenance") return;
+    const poll = async () => {
+      try {
+        const res = await fetch(`${API}/api/v1/admin/maintenance/status`, { headers: authHeaders() });
+        if (!res.ok) return;
+        const state = await res.json();
+        if (state.status === "success" || state.status === "error") {
+          setMaintResult(state);
+          setRunning(null);
+          fetchDashboard();
+        }
+      } catch {}
+    };
+    const interval = setInterval(poll, 5000);
+    return () => clearInterval(interval);
+  }, [running, authHeaders, fetchDashboard]);
+
   async function triggerPipeline(step: string) {
-    setRunning(step);
     if (step === "maintenance") {
       setMaintStart(Date.now());
       setMaintElapsed(0);
       setMaintResult(null);
-    }
-    try {
-      const url = step === "maintenance" ? `${API}/api/v1/admin/maintenance/run` : `${API}/api/v1/admin/${step}/trigger`;
-      const res = await fetch(url, { method: "POST", headers: authHeaders() });
-      const data = await res.json();
-      if (step === "maintenance") {
-        setMaintResult(data);
-      } else {
-        alert(JSON.stringify(data, null, 2));
+      setRunning("maintenance");
+      try {
+        const res = await fetch(`${API}/api/v1/admin/maintenance/run`, { method: "POST", headers: authHeaders() });
+        const data = await res.json();
+        if (data.status === "already_running") {
+          // A previous run is still going — just attach to it
+          // (polling effect picks up status)
+        } else if (data.status !== "started") {
+          setMaintResult({ status: "error", error: data.error || "Unknown error starting maintenance" });
+          setRunning(null);
+        }
+      } catch (e: any) {
+        setMaintResult({ status: "error", error: e.message });
+        setRunning(null);
       }
+      return;
+    }
+
+    setRunning(step);
+    try {
+      const res = await fetch(`${API}/api/v1/admin/${step}/trigger`, { method: "POST", headers: authHeaders() });
+      const data = await res.json();
+      alert(JSON.stringify(data, null, 2));
       fetchDashboard();
     } catch (e: any) {
-      if (step === "maintenance") {
-        setMaintResult({ error: e.message });
-      } else {
-        alert(`Error: ${e.message}`);
-      }
+      alert(`Error: ${e.message}`);
     }
     setRunning(null);
-    if (step === "maintenance") {
-      // Keep modal open so user can see final result; they close it manually
-    }
   }
 
   if (loading && !dashboard) {

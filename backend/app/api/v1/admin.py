@@ -1,5 +1,6 @@
 """Admin endpoints for managing ingestion and NLP pipeline."""
 
+import asyncio
 import logging
 import os
 import re
@@ -324,22 +325,86 @@ async def diagnostics(db: AsyncSession = Depends(get_db)):
     }
 
 
-@router.post("/maintenance/run")
-async def run_maintenance_endpoint():
-    """Trigger a maintenance run (ingest, process, cluster, summarize, fix)."""
+# Simple in-memory tracker for the most recent maintenance run.
+# Not durable across restarts, but fine for the dashboard progress UI.
+_maintenance_state: dict = {
+    "status": "idle",  # idle | running | success | error
+    "started_at": None,
+    "finished_at": None,
+    "elapsed_s": None,
+    "results": None,
+    "error": None,
+}
+_maintenance_lock = asyncio.Lock()
+
+
+async def _run_maintenance_background():
+    """Run the full maintenance cycle as a background task.
+
+    Updates _maintenance_state so the frontend can poll /maintenance/status.
+    """
+    import sys
+    import time
+
+    _maintenance_state.update({
+        "status": "running",
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "finished_at": None,
+        "elapsed_s": None,
+        "results": None,
+        "error": None,
+    })
+
+    t0 = time.time()
     try:
-        import sys
-        # Ensure backend dir is in path so auto_maintenance can import app.*
         backend_dir = str(Path(__file__).parent.parent.parent.parent)
         if backend_dir not in sys.path:
             sys.path.insert(0, backend_dir)
-
         from auto_maintenance import run_maintenance
+
         results = await run_maintenance()
-        return {"status": "ok", "results": results}
+        _maintenance_state.update({
+            "status": "success",
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "elapsed_s": round(time.time() - t0, 1),
+            "results": results,
+        })
     except Exception as e:
-        logger.exception("Maintenance run failed")
-        return {"status": "error", "error": str(e), "detail": "Check server logs"}
+        logger.exception("Background maintenance failed")
+        _maintenance_state.update({
+            "status": "error",
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "elapsed_s": round(time.time() - t0, 1),
+            "error": str(e),
+        })
+
+
+@router.post("/maintenance/run")
+async def run_maintenance_endpoint():
+    """Kick off a maintenance run in the background and return immediately.
+
+    Poll /maintenance/status to see progress. The previous synchronous
+    implementation hit Railway's 2-minute proxy timeout on long runs.
+    """
+    async with _maintenance_lock:
+        if _maintenance_state.get("status") == "running":
+            return {
+                "status": "already_running",
+                "message": "A maintenance run is already in progress",
+                "state": _maintenance_state,
+            }
+        # Fire and forget — uvicorn keeps the coroutine alive
+        asyncio.create_task(_run_maintenance_background())
+    return {
+        "status": "started",
+        "message": "Maintenance is running in the background. Watch the dashboard numbers or poll /admin/maintenance/status.",
+    }
+
+
+@router.get("/maintenance/status")
+async def maintenance_status():
+    """Return the current maintenance run state (for dashboard polling)."""
+    return _maintenance_state
 
 
 @router.post("/ingest/trigger")
