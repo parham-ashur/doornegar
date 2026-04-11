@@ -173,6 +173,25 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, [running, fetchDashboard]);
 
+  // Poll maintenance status every 5s while running (fire-and-forget pattern)
+  useEffect(() => {
+    if (running !== "maintenance") return;
+    const poll = async () => {
+      try {
+        const res = await fetch(`${API}/api/v1/admin/maintenance/status`, { headers: authHeaders() });
+        if (!res.ok) return;
+        const state = await res.json();
+        if (state.status === "success" || state.status === "error") {
+          setMaintResult(state);
+          setRunning(null);
+          fetchDashboard();
+        }
+      } catch {}
+    };
+    const interval = setInterval(poll, 5000);
+    return () => clearInterval(interval);
+  }, [running, authHeaders, fetchDashboard]);
+
   if (!authed) {
     return (
       <div className="mx-auto max-w-sm px-4 py-24">
@@ -201,25 +220,6 @@ export default function DashboardPage() {
       </div>
     );
   }
-
-  // Poll maintenance status every 5s while running (fire-and-forget pattern)
-  useEffect(() => {
-    if (running !== "maintenance") return;
-    const poll = async () => {
-      try {
-        const res = await fetch(`${API}/api/v1/admin/maintenance/status`, { headers: authHeaders() });
-        if (!res.ok) return;
-        const state = await res.json();
-        if (state.status === "success" || state.status === "error") {
-          setMaintResult(state);
-          setRunning(null);
-          fetchDashboard();
-        }
-      } catch {}
-    };
-    const interval = setInterval(poll, 5000);
-    return () => clearInterval(interval);
-  }, [running, authHeaders, fetchDashboard]);
 
   async function triggerPipeline(step: string) {
     if (step === "maintenance") {
