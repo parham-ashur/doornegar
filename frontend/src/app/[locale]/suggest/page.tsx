@@ -1,14 +1,59 @@
 "use client";
 
-import { useState } from "react";
-import { CheckCircle2, AlertCircle } from "lucide-react";
+import { useEffect, useState } from "react";
+import { CheckCircle2, AlertCircle, ChevronDown, ChevronUp, ExternalLink } from "lucide-react";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 type SuggestionType = "media" | "telegram" | "x_twitter" | "youtube" | "instagram" | "website" | "other";
 type Category = "state" | "semi_state" | "independent" | "diaspora" | "not_sure";
 
+interface TrackedSource {
+  name_fa: string;
+  name_en: string;
+  slug: string;
+  website_url: string;
+  state_alignment: string;
+  language: string;
+}
+
+interface TrackedChannel {
+  username: string;
+  title: string;
+}
+
+const CATEGORY_LABELS: Record<string, { label: string; color: string }> = {
+  state: { label: "حکومتی", color: "text-red-600 dark:text-red-400 border-red-200 dark:border-red-900/50" },
+  semi_state: { label: "نیمه‌حکومتی", color: "text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-900/50" },
+  independent: { label: "مستقل", color: "text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/50" },
+  diaspora: { label: "برون‌مرزی", color: "text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-900/50" },
+};
+
 export default function SuggestPage() {
+  const [sources, setSources] = useState<TrackedSource[]>([]);
+  const [channels, setChannels] = useState<TrackedChannel[]>([]);
+  const [trackedOpen, setTrackedOpen] = useState(true);
+
+  useEffect(() => {
+    fetch(`${API}/api/v1/sources`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => { if (d?.sources) setSources(d.sources); })
+      .catch(() => {});
+    fetch(`${API}/api/v1/social/channels`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => { if (Array.isArray(d)) setChannels(d); })
+      .catch(() => {});
+  }, []);
+
+  // Group sources by state_alignment
+  const grouped: Record<string, TrackedSource[]> = {};
+  for (const s of sources) {
+    const key = s.state_alignment || "other";
+    if (!grouped[key]) grouped[key] = [];
+    grouped[key].push(s);
+  }
+  const groupOrder = ["state", "semi_state", "independent", "diaspora"];
+
   const [form, setForm] = useState({
     suggestion_type: "media" as SuggestionType,
     name: "",
@@ -77,11 +122,97 @@ export default function SuggestPage() {
       <h1 className="text-[26px] md:text-[32px] font-black leading-snug text-slate-900 dark:text-white mb-2">
         پیشنهاد منبع جدید
       </h1>
-      <p className="text-[14px] text-slate-500 dark:text-slate-400 leading-7 mb-8">
+      <p className="text-[14px] text-slate-500 dark:text-slate-400 leading-7 mb-6">
         اگر رسانه، کانال تلگرام، حساب اکس (توییتر) یا منبع دیگری می‌شناسید که
         باید پوشش داده شود، فرم زیر را پر کنید. همه پیشنهادها توسط تیم
         بررسی می‌شوند و در صورت تأیید، به منابع افزوده خواهند شد.
       </p>
+
+      {/* Currently tracked sources — collapsible */}
+      {(sources.length > 0 || channels.length > 0) && (
+        <div className="mb-8 border border-slate-200 dark:border-slate-800">
+          <button
+            type="button"
+            onClick={() => setTrackedOpen(!trackedOpen)}
+            className="w-full flex items-center justify-between px-4 py-3 text-[13px] hover:bg-slate-50 dark:hover:bg-slate-900/50"
+          >
+            <span className="font-bold text-slate-900 dark:text-white">
+              منابعی که در حال حاضر پوشش می‌دهیم
+              <span className="font-normal text-slate-400 mr-2">
+                ({sources.length} رسانه · {channels.length} کانال تلگرام)
+              </span>
+            </span>
+            {trackedOpen ? <ChevronUp className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
+          </button>
+
+          {trackedOpen && (
+            <div className="border-t border-slate-200 dark:border-slate-800 px-4 py-4 space-y-5">
+              <p className="text-[11px] leading-6 text-slate-500 dark:text-slate-400">
+                قبل از پیشنهاد، بررسی کنید که منبع موردنظر در این فهرست نباشد. طیف فعلی ما شامل رسانه‌های حکومتی، نیمه‌حکومتی، مستقل و برون‌مرزی است.
+              </p>
+
+              {/* Sources grouped by alignment */}
+              {groupOrder.map((key) => {
+                const group = grouped[key];
+                if (!group || group.length === 0) return null;
+                const cat = CATEGORY_LABELS[key];
+                return (
+                  <div key={key}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className={`inline-block px-2 py-0.5 text-[10px] font-bold border ${cat.color}`}>
+                        {cat.label}
+                      </span>
+                      <span className="text-[10px] text-slate-400">({group.length})</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {group.map((s) => (
+                        <a
+                          key={s.slug}
+                          href={s.website_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title={s.name_en}
+                          className="inline-flex items-center gap-1 px-2 py-1 text-[11px] border border-slate-200 dark:border-slate-800 hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-300"
+                        >
+                          {s.name_fa || s.name_en}
+                          <ExternalLink className="h-2.5 w-2.5 opacity-50" />
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* Telegram channels */}
+              {channels.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="inline-block px-2 py-0.5 text-[10px] font-bold border text-sky-600 dark:text-sky-400 border-sky-200 dark:border-sky-900/50">
+                      کانال‌های تلگرام
+                    </span>
+                    <span className="text-[10px] text-slate-400">({channels.length})</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {channels.map((c) => (
+                      <a
+                        key={c.username}
+                        href={`https://t.me/${c.username.replace(/^@/, "")}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        dir="ltr"
+                        className="inline-flex items-center gap-1 px-2 py-1 text-[11px] border border-slate-200 dark:border-slate-800 hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-300"
+                      >
+                        @{c.username.replace(/^@/, "")}
+                        <ExternalLink className="h-2.5 w-2.5 opacity-50" />
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {result && (
         <div

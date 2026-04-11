@@ -147,16 +147,55 @@ export default function DashboardPage() {
     );
   }
 
+  // Progress tracking for maintenance runs
+  const [maintStart, setMaintStart] = useState<number | null>(null);
+  const [maintElapsed, setMaintElapsed] = useState(0);
+  const [maintResult, setMaintResult] = useState<any>(null);
+
+  // Tick elapsed time every second while running
+  useEffect(() => {
+    if (!maintStart) return;
+    const interval = setInterval(() => {
+      setMaintElapsed(Math.floor((Date.now() - maintStart) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [maintStart]);
+
+  // Refresh dashboard every 5 seconds while maintenance is running
+  useEffect(() => {
+    if (running !== "maintenance") return;
+    const interval = setInterval(() => { fetchDashboard(); }, 5000);
+    return () => clearInterval(interval);
+  }, [running, fetchDashboard]);
+
   async function triggerPipeline(step: string) {
     setRunning(step);
+    if (step === "maintenance") {
+      setMaintStart(Date.now());
+      setMaintElapsed(0);
+      setMaintResult(null);
+    }
     try {
       const url = step === "maintenance" ? `${API}/api/v1/admin/maintenance/run` : `${API}/api/v1/admin/${step}/trigger`;
       const res = await fetch(url, { method: "POST", headers: authHeaders() });
       const data = await res.json();
-      alert(JSON.stringify(data, null, 2));
+      if (step === "maintenance") {
+        setMaintResult(data);
+      } else {
+        alert(JSON.stringify(data, null, 2));
+      }
       fetchDashboard();
-    } catch (e: any) { alert(`Error: ${e.message}`); }
+    } catch (e: any) {
+      if (step === "maintenance") {
+        setMaintResult({ error: e.message });
+      } else {
+        alert(`Error: ${e.message}`);
+      }
+    }
     setRunning(null);
+    if (step === "maintenance") {
+      // Keep modal open so user can see final result; they close it manually
+    }
   }
 
   if (loading && !dashboard) {
@@ -211,8 +250,120 @@ export default function DashboardPage() {
   if (!dashboard) return null;
   const d = dashboard.data;
 
+  // Progress modal shown while maintenance is running or just finished
+  const maintModal = (running === "maintenance" || maintResult) && (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm">
+      <div className="w-full max-w-xl bg-white dark:bg-[#0a0e1a] border border-slate-200 dark:border-slate-800 shadow-2xl">
+        <div className="px-6 py-5 border-b border-slate-200 dark:border-slate-800">
+          <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+            {running === "maintenance" ? (
+              <>
+                <RefreshCw className="h-4 w-4 animate-spin text-blue-600" />
+                Running maintenance...
+              </>
+            ) : maintResult?.error ? (
+              <>
+                <XCircle className="h-4 w-4 text-red-500" />
+                Maintenance failed
+              </>
+            ) : (
+              <>
+                <CheckCircle className="h-4 w-4 text-emerald-500" />
+                Maintenance complete
+              </>
+            )}
+          </h2>
+          <p className="text-xs text-slate-500 mt-1">
+            Elapsed: <span className="font-mono">{Math.floor(maintElapsed / 60)}:{String(maintElapsed % 60).padStart(2, "0")}</span>
+            {running === "maintenance" && " · estimated 2-5 minutes"}
+          </p>
+        </div>
+
+        <div className="px-6 py-5 space-y-4">
+          {running === "maintenance" && (
+            <>
+              {/* Indeterminate bar */}
+              <div className="h-1.5 w-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
+                <div className="h-full bg-blue-500 animate-pulse" style={{ width: "40%" }} />
+              </div>
+              <p className="text-xs text-slate-600 dark:text-slate-400 leading-6">
+                The pipeline is running through these steps in order. Numbers below refresh every 5 seconds.
+              </p>
+              <ul className="text-xs space-y-1 text-slate-600 dark:text-slate-400 list-disc pr-5" dir="ltr">
+                <li>Ingest RSS feeds + Telegram channels</li>
+                <li>NLP: normalize, embed, translate new articles</li>
+                <li>Backfill Farsi titles (up to 300/run)</li>
+                <li>Cluster articles into stories</li>
+                <li>Summarize new stories</li>
+                <li>Bias scoring (up to 150/run)</li>
+                <li>Image fixes, dedup, quality checks, backups...</li>
+              </ul>
+            </>
+          )}
+
+          {/* Live counters — refreshes every 5s while running */}
+          {dashboard && (
+            <div className="grid grid-cols-3 gap-3 pt-2 border-t border-slate-200 dark:border-slate-800">
+              <div>
+                <p className="text-[10px] uppercase tracking-wide text-slate-400">Articles</p>
+                <p className="text-base font-bold text-slate-900 dark:text-white">
+                  {dashboard.data.articles.total.toLocaleString()}
+                </p>
+                <p className="text-[10px] text-slate-500">{dashboard.data.articles.last_24h} in 24h</p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-wide text-slate-400">Missing Farsi title</p>
+                <p className="text-base font-bold text-slate-900 dark:text-white">
+                  {dashboard.data.articles.without_farsi_title.toLocaleString()}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-wide text-slate-400">Bias coverage</p>
+                <p className="text-base font-bold text-slate-900 dark:text-white">
+                  {dashboard.data.bias_scores.coverage_pct}%
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Final result */}
+          {maintResult && !maintResult.error && (
+            <div className="pt-3 border-t border-slate-200 dark:border-slate-800">
+              <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 mb-2">Result summary</p>
+              <pre className="text-[10px] bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 p-3 overflow-auto max-h-48 text-slate-700 dark:text-slate-300" dir="ltr">
+                {JSON.stringify(maintResult, null, 2)}
+              </pre>
+            </div>
+          )}
+          {maintResult?.error && (
+            <div className="pt-3 border-t border-slate-200 dark:border-slate-800">
+              <p className="text-xs font-semibold text-red-600 dark:text-red-400 mb-2">Error</p>
+              <p className="text-xs text-slate-700 dark:text-slate-300">{maintResult.error}</p>
+            </div>
+          )}
+        </div>
+
+        <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-800 flex justify-end gap-2">
+          {running === "maintenance" ? (
+            <p className="text-xs text-slate-500 italic">
+              You can close this tab — the run continues on the server.
+            </p>
+          ) : (
+            <button
+              onClick={() => { setMaintResult(null); setMaintStart(null); }}
+              className="px-4 py-2 text-xs font-bold text-white bg-slate-900 dark:bg-white dark:text-slate-900 hover:opacity-90"
+            >
+              Close
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
+      {maintModal}
       {/* Header */}
       <div className="mb-8 flex items-center justify-between">
         <div>
