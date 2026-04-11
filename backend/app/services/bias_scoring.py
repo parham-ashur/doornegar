@@ -40,41 +40,190 @@ FRAMING_LABELS = [
 ]
 
 BIAS_ANALYSIS_PROMPT = """\
-You are a media bias analyst specializing in Iranian news media. You understand \
-the dynamics between state-controlled media (inside Iran), diaspora/opposition media \
-(outside Iran), and independent outlets.
+You are a senior media bias analyst specializing in Iranian news media. You understand \
+the Islamic Republic's media ecosystem, the divide between state-controlled outlets inside \
+Iran (فارس، تسنیم، ایرنا، کیهان), semi-state outlets with factional leanings (شرق، اعتماد، \
+ایران)، independent domestic outlets, and diaspora/opposition outlets abroad (ایران‌اینترنشنال، \
+بی‌بی‌سی‌فارسی، صدای‌آمریکا، رادیو فردا، کیهان لندن، ایندیپندنت‌فارسی).
 
-Analyze the following news article and provide bias ratings. The source of the \
-article is HIDDEN — do not try to guess it. Analyze only based on the text content.
+Your job: given an article's text only (source is HIDDEN — never guess it), produce \
+structured bias ratings the Doornegar platform uses to show Iranian readers how different \
+outlets frame the same events. You must be consistent — the same article analyzed twice \
+should get near-identical scores.
 
-ARTICLE:
-Title: {title}
-Text: {text}
+# CONTEXT: Iranian media framing patterns
 
-Rate the following dimensions. You MUST return valid JSON only, no other text.
+State-aligned outlets typically:
+- Call protests فتنه (sedition), اغتشاش (riot), بلوا (unrest); call protesters اغتشاشگر / آشوبگر / عوامل بیگانه (rioters / agents of foreign powers)
+- Frame sanctions as "جنگ اقتصادی" (economic war), "ظالمانه", "یکجانبه‌گرایی آمریکا"
+- Refer to opposition as ضدانقلاب (counter-revolutionary), معاند (adversary), منافق (hypocrite = MEK)
+- Quote or celebrate مقام معظم رهبری (Supreme Leader) and سپاه (IRGC) favorably
+- Use شهادت (martyrdom), مقاومت (resistance), دشمن (enemy), سلطه‌گر (hegemon)
+- Downplay domestic economic problems; emphasize US/Israel malice
 
+Diaspora/opposition outlets typically:
+- Call the same protests قیام (uprising), انقلاب ژینا (Jina/Mahsa revolution), خیزش سراسری
+- Frame sanctions as leverage or justified, or at least as America's right
+- Refer to security forces as سرکوبگر (repressor), نیروهای سرکوب, گزمه
+- Highlight prisoners, executions, economic collapse, women's rights, minority rights
+- Use کشتار (massacre), اعدام (execution), زندانی سیاسی (political prisoner), کودک‌کشی (child-killing)
+- Often cite ICHR, Amnesty, CHRI, Iran Human Rights, HRANA
+
+Independent domestic outlets try to:
+- Use neutral terms: معترضان (protesters), اعتراضات (protests), درگیری (clashes)
+- Cite multiple viewpoints, present economic data with context
+- Avoid pejoratives from both sides
+- Report on reformist and conservative factions without loaded language
+
+Loaded Persian terms to recognize (state → opposition equivalents):
+- شهید (martyr) ↔ قربانی (victim) — state calls dead security forces martyrs
+- مقاومت (resistance) ↔ درگیری / حمله (clash / attack)
+- دشمن (enemy) ↔ طرف مقابل (opposing party)
+- فتنه (sedition) ↔ اعتراض (protest)
+- اراذل و اوباش (thugs) ↔ معترضان (protesters)
+- عوامل بیگانه (foreign agents) ↔ شهروندان ناراضی (dissatisfied citizens)
+- نظام / جمهوری اسلامی ↔ حکومت ایران / رژیم (regime)
+
+# SCORING RUBRIC
+
+## political_alignment (-1.0 to +1.0)
+- -1.0: strongly pro-establishment, celebratory of Supreme Leader/IRGC, uses state framing
+- -0.5: sympathetic to establishment, uses some state terms but not fully propagandistic
+-  0.0: neutral, fact-based, no clear alignment
+- +0.5: critical of establishment, uses opposition framing but still reports facts
+- +1.0: strongly anti-establishment, uses full opposition framing, celebrates protests/exiles
+
+## pro_regime_score, reformist_score, opposition_score (each 0.0-1.0)
+How strongly does the article align with that specific camp? These are not mutually \
+exclusive — a reformist piece can have reformist_score=0.7 and opposition_score=0.3.
+
+## tone_score (-1.0 to +1.0)
+- -1.0: alarming, doom-laden, crisis framing
+-  0.0: neutral, informational
+- +1.0: celebratory, triumphalist
+
+## emotional_language_score (0.0-1.0)
+- 0.0: dry facts, wire-service prose
+- 0.5: some adjectives, mild framing
+- 1.0: propaganda-grade — loaded words in nearly every sentence
+
+## factuality_score (0.0-1.0)
+- 0.0: pure opinion, no sources, makes claims without evidence
+- 0.5: some facts mixed with speculation; single-sourced
+- 1.0: multiple named sources, specific data, allows counter-viewpoints
+
+## source_citation_count / anonymous_source_count
+Count literal citations: "according to X", "officials said", "reports indicate". \
+Named = X is identified. Anonymous = unnamed source / "officials" / "reports".
+
+## uses_loaded_language (bool)
+True if the article uses any of the loaded terms above, or their equivalents.
+
+## framing_labels
+Pick 1-3 from: {framing_labels}
+
+# FEW-SHOT EXAMPLES
+
+## Example A (clearly state-aligned)
+
+Title: دستگیری عوامل فتنه اخیر / عناصر وابسته به سرویس‌های بیگانه
+Text: به گزارش خبرنگار ما، نیروهای امنیتی موفق شدند تعدادی از اغتشاشگران و عوامل وابسته به سرویس‌های \
+بیگانه که قصد ایجاد ناامنی در کشور را داشتند، دستگیر کنند. یک مقام آگاه اعلام کرد این افراد با \
+هدایت رسانه‌های معاند قصد برهم زدن نظم عمومی را داشتند. مقام معظم رهبری پیش‌تر درباره توطئه دشمنان \
+هشدار داده بودند.
+
+Expected output (for calibration — you will analyze a different article):
 {{
-  "political_alignment": <float, -1.0 (strongly pro-Islamic Republic establishment) to +1.0 (strongly anti-establishment / opposition)>,
-  "pro_regime_score": <float, 0.0-1.0, how favorable to IR government/supreme leader>,
-  "reformist_score": <float, 0.0-1.0, alignment with reformist movement>,
-  "opposition_score": <float, 0.0-1.0, alignment with opposition/diaspora movements>,
-  "framing_labels": <list of strings from: {framing_labels}>,
-  "tone_score": <float, -1.0 (very negative/alarming) to +1.0 (very positive/celebratory)>,
-  "emotional_language_score": <float, 0.0 (purely factual, neutral language) to 1.0 (heavily emotional, loaded words, propaganda-like)>,
-  "factuality_score": <float, 0.0 (pure opinion/propaganda) to 1.0 (thoroughly sourced, verifiable facts)>,
-  "source_citation_count": <int, number of named/identified sources cited in the article>,
-  "anonymous_source_count": <int, number of unnamed/anonymous sources>,
-  "uses_loaded_language": <bool, true if article uses emotionally charged or propaganda-like language>,
-  "reasoning_en": "<2-3 sentences explaining your ratings in English>",
-  "reasoning_fa": "<2-3 sentences explaining your ratings in Persian/Farsi>"
+  "political_alignment": -0.85,
+  "pro_regime_score": 0.9,
+  "reformist_score": 0.0,
+  "opposition_score": 0.0,
+  "framing_labels": ["security", "western_interference", "sovereignty"],
+  "tone_score": -0.3,
+  "emotional_language_score": 0.8,
+  "factuality_score": 0.2,
+  "source_citation_count": 0,
+  "anonymous_source_count": 1,
+  "uses_loaded_language": true,
+  "reasoning_en": "Uses fully state framing (اغتشاشگران/عوامل وابسته/معاند/توطئه), cites only an anonymous official, and centers the Supreme Leader as authoritative.",
+  "reasoning_fa": "از ادبیات کاملاً حکومتی استفاده شده و فقط به یک منبع ناشناس و سخن رهبری استناد کرده، بدون دیدگاه مقابل."
 }}
 
-Guidelines for Iranian media context:
-- State media often frames sanctions as "economic war", protests as "riots/sedition", and opposition as "enemies"
-- Diaspora media may frame protests as "uprisings", government actions as "repression", and sanctions as justified
-- Look for loaded terms: فتنه (sedition), اغتشاشگر (rioter), مبارز (fighter/activist), شهید (martyr)
-- Factual articles cite specific sources, data, and allow multiple viewpoints
-- Propaganda tends to use absolute language, emotional appeals, and one-sided framing
+## Example B (clearly diaspora/opposition)
+
+Title: سرکوب معترضان در کردستان / گزارش‌هایی از کشته‌شدن چند شهروند
+Text: بر اساس گزارش‌های دریافتی از فعالان حقوق بشر و تصاویر منتشرشده در شبکه‌های اجتماعی، نیروهای \
+سرکوب جمهوری اسلامی در چند شهر کردستان به سوی معترضان تیراندازی کرده‌اند. سازمان حقوق بشر ایران \
+اعلام کرد دست‌کم چهار شهروند کشته و ده‌ها نفر بازداشت شده‌اند. یکی از شاهدان گفت: «نیروها بدون \
+هشدار به سمت جمعیت شلیک کردند.»
+
+Expected output:
+{{
+  "political_alignment": 0.85,
+  "pro_regime_score": 0.0,
+  "reformist_score": 0.05,
+  "opposition_score": 0.9,
+  "framing_labels": ["human_rights", "victimization", "conflict"],
+  "tone_score": -0.7,
+  "emotional_language_score": 0.6,
+  "factuality_score": 0.6,
+  "source_citation_count": 1,
+  "anonymous_source_count": 1,
+  "uses_loaded_language": true,
+  "reasoning_en": "Uses full opposition framing (نیروهای سرکوب/جمهوری اسلامی), cites a named NGO (Iran HR), centers victim and witness perspective, and uses دست‌کم N کشته (at least N killed) — a typical diaspora-media pattern.",
+  "reasoning_fa": "از چارچوب‌بندی اپوزیسیون استفاده شده؛ به یک نهاد حقوق بشری و یک شاهد ناشناس استناد می‌کند و لحن به‌شدت انتقادی است."
+}}
+
+## Example C (neutral / independent)
+
+Title: نرخ تورم ماهانه به ۳٫۲ درصد رسید / اعلام مرکز آمار
+Text: مرکز آمار ایران اعلام کرد نرخ تورم نقطه‌به‌نقطه در ماه گذشته به ۳۲ درصد رسیده است. احمد رضایی، \
+اقتصاددان دانشگاه تهران، در گفتگو با ما گفت این رقم از سقف پیش‌بینی‌های اولیه بالاتر است اما روند \
+کند شدنی را نشان می‌دهد. گزارش کامل مرکز آمار در وبگاه این نهاد منتشر شده است.
+
+Expected output:
+{{
+  "political_alignment": 0.05,
+  "pro_regime_score": 0.1,
+  "reformist_score": 0.1,
+  "opposition_score": 0.1,
+  "framing_labels": ["economic_impact"],
+  "tone_score": -0.1,
+  "emotional_language_score": 0.1,
+  "factuality_score": 0.9,
+  "source_citation_count": 2,
+  "anonymous_source_count": 0,
+  "uses_loaded_language": false,
+  "reasoning_en": "Straightforward economic reporting with two named sources (official statistics + a named academic) and no loaded language. Slight negative tone is the subject matter (rising inflation), not framing.",
+  "reasoning_fa": "گزارش اقتصادی مستقیم با دو منبع نامبرده و بدون ادبیات بارگذاری‌شده. لحن کمی منفی به‌دلیل خود موضوع (افزایش تورم) است، نه چارچوب‌بندی."
+}}
+
+# OUTPUT FORMAT
+
+You MUST return a single JSON object only — no prose, no markdown code fences, no \
+commentary. Use this exact schema:
+
+{{
+  "political_alignment": <float -1.0 to 1.0>,
+  "pro_regime_score": <float 0.0 to 1.0>,
+  "reformist_score": <float 0.0 to 1.0>,
+  "opposition_score": <float 0.0 to 1.0>,
+  "framing_labels": <list of 1-3 strings from: {framing_labels}>,
+  "tone_score": <float -1.0 to 1.0>,
+  "emotional_language_score": <float 0.0 to 1.0>,
+  "factuality_score": <float 0.0 to 1.0>,
+  "source_citation_count": <int>,
+  "anonymous_source_count": <int>,
+  "uses_loaded_language": <bool>,
+  "reasoning_en": "<2-3 sentences in English>",
+  "reasoning_fa": "<2-3 sentences in Persian>"
+}}
+
+# ARTICLE TO ANALYZE
+
+Title: {title}
+
+Text: {text}
 """
 
 
