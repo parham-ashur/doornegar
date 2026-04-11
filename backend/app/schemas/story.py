@@ -21,6 +21,7 @@ class StoryBrief(BaseModel):
     coverage_diversity_score: float | None = None
     topics: list[str]
     first_published_at: datetime | None = None
+    updated_at: datetime | None = None
     trending_score: float
     priority: int = 0
     image_url: str | None = None

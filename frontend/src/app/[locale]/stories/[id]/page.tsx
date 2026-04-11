@@ -104,7 +104,14 @@ export default async function StoryDetailPage({
             {story.source_count} رسانه · {story.article_count} مقاله
           </span>
           {story.first_published_at && (
-            <span>{formatRelativeTime(story.first_published_at, "fa")}</span>
+            <span title="زمان انتشار اولین مقاله">
+              خبر: {formatRelativeTime(story.first_published_at, "fa")}
+            </span>
+          )}
+          {story.updated_at && (
+            <span title="آخرین به‌روزرسانی تحلیل توسط دورنگر" className="text-[11px] text-slate-400">
+              تحلیل: {formatRelativeTime(story.updated_at, "fa")}
+            </span>
           )}
         </div>
 

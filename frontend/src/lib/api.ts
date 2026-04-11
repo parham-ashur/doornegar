@@ -7,7 +7,7 @@ async function fetchAPI<T>(path: string, options?: RequestInit): Promise<T> {
       "Content-Type": "application/json",
       ...options?.headers,
     },
-    next: { revalidate: 60 }, // Cache for 60 seconds
+    next: { revalidate: 30 }, // Cache for 30 seconds — short so summary updates appear quickly
   });
 
   if (!res.ok) {

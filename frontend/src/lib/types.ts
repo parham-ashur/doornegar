@@ -70,6 +70,7 @@ export interface StoryBrief {
   coverage_diversity_score: number | null;
   topics: string[];
   first_published_at: string | null;
+  updated_at: string | null;
   trending_score: number;
   priority: number;
   image_url: string | null;
