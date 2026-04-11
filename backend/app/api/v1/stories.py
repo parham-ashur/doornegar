@@ -235,27 +235,44 @@ def _is_bad_image(url: str) -> bool:
 
 
 def _story_brief_with_extras(story: Story) -> StoryBrief:
-    """Build StoryBrief with image_url and coverage percentages."""
+    """Build StoryBrief with image_url and coverage percentages.
+
+    Image selection:
+    1. Collect articles with live, non-bad image_url values
+    2. Score each by title-word overlap with the story title (≥3 char words)
+    3. Prefer R2 / stable-storage URLs, break ties by highest overlap,
+       then by longest URL (often higher-resolution on Telegram CDN)
+    """
     from app.config import settings
 
     brief = StoryBrief.model_validate(story)
-    # Pick best image: prefer permanent-storage URLs (R2 or local), skip bad URLs
-    all_candidates = [
-        a.image_url for a in story.articles
+
+    def _title_words(s: str | None) -> set:
+        if not s:
+            return set()
+        return {w for w in s.split() if len(w) >= 3}
+
+    story_words = _title_words(story.title_fa or story.title_en)
+
+    # Collect candidate articles with a usable image
+    candidates = [
+        a for a in story.articles
         if a.image_url and not _is_bad_image(a.image_url)
     ]
-    # Stable storage URLs (R2 public URL or local /images/) are preferred
-    stable = [
-        c for c in all_candidates
-        if c.startswith("/images/")
-        or (settings.r2_public_url and c.startswith(settings.r2_public_url))
-    ]
-    if stable:
-        brief.image_url = stable[0]
-    elif all_candidates:
-        # Fallback: prefer longer URLs (often higher res)
-        all_candidates.sort(key=len, reverse=True)
-        brief.image_url = all_candidates[0]
+    if candidates:
+        def _score(a) -> tuple:
+            art_words = _title_words(a.title_fa or a.title_original or a.title_en)
+            overlap = len(story_words & art_words)
+            is_stable = a.image_url.startswith("/images/") or (
+                settings.r2_public_url
+                and a.image_url.startswith(settings.r2_public_url)
+            )
+            # Tuple is sorted in priority order:
+            # (stable URL > higher overlap > longer URL)
+            return (1 if is_stable else 0, overlap, len(a.image_url))
+
+        best = max(candidates, key=_score)
+        brief.image_url = best.image_url
     # Coverage percentages
     total = len(story.articles)
     if total > 0:

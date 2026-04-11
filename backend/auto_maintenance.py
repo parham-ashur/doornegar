@@ -333,17 +333,23 @@ async def step_summarize():
 
 
 async def step_fix_images():
-    """Step 4b: Fix broken images and pick a relevant image per visible story.
+    """Step 4b: Keep article image URLs healthy.
 
     Passes:
-    1. HEAD-check 300 article images per run; null-out any that return non-200.
-       (Null-out lets step 2 re-fetch from article URL.)
-    2. For each visible story, pick an explicit story.image_url from the
-       article whose title overlaps most with the story title (best-available
-       heuristic for "the image most likely to be relevant"). Only articles
-       with a live image_url are considered.
-    3. For stories where NO article has a working image, try to fetch an
-       og:image from the first article's source URL.
+    1. HEAD-check up to 300 article images per run, skipping ones checked
+       within the last 24h. Null out broken / localhost URLs. Marks
+       image_checked_at on every check (success or null-out) so subsequent
+       runs can skip them.
+    2. For visible stories where NO article has a usable image, try to
+       fetch an og:image from the first non-Telegram article's source URL
+       and cache it on that article.
+
+    Image relevance selection (picking WHICH article image to display
+    for a story) happens at response time in
+    app.api.v1.stories._story_brief_with_extras() — it uses a title-word
+    overlap heuristic plus R2-stable-URL preference. Doing it at response
+    time means we don't need a story.image_url column and the picker
+    automatically tracks changes to article.image_url.
     """
     import httpx
     from sqlalchemy import select
@@ -357,17 +363,8 @@ async def step_fix_images():
         "checked": 0,
         "nulled": 0,
         "replaced": 0,
-        "story_images_set": 0,
         "stories_without_image": 0,
     }
-
-    def _title_overlap(a: str, b: str) -> int:
-        """Return the number of shared word-tokens (>=3 chars) between two titles."""
-        if not a or not b:
-            return 0
-        aw = {w for w in a.split() if len(w) >= 3}
-        bw = {w for w in b.split() if len(w) >= 3}
-        return len(aw & bw)
 
     async with async_session() as db:
         # --- Pass 1: HEAD-check up to 300 article images, null out broken ones ---
@@ -408,45 +405,37 @@ async def step_fix_images():
 
         await db.commit()
 
-        # --- Pass 2: For each visible story, pick an explicit image_url ---
+        # --- Pass 2: For visible stories WITHOUT any working image,
+        # try to fetch an og:image from one of their article URLs.
+        # Note: Story has no image_url column — image selection happens
+        # at response time in _story_brief_with_extras() using a
+        # title-overlap heuristic across story.articles. We don't set
+        # story.image_url here because the attribute doesn't exist on
+        # the Story model.
         result = await db.execute(
             select(Story).options(selectinload(Story.articles))
             .where(Story.article_count >= 5)
         )
         for story in result.scalars().all():
-            # Candidate articles = those with a live image_url
-            candidates = [a for a in story.articles if a.image_url]
-            if not candidates:
-                # Last-ditch: fetch an og:image from the first article's URL
-                for a in story.articles:
-                    if a.url and "t.me/" not in a.url:
-                        from app.services.nlp_pipeline import _fetch_og_image
-                        img = await _fetch_og_image(a.url)
-                        if img:
-                            a.image_url = img
-                            candidates = [a]
-                            stats["replaced"] += 1
-                            break
-                if not candidates:
-                    stats["stories_without_image"] += 1
-                    # Clear the story image so frontend knows there's nothing
-                    if story.image_url:
-                        story.image_url = None
-                    continue
-
-            # Pick the article whose title overlaps most with the story title.
-            # If no overlap, fall back to the most recent article with an image.
-            story_title = story.title_fa or story.title_en or ""
-            best = max(
-                candidates,
-                key=lambda a: (
-                    _title_overlap(story_title, a.title_fa or a.title_original or ""),
-                    a.published_at or datetime.min.replace(tzinfo=timezone.utc),
-                ),
-            )
-            if story.image_url != best.image_url:
-                story.image_url = best.image_url
-                stats["story_images_set"] += 1
+            # Any article with a live image_url is enough for the
+            # response-time picker to work.
+            has_image = any(a.image_url for a in story.articles)
+            if has_image:
+                continue
+            # Last-ditch: fetch an og:image from the first non-telegram article URL
+            fetched = False
+            for a in story.articles:
+                if a.url and "t.me/" not in a.url:
+                    from app.services.nlp_pipeline import _fetch_og_image
+                    img = await _fetch_og_image(a.url)
+                    if img:
+                        a.image_url = img
+                        a.image_checked_at = now_ts
+                        stats["replaced"] += 1
+                        fetched = True
+                        break
+            if not fetched:
+                stats["stories_without_image"] += 1
 
         await db.commit()
 

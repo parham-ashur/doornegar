@@ -837,13 +837,18 @@ class _EditStoryRequest(_BaseModel):
     title_en: str | None = None
     summary_fa: str | None = None
     priority: int | None = None
-    image_url: str | None = None
 
 @router.patch("/stories/{story_id}")
 async def edit_story(story_id: str, request: _EditStoryRequest, db: AsyncSession = Depends(get_db)):
-    """Edit a story's title, summary, image, or priority. Admin-only.
+    """Edit a story's title, summary, or priority. Admin-only.
 
-    To HIDE a story from homepages, set priority = -100 (it falls
+    Note: Story has no image_url column. Image selection happens at
+    response time in _story_brief_with_extras() using a title-overlap
+    heuristic. To change what image appears, either (a) fix the
+    underlying article's image_url, or (b) nullify the wrong article's
+    image via a manual DB update.
+
+    To HIDE a story from the homepage, set priority = -100 (it falls
     below trending_score-sorted stories).
     """
     from sqlalchemy import select
@@ -863,8 +868,6 @@ async def edit_story(story_id: str, request: _EditStoryRequest, db: AsyncSession
         story.summary_fa = request.summary_fa
     if request.priority is not None:
         story.priority = request.priority
-    if request.image_url is not None:
-        story.image_url = request.image_url
     await db.commit()
 
     return {
@@ -873,7 +876,6 @@ async def edit_story(story_id: str, request: _EditStoryRequest, db: AsyncSession
         "title_fa": story.title_fa,
         "title_en": story.title_en,
         "priority": story.priority,
-        "image_url": story.image_url,
     }
 
 
