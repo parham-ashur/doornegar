@@ -22,7 +22,37 @@ interface Props {
   currentValue?: string;
   defaultIssueType?: IssueType;
   contextLabel?: string;
+  /** For image feedback — show the actual image inside the modal */
+  imageUrl?: string | null;
 }
+
+// Quick-preset reasons by target type (tap to fill the reason field)
+const REASON_PRESETS: Partial<Record<TargetType, string[]>> = {
+  story_image: [
+    "کیفیت پایین",
+    "تصویر نامرتبط",
+    "تصویر اشتباه",
+    "بهتر است بدون تصویر باشد",
+    "تصویر بی‌ربط به موضوع",
+  ],
+  story_title: [
+    "عنوان گمراه‌کننده",
+    "عنوان خیلی طولانی",
+    "عنوان ناقص",
+    "غلط املایی",
+  ],
+  story_summary: [
+    "خلاصه ناقص",
+    "اشتباه واقعی در خلاصه",
+    "نیاز به بازنویسی",
+    "طرف یکی را پنهان کرده",
+  ],
+  story: [
+    "مقاله‌های نامرتبط در یک خبر",
+    "خبر باید تقسیم شود",
+    "مقاله‌ای جا مانده",
+  ],
+};
 
 // ─── Form schemas — context-aware field sets per target type ─────
 interface FormSchema {
@@ -191,6 +221,7 @@ export default function ImprovementModal({
   currentValue,
   defaultIssueType = "other",
   contextLabel,
+  imageUrl,
 }: Props) {
   const schema = SCHEMAS[targetType] || SCHEMAS.other;
   const [issueType, setIssueType] = useState<IssueType>(defaultIssueType);
@@ -287,6 +318,20 @@ export default function ImprovementModal({
             </div>
           ) : (
             <form onSubmit={submit} className="space-y-4">
+              {/* Image preview for image feedback */}
+              {targetType === "story_image" && imageUrl && (
+                <div>
+                  <p className="text-[10px] text-slate-400 mb-1.5">تصویر مورد نظر</p>
+                  <div className="aspect-video w-full max-w-xs mx-auto overflow-hidden bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-800">
+                    <img
+                      src={imageUrl.startsWith("/images/") ? `${API}${imageUrl}` : imageUrl}
+                      alt=""
+                      className="h-full w-full object-cover"
+                    />
+                  </div>
+                </div>
+              )}
+
               {/* Issue type — only if more than one option */}
               {schema.issueOptions.length > 1 && (
                 <div>
@@ -336,6 +381,21 @@ export default function ImprovementModal({
                 <label className="block text-xs font-bold text-slate-900 dark:text-white mb-1.5">
                   {schema.reasonLabel}
                 </label>
+                {/* Quick-preset chips */}
+                {REASON_PRESETS[targetType] && (
+                  <div className="flex flex-wrap gap-1.5 mb-2">
+                    {REASON_PRESETS[targetType]!.map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setReason(preset)}
+                        className="px-2 py-1 text-[11px] border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:border-slate-900 dark:hover:border-white hover:bg-slate-50 dark:hover:bg-slate-800"
+                      >
+                        {preset}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <textarea
                   value={reason}
                   onChange={(e) => setReason(e.target.value)}

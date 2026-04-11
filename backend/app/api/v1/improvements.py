@@ -30,7 +30,7 @@ router = APIRouter()
 # are in use.
 
 @router.post("", response_model=ImprovementResponse)
-@_limiter.limit("30/hour")
+@_limiter.limit("60/hour")
 async def submit_feedback(
     request: Request,
     body: ImprovementSubmit,

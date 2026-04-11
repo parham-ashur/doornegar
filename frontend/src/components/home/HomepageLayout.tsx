@@ -23,6 +23,7 @@ interface FeedbackContext {
   currentValue?: string;
   defaultIssueType?: IssueType;
   contextLabel?: string;
+  imageUrl?: string | null;
 }
 
 // ─── Feedback button (visible on mobile, hover on desktop) ────
@@ -174,7 +175,7 @@ export default function HomepageLayout({ stories, summaries, locale, feedbackMod
               </Link>
               {feedbackMode && (
                 <FeedbackBtn icon={ImageIcon} label="تصویر" position="tr"
-                  onClick={() => openFeedback({ targetType: "story_image", targetId: hero.id, defaultIssueType: "bad_image", contextLabel: hero.title_fa })} />
+                  onClick={() => openFeedback({ targetType: "story_image", targetId: hero.id, defaultIssueType: "bad_image", contextLabel: hero.title_fa, imageUrl: hero.image_url })} />
               )}
             </div>
           )}
@@ -200,7 +201,7 @@ export default function HomepageLayout({ stories, summaries, locale, feedbackMod
                   {feedbackMode && (
                     <>
                       <FeedbackBtn icon={ImageIcon} label="تصویر" position="tr"
-                        onClick={() => openFeedback({ targetType: "story_image", targetId: s.id, defaultIssueType: "bad_image", contextLabel: s.title_fa })} />
+                        onClick={() => openFeedback({ targetType: "story_image", targetId: s.id, defaultIssueType: "bad_image", contextLabel: s.title_fa, imageUrl: s.image_url })} />
                       <FeedbackBtn icon={Type} label="عنوان" position="bl"
                         onClick={() => openFeedback({ targetType: "story_title", targetId: s.id, currentValue: s.title_fa, defaultIssueType: "wrong_title", contextLabel: s.title_fa })} />
                     </>
@@ -228,7 +229,7 @@ export default function HomepageLayout({ stories, summaries, locale, feedbackMod
               {feedbackMode && (
                 <>
                   <FeedbackBtn icon={ImageIcon} label="تصویر" position="tr"
-                    onClick={() => openFeedback({ targetType: "story_image", targetId: row2Stories[1].id, defaultIssueType: "bad_image", contextLabel: row2Stories[1].title_fa })} />
+                    onClick={() => openFeedback({ targetType: "story_image", targetId: row2Stories[1].id, defaultIssueType: "bad_image", contextLabel: row2Stories[1].title_fa, imageUrl: row2Stories[1].image_url })} />
                 </>
               )}
             </div>
@@ -264,7 +265,7 @@ export default function HomepageLayout({ stories, summaries, locale, feedbackMod
               </Link>
               {feedbackMode && (
                 <FeedbackBtn icon={ImageIcon} label="تصویر" position="tr"
-                  onClick={() => openFeedback({ targetType: "story_image", targetId: row2Stories[0].id, defaultIssueType: "bad_image", contextLabel: row2Stories[0].title_fa })} />
+                  onClick={() => openFeedback({ targetType: "story_image", targetId: row2Stories[0].id, defaultIssueType: "bad_image", contextLabel: row2Stories[0].title_fa, imageUrl: row2Stories[0].image_url })} />
               )}
             </div>
           </div>
@@ -319,7 +320,7 @@ export default function HomepageLayout({ stories, summaries, locale, feedbackMod
                       <FeedbackBtn icon={Type} label="عنوان" position="tl"
                         onClick={() => openFeedback({ targetType: "story_title", targetId: s.id, currentValue: s.title_fa, defaultIssueType: "wrong_title", contextLabel: s.title_fa })} />
                       <FeedbackBtn icon={ImageIcon} label="تصویر" position="tr"
-                        onClick={() => openFeedback({ targetType: "story_image", targetId: s.id, defaultIssueType: "bad_image", contextLabel: s.title_fa })} />
+                        onClick={() => openFeedback({ targetType: "story_image", targetId: s.id, defaultIssueType: "bad_image", contextLabel: s.title_fa, imageUrl: s.image_url })} />
                     </>
                   )}
                 </div>
@@ -347,7 +348,7 @@ export default function HomepageLayout({ stories, summaries, locale, feedbackMod
                     </Link>
                     {feedbackMode && (
                       <FeedbackBtn icon={ImageIcon} label="تصویر" position="tr"
-                        onClick={() => openFeedback({ targetType: "story_image", targetId: s.id, defaultIssueType: "bad_image", contextLabel: s.title_fa })} />
+                        onClick={() => openFeedback({ targetType: "story_image", targetId: s.id, defaultIssueType: "bad_image", contextLabel: s.title_fa, imageUrl: s.image_url })} />
                     )}
                   </div>
                 ))}
@@ -384,6 +385,7 @@ export default function HomepageLayout({ stories, summaries, locale, feedbackMod
         currentValue={context.currentValue}
         defaultIssueType={context.defaultIssueType}
         contextLabel={context.contextLabel}
+        imageUrl={context.imageUrl}
       />
     </>
   );
@@ -440,7 +442,7 @@ function MobileHome({
         {feedbackMode && (
           <div className="absolute top-2 right-2 z-20 flex gap-1">
             <button type="button"
-              onClick={(e) => { e.preventDefault(); e.stopPropagation(); openFeedback({ targetType: "story_image", targetId: hero.id, defaultIssueType: "bad_image", contextLabel: hero.title_fa }); }}
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); openFeedback({ targetType: "story_image", targetId: hero.id, defaultIssueType: "bad_image", contextLabel: hero.title_fa, imageUrl: hero.image_url }); }}
               className="p-2 bg-white/95 dark:bg-slate-900/95 text-slate-900 dark:text-white shadow-md" title="تصویر">
               <ImageIcon className="h-4 w-4" />
             </button>
@@ -470,7 +472,7 @@ function MobileHome({
                   {feedbackMode && (
                     <div className="absolute top-1 right-1 flex gap-1">
                       <button type="button"
-                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); openFeedback({ targetType: "story_image", targetId: s.id, defaultIssueType: "bad_image", contextLabel: s.title_fa }); }}
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); openFeedback({ targetType: "story_image", targetId: s.id, defaultIssueType: "bad_image", contextLabel: s.title_fa, imageUrl: s.image_url }); }}
                         className="p-1.5 bg-white/95 dark:bg-slate-900/95 text-slate-900 dark:text-white shadow-md">
                         <ImageIcon className="h-3 w-3" />
                       </button>

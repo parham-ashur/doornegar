@@ -76,6 +76,7 @@ export default function ImprovementsAdminPage() {
   const [filter, setFilter] = useState<string>("open");
   const [loading, setLoading] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [groupByStory, setGroupByStory] = useState(false);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -151,18 +152,33 @@ export default function ImprovementsAdminPage() {
   }
 
   function copyClaudePrompt(item: FeedbackItem) {
+    // Build richer prompt with direct URLs Claude can click
+    const storyUrl = item.target_id && item.target_type.startsWith("story")
+      ? `https://frontend-tau-six-36.vercel.app/fa/stories/${item.target_id}`
+      : null;
     const lines = [
-      `Improvement feedback (id: ${item.id}):`,
-      `Target: ${TARGET_LABELS[item.target_type] || item.target_type}${item.target_id ? ` (${item.target_id})` : ""}`,
-      item.target_url ? `URL: ${item.target_url}` : null,
-      `Issue: ${ISSUE_LABELS[item.issue_type] || item.issue_type}`,
-      item.current_value ? `Current: ${item.current_value}` : null,
-      item.suggested_value ? `Suggested: ${item.suggested_value}` : null,
-      item.reason ? `Reason: ${item.reason}` : null,
-      item.rater_name ? `Reported by: ${item.rater_name}` : null,
+      `Please fix this improvement feedback (db id: ${item.id}):`,
+      ``,
+      `**Target**: ${TARGET_LABELS[item.target_type] || item.target_type}${item.target_id ? ` — ${item.target_id}` : ""}`,
+      `**Issue**: ${ISSUE_LABELS[item.issue_type] || item.issue_type}`,
+      storyUrl ? `**Story URL**: ${storyUrl}` : null,
+      item.target_url && item.target_url !== storyUrl ? `**Reported from**: ${item.target_url}` : null,
+      ``,
+      item.current_value ? `**Current value**:\n${item.current_value}\n` : null,
+      item.suggested_value ? `**Suggested value**:\n${item.suggested_value}\n` : null,
+      item.reason ? `**Rater's reason**:\n${item.reason}\n` : null,
+      ``,
+      `After fixing, mark this feedback as done at:`,
+      `https://frontend-tau-six-36.vercel.app/fa/dashboard/improvements`,
     ].filter(Boolean);
     navigator.clipboard.writeText(lines.join("\n"));
-    alert("Copied. Paste in Claude to request a fix.");
+    alert("Copied a detailed prompt. Paste in Claude to request the fix.");
+  }
+
+  function storyLink(item: FeedbackItem): string | null {
+    if (!item.target_id || !item.target_type.startsWith("story")) return null;
+    const params = new URLSearchParams({ feedback: "1" });
+    return `/fa/stories/${item.target_id}?${params}`;
   }
 
   if (!authed) {
@@ -235,8 +251,8 @@ export default function ImprovementsAdminPage() {
         </div>
       </div>
 
-      {/* Status filters */}
-      <div className="mb-6 flex flex-wrap gap-2">
+      {/* Status filters + group toggle */}
+      <div className="mb-6 flex flex-wrap items-center gap-2">
         {["open", "in_progress", "done", "wont_do", "all"].map((s) => (
           <button
             key={s}
@@ -250,6 +266,17 @@ export default function ImprovementsAdminPage() {
             {s === "all" ? "All" : STATUS_LABELS[s]?.label || s}
           </button>
         ))}
+        <div className="mr-auto ml-4 flex items-center gap-2 text-xs text-slate-500">
+          <label className="flex items-center gap-1.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={groupByStory}
+              onChange={(e) => setGroupByStory(e.target.checked)}
+              className="accent-slate-900 dark:accent-white"
+            />
+            Group by story
+          </label>
+        </div>
       </div>
 
       {loading && !items.length && (
@@ -262,179 +289,245 @@ export default function ImprovementsAdminPage() {
         </p>
       )}
 
-      {/* Items */}
-      <div className="space-y-3">
-        {items.map((item) => {
-          const expanded = expandedId === item.id;
-          const status = STATUS_LABELS[item.status] || { label: item.status, color: "text-slate-500" };
+      {/* Items — flat or grouped by story */}
+      {(() => {
+        if (groupByStory) {
+          // Group items by target_id (for story-related items) or "other"
+          const groups: Record<string, { label: string; items: FeedbackItem[] }> = {};
+          for (const item of items) {
+            const key = item.target_type.startsWith("story") && item.target_id
+              ? item.target_id
+              : "_other";
+            if (!groups[key]) {
+              groups[key] = {
+                label: key === "_other" ? "Non-story feedback" : `Story ${key.slice(0, 8)}`,
+                items: [],
+              };
+            }
+            groups[key].items.push(item);
+          }
+          // Sort groups: biggest first
+          const sorted = Object.entries(groups).sort((a, b) => b[1].items.length - a[1].items.length);
           return (
-            <div
-              key={item.id}
-              className="border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900"
-            >
-              <div className="p-4">
-                <div className="flex items-start gap-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-3 mb-1 flex-wrap text-xs">
-                      <span className="font-bold text-slate-700 dark:text-slate-300">
-                        {ISSUE_LABELS[item.issue_type] || item.issue_type}
+            <div className="space-y-4">
+              {sorted.map(([key, group]) => (
+                <div key={key} className="border border-slate-300 dark:border-slate-700">
+                  <div className="px-4 py-2 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                        {group.label}
                       </span>
-                      <span className="text-slate-400">•</span>
-                      <span className="text-slate-500">
-                        {TARGET_LABELS[item.target_type] || item.target_type}
+                      <span className="text-xs text-slate-400">
+                        {group.items.length} {group.items.length === 1 ? "item" : "items"}
                       </span>
-                      <span className={`font-medium ${status.color}`}>
-                        {status.label}
-                      </span>
-                      {item.priority && (
-                        <span className={`px-1.5 py-0.5 text-[10px] border ${
-                          item.priority === "high" ? "border-red-400 text-red-500" :
-                          item.priority === "medium" ? "border-amber-400 text-amber-600" :
-                          "border-slate-300 text-slate-500"
-                        }`}>
-                          {item.priority}
-                        </span>
-                      )}
-                      <span className="text-slate-400">{formatDate(item.created_at)}</span>
                     </div>
-
-                    {(item.suggested_value || item.reason) && (
-                      <p className="text-sm text-slate-700 dark:text-slate-300 leading-6 mt-1" dir="rtl">
-                        {item.suggested_value || item.reason}
-                      </p>
-                    )}
-
-                    {item.target_url && (
+                    {key !== "_other" && (
                       <a
-                        href={item.target_url}
+                        href={`/fa/stories/${key}?feedback=1`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-[11px] text-blue-600 dark:text-blue-400 hover:underline mt-1"
+                        className="text-xs text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
                       >
-                        View page <ExternalLink className="h-3 w-3" />
+                        <ExternalLink className="h-3 w-3" />
+                        View story
                       </a>
                     )}
                   </div>
-
-                  <div className="flex flex-col gap-1 shrink-0">
-                    {item.status === "open" && (
-                      <button
-                        onClick={() => update(item.id, { status: "in_progress" })}
-                        title="Start"
-                        className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20"
-                      >
-                        <Play className="h-3.5 w-3.5" />
-                      </button>
-                    )}
-                    {item.status !== "done" && (
-                      <button
-                        onClick={() => update(item.id, { status: "done" })}
-                        title="Mark done"
-                        className="p-1.5 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20"
-                      >
-                        <Check className="h-3.5 w-3.5" />
-                      </button>
-                    )}
-                    {item.status !== "wont_do" && item.status !== "done" && (
-                      <button
-                        onClick={() => update(item.id, { status: "wont_do" })}
-                        title="Won't do"
-                        className="p-1.5 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
-                      >
-                        <XCircle className="h-3.5 w-3.5" />
-                      </button>
-                    )}
-                    <button
-                      onClick={() => copyClaudePrompt(item)}
-                      title="Copy Claude prompt"
-                      className="p-1.5 text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/20"
-                    >
-                      <Copy className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      onClick={() => setExpandedId(expanded ? null : item.id)}
-                      className="p-1.5 text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                    >
-                      {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                    </button>
+                  <div className="divide-y divide-slate-200 dark:divide-slate-800/50">
+                    {group.items.map((item) => renderItem(item))}
                   </div>
                 </div>
+              ))}
+            </div>
+          );
+        }
+        // Flat view
+        return (
+          <div className="space-y-3">
+            {items.map((item) => renderItem(item))}
+          </div>
+        );
+      })()}
 
-                {expanded && (
-                  <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800/50 space-y-3 text-xs">
-                    {item.target_id && (
-                      <div>
-                        <p className="text-slate-400">Target ID</p>
-                        <p className="font-mono text-slate-700 dark:text-slate-300">{item.target_id}</p>
-                      </div>
-                    )}
-                    {item.current_value && (
-                      <div>
-                        <p className="text-slate-400 mb-1">Current value</p>
-                        <p className="text-slate-700 dark:text-slate-300 p-2 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800" dir="rtl">
-                          {item.current_value}
-                        </p>
-                      </div>
-                    )}
-                    {item.suggested_value && (
-                      <div>
-                        <p className="text-slate-400 mb-1">Suggested value</p>
-                        <p className="text-slate-700 dark:text-slate-300 p-2 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/50" dir="rtl">
-                          {item.suggested_value}
-                        </p>
-                      </div>
-                    )}
-                    {item.reason && (
-                      <div>
-                        <p className="text-slate-400 mb-1">Reason</p>
-                        <p className="text-slate-700 dark:text-slate-300" dir="rtl">{item.reason}</p>
-                      </div>
-                    )}
-                    {item.rater_name && (
-                      <div>
-                        <p className="text-slate-400">Reported by</p>
-                        <p className="text-slate-700 dark:text-slate-300">{item.rater_name}</p>
-                      </div>
-                    )}
-                    {item.admin_notes && (
-                      <div>
-                        <p className="text-slate-400 mb-1">Admin notes</p>
-                        <p className="text-slate-700 dark:text-slate-300">{item.admin_notes}</p>
-                      </div>
-                    )}
-                    <div className="flex items-center gap-3 pt-2 border-t border-slate-100 dark:border-slate-800/50">
-                      <button
-                        onClick={() => {
-                          const notes = prompt("Admin notes:", item.admin_notes || "");
-                          if (notes !== null) update(item.id, { admin_notes: notes });
-                        }}
-                        className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
-                      >
-                        Edit notes
-                      </button>
-                      <button
-                        onClick={() => {
-                          const p = prompt("Priority (low/medium/high):", item.priority || "");
-                          if (p === "low" || p === "medium" || p === "high") update(item.id, { priority: p });
-                        }}
-                        className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
-                      >
-                        Set priority
-                      </button>
-                      <button
-                        onClick={() => remove(item.id)}
-                        className="text-xs text-red-500 hover:underline"
-                      >
-                        <Trash2 className="h-3 w-3 inline" /> Delete
-                      </button>
-                    </div>
-                  </div>
+    </div>
+  );
+
+  // Render a single feedback item (used by both flat and grouped views)
+  function renderItem(item: FeedbackItem) {
+    const expanded = expandedId === item.id;
+    const status = STATUS_LABELS[item.status] || { label: item.status, color: "text-slate-500" };
+    const linkToSource = storyLink(item);
+    return (
+      <div
+        key={item.id}
+        className="bg-white dark:bg-slate-900"
+      >
+        <div className="p-4">
+          <div className="flex items-start gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-3 mb-1 flex-wrap text-xs">
+                <span className="font-bold text-slate-700 dark:text-slate-300">
+                  {ISSUE_LABELS[item.issue_type] || item.issue_type}
+                </span>
+                <span className="text-slate-400">•</span>
+                <span className="text-slate-500">
+                  {TARGET_LABELS[item.target_type] || item.target_type}
+                </span>
+                <span className={`font-medium ${status.color}`}>
+                  {status.label}
+                </span>
+                {item.priority && (
+                  <span className={`px-1.5 py-0.5 text-[10px] border ${
+                    item.priority === "high" ? "border-red-400 text-red-500" :
+                    item.priority === "medium" ? "border-amber-400 text-amber-600" :
+                    "border-slate-300 text-slate-500"
+                  }`}>
+                    {item.priority}
+                  </span>
+                )}
+                <span className="text-slate-400">{formatDate(item.created_at)}</span>
+              </div>
+
+              {(item.suggested_value || item.reason) && (
+                <p className="text-sm text-slate-700 dark:text-slate-300 leading-6 mt-1" dir="rtl">
+                  {item.suggested_value || item.reason}
+                </p>
+              )}
+
+              <div className="flex items-center gap-3 mt-1">
+                {linkToSource && (
+                  <a
+                    href={linkToSource}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-[11px] text-blue-600 dark:text-blue-400 hover:underline"
+                  >
+                    View in context <ExternalLink className="h-3 w-3" />
+                  </a>
+                )}
+                {item.target_url && !linkToSource && (
+                  <a
+                    href={item.target_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-[11px] text-blue-600 dark:text-blue-400 hover:underline"
+                  >
+                    View page <ExternalLink className="h-3 w-3" />
+                  </a>
                 )}
               </div>
             </div>
-          );
-        })}
+
+            <div className="flex flex-col gap-1 shrink-0">
+              {item.status === "open" && (
+                <button
+                  onClick={() => update(item.id, { status: "in_progress" })}
+                  title="Start"
+                  className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                >
+                  <Play className="h-3.5 w-3.5" />
+                </button>
+              )}
+              {item.status !== "done" && (
+                <button
+                  onClick={() => update(item.id, { status: "done" })}
+                  title="Mark done"
+                  className="p-1.5 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20"
+                >
+                  <Check className="h-3.5 w-3.5" />
+                </button>
+              )}
+              {item.status !== "wont_do" && item.status !== "done" && (
+                <button
+                  onClick={() => update(item.id, { status: "wont_do" })}
+                  title="Won't do"
+                  className="p-1.5 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                >
+                  <XCircle className="h-3.5 w-3.5" />
+                </button>
+              )}
+              <button
+                onClick={() => copyClaudePrompt(item)}
+                title="Copy Claude prompt"
+                className="p-1.5 text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/20"
+              >
+                <Copy className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={() => setExpandedId(expanded ? null : item.id)}
+                className="p-1.5 text-slate-400 hover:text-slate-900 dark:hover:text-white"
+              >
+                {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+              </button>
+            </div>
+          </div>
+
+          {expanded && (
+            <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800/50 space-y-3 text-xs">
+              {item.target_id && (
+                <div>
+                  <p className="text-slate-400">Target ID</p>
+                  <p className="font-mono text-slate-700 dark:text-slate-300">{item.target_id}</p>
+                </div>
+              )}
+              {item.current_value && (
+                <div>
+                  <p className="text-slate-400 mb-1">Current value</p>
+                  <p className="text-slate-700 dark:text-slate-300 p-2 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800" dir="rtl">
+                    {item.current_value}
+                  </p>
+                </div>
+              )}
+              {item.suggested_value && (
+                <div>
+                  <p className="text-slate-400 mb-1">Suggested value</p>
+                  <p className="text-slate-700 dark:text-slate-300 p-2 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/50" dir="rtl">
+                    {item.suggested_value}
+                  </p>
+                </div>
+              )}
+              {item.reason && (
+                <div>
+                  <p className="text-slate-400 mb-1">Reason</p>
+                  <p className="text-slate-700 dark:text-slate-300" dir="rtl">{item.reason}</p>
+                </div>
+              )}
+              {item.admin_notes && (
+                <div>
+                  <p className="text-slate-400 mb-1">Admin notes</p>
+                  <p className="text-slate-700 dark:text-slate-300">{item.admin_notes}</p>
+                </div>
+              )}
+              <div className="flex items-center gap-3 pt-2 border-t border-slate-100 dark:border-slate-800/50">
+                <button
+                  onClick={() => {
+                    const notes = prompt("Admin notes:", item.admin_notes || "");
+                    if (notes !== null) update(item.id, { admin_notes: notes });
+                  }}
+                  className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                >
+                  Edit notes
+                </button>
+                <button
+                  onClick={() => {
+                    const p = prompt("Priority (low/medium/high):", item.priority || "");
+                    if (p === "low" || p === "medium" || p === "high") update(item.id, { priority: p });
+                  }}
+                  className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                >
+                  Set priority
+                </button>
+                <button
+                  onClick={() => remove(item.id)}
+                  className="text-xs text-red-500 hover:underline"
+                >
+                  <Trash2 className="h-3 w-3 inline" /> Delete
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
-    </div>
-  );
+    );
+  }
 }
