@@ -1,0 +1,282 @@
+{
+  "press-tv": {
+    "crisis_behavior": 1,
+    "source_diversity": 2,
+    "factional_capture": 1,
+    "viewpoint_pluralism": 1,
+    "funding_transparency": 3,
+    "editorial_independence": 1,
+    "operational_constraint": 1,
+    "audience_accountability": 1
+  },
+  "iranwire": {
+    "crisis_behavior": 5,
+    "source_diversity": 5,
+    "factional_capture": 4,
+    "viewpoint_pluralism": 4,
+    "funding_transparency": 4,
+    "editorial_independence": 5,
+    "operational_constraint": 4,
+    "audience_accountability": 4
+  },
+  "radio-farda": {
+    "crisis_behavior": 3,
+    "source_diversity": 3,
+    "factional_capture": 3,
+    "viewpoint_pluralism": 3,
+    "funding_transparency": 4,
+    "editorial_independence": 3,
+    "operational_constraint": 4,
+    "audience_accountability": 3
+  },
+  "voa-farsi": {
+    "crisis_behavior": 3,
+    "source_diversity": 3,
+    "factional_capture": 3,
+    "viewpoint_pluralism": 2,
+    "funding_transparency": 4,
+    "editorial_independence": 2,
+    "operational_constraint": 4,
+    "audience_accountability": 2
+  },
+  "bbc-persian": {
+    "crisis_behavior": 4,
+    "source_diversity": 4,
+    "factional_capture": 4,
+    "viewpoint_pluralism": 4,
+    "funding_transparency": 4,
+    "editorial_independence": 4,
+    "operational_constraint": 4,
+    "audience_accountability": 4
+  },
+  "dw-persian": {
+    "crisis_behavior": 4,
+    "source_diversity": 4,
+    "factional_capture": 5,
+    "viewpoint_pluralism": 4,
+    "funding_transparency": 4,
+    "editorial_independence": 4,
+    "operational_constraint": 4,
+    "audience_accountability": 3
+  },
+  "asr-iran": {
+    "crisis_behavior": 2,
+    "source_diversity": 3,
+    "factional_capture": 3,
+    "viewpoint_pluralism": 3,
+    "funding_transparency": 3,
+    "editorial_independence": 4,
+    "operational_constraint": 2,
+    "audience_accountability": 4
+  },
+  "fararu": {
+    "crisis_behavior": 2,
+    "source_diversity": 3,
+    "factional_capture": 3,
+    "viewpoint_pluralism": 3,
+    "funding_transparency": 3,
+    "editorial_independence": 4,
+    "operational_constraint": 2,
+    "audience_accountability": 4
+  },
+  "zeitoons": {
+    "crisis_behavior": 3,
+    "source_diversity": 3,
+    "factional_capture": 3,
+    "viewpoint_pluralism": 3,
+    "funding_transparency": 3,
+    "editorial_independence": 4,
+    "operational_constraint": 3,
+    "audience_accountability": 3
+  },
+  "kayhan-london": {
+    "crisis_behavior": 3,
+    "source_diversity": 3,
+    "factional_capture": 3,
+    "viewpoint_pluralism": 3,
+    "funding_transparency": 4,
+    "editorial_independence": 5,
+    "operational_constraint": 5,
+    "audience_accountability": 3
+  },
+  "tasnim": {
+    "crisis_behavior": 1,
+    "source_diversity": 2,
+    "factional_capture": 1,
+    "viewpoint_pluralism": 1,
+    "funding_transparency": 2,
+    "editorial_independence": 1,
+    "operational_constraint": 1,
+    "audience_accountability": 1
+  },
+  "mashregh": {
+    "crisis_behavior": 1,
+    "source_diversity": 1,
+    "factional_capture": 1,
+    "viewpoint_pluralism": 1,
+    "funding_transparency": 1,
+    "editorial_independence": 1,
+    "operational_constraint": 1,
+    "audience_accountability": 1
+  },
+  "irna": {
+    "crisis_behavior": 1,
+    "source_diversity": 2,
+    "factional_capture": 2,
+    "viewpoint_pluralism": 2,
+    "funding_transparency": 3,
+    "editorial_independence": 2,
+    "operational_constraint": 1,
+    "audience_accountability": 1
+  },
+  "mehr-news": {
+    "crisis_behavior": 1,
+    "source_diversity": 2,
+    "factional_capture": 2,
+    "viewpoint_pluralism": 2,
+    "funding_transparency": 3,
+    "editorial_independence": 2,
+    "operational_constraint": 1,
+    "audience_accountability": 1
+  },
+  "irib": {
+    "crisis_behavior": 1,
+    "source_diversity": 2,
+    "factional_capture": 1,
+    "viewpoint_pluralism": 1,
+    "funding_transparency": 3,
+    "editorial_independence": 1,
+    "operational_constraint": 1,
+    "audience_accountability": 1
+  },
+  "fars-news": {
+    "crisis_behavior": 1,
+    "source_diversity": 1,
+    "factional_capture": 1,
+    "viewpoint_pluralism": 1,
+    "funding_transparency": 2,
+    "editorial_independence": 1,
+    "operational_constraint": 1,
+    "audience_accountability": 1
+  },
+  "khabar-online": {
+    "crisis_behavior": 2,
+    "source_diversity": 3,
+    "factional_capture": 3,
+    "viewpoint_pluralism": 3,
+    "funding_transparency": 3,
+    "editorial_independence": 3,
+    "operational_constraint": 2,
+    "audience_accountability": 3
+  },
+  "tabnak": {
+    "crisis_behavior": 2,
+    "source_diversity": 3,
+    "factional_capture": 2,
+    "viewpoint_pluralism": 2,
+    "funding_transparency": 2,
+    "editorial_independence": 2,
+    "operational_constraint": 2,
+    "audience_accountability": 3
+  },
+  "shargh": {
+    "crisis_behavior": 2,
+    "source_diversity": 4,
+    "factional_capture": 3,
+    "viewpoint_pluralism": 3,
+    "funding_transparency": 3,
+    "editorial_independence": 4,
+    "operational_constraint": 2,
+    "audience_accountability": 4
+  },
+  "etemad": {
+    "crisis_behavior": 2,
+    "source_diversity": 3,
+    "factional_capture": 3,
+    "viewpoint_pluralism": 3,
+    "funding_transparency": 3,
+    "editorial_independence": 4,
+    "operational_constraint": 2,
+    "audience_accountability": 4
+  },
+  "hammihan": {
+    "crisis_behavior": 3,
+    "source_diversity": 3,
+    "factional_capture": 3,
+    "viewpoint_pluralism": 3,
+    "funding_transparency": 3,
+    "editorial_independence": 4,
+    "operational_constraint": 2,
+    "audience_accountability": 4
+  },
+  "ilna": {
+    "crisis_behavior": 2,
+    "source_diversity": 3,
+    "factional_capture": 3,
+    "viewpoint_pluralism": 3,
+    "funding_transparency": 3,
+    "editorial_independence": 3,
+    "operational_constraint": 2,
+    "audience_accountability": 3
+  },
+  "eghtesad-online": {
+    "crisis_behavior": 3,
+    "source_diversity": 4,
+    "factional_capture": 5,
+    "viewpoint_pluralism": 4,
+    "funding_transparency": 5,
+    "editorial_independence": 5,
+    "operational_constraint": 3,
+    "audience_accountability": 4
+  },
+  "rfi-farsi": {
+    "crisis_behavior": 3,
+    "source_diversity": 3,
+    "factional_capture": 5,
+    "viewpoint_pluralism": 4,
+    "funding_transparency": 4,
+    "editorial_independence": 4,
+    "operational_constraint": 5,
+    "audience_accountability": 3
+  },
+  "euronews-persian": {
+    "crisis_behavior": 3,
+    "source_diversity": 3,
+    "factional_capture": 5,
+    "viewpoint_pluralism": 4,
+    "funding_transparency": 4,
+    "editorial_independence": 4,
+    "operational_constraint": 5,
+    "audience_accountability": 3
+  },
+  "isna": {
+    "crisis_behavior": 2,
+    "source_diversity": 3,
+    "factional_capture": 3,
+    "viewpoint_pluralism": 3,
+    "funding_transparency": 3,
+    "editorial_independence": 3,
+    "operational_constraint": 2,
+    "audience_accountability": 3
+  },
+  "iran-international": {
+    "crisis_behavior": 4,
+    "source_diversity": 3,
+    "factional_capture": 2,
+    "viewpoint_pluralism": 2,
+    "funding_transparency": 1,
+    "editorial_independence": 3,
+    "operational_constraint": 4,
+    "audience_accountability": 3
+  },
+  "radio-zamaneh": {
+    "crisis_behavior": 4,
+    "source_diversity": 4,
+    "factional_capture": 4,
+    "viewpoint_pluralism": 4,
+    "funding_transparency": 4,
+    "editorial_independence": 4,
+    "operational_constraint": 4,
+    "audience_accountability": 3
+  }
+}

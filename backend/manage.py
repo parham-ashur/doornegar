@@ -404,6 +404,43 @@ async def fill_images():
         print(f"\nFixed {filled}/{len(stories_to_fix)} stories")
 
 
+async def seed_media_dimensions():
+    """Load media_dimensions values from JSON seed file and apply to all sources."""
+    import json
+    from pathlib import Path
+    from sqlalchemy import select
+
+    from app.database import async_session
+    from app.models.source import Source
+
+    seed_path = Path(__file__).parent / "app" / "services" / "media_dimensions_seed.json"
+    if not seed_path.exists():
+        print(f"Seed file not found: {seed_path}")
+        return
+
+    with open(seed_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    async with async_session() as db:
+        result = await db.execute(select(Source))
+        sources = {s.slug: s for s in result.scalars().all()}
+
+        updated = 0
+        missing = []
+        for slug, dims in data.items():
+            src = sources.get(slug)
+            if src:
+                src.media_dimensions = dims
+                updated += 1
+            else:
+                missing.append(slug)
+
+        await db.commit()
+        print(f"Updated media_dimensions on {updated} sources")
+        if missing:
+            print(f"Missing sources (not in DB): {', '.join(missing)}")
+
+
 async def check_images():
     """Find stories where no article has an image — alerts about missing images."""
     from sqlalchemy import select
@@ -515,6 +552,7 @@ if __name__ == "__main__":
         "check-images": check_images,
         "fill-images": fill_images,
         "migrate-images-to-r2": migrate_images_to_r2,
+        "seed-media-dimensions": seed_media_dimensions,
         "status": status,
     }
 

@@ -18,6 +18,13 @@ interface SocialData {
   posts: TelegramPost[];
 }
 
+// Detect if text contains Persian/Arabic characters
+function hasPersian(text: string | null): boolean {
+  if (!text) return false;
+  // Persian + Arabic Unicode blocks
+  return /[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]/.test(text);
+}
+
 export default function TelegramPanel({ storyId }: { storyId: string }) {
   const [data, setData] = useState<SocialData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -33,16 +40,20 @@ export default function TelegramPanel({ storyId }: { storyId: string }) {
   if (loading) return null;
   if (!data || data.total_posts === 0) return null;
 
+  // Filter out English-only posts — show only posts with Persian/Arabic text
+  const persianPosts = data.posts.filter((p) => hasPersian(p.text));
+  if (persianPosts.length === 0) return null;
+
   return (
     <div className="border-t border-slate-200 dark:border-slate-800 pt-6 mt-6" dir="rtl">
       <h3 className="text-base font-black text-slate-900 dark:text-white mb-4 pb-3 border-b border-slate-200 dark:border-slate-800 flex items-center gap-2">
         <MessageCircle className="h-4 w-4" />
         پوشش تلگرامی
-        <span className="text-[11px] font-normal text-slate-400">{data.total_posts} پست</span>
+        <span className="text-[11px] font-normal text-slate-400">{persianPosts.length} پست</span>
       </h3>
 
       <div className="divide-y divide-slate-200 dark:divide-slate-800">
-        {data.posts.slice(0, 10).map((post) => {
+        {persianPosts.slice(0, 10).map((post) => {
           // Clean text: remove markdown links, @mentions at end
           let text = post.text || "";
           text = text.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1"); // [text](url) -> text
