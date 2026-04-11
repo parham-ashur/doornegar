@@ -1,6 +1,6 @@
 # Doornegar - Backlog
 
-**Last updated**: 2026-04-10
+**Last updated**: 2026-04-11 (post 3-tier LLM + clustering-fix session)
 
 ## Must Have (before public launch)
 
@@ -18,14 +18,16 @@
   - See RUNBOOK for setup steps
 - [ ] **UptimeRobot monitoring** — free, pings /health every 5 min, emails on outage
 - [ ] **Railway max-instance limit** — prevent runaway scaling costs
-- [ ] Celery workers for automated pipeline (currently manual)
+- [x] **Automated maintenance scheduler** — Railway cron service `maintenance-cron` runs `python auto_maintenance.py` nightly
 - [ ] Automated daily database backup (Neon → local/S3)
 - [ ] Sentry error tracking (free tier)
 
 ### Content
-- [ ] Bias scoring for all articles (currently only partial coverage)
-- [ ] Content review of LLM-generated summaries (spot-check for accuracy)
+- [ ] Bias scoring full coverage — currently ~10% of eligible; ~9 maintenance runs at default 150/run will clear the backlog
+- [ ] Content review of LLM-generated summaries (spot-check for accuracy — use dashboard "Recently re-summarized" card)
 - [ ] Add more Iranian media sources (geo-blocked ones via proxy)
+- [ ] Clean up pre-size-ceiling oversized clusters (use dashboard "Unclaim story articles" button as spotted)
+- [ ] One-shot: click "Null localhost image URLs" on dashboard + run maintenance 3-4 times to re-fetch og:images for ~2,000 articles
 
 ## Should Have
 

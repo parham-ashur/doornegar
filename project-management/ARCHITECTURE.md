@@ -74,35 +74,98 @@
 
 ```
 Step 1: INGEST
-  RSS Feeds (18 sources)  ──>  Articles table
-  Telegram (15 channels)  ──>  TelegramPosts table ──> converted to Articles
+  RSS Feeds (28 sources)  ──>  Articles table
+  Telegram (16 channels)  ──>  TelegramPosts ──> converted to Articles
 
 Step 2: NLP PROCESS
-  Raw articles ──> Persian text normalization
-                ──> Embedding generation (384-dim vectors)
-                ──> Keyword extraction
-                ──> Title translation (FA <-> EN)
+  Unprocessed articles ──> Persian text normalization
+                       ──> Embedding generation (384-dim vectors)
+                       ──> Keyword extraction
+                       ──> Title translation FA ↔ EN (gpt-4.1-nano, economy tier)
 
-Step 3: CLUSTER
-  Processed articles ──> Vector similarity comparison (threshold: 0.45)
-                     ──> Group into Stories
-                     ──> Merge similar stories (threshold: 0.55)
-                     ──> Detect blind spots (one-sided coverage)
+Step 2b: BACKFILL FARSI TITLES (new)
+  Articles where title_fa IS NULL (regardless of processed_at)
+    ──> Translate up to 300/run via gpt-4.1-nano
+    ──> Fixes the "stuck translation" trap where a previous run
+        marked processed_at but translation actually failed
 
-Step 4: BIAS SCORE
-  Articles ──> Send to Claude Haiku with analysis prompt
-           ──> Returns: political alignment, framing, tone, factuality
-           ──> Stored as BiasScore records
+Step 3: CLUSTER (LLM-based, not embedding-based)
+  New unclustered articles (last 30 days)
+    │
+    ├──> Build articles block: title + source + first 400 chars of content
+    │
+    ├──> For each batch of 50 existing OPEN stories:
+    │      (open = article_count < 30 AND last_updated_at within 7 days)
+    │
+    │    Send to gpt-5-mini with strict MATCHING_PROMPT
+    │    ("REJECTION IS THE DEFAULT")
+    │    └──> article_idx → story_idx or null
+    │
+    ├──> Remaining unmatched articles → _cluster_new_articles
+    │    (CLUSTERING_PROMPT asks LLM to group remaining by exact event)
+    │
+    ├──> Merge very-similar hidden stories (MERGE_PROMPT)
+    │
+    └──> Update trending_score = article_count × recency_factor
+         (recency decays linearly 1.0 → 0.1 over 30 days)
 
-Step 5: SUMMARIZE
-  Stories (with articles) ──> Send to Claude Haiku
-                          ──> Returns: summary_fa, per-perspective summaries
-                          ──> State perspective / Diaspora perspective / Independent perspective
-                          ──> Bias explanation
+Step 4: SUMMARIZE (tiered)
+  Stories with summary_fa IS NULL AND article_count ≥ 5
+    │
+    ├──> Pre-compute top-N trending story IDs (N=30)
+    │
+    ├──> For each story:
+    │      if story.id in top_N:
+    │        model = gpt-5-mini (premium — homepage visible)
+    │      else:
+    │        model = gpt-4o-mini (baseline — long tail)
+    │
+    └──> generate_story_analysis → JSON:
+         summary_fa, state_summary_fa, diaspora_summary_fa,
+         independent_summary_fa, bias_explanation_fa, scores,
+         llm_model_used (audit trail)
 
-Step 6: SERVE
-  Frontend requests ──> API endpoints ──> JSON responses ──> UI rendering
+Step 5: BIAS SCORE
+  Articles with story_id IS NOT NULL AND no existing BiasScore
+    ──> Send to gpt-4o-mini with rich BIAS_ANALYSIS_PROMPT
+        (~2,200-token static prefix, cache-eligible, Persian glossary,
+         3 few-shot examples)
+    ──> Returns: political_alignment, framing_labels, tone_score,
+        factuality_score, reasoning_en, reasoning_fa
+    ──> Up to 150 articles/run
+
+Step 6: FIX IMAGES
+  Pass 1: HEAD-check 300 articles/run; null out any localhost or broken URLs
+  Pass 2: For each visible story, pick story.image_url explicitly via
+          title-word-overlap heuristic (most relevant article wins,
+          falls back to most recent with a valid image)
+
+Step 7..22: maintenance housekeeping
+  story_quality, source_health, archive_stale, recalc_trending,
+  dedup_articles, fix_issues, rater_feedback_apply, feedback_health,
+  telegram_health, visual_check, uptime_check, disk_monitoring,
+  cost_tracking, backup, weekly_digest, docs update
+
+Step 23: SERVE
+  Frontend requests ──> API endpoints ──> JSON ──> UI rendering
+  Dashboard polls /admin/maintenance/status every 3s for live progress
 ```
+
+## LLM 3-tier strategy
+
+| Task | Model | Tier | Cost/month |
+|---|---|---|---|
+| Headline translation | `gpt-4.1-nano` | Economy | ~$0.40 |
+| Bias scoring (all articles) | `gpt-4o-mini` | Baseline | ~$4-5 |
+| Story analysis (long-tail) | `gpt-4o-mini` | Baseline | ~$1-2 |
+| Story analysis (top-30 trending) | `gpt-5-mini` | Premium | ~$2-4 |
+| Clustering (article matching) | `gpt-5-mini` | Premium* | ~$0.50 |
+
+*Clustering uses the premium model because it's a reasoning task (deciding whether two events are the same) and the cost is tiny.
+
+All configured via `app/config.py` fields and overridable via env vars:
+`BIAS_SCORING_MODEL`, `STORY_ANALYSIS_MODEL`, `STORY_ANALYSIS_PREMIUM_MODEL`,
+`TRANSLATION_MODEL`, `CLUSTERING_MODEL`, `PREMIUM_STORY_TOP_N`.
 
 ## Directory Structure
 

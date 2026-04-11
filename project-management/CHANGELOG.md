@@ -4,6 +4,92 @@ All notable changes to the Doornegar project are documented here, organized by w
 
 ---
 
+## April 11, 2026
+
+### LLM Model Strategy — 3-tier system
+- **Premium tier** (`gpt-5-mini`): story analysis for top-30 trending stories (homepage-visible content)
+- **Baseline tier** (`gpt-4o-mini`): bias scoring + long-tail story analysis + clustering matching
+- **Economy tier** (`gpt-4.1-nano`): headline translation (simple short-text task)
+- New config fields: `bias_scoring_model`, `story_analysis_model`, `story_analysis_premium_model`, `translation_model`, `clustering_model`, `premium_story_top_n` (default 30)
+- All overridable via env vars — no code change needed to tune
+- New helper `app/services/llm_helper.py` with `build_openai_params()` that handles gpt-5-family parameter differences (`max_completion_tokens` instead of `max_tokens`, no custom `temperature`)
+- Upgraded `clustering_model` default from `gpt-4o-mini` → `gpt-5-mini` (clustering is a reasoning task; ~$0.11/month delta is worth the conservative matching behavior)
+- Expected total LLM cost: **~$8-10/month** (was ~$12-15 on uniform gpt-5-mini, ~$5 on uniform gpt-4o-mini)
+
+### Clustering Fixes — prevent 209-article attractor clusters
+- **Cluster size ceiling** (`max_cluster_size = 30`): stories stop accepting new matches at 30 articles; forces a new story for the next related article
+- **Time window** (`clustering_time_window_days = 7`): stories whose most recent activity is >7 days old are "closed" for matching, preventing weeks-long drift
+- **Stricter `MATCHING_PROMPT`**: rewrote with "REJECTION IS THE DEFAULT", concrete accept/reject examples, "Iran-related is NOT enough", "no penalty for nulls"
+- **Article content in clustering prompt**: `_build_articles_block` now includes first ~400 chars of `content_text` (or `summary`) per article, not just title + source. The LLM actually understands each article's substance before deciding whether it's the same event
+- Prompts still sent via `_call_openai` but now via `build_openai_params` helper so the clustering model can swap between gpt-4o-mini / gpt-5-mini / gpt-5-nano with no code change
+
+### Bias Scoring Prompt Rewrite (for prompt caching + quality)
+- Completely restructured `BIAS_ANALYSIS_PROMPT` in `app/services/bias_scoring.py`
+- Static prefix is now ~2,200 tokens (well above OpenAI's 1,024-token cache threshold — 90% savings on cached reads)
+- Dynamic content (`{title}` + `{text}`) moved to the very end so the entire preamble is a stable cacheable prefix
+- Added rich Persian media glossary: state ↔ opposition term pairs (شهید/قربانی, مقاومت/درگیری, فتنه/اعتراض, etc.)
+- Three few-shot worked examples with expected JSON output (clearly state-aligned, clearly diaspora, neutral independent)
+- More explicit scoring rubric per dimension for consistency across runs
+- Bias scoring now actually uses `settings.bias_scoring_model` (previously hardcoded gpt-4o-mini)
+
+### Story Analysis Prompt Rewrite (Option A — light touch)
+- Rewrote `STORY_ANALYSIS_PROMPT` in `app/services/story_analysis.py`
+- Explicit neutral-narrator role: Doornegar's mission is to show readers HOW sides differ, not to take a side
+- Rules: always use formal standard Persian; never copy loaded terms as assertions, always quote them in guillemets «»
+- Persian media glossary (same as bias prompt) so both services share vocabulary recognition
+- Explicit `bias_explanation_fa` rubric with a worked example
+- Word-count ceilings per field (40-60 for overall summary, 25-40 for side summaries, 30-50 for bias explanation)
+- Prompt now ~1,092 tokens, just above the 1,024 cache threshold
+- `generate_story_analysis` accepts an optional `model` parameter for tiered usage
+- `step_summarize` pre-computes top-N trending story IDs and picks premium vs baseline model per story
+- Stores `llm_model_used` in the `summary_en` extras JSON (audit trail without a migration)
+
+### Auto-Maintenance Overhaul
+- **New shared state module** `app/services/maintenance_state.py` with a module-level `STATE` dict
+- `run_maintenance()` now wraps every step with `begin_step`/`end_step` calls for per-step progress tracking
+- Pipeline is now a single ordered list with uniform error handling and live status updates
+- **Fire-and-forget pattern**: `POST /admin/maintenance/run` returns immediately with `{status: "started"}` and kicks off the actual run as an `asyncio.create_task`. Fixes the Railway 2-minute proxy timeout on 10+ minute runs
+- **New endpoint** `GET /admin/maintenance/status` returns live state (idle/running/success/error) + current_step + completed steps[] with per-step timings and stats
+- **New step** `step_backfill_farsi_titles`: retries OpenAI translation for stuck articles where `title_fa IS NULL` regardless of `processed_at`, capped at 300/run. Fixes the "process_unprocessed_articles only touches null-processed_at" trap
+- **New step** `step_bias_score`: runs `score_unscored_articles` in batches up to 150/run so bias coverage catches up over time (was previously only in Celery, never in maintenance)
+- **New step** `step_feedback_health`: tracks improvement + suggestion backlog stats, alerts on stale items >14 days or backlog >50
+
+### Image Fixes
+- `step_fix_images` expanded: bumped per-run limit 100 → 300 articles, fast-path null for `http://localhost` URLs (verified not in R2), new Pass 2 picks an **explicit `story.image_url`** per visible story via title-word-overlap heuristic (most relevant article's image wins, falls back to most recent)
+- Previously the frontend just used `story.articles[0].image_url` which was arbitrary
+- **New admin endpoint** `POST /admin/nullify-localhost-images`: bulk-nulls every row with `image_url LIKE 'http://localhost%'`, returns count
+- **New admin endpoint** `POST /admin/stories/{id}/unclaim-articles`: detaches all articles from a story and hides it (`priority = -100`, `article_count = 0`). Used to nuke badly-clustered stories so their articles redistribute on the next run
+
+### Admin Dashboard — major additions
+- **Maintenance progress modal**: live elapsed-time counter, per-step live tracker (current step with seconds + scrollable list of completed steps with ✅/❌, elapsed, and top 3 stat key:values), real progress bar showing N of 23 steps + percent, auto-refreshing live counters (Articles / Missing Farsi title / Bias coverage), polls `/maintenance/status` every 3 seconds, detects lost-run case when backend restarts mid-task
+- **Diagnostics panel** (`GET /admin/diagnostics`): article breakdown (no_title_fa, no_title_original, translatable_now, unprocessed, clustered, has_content), bias scoring breakdown (eligible, already_scored, remaining, coverage % of eligible), LLM key status (OpenAI/Anthropic set), auto-interpreted "What this means" panel
+- **Recently re-summarized stories** (`GET /admin/recently-summarized`): list the N most-recently-updated stories with summary previews and `bias_explanation_fa`. Emerald border on stories touched in last 2h, « » "new prompt" badge auto-detected from guillemet characters. Click-through links to view in context
+- **Force re-summarize buttons**: "Test: refresh 5" (~$0.30) and "Refresh 30" (~$1.80) that call `POST /admin/force-resummarize?limit=N&order=trending&mode=immediate`. Always uses the premium model. Matches the exact homepage trending order so regenerated stories are the ones visible to users
+- **Data Repair section** (red-bordered, destructive): "Null localhost image URLs" and "Unclaim story articles…" buttons that wrap the admin endpoints with confirm dialogs
+- **Suggest page (`/fa/suggest`)**: new collapsible "Currently tracked sources" section fetching `/api/v1/sources` + `/api/v1/social/channels`, grouped by state_alignment with clickable chips so visitors can see the spectrum before suggesting duplicates
+- **Dashboard dir="ltr"**: added `dashboard/layout.tsx` forcing LTR across all admin pages since they're English-only
+- **Story detail page**: now shows both `first_published_at` («خبر: N days ago») and `updated_at` («تحلیل: M minutes ago») with tooltips clarifying the difference
+- Hooks-order bug fixed (three times, now with a persistent memory note): all new `useState`/`useEffect`/`useCallback` in `dashboard/page.tsx` must go **above** the `if (!authed) return` early return
+
+### Homepage / Suggest Page
+- Removed `منبعی پیشنهاد دهید` link from Footer (keeping `/fa/suggest` hidden for prelaunch invite-only use)
+- Suggest page gained the "Currently tracked sources" collapsible showing real spectrum
+
+### Maintenance Scheduler
+- Moved to Railway cron service (`maintenance-cron`), separate from web service, using `python auto_maintenance.py` with `Restart Policy: Never`
+- Created `backend/.env.example` documenting every environment variable for easy OVH migration later
+
+### Model Quality Verification
+- New `backend/scripts/compare_models.py` runs the exact production prompts (bias scoring + story analysis) against multiple candidate models (gpt-4o-mini / gpt-4.1-nano / gpt-5-nano / gpt-5-mini) on real articles and outputs `model_comparison_results.md` for side-by-side human review
+- Handles gpt-5-family parameter differences
+- Used to validate the 3-tier strategy (Parham verified gpt-5-mini best for summaries, gpt-4o-mini acceptable for titles)
+
+### Dev experience / infra
+- `.gitignore` expanded: `.Rhistory`, `backend/model_comparison_results.md` (local artifacts)
+- `backend/.env.example` rewritten to document every variable the app reads, grouped by purpose (core / DB / Redis / LLM / R2 / Telegram / ingestion tunables / social integrations)
+
+---
+
 ## April 10, 2026
 
 ### Infrastructure

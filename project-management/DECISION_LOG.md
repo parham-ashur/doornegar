@@ -88,6 +88,70 @@ Tracks key decisions, their reasoning, and any alternatives considered.
 **Why**: Primary defense against cost abuse. Even a successful DDoS against these endpoints only wastes bandwidth, not API credits.
 **Status**: Implemented ✓
 
+## 2026-04-11
+
+### D013: 3-tier LLM model strategy (cost/quality tradeoff)
+**Decision**: Use different OpenAI models for different tasks based on visibility and task complexity.
+- **Premium (`gpt-5-mini`)**: story analysis for the top-30 trending stories (the ones visible on the homepage)
+- **Baseline (`gpt-4o-mini`)**: bias scoring + long-tail story analysis
+- **Economy (`gpt-4.1-nano`)**: headline translation
+**Why**: Uniform gpt-5-mini would have cost ~$12-15/month; uniform gpt-4o-mini would have compromised quality on the most visible outputs (homepage summaries + side comparisons). Tiering gives us best-quality on visible content, cheap on everything else.
+**Alternatives considered**:
+- Uniform gpt-5-mini: rejected as unnecessary for bias scoring + translations
+- Uniform gpt-4o-mini: rejected because Parham verified gpt-5-mini is noticeably better for Persian summaries and bias comparison via `compare_models.py`
+- Anthropic Claude: rejected because output tokens dominate reasoning-model cost and Claude Sonnet 4.5 would cost 5-8× more than gpt-5-mini for similar quality
+**Cost impact**: ~$8-10/month total (down from ~$12-15 uniform premium, up from ~$5 uniform baseline).
+**Implementation**: New config fields in `app/config.py` (`bias_scoring_model`, `story_analysis_model`, `story_analysis_premium_model`, `translation_model`, `clustering_model`, `premium_story_top_n`), all override-able via env vars. `step_summarize` pre-computes top-N trending IDs and picks model per story. Shared helper `app/services/llm_helper.py` handles gpt-5-family parameter differences.
+**Verification**: `backend/scripts/compare_models.py` runs the exact production prompts against all 4 candidate models on real articles and outputs `model_comparison_results.md` for human review.
+**Status**: Implemented ✓
+
+### D014: Clustering — size ceiling + time window + strict prompt + article content
+**Decision**: Prevent 209-article "attractor" clusters via multiple stacked defenses.
+- `max_cluster_size = 30` — story stops accepting new articles once it reaches 30
+- `clustering_time_window_days = 7` — story must have `last_updated_at` within the last 7 days to be considered open for matching
+- Rewrote `MATCHING_PROMPT` with "REJECTION IS THE DEFAULT", explicit reject/accept examples, "Iran-related is NOT enough", "no penalty for nulls"
+- `_build_articles_block` now includes first 400 chars of article content (not just title) so the LLM can actually understand what each article is about
+- Upgraded `clustering_model` default to `gpt-5-mini` (~$0.20/month extra, much more conservative matching behavior)
+**Why**: The Hormuz Draft Resolution story had 209 articles about wildly different topics (moon missions, Panama gas explosions, archaeology). Root cause: the LLM matched on title keywords alone, drifted over many runs, and nothing ever shrank a cluster. User spotted it via a rater feedback item (`4ea8d828`).
+**Alternatives considered**:
+- Tighter embedding-similarity threshold: rejected because clustering is actually LLM-based, not embedding-based
+- Post-hoc audit step (find clusters >20, ask LLM if they should be split): deferred; will add if stacked defenses aren't sufficient
+- Embedding pre-filter (only show stories with cosine > 0.65 to the LLM): deferred
+**Cost impact**: ~$0.50/month total for clustering (was ~$0.10/month).
+**Status**: Implemented ✓
+
+### D015: Rich bias scoring prompt with Persian glossary + few-shot examples
+**Decision**: Rewrite `BIAS_ANALYSIS_PROMPT` from a short ~450-token prompt to a rich ~2,200-token prompt with role/context, Persian media glossary (state ↔ opposition term pairs), three worked examples, and a scoring rubric per dimension.
+**Why**:
+1. Consistency — prior prompt produced variable scores on the same article type across runs
+2. Calibration — few-shot examples anchor the meaning of -0.85 vs -0.5
+3. Prompt caching — static prefix ≥1024 tokens unlocks OpenAI's 90% cached-input discount
+4. Quality — explicit Persian glossary helps the model recognize state vs diaspora vocabulary (فتنه / قیام, شهید / قربانی, اغتشاشگر / معترض)
+**Cost impact**: essentially neutral — longer prompt per call, but prompt caching recovers most of the extra cost since a run makes 150+ calls with the same static prefix.
+**Status**: Implemented ✓
+
+### D016: Fire-and-forget maintenance endpoint with shared state tracker
+**Decision**: `POST /admin/maintenance/run` now returns immediately after spawning an `asyncio.create_task`. Progress is tracked in `app/services/maintenance_state.py` (shared module with module-level STATE dict) and exposed via `GET /admin/maintenance/status`.
+**Why**: Railway's HTTP proxy cuts connections after ~2 minutes of inactivity. Long maintenance runs (20-45 min with backlogs) were hitting timeout and showing "Failed to fetch" in the dashboard modal even though the backend kept working. The fire-and-forget pattern decouples HTTP lifetime from task lifetime.
+**Trade-off**: If the backend container restarts (e.g. from a deploy) the asyncio task dies and loses unfinished work. Completed DB writes are persistent. Frontend now detects the "backend restarted mid-task" case (sees `idle` status after `running`) and surfaces a clear error.
+**Lesson**: Do NOT push backend code while a long maintenance is in progress — Railway redeploys kill in-flight background tasks.
+**Status**: Implemented ✓
+
+### D017: Image relevance via title-word overlap heuristic
+**Decision**: `step_fix_images` now picks an explicit `story.image_url` per visible story by choosing the article whose title shares the most words (≥3 chars) with the story title. Falls back to the most recent article with a valid image.
+**Why**: Previously the frontend just used `story.articles[0].image_url` — arbitrary order. Combined with broken clusters (see D014), this often produced misleading hero images (e.g. a moon mission photo on a Hormuz resolution story).
+**Alternatives considered**:
+- Vision LLM validation (send image + title to gpt-4o-mini vision, ask if related): deferred as too expensive for every story; revisit if top-30 stories still show irrelevant images after D014 + D017 land
+- Embedding similarity between story title and article title: deferred; heuristic is good enough and deterministic
+**Status**: Implemented ✓
+
+### D018: Nullify `http://localhost:8000/images/*` URLs (admin endpoint, not auto-migration)
+**Decision**: Provide a one-shot admin endpoint (`POST /admin/nullify-localhost-images`) to bulk-null every row with a dev-only image URL. Those files were never migrated to R2 (verified — R2 returns 404 for the affected hashes). Post-null, `step_fix_images` re-fetches og:images from article source URLs.
+**Why**: Simple rewrite `localhost:8000/...` → `pub-*.r2.dev/...` won't work because the files aren't in R2. The only recovery is to re-fetch from the original article URLs.
+**Alternatives considered**:
+- Hidden automatic migration during maintenance: rejected because `step_fix_images` already handles broken URLs — just need to trigger the initial null-out
+**Status**: Implemented ✓, awaiting one-shot execution from dashboard
+
 ## Pending Decisions
 
 ### P001: Cloud provider for production (partially resolved)

@@ -1,5 +1,57 @@
 # Doornegar Development Log
 
+## 2026-04-11 — LLM strategy + clustering + dashboard session
+
+### Key outcomes
+
+1. **3-tier LLM model strategy** — premium (`gpt-5-mini`) for homepage, baseline (`gpt-4o-mini`) for bias + long-tail, economy (`gpt-4.1-nano`) for translations. ~$8-10/month total.
+2. **Clustering hardened** — size ceiling (30), time window (7 days), strict rejection-first prompt, article content in prompt, upgraded to `gpt-5-mini`. Prevents attractor clusters like the 209-article Hormuz bug.
+3. **Prompts rewritten** — `BIAS_ANALYSIS_PROMPT` (~2,200 tokens, cache-eligible, Persian glossary, 3 few-shot examples) and `STORY_ANALYSIS_PROMPT` (Persian glossary, narrator rules, bias-explanation rubric with worked example, word-count ceilings).
+4. **Maintenance fire-and-forget** — new shared `maintenance_state.py` module, `POST /admin/maintenance/run` returns immediately, per-step live progress tracking, detects backend-restart-mid-run as error.
+5. **Dashboard overhaul** — live progress modal, diagnostics panel, recently-resummarized browser, force-refresh buttons (test 5 / refresh 30), Data Repair section (null localhost / unclaim articles), suggest page with spectrum display.
+6. **Image fixes** — title-overlap picker for `story.image_url`, fast-path null for localhost URLs, per-run limit raised 100 → 300, two new admin endpoints for cleanup.
+7. **Backfill steps** — `step_backfill_farsi_titles` (retries stuck translations) + `step_bias_score` (150 articles/run) added to auto_maintenance pipeline.
+
+### Key decisions (see DECISION_LOG for details)
+- D013: 3-tier LLM model strategy
+- D014: Clustering — size ceiling + time window + strict prompt + article content
+- D015: Rich bias scoring prompt with Persian glossary + few-shot examples
+- D016: Fire-and-forget maintenance endpoint with shared state tracker
+- D017: Image relevance via title-word overlap heuristic
+- D018: Nullify `http://localhost:8000/images/*` URLs (admin endpoint, not auto-migration)
+
+### Lessons learned
+- **Do NOT deploy backend code while a long maintenance run is in progress.** Railway redeploys kill background asyncio tasks. (Lost a ~40-min run during this session.)
+- **Hooks-order trap in `dashboard/page.tsx`**: any new `useState`/`useEffect`/`useCallback` must go ABOVE the `if (!authed) return` early return. Fixed 3 times in this session, now persisted as a memory note.
+- **Clustering was LLM-based all along, not embedding-based.** The "similarity_threshold" config field is unused. Fixing the LLM prompt + adding article content + capping cluster size were the right levers.
+- **Gpt-5 family parameter differences**: uses `max_completion_tokens` instead of `max_tokens`, no custom `temperature`. Centralized in `app/services/llm_helper.py`.
+- **OpenAI already has 90% prompt caching**, same as Anthropic. Claude isn't uniquely cheaper on cached reads. Output tokens dominate reasoning-model cost anyway.
+- **Cluster size ceiling + time window is much more robust than threshold tuning.** Simple safety valves beat complex similarity math.
+- **`process_unprocessed_articles` has a trap**: only queries where `processed_at IS NULL`. If translation fails, the row gets `processed_at` set anyway and never gets retried. `step_backfill_farsi_titles` fixes this by querying `title_fa IS NULL` directly.
+
+### Files changed (summary)
+```
+backend/app/config.py                     # 3-tier config fields
+backend/app/services/llm_helper.py        # NEW: gpt-5 parameter adapter
+backend/app/services/bias_scoring.py      # rich prompt with glossary + examples
+backend/app/services/story_analysis.py    # narrator rules + bias rubric + model param
+backend/app/services/clustering.py        # size ceiling, time window, content in prompt
+backend/app/services/maintenance_state.py # NEW: shared progress state
+backend/app/api/v1/admin.py               # 6 new endpoints
+backend/auto_maintenance.py               # new steps, tiered step_summarize, uniform progress
+backend/scripts/compare_models.py         # NEW: model quality comparison
+backend/.env.example                      # rewritten with all vars documented
+frontend/src/app/[locale]/dashboard/page.tsx  # progress modal, diagnostics, repair, etc.
+frontend/src/app/[locale]/suggest/page.tsx    # tracked sources section
+frontend/src/app/[locale]/stories/[id]/page.tsx # dual date display
+frontend/src/app/[locale]/dashboard/layout.tsx  # NEW: dir="ltr"
+frontend/src/lib/api.ts                   # revalidate 60 → 30 seconds
+frontend/src/lib/types.ts                 # updated_at field
+frontend/src/components/layout/Footer.tsx # removed suggest link
+```
+
+---
+
 ## 2026-04-06 — Project Kickoff
 
 ### Phase 1: Core Infrastructure (Complete)

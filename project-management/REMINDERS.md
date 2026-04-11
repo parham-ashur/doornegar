@@ -1,27 +1,21 @@
 # Reminders & Action Items
 
-Last updated: 2026-04-11
+Last updated: 2026-04-11 (post 3-tier LLM + clustering-fix session)
 
-## 🔴 URGENT — Blocking Production
+## 🔴 URGENT — Action items from this session
 
-- [ ] **Fix Railway 502**: Set R2 env vars on Railway dashboard so the backend can start:
-  ```
-  R2_ACCOUNT_ID=dc19030b9b78a70652d26ab5b8e85d85
-  R2_ACCESS_KEY_ID=<rotate after setting>
-  R2_SECRET_ACCESS_KEY=<rotate after setting>
-  R2_BUCKET_NAME=doornegar-images
-  R2_PUBLIC_URL=https://pub-65f981ecf095486aaea3482ec613d9b1.r2.dev
-  SECRET_KEY=<generate with `openssl rand -hex 32`>
-  ADMIN_TOKEN=<generate with `openssl rand -hex 32`>
-  ENVIRONMENT=production
-  ```
+- [ ] **Click "Null localhost image URLs"** on `/fa/dashboard` → Data Repair section (one-shot, ~2,000 rows affected)
+- [ ] **Click "Unclaim story articles…"** on `/fa/dashboard` → paste story ID `53f091c9-52b4-467f-8f55-3a71e9b8ae2c` (the Hormuz 209-article cluster)
+- [ ] **Click "Run Maintenance"** — lets the clustering + image fixes catch up with the new rules
+- [ ] **Mark improvement feedback item `4ea8d828` as done** at `/fa/dashboard/improvements`
+- [ ] **Click "Refresh 30"** on the dashboard to regenerate the top-30 trending stories with the new gpt-5-mini + improved prompt (~$1-2 one-shot)
 - [ ] **Set OpenAI hard spending cap** ($30/month) at https://platform.openai.com/usage → Limits
-- [ ] **Rotate exposed R2 token** after Railway is stable — it was shared in chat
-- [ ] Rotate: Neon DB password, Upstash Redis password, Anthropic API key (all shared in chat history)
+- [ ] **Rotate credentials** that were shared in chat: R2 token, Neon DB password, Upstash Redis password, Anthropic API key
 
-## Daily Tasks (run every day)
-- [ ] Run `python manage.py pipeline` — full cycle including R2 image upload
-- [ ] Check http://localhost:3000/fa — verify data is fresh
+## Daily Tasks
+- [x] **Automatic**: Railway cron service `maintenance-cron` runs `python auto_maintenance.py` nightly
+- [ ] Spot-check the homepage in the morning (is data fresh? are summaries sensible?)
+- [ ] Glance at `/fa/dashboard` → Diagnostics → bias coverage % of eligible is catching up
 
 ## Weekly Tasks
 - [ ] Review new stories for quality
@@ -41,11 +35,13 @@ Last updated: 2026-04-11
 ## Upcoming Milestones
 
 ### By April 17, 2026 (1 week)
-- [ ] Railway backend back online
+- [x] Railway backend back online
 - [ ] Cloudflare proxy in front of Railway + custom domain
 - [ ] UptimeRobot monitoring active
 - [ ] OpenAI hard cap set
 - [ ] All shared credentials rotated
+- [ ] Bias coverage of eligible articles reaches ~80% (runs 9-10 will get there at 150/run cap)
+- [ ] Localhost image URLs all cleaned (post-nullify + 3-4 maintenance runs of OG refetching)
 
 ### By April 30, 2026 (1 month)
 - [ ] Celery workers running for automated pipeline
