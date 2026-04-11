@@ -9,6 +9,27 @@ import {
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+interface Diagnostics {
+  articles: {
+    total: number;
+    no_title_fa: number;
+    no_title_original: number;
+    translatable_now: number;
+    unprocessed: number;
+    clustered_into_story: number;
+    has_content_or_summary: number;
+  };
+  bias: {
+    total_articles: number;
+    eligible_for_scoring: number;
+    already_scored: number;
+    remaining_to_score: number;
+    coverage_of_eligible_pct: number;
+  };
+  llm_keys: { openai_set: boolean; anthropic_set: boolean };
+  notes: string[];
+}
+
 interface DashboardData {
   data: {
     articles: { total: number; last_24h: number; with_farsi_title: number; without_farsi_title: number };
@@ -117,6 +138,19 @@ export default function DashboardPage() {
   }, [authHeaders, authed]);
 
   useEffect(() => { fetchDashboard(); }, [fetchDashboard]);
+
+  // Diagnostics
+  const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null);
+  const [diagLoading, setDiagLoading] = useState(false);
+
+  const fetchDiagnostics = useCallback(async () => {
+    setDiagLoading(true);
+    try {
+      const res = await fetch(`${API}/api/v1/admin/diagnostics`, { headers: authHeaders() });
+      if (res.ok) setDiagnostics(await res.json());
+    } catch {}
+    setDiagLoading(false);
+  }, [authHeaders]);
 
   // Progress tracking for maintenance runs
   const [maintStart, setMaintStart] = useState<number | null>(null);
@@ -452,6 +486,132 @@ export default function DashboardPage() {
           </ul>
         </div>
       )}
+
+      {/* Diagnostics */}
+      <div className="mb-6 border border-slate-200 dark:border-slate-800 p-5">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+            <Activity className="h-4 w-4 text-purple-500" /> Diagnostics
+          </h2>
+          <button
+            onClick={fetchDiagnostics}
+            disabled={diagLoading}
+            className="flex items-center gap-2 border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-xs text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50"
+          >
+            <RefreshCw className={`h-3 w-3 ${diagLoading ? "animate-spin" : ""}`} />
+            {diagnostics ? "Refresh" : "Run diagnostics"}
+          </button>
+        </div>
+
+        {!diagnostics && !diagLoading && (
+          <p className="text-xs text-slate-500">
+            Click "Run diagnostics" to see why backfills aren't catching up (broken articles, missing LLM keys, clustering gaps).
+          </p>
+        )}
+
+        {diagnostics && (
+          <div className="space-y-4">
+            {/* LLM keys */}
+            <div className="flex items-center gap-3 text-xs">
+              <span className="font-semibold text-slate-700 dark:text-slate-300">LLM keys:</span>
+              <span className={`px-2 py-0.5 border ${diagnostics.llm_keys.openai_set ? "border-emerald-400 text-emerald-600" : "border-red-400 text-red-500"}`}>
+                OPENAI {diagnostics.llm_keys.openai_set ? "set" : "MISSING"}
+              </span>
+              <span className={`px-2 py-0.5 border ${diagnostics.llm_keys.anthropic_set ? "border-emerald-400 text-emerald-600" : "border-slate-300 text-slate-500"}`}>
+                ANTHROPIC {diagnostics.llm_keys.anthropic_set ? "set" : "not set"}
+              </span>
+            </div>
+
+            {/* Articles breakdown */}
+            <div>
+              <h3 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wide mb-2">Articles</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                <div className="border border-slate-200 dark:border-slate-800 p-3">
+                  <p className="text-[10px] text-slate-400 uppercase">Total</p>
+                  <p className="text-lg font-bold text-slate-900 dark:text-white">{diagnostics.articles.total.toLocaleString()}</p>
+                </div>
+                <div className="border border-slate-200 dark:border-slate-800 p-3">
+                  <p className="text-[10px] text-slate-400 uppercase">No Farsi title</p>
+                  <p className="text-lg font-bold text-amber-600 dark:text-amber-400">{diagnostics.articles.no_title_fa.toLocaleString()}</p>
+                </div>
+                <div className="border border-slate-200 dark:border-slate-800 p-3">
+                  <p className="text-[10px] text-slate-400 uppercase">No original title (broken)</p>
+                  <p className="text-lg font-bold text-red-600 dark:text-red-400">{diagnostics.articles.no_title_original.toLocaleString()}</p>
+                </div>
+                <div className="border border-slate-200 dark:border-slate-800 p-3">
+                  <p className="text-[10px] text-slate-400 uppercase">Translatable now</p>
+                  <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400">{diagnostics.articles.translatable_now.toLocaleString()}</p>
+                </div>
+                <div className="border border-slate-200 dark:border-slate-800 p-3">
+                  <p className="text-[10px] text-slate-400 uppercase">Unprocessed</p>
+                  <p className="text-base font-bold text-slate-900 dark:text-white">{diagnostics.articles.unprocessed.toLocaleString()}</p>
+                </div>
+                <div className="border border-slate-200 dark:border-slate-800 p-3">
+                  <p className="text-[10px] text-slate-400 uppercase">Clustered into story</p>
+                  <p className="text-base font-bold text-slate-900 dark:text-white">{diagnostics.articles.clustered_into_story.toLocaleString()}</p>
+                </div>
+                <div className="border border-slate-200 dark:border-slate-800 p-3">
+                  <p className="text-[10px] text-slate-400 uppercase">Has content/summary</p>
+                  <p className="text-base font-bold text-slate-900 dark:text-white">{diagnostics.articles.has_content_or_summary.toLocaleString()}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Bias scoring breakdown */}
+            <div>
+              <h3 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wide mb-2">Bias scoring</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                <div className="border border-slate-200 dark:border-slate-800 p-3">
+                  <p className="text-[10px] text-slate-400 uppercase">Eligible</p>
+                  <p className="text-lg font-bold text-slate-900 dark:text-white">{diagnostics.bias.eligible_for_scoring.toLocaleString()}</p>
+                </div>
+                <div className="border border-slate-200 dark:border-slate-800 p-3">
+                  <p className="text-[10px] text-slate-400 uppercase">Already scored</p>
+                  <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400">{diagnostics.bias.already_scored.toLocaleString()}</p>
+                </div>
+                <div className="border border-slate-200 dark:border-slate-800 p-3">
+                  <p className="text-[10px] text-slate-400 uppercase">Remaining</p>
+                  <p className="text-lg font-bold text-amber-600 dark:text-amber-400">{diagnostics.bias.remaining_to_score.toLocaleString()}</p>
+                </div>
+                <div className="border border-slate-200 dark:border-slate-800 p-3">
+                  <p className="text-[10px] text-slate-400 uppercase">Eligible coverage</p>
+                  <p className="text-lg font-bold text-slate-900 dark:text-white">{diagnostics.bias.coverage_of_eligible_pct}%</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Interpretation */}
+            <div className="border border-blue-200 dark:border-blue-900/50 bg-blue-50 dark:bg-blue-950/20 p-3 text-xs text-slate-700 dark:text-slate-300 space-y-1">
+              <p className="font-bold text-slate-900 dark:text-white">What this means</p>
+              {!diagnostics.llm_keys.openai_set && !diagnostics.llm_keys.anthropic_set && (
+                <p className="text-red-600 dark:text-red-400">
+                  ⚠ No LLM key is set. Add <code>OPENAI_API_KEY</code> or <code>ANTHROPIC_API_KEY</code> to Railway backend Variables. Title translation and bias scoring won't work without one.
+                </p>
+              )}
+              {diagnostics.articles.no_title_original > 50 && (
+                <p>
+                  <strong>{diagnostics.articles.no_title_original}</strong> articles have no original title at all — ingestion saved them as ghosts. These can never be translated. Consider filtering them out of the UI or deleting them.
+                </p>
+              )}
+              {diagnostics.articles.translatable_now > 0 && diagnostics.llm_keys.openai_set && (
+                <p>
+                  <strong>{diagnostics.articles.translatable_now}</strong> articles are ready to translate. Click "Run Maintenance" — each run processes up to 300.
+                </p>
+              )}
+              {diagnostics.bias.coverage_of_eligible_pct >= 95 && (
+                <p>
+                  Bias scoring is essentially complete for eligible articles ({diagnostics.bias.coverage_of_eligible_pct}% of {diagnostics.bias.eligible_for_scoring}). The dashboard's "5%" is misleading — it's measuring against ALL articles including unclusterd ones.
+                </p>
+              )}
+              {diagnostics.articles.clustered_into_story < diagnostics.articles.total * 0.5 && (
+                <p>
+                  Only <strong>{diagnostics.articles.clustered_into_story}</strong> / {diagnostics.articles.total} articles are clustered into stories. The rest aren't eligible for bias scoring because they never joined a story.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Pipeline Controls */}
       <div className="border border-slate-200 dark:border-slate-800 p-5">
