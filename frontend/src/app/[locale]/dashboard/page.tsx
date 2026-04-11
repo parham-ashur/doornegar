@@ -216,12 +216,11 @@ export default function DashboardPage() {
           ? `${data.articles_unclaimed} articles detached. Story hidden.\n\nRun maintenance to re-cluster them.`
           : `Error: ${data.error || "unknown"}`
       );
-      fetchRecentSummaries();
     } catch (e: any) {
       alert(`Error: ${e.message}`);
     }
     setRepairRunning(null);
-  }, [authHeaders, fetchRecentSummaries]);
+  }, [authHeaders]);
 
   // Force re-summarize N stories with the current model
   const [forceRunning, setForceRunning] = useState(false);
@@ -239,13 +238,15 @@ export default function DashboardPage() {
         headers: authHeaders(),
       });
       const data = await res.json();
-      alert(`${data.message}\n\nRegenerated: ${data.regenerated}\nFailed: ${data.failed || 0}\n\nRefreshing...`);
-      fetchRecentSummaries();
+      alert(
+        `${data.message}\n\nRegenerated: ${data.regenerated}\nFailed: ${data.failed || 0}\n\n` +
+        `Click "Reload" in the 'Recently re-summarized stories' card to see the updated output.`
+      );
     } catch (e: any) {
       alert(`Error: ${e.message}`);
     }
     setForceRunning(false);
-  }, [authHeaders, fetchRecentSummaries]);
+  }, [authHeaders]);
 
   // Progress tracking for maintenance runs
   const [maintStart, setMaintStart] = useState<number | null>(null);
