@@ -496,30 +496,46 @@ export default function DashboardPage() {
 
               {/* Scrollable list of steps completed so far (most recent first) */}
               {(maintLive.steps || []).length > 0 && (
-                <div className="border border-slate-200 dark:border-slate-800 max-h-48 overflow-y-auto" dir="ltr">
-                  {[...maintLive.steps].reverse().map((step: any, idx: number) => (
-                    <div
-                      key={`${step.name}-${idx}`}
-                      className="flex items-start gap-2 px-3 py-1.5 text-[11px] border-b border-slate-100 dark:border-slate-800/50 last:border-b-0"
-                    >
-                      {step.status === "ok" ? (
-                        <CheckCircle className="h-3 w-3 mt-0.5 shrink-0 text-emerald-500" />
-                      ) : (
-                        <XCircle className="h-3 w-3 mt-0.5 shrink-0 text-red-500" />
-                      )}
-                      <span className="flex-1 text-slate-700 dark:text-slate-300">{step.name}</span>
-                      <span className="font-mono text-slate-400 text-[10px]">{step.elapsed_s}s</span>
-                      {step.stats && typeof step.stats === "object" && (
-                        <span className="text-slate-500 text-[10px] max-w-[50%] truncate">
-                          {Object.entries(step.stats as Record<string, any>)
-                            .filter(([k, v]) => typeof v === "number" && v > 0 && k !== "error")
-                            .slice(0, 3)
-                            .map(([k, v]) => `${k}:${v}`)
-                            .join(" ") || ""}
-                        </span>
-                      )}
-                    </div>
-                  ))}
+                <div className="border border-slate-200 dark:border-slate-800 max-h-64 overflow-y-auto" dir="ltr">
+                  {[...maintLive.steps].reverse().map((step: any, idx: number) => {
+                    const isError = step.status !== "ok";
+                    const errorMsg = isError && step.stats && typeof step.stats === "object"
+                      ? (step.stats.error as string | undefined)
+                      : null;
+                    return (
+                      <div
+                        key={`${step.name}-${idx}`}
+                        className={`px-3 py-1.5 text-[11px] border-b border-slate-100 dark:border-slate-800/50 last:border-b-0 ${
+                          isError ? "bg-red-50 dark:bg-red-950/20" : ""
+                        }`}
+                      >
+                        <div className="flex items-start gap-2">
+                          {step.status === "ok" ? (
+                            <CheckCircle className="h-3 w-3 mt-0.5 shrink-0 text-emerald-500" />
+                          ) : (
+                            <XCircle className="h-3 w-3 mt-0.5 shrink-0 text-red-500" />
+                          )}
+                          <span className="flex-1 text-slate-700 dark:text-slate-300">{step.name}</span>
+                          <span className="font-mono text-slate-400 text-[10px]">{step.elapsed_s}s</span>
+                          {!isError && step.stats && typeof step.stats === "object" && (
+                            <span className="text-slate-500 text-[10px] max-w-[50%] truncate">
+                              {Object.entries(step.stats as Record<string, any>)
+                                .filter(([k, v]) => typeof v === "number" && v > 0 && k !== "error")
+                                .slice(0, 3)
+                                .map(([k, v]) => `${k}:${v}`)
+                                .join(" ") || ""}
+                            </span>
+                          )}
+                        </div>
+                        {/* Show error message for failed steps */}
+                        {errorMsg && (
+                          <div className="mt-1 pl-5 text-[10px] font-mono text-red-600 dark:text-red-400 break-all">
+                            {errorMsg}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </>

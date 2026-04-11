@@ -1,6 +1,6 @@
 # Reminders & Action Items
 
-Last updated: 2026-04-11 (post 3-tier LLM + clustering-fix session)
+Last updated: 2026-04-11
 
 ## 🔴 URGENT — Action items from this session
 
