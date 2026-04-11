@@ -251,30 +251,46 @@ async def get_dashboard(db: AsyncSession = Depends(get_db)):
 async def force_resummarize(
     limit: int = Query(5, ge=1, le=200),
     mode: str = Query("immediate", pattern="^(immediate|queue)$"),
+    order: str = Query("trending", pattern="^(trending|recent)$"),
     db: AsyncSession = Depends(get_db),
 ):
-    """Force re-generation of summaries on N visible stories with the current model.
+    """Force re-generation of summaries with the current model.
 
     Modes:
       - "immediate" (default): clears summary_fa AND runs story_analysis
-        inline for each story, returning once done. Slower but instant feedback.
+        inline for each story, returning once done.
       - "queue": just clears summary_fa on N stories so the next maintenance
-        run picks them up via step_summarize. Fast but requires a run.
+        run picks them up via step_summarize.
 
-    Picks the N most-recent visible stories (article_count >= 5).
+    Order:
+      - "trending" (default): same order as the homepage /trending endpoint
+        (priority DESC, trending_score DESC). Ensures the stories visible
+        to users get refreshed first.
+      - "recent": most recently updated/published first.
+
+    Only picks visible stories (article_count >= 5).
     """
     import json as _json
     from sqlalchemy.orm import selectinload
     from app.models.article import Article
     from app.models.story import Story
 
-    result = await db.execute(
+    query = (
         select(Story)
         .options(selectinload(Story.articles).selectinload(Article.source))
         .where(Story.article_count >= 5)
-        .order_by(Story.updated_at.desc().nullslast(), Story.first_published_at.desc().nullslast())
-        .limit(limit)
     )
+    if order == "trending":
+        # Match /api/v1/stories/trending: priority DESC, trending_score DESC
+        query = query.order_by(Story.priority.desc(), Story.trending_score.desc())
+    else:
+        query = query.order_by(
+            Story.updated_at.desc().nullslast(),
+            Story.first_published_at.desc().nullslast(),
+        )
+    query = query.limit(limit)
+
+    result = await db.execute(query)
     stories = list(result.scalars().all())
 
     if not stories:

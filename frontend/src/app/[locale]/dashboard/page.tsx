@@ -179,7 +179,7 @@ export default function DashboardPage() {
     if (!ok) return;
     setForceRunning(true);
     try {
-      const res = await fetch(`${API}/api/v1/admin/force-resummarize?limit=${limit}&mode=immediate`, {
+      const res = await fetch(`${API}/api/v1/admin/force-resummarize?limit=${limit}&mode=immediate&order=trending`, {
         method: "POST",
         headers: authHeaders(),
       });
@@ -766,7 +766,7 @@ export default function DashboardPage() {
             <button
               onClick={() => forceResummarize(5)}
               disabled={forceRunning || recentLoading}
-              title="Clear summary_fa on the 5 newest stories and regenerate them immediately with the current model"
+              title="Regenerate summaries on the 5 top trending stories with the current model"
               className="flex items-center gap-1 border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/10 px-3 py-1.5 text-xs text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/20 disabled:opacity-50"
             >
               {forceRunning ? <RefreshCw className="h-3 w-3 animate-spin" /> : null}
@@ -775,7 +775,7 @@ export default function DashboardPage() {
             <button
               onClick={() => forceResummarize(30)}
               disabled={forceRunning || recentLoading}
-              title="Clear and regenerate the 30 newest visible stories"
+              title="Regenerate summaries on the 30 top trending stories — matches the homepage"
               className="flex items-center gap-1 border border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/10 px-3 py-1.5 text-xs text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/20 disabled:opacity-50"
             >
               Refresh 30
