@@ -93,6 +93,31 @@ export default function DashboardPage() {
     }
   }, []);
 
+  const authHeaders = useCallback((): Record<string, string> => {
+    return adminToken ? { Authorization: `Bearer ${adminToken}` } : {};
+  }, [adminToken]);
+
+  const fetchDashboard = useCallback(async () => {
+    if (!authed) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API}/api/v1/admin/dashboard`, { headers: authHeaders() });
+      if (!res.ok) {
+        if (res.status === 401 || res.status === 403) {
+          throw new Error("Admin token required or invalid. Paste your ADMIN_TOKEN below and click Load.");
+        }
+        throw new Error(`HTTP ${res.status}`);
+      }
+      setDashboard(await res.json());
+    } catch (e: any) {
+      setError(e.message || "Unknown error");
+    }
+    setLoading(false);
+  }, [authHeaders, authed]);
+
+  useEffect(() => { fetchDashboard(); }, [fetchDashboard]);
+
   if (!authed) {
     return (
       <div className="mx-auto max-w-sm px-4 py-24">
@@ -121,30 +146,6 @@ export default function DashboardPage() {
       </div>
     );
   }
-
-  const authHeaders = useCallback((): Record<string, string> => {
-    return adminToken ? { Authorization: `Bearer ${adminToken}` } : {};
-  }, [adminToken]);
-
-  const fetchDashboard = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(`${API}/api/v1/admin/dashboard`, { headers: authHeaders() });
-      if (!res.ok) {
-        if (res.status === 401 || res.status === 403) {
-          throw new Error("Admin token required or invalid. Paste your ADMIN_TOKEN below and click Load.");
-        }
-        throw new Error(`HTTP ${res.status}`);
-      }
-      setDashboard(await res.json());
-    } catch (e: any) {
-      setError(e.message || "Unknown error");
-    }
-    setLoading(false);
-  }, [authHeaders]);
-
-  useEffect(() => { fetchDashboard(); }, [fetchDashboard]);
 
   async function triggerPipeline(step: string) {
     setRunning(step);

@@ -226,29 +226,50 @@ export default function ImprovementsAdminPage() {
         </button>
       </div>
 
-      {/* Admin token */}
-      <div className="mb-6 border border-slate-200 dark:border-slate-800 p-4">
-        <label className="block text-xs font-semibold text-slate-500 mb-2">
-          Admin Token
-        </label>
-        <div className="flex gap-2">
-          <input
-            type="password"
-            value={adminToken}
-            onChange={(e) => {
-              setAdminToken(e.target.value);
-              localStorage.setItem("doornegar_admin_token", e.target.value);
-            }}
-            placeholder="Paste ADMIN_TOKEN"
-            className="flex-1 px-3 py-2 text-sm border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none"
-          />
-          <button
-            onClick={fetchItems}
-            className="px-4 py-2 text-sm bg-slate-900 dark:bg-white text-white dark:text-slate-900"
-          >
-            Load
-          </button>
+      {/* Admin token — only show if not yet set */}
+      {!adminToken && (
+        <div className="mb-6 border border-slate-200 dark:border-slate-800 p-4">
+          <label className="block text-xs font-semibold text-slate-500 mb-2">
+            Admin Token
+          </label>
+          <div className="flex gap-2">
+            <input
+              type="password"
+              value={adminToken}
+              onChange={(e) => {
+                setAdminToken(e.target.value);
+                localStorage.setItem("doornegar_admin_token", e.target.value);
+              }}
+              placeholder="Paste ADMIN_TOKEN"
+              className="flex-1 px-3 py-2 text-sm border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none"
+            />
+            <button
+              onClick={fetchItems}
+              className="px-4 py-2 text-sm bg-slate-900 dark:bg-white text-white dark:text-slate-900"
+            >
+              Load
+            </button>
+          </div>
         </div>
+      )}
+
+      {/* Help panel */}
+      <div className="mb-6 border border-blue-200 dark:border-blue-900/50 bg-blue-50 dark:bg-blue-950/20 p-4 text-xs leading-6 text-slate-700 dark:text-slate-300">
+        <p className="font-bold text-slate-900 dark:text-white mb-2">How this todo list works</p>
+        <p className="mb-2">
+          Each row is a suggestion submitted by a rater from <code className="text-[11px] bg-white dark:bg-slate-900 px-1 border border-slate-200 dark:border-slate-800">/fa/rate</code>. Work through items using the action buttons on the right:
+        </p>
+        <ul className="space-y-1 list-none">
+          <li><span className="inline-flex items-center gap-1"><Play className="h-3 w-3 text-blue-600" /> <strong>Start</strong></span> — mark as <em>in progress</em> (you're working on it now, prevents double work)</li>
+          <li><span className="inline-flex items-center gap-1"><Check className="h-3 w-3 text-emerald-600" /> <strong>Mark done</strong></span> — fix applied, close the item</li>
+          <li><span className="inline-flex items-center gap-1"><XCircle className="h-3 w-3 text-slate-500" /> <strong>Won't do</strong></span> — rejected, not actionable or disagreeing with suggestion</li>
+          <li><span className="inline-flex items-center gap-1"><Copy className="h-3 w-3 text-purple-600" /> <strong>Copy Claude prompt</strong></span> — copies a rich prompt with story URL and context; paste into Claude to ask it to fix the issue, then come back and click <em>Mark done</em></li>
+          <li><span className="inline-flex items-center gap-1"><ExternalLink className="h-3 w-3 text-blue-600" /> <strong>View in context</strong></span> — opens the story page in feedback mode to see the original</li>
+          <li><span className="inline-flex items-center gap-1"><ChevronDown className="h-3 w-3" /> <strong>Expand</strong></span> — shows full details + lets you set priority, add admin notes, or delete</li>
+        </ul>
+        <p className="mt-2 text-slate-500">
+          Tip: toggle <em>Group by story</em> to batch multiple complaints about the same story, then fix them together.
+        </p>
       </div>
 
       {/* Status filters + group toggle */}

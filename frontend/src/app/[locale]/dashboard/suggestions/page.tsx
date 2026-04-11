@@ -190,29 +190,48 @@ export default function SuggestionsAdminPage() {
         </button>
       </div>
 
-      {/* Admin token input */}
-      <div className="mb-6 border border-slate-200 dark:border-slate-800 p-4">
-        <label className="block text-xs font-semibold text-slate-500 mb-2">
-          Admin Token (required for admin endpoints in production)
-        </label>
-        <div className="flex gap-2">
-          <input
-            type="password"
-            value={adminToken}
-            onChange={(e) => {
-              setAdminToken(e.target.value);
-              localStorage.setItem("doornegar_admin_token", e.target.value);
-            }}
-            placeholder="Paste ADMIN_TOKEN here"
-            className="flex-1 px-3 py-2 text-sm border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none focus:border-blue-500"
-          />
-          <button
-            onClick={fetchSuggestions}
-            className="px-4 py-2 text-sm bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:opacity-90"
-          >
-            Load
-          </button>
+      {/* Admin token input — only show if missing or there was an auth error */}
+      {(!adminToken || error) && (
+        <div className="mb-6 border border-slate-200 dark:border-slate-800 p-4">
+          <label className="block text-xs font-semibold text-slate-500 mb-2">
+            Admin Token (required for admin endpoints in production)
+          </label>
+          <div className="flex gap-2">
+            <input
+              type="password"
+              value={adminToken}
+              onChange={(e) => {
+                setAdminToken(e.target.value);
+                localStorage.setItem("doornegar_admin_token", e.target.value);
+              }}
+              placeholder="Paste ADMIN_TOKEN here"
+              className="flex-1 px-3 py-2 text-sm border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none focus:border-blue-500"
+            />
+            <button
+              onClick={fetchSuggestions}
+              className="px-4 py-2 text-sm bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:opacity-90"
+            >
+              Load
+            </button>
+          </div>
         </div>
+      )}
+
+      {/* Help panel */}
+      <div className="mb-6 border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/20 p-4 text-xs leading-6 text-slate-700 dark:text-slate-300">
+        <p className="font-bold text-slate-900 dark:text-white mb-2">How to review source suggestions</p>
+        <p className="mb-2">
+          These are new media outlets, Telegram channels, or websites submitted by visitors via <code className="text-[11px] bg-white dark:bg-slate-900 px-1 border border-slate-200 dark:border-slate-800">/fa/suggest</code>. Click the URL to inspect the source, then use the buttons on the right:
+        </p>
+        <ul className="space-y-1 list-none">
+          <li><span className="inline-flex items-center gap-1"><Check className="h-3 w-3 text-emerald-600" /> <strong>Approve</strong></span> — good source, you intend to add it to the tracked list (you'll still need to add it manually via backend seeding)</li>
+          <li><span className="inline-flex items-center gap-1"><X className="h-3 w-3 text-red-500" /> <strong>Reject</strong></span> — not relevant, low quality, or unsafe</li>
+          <li><span className="inline-flex items-center gap-1"><CheckCircle2 className="h-3 w-3 text-slate-500" /> <strong>Already tracked</strong></span> — duplicate of a source already in the system</li>
+          <li><span className="inline-flex items-center gap-1"><ChevronDown className="h-3 w-3" /> <strong>Expand</strong></span> — see full description, submitter info, and add reviewer notes</li>
+        </ul>
+        <p className="mt-2 text-slate-500">
+          Approving does NOT automatically start scraping — it just marks the suggestion as accepted. Actual integration still requires adding the source to the backend seed.
+        </p>
       </div>
 
       {/* Filters */}

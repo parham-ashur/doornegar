@@ -85,6 +85,107 @@ async def step_process():
     return {"processed": total_processed}
 
 
+async def step_backfill_farsi_titles():
+    """Backfill: translate English titles that are missing title_fa.
+
+    process_unprocessed_articles only touches articles with processed_at IS NULL,
+    so articles where translation failed the first time get stuck. This step
+    targets them directly.
+    """
+    from app.config import settings
+    from app.database import async_session
+    from app.models import Article
+    from sqlalchemy import and_, select
+
+    if not settings.openai_api_key:
+        logger.warning("OPENAI_API_KEY not set — skipping title backfill")
+        return {"skipped": "no_openai_key"}
+
+    async with async_session() as db:
+        result = await db.execute(
+            select(Article)
+            .where(
+                and_(
+                    Article.title_fa.is_(None),
+                    Article.title_original.isnot(None),
+                )
+            )
+            .limit(300)  # cap per maintenance run
+        )
+        articles = list(result.scalars().all())
+
+        if not articles:
+            return {"backfilled": 0}
+
+        from openai import OpenAI
+        client = OpenAI(api_key=settings.openai_api_key)
+        import re as _re
+
+        backfilled = 0
+        failed = 0
+        for batch_start in range(0, len(articles), 30):
+            batch = articles[batch_start:batch_start + 30]
+            titles = "\n".join(f"{i+1}. {a.title_original}" for i, a in enumerate(batch))
+            try:
+                resp = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{
+                        "role": "user",
+                        "content": f"Translate these news headlines to Farsi. Return ONLY the translations, one per line, numbered.\n\n{titles}",
+                    }],
+                    max_tokens=2500,
+                    temperature=0,
+                )
+                lines = resp.choices[0].message.content.strip().split("\n")
+                for i, article in enumerate(batch):
+                    if i >= len(lines):
+                        failed += 1
+                        continue
+                    translated = _re.sub(r"^[\d۰-۹]+[\.\)]\s*", "", lines[i]).strip()
+                    if translated:
+                        article.title_fa = translated
+                        backfilled += 1
+                    else:
+                        failed += 1
+            except Exception as e:
+                logger.warning(f"Title backfill batch failed: {e}")
+                failed += len(batch)
+
+        await db.commit()
+    logger.info(f"Farsi title backfill: {backfilled} translated, {failed} failed")
+    return {"backfilled": backfilled, "failed": failed}
+
+
+async def step_bias_score():
+    """Score articles that don't yet have a bias score.
+
+    Runs multiple batches per maintenance cycle so coverage catches up over time.
+    Capped to avoid runaway LLM spend.
+    """
+    from app.config import settings
+    from app.database import async_session
+    from app.services.bias_scoring import score_unscored_articles
+
+    if not (settings.openai_api_key or settings.anthropic_api_key):
+        logger.warning("No LLM API key set — skipping bias scoring")
+        return {"skipped": "no_llm_key"}
+
+    MAX_PER_RUN = 150  # ~$3-5/run at Haiku prices; adjust as needed
+    BATCH = 30
+    total = {"scored": 0, "failed": 0, "skipped": 0}
+    async with async_session() as db:
+        for _ in range(MAX_PER_RUN // BATCH):
+            stats = await score_unscored_articles(db, batch_size=BATCH)
+            total["scored"] += stats.get("scored", 0)
+            total["failed"] += stats.get("failed", 0)
+            total["skipped"] += stats.get("skipped", 0)
+            # Stop early if nothing left
+            if stats.get("scored", 0) + stats.get("failed", 0) == 0:
+                break
+    logger.info(f"Bias scoring: {total}")
+    return total
+
+
 async def step_cluster():
     """Step 3: Cluster articles into stories."""
     from app.database import async_session
@@ -1279,6 +1380,12 @@ async def run_maintenance():
         results["process"] = {"error": str(e)}
 
     try:
+        results["backfill_farsi_titles"] = await step_backfill_farsi_titles()
+    except Exception as e:
+        logger.error(f"Title backfill failed: {e}")
+        results["backfill_farsi_titles"] = {"error": str(e)}
+
+    try:
         results["cluster"] = await step_cluster()
     except Exception as e:
         logger.error(f"Cluster failed: {e}")
@@ -1289,6 +1396,12 @@ async def run_maintenance():
     except Exception as e:
         logger.error(f"Summarize failed: {e}")
         results["summarize"] = {"error": str(e)}
+
+    try:
+        results["bias_score"] = await step_bias_score()
+    except Exception as e:
+        logger.error(f"Bias scoring failed: {e}")
+        results["bias_score"] = {"error": str(e)}
 
     steps = [
         ("fix_images", step_fix_images),
