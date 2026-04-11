@@ -29,17 +29,19 @@ class Settings(BaseSettings):
     ingestion_timeout_seconds: int = 30
     max_articles_per_feed: int = 50
 
-    # LLM
+    # LLM — 3-tier model strategy:
+    #   Premium (gpt-5-mini): story analysis for top-N trending stories
+    #     (homepage visible). Best quality where it counts.
+    #   Baseline (gpt-4o-mini): bias scoring + long-tail story analysis.
+    #     Good quality at ~1/3 the cost of premium.
+    #   Economy (gpt-4.1-nano): title translation. Simple task where
+    #     nano-tier models are indistinguishable in output quality.
     anthropic_api_key: str = ""
     openai_api_key: str = ""
-    # Default (baseline) models — cheap, run on everything
-    bias_scoring_model: str = "gpt-4o-mini"
-    story_analysis_model: str = "gpt-4o-mini"
-    translation_model: str = "gpt-4o-mini"
-    # Premium model — used ONLY for story analysis on the top N trending
-    # stories (the ones visible on the homepage). Quality where it counts,
-    # cheap everywhere else.
-    story_analysis_premium_model: str = "gpt-5-mini"
+    bias_scoring_model: str = "gpt-4o-mini"        # baseline
+    story_analysis_model: str = "gpt-4o-mini"       # baseline (non-trending)
+    story_analysis_premium_model: str = "gpt-5-mini"  # premium (top-N)
+    translation_model: str = "gpt-4.1-nano"         # economy
     premium_story_top_n: int = 30
 
     # NLP
