@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 TargetType = Literal[
     "story", "story_title", "story_image", "story_summary",
-    "article", "source", "layout", "homepage", "other",
+    "article", "source", "source_dimension", "layout", "homepage", "other",
 ]
 
 IssueType = Literal[

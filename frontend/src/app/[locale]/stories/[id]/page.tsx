@@ -11,6 +11,7 @@ import FeedbackProvider from "@/components/feedback/FeedbackProvider";
 import SummaryRating from "@/components/feedback/SummaryRating";
 import EditableTitle from "@/components/feedback/EditableTitle";
 import PriorityControl from "@/components/feedback/PriorityControl";
+import StoryFeedbackOverlay from "@/components/improvement/StoryFeedbackOverlay";
 import { getStory, getSources } from "@/lib/api";
 import { formatRelativeTime } from "@/lib/utils";
 
@@ -87,6 +88,7 @@ export default async function StoryDetailPage({
 
   return (
     <FeedbackProvider>
+    <StoryFeedbackOverlay storyId={id} storyTitle={title} />
     <div dir="rtl" className="mx-auto max-w-7xl px-4 py-8">
       {/* Header */}
       <div className="mb-6 pb-6 border-b border-slate-200 dark:border-slate-800">
