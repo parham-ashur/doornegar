@@ -796,10 +796,15 @@ class _EditStoryRequest(_BaseModel):
     title_en: str | None = None
     summary_fa: str | None = None
     priority: int | None = None
+    image_url: str | None = None
 
 @router.patch("/stories/{story_id}")
 async def edit_story(story_id: str, request: _EditStoryRequest, db: AsyncSession = Depends(get_db)):
-    """Edit a story's title or summary. Admin-only."""
+    """Edit a story's title, summary, image, or priority. Admin-only.
+
+    To HIDE a story from homepages, set priority = -100 (it falls
+    below trending_score-sorted stories).
+    """
     from sqlalchemy import select
     from app.models.story import Story
     import uuid
@@ -817,6 +822,8 @@ async def edit_story(story_id: str, request: _EditStoryRequest, db: AsyncSession
         story.summary_fa = request.summary_fa
     if request.priority is not None:
         story.priority = request.priority
+    if request.image_url is not None:
+        story.image_url = request.image_url
     await db.commit()
 
     return {
@@ -824,6 +831,8 @@ async def edit_story(story_id: str, request: _EditStoryRequest, db: AsyncSession
         "story_id": str(story.id),
         "title_fa": story.title_fa,
         "title_en": story.title_en,
+        "priority": story.priority,
+        "image_url": story.image_url,
     }
 
 
