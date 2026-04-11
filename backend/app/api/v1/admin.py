@@ -246,6 +246,84 @@ async def get_dashboard(db: AsyncSession = Depends(get_db)):
     }
 
 
+@router.get("/diagnostics")
+async def diagnostics(db: AsyncSession = Depends(get_db)):
+    """Diagnostic info to explain why backfills aren't fully catching up.
+
+    Returns:
+    - articles: counts broken down by what's missing
+    - bias_eligible: how many articles are eligible for bias scoring
+    - llm_keys: which LLM keys are configured (true/false, never the value)
+    """
+    from app.config import settings
+    from sqlalchemy import and_
+
+    total = (await db.execute(select(func.count(Article.id)))).scalar() or 0
+    no_title_fa = (await db.execute(
+        select(func.count(Article.id)).where(Article.title_fa.is_(None))
+    )).scalar() or 0
+    no_title_original = (await db.execute(
+        select(func.count(Article.id)).where(Article.title_original.is_(None))
+    )).scalar() or 0
+    no_title_fa_but_has_original = (await db.execute(
+        select(func.count(Article.id)).where(
+            and_(Article.title_fa.is_(None), Article.title_original.isnot(None))
+        )
+    )).scalar() or 0
+    unprocessed = (await db.execute(
+        select(func.count(Article.id)).where(Article.processed_at.is_(None))
+    )).scalar() or 0
+
+    # Clustering coverage
+    clustered = (await db.execute(
+        select(func.count(Article.id)).where(Article.story_id.isnot(None))
+    )).scalar() or 0
+    has_content = (await db.execute(
+        select(func.count(Article.id)).where(
+            (Article.content_text.isnot(None)) | (Article.summary.isnot(None))
+        )
+    )).scalar() or 0
+
+    # Bias-eligible = clustered AND has content
+    bias_eligible = (await db.execute(
+        select(func.count(Article.id)).where(
+            and_(
+                Article.story_id.isnot(None),
+                (Article.content_text.isnot(None)) | (Article.summary.isnot(None)),
+            )
+        )
+    )).scalar() or 0
+    already_scored = (await db.execute(select(func.count(BiasScore.id)))).scalar() or 0
+
+    return {
+        "articles": {
+            "total": total,
+            "no_title_fa": no_title_fa,
+            "no_title_original": no_title_original,
+            "translatable_now": no_title_fa_but_has_original,
+            "unprocessed": unprocessed,
+            "clustered_into_story": clustered,
+            "has_content_or_summary": has_content,
+        },
+        "bias": {
+            "total_articles": total,
+            "eligible_for_scoring": bias_eligible,
+            "already_scored": already_scored,
+            "remaining_to_score": max(0, bias_eligible - already_scored),
+            "coverage_of_eligible_pct": round(already_scored * 100 / max(bias_eligible, 1)),
+        },
+        "llm_keys": {
+            "openai_set": bool(settings.openai_api_key),
+            "anthropic_set": bool(settings.anthropic_api_key),
+        },
+        "notes": [
+            "translatable_now = articles the backfill step can actually translate (have title_original but no title_fa)",
+            "if translatable_now is small, the remaining no_title_fa articles have broken ingestion (no title_original either)",
+            "bias scoring requires: clustered into story AND has content/summary AND LLM key set",
+        ],
+    }
+
+
 @router.post("/maintenance/run")
 async def run_maintenance_endpoint():
     """Trigger a maintenance run (ingest, process, cluster, summarize, fix)."""
