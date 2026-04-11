@@ -1,413 +1,570 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useLocale } from "next-intl";
 import {
-  Eye, EyeOff, LogIn, Send, ChevronRight, CheckCircle,
-  AlertTriangle, Gauge,
+  Image as ImageIcon, Type, FileText, LayoutGrid,
+  MessageSquare, Info, Sparkles,
 } from "lucide-react";
-import FactCheckBarometer from "@/components/common/FactCheckBarometer";
+import SafeImage from "@/components/common/SafeImage";
+import ImprovementModal from "@/components/improvement/ImprovementModal";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-const FRAMING_OPTIONS = [
-  { value: "conflict", fa: "تعارض", en: "Conflict" },
-  { value: "human_interest", fa: "داستان انسانی", en: "Human Interest" },
-  { value: "economic_impact", fa: "تأثیر اقتصادی", en: "Economic Impact" },
-  { value: "security", fa: "امنیت", en: "Security" },
-  { value: "victimization", fa: "قربانی‌سازی", en: "Victimization" },
-  { value: "resistance", fa: "مقاومت", en: "Resistance" },
-  { value: "sovereignty", fa: "حاکمیت", en: "Sovereignty" },
-  { value: "western_interference", fa: "دخالت غرب", en: "Western Interference" },
-  { value: "human_rights", fa: "حقوق بشر", en: "Human Rights" },
-  { value: "reform", fa: "اصلاحات", en: "Reform" },
-  { value: "national_pride", fa: "غرور ملی", en: "National Pride" },
-  { value: "corruption", fa: "فساد", en: "Corruption" },
-];
+interface Story {
+  id: string;
+  title_fa: string;
+  slug: string;
+  article_count: number;
+  source_count: number;
+  image_url: string | null;
+  state_pct: number;
+  diaspora_pct: number;
+  independent_pct: number;
+}
+
+type TargetType =
+  | "story" | "story_title" | "story_image" | "story_summary"
+  | "article" | "source" | "layout" | "homepage" | "other";
+
+type IssueType =
+  | "wrong_title" | "bad_image" | "wrong_clustering" | "bad_summary"
+  | "wrong_source_class" | "layout_issue" | "bug" | "feature_request" | "other";
+
+interface FeedbackContext {
+  targetType: TargetType;
+  targetId?: string;
+  currentValue?: string;
+  defaultIssueType?: IssueType;
+  contextLabel?: string;
+}
+
+async function fetchSummary(storyId: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${API}/api/v1/stories/${storyId}/analysis`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.summary_fa || null;
+  } catch {
+    return null;
+  }
+}
+
+// Small floating feedback icon that appears on hover
+function FeedbackIcon({
+  onClick,
+  label,
+  icon: Icon,
+  position = "top-right",
+}: {
+  onClick: (e: React.MouseEvent) => void;
+  label: string;
+  icon: typeof Type;
+  position?: "top-right" | "top-left" | "center";
+}) {
+  const posClass = {
+    "top-right": "top-1 right-1",
+    "top-left": "top-1 left-1",
+    "center": "top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2",
+  }[position];
+
+  return (
+    <button
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onClick(e);
+      }}
+      title={label}
+      aria-label={label}
+      className={`absolute ${posClass} z-20 p-1.5 bg-slate-900/90 dark:bg-white/90 text-white dark:text-slate-900 hover:scale-110 transition-transform shadow-md opacity-0 group-hover:opacity-100 focus:opacity-100`}
+    >
+      <Icon className="h-3 w-3" />
+    </button>
+  );
+}
 
 export default function RatePage() {
   const locale = useLocale();
-  const [token, setToken] = useState<string | null>(null);
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [loginError, setLoginError] = useState("");
-  const [article, setArticle] = useState<any>(null);
-  const [loading, setLoading] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
-  const [totalRated, setTotalRated] = useState(0);
-  const [startTime, setStartTime] = useState<number>(0);
+  const [stories, setStories] = useState<Story[]>([]);
+  const [summaries, setSummaries] = useState<Record<string, string | null>>({});
+  const [loading, setLoading] = useState(true);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [context, setContext] = useState<FeedbackContext>({ targetType: "other" });
+  const [helpShown, setHelpShown] = useState(true);
 
-  // Rating state
-  const [politicalAlignment, setPoliticalAlignment] = useState(0);
-  const [factuality, setFactuality] = useState(3);
-  const [tone, setTone] = useState(0);
-  const [emotionalLanguage, setEmotionalLanguage] = useState(3);
-  const [framingLabels, setFramingLabels] = useState<string[]>([]);
-  const [notes, setNotes] = useState("");
-
-  // Check for saved token
   useEffect(() => {
-    const saved = localStorage.getItem("doornegar_token");
-    if (saved) setToken(saved);
+    fetch(`${API}/api/v1/stories/trending?limit=30`)
+      .then((r) => r.json())
+      .then(async (data) => {
+        const list: Story[] = Array.isArray(data) ? data : [];
+        setStories(list);
+        setLoading(false);
+        // Fetch summaries in parallel
+        const results = await Promise.all(
+          list.slice(0, 20).map((s) => fetchSummary(s.id).then((sum) => [s.id, sum] as [string, string | null]))
+        );
+        const map: Record<string, string | null> = {};
+        for (const [id, sum] of results) map[id] = sum;
+        setSummaries(map);
+      })
+      .catch(() => setLoading(false));
   }, []);
 
-  async function handleLogin() {
-    setLoginError("");
-    try {
-      const res = await fetch(`${API}/api/v1/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
-      });
-      if (!res.ok) {
-        const data = await res.json();
-        setLoginError(data.detail || "Login failed");
-        return;
-      }
-      const data = await res.json();
-      setToken(data.access_token);
-      localStorage.setItem("doornegar_token", data.access_token);
-      loadNextArticle(data.access_token);
-    } catch {
-      setLoginError("Connection error");
-    }
-  }
+  const openModal = (ctx: FeedbackContext) => {
+    setContext(ctx);
+    setModalOpen(true);
+  };
 
-  async function loadNextArticle(t?: string) {
-    const authToken = t || token;
-    if (!authToken) return;
-    setLoading(true);
-    setSubmitted(false);
-    resetRating();
-    try {
-      const res = await fetch(`${API}/api/v1/rate/next`, {
-        headers: { Authorization: `Bearer ${authToken}` },
-      });
-      const data = await res.json();
-      if (data.status === "ok") {
-        setArticle(data.article);
-        setStartTime(Date.now());
-      } else {
-        setArticle(null);
-      }
-    } catch {
-      setArticle(null);
-    }
-    setLoading(false);
-  }
-
-  function resetRating() {
-    setPoliticalAlignment(0);
-    setFactuality(3);
-    setTone(0);
-    setEmotionalLanguage(3);
-    setFramingLabels([]);
-    setNotes("");
-  }
-
-  async function submitRating() {
-    if (!token || !article) return;
-    setLoading(true);
-    try {
-      const timeSpent = Math.round((Date.now() - startTime) / 1000);
-      const res = await fetch(`${API}/api/v1/rate/${article.id}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          political_alignment_rating: politicalAlignment,
-          factuality_rating: factuality,
-          tone_rating: tone,
-          emotional_language_rating: emotionalLanguage,
-          framing_labels: framingLabels,
-          notes: notes || null,
-          was_blind: true,
-          time_spent_seconds: timeSpent,
-        }),
-      });
-      const data = await res.json();
-      if (data.status === "ok") {
-        setSubmitted(true);
-        setTotalRated(data.total_ratings);
-      }
-    } catch (e) {
-      alert("خطا در ارسال امتیاز");
-    }
-    setLoading(false);
-  }
-
-  function toggleFraming(value: string) {
-    setFramingLabels((prev) =>
-      prev.includes(value) ? prev.filter((f) => f !== value) : [...prev, value]
+  if (loading) {
+    return (
+      <div dir="rtl" className="mx-auto max-w-7xl px-6 lg:px-8 py-12 text-center">
+        <p className="text-sm text-slate-500">در حال بارگذاری...</p>
+      </div>
     );
   }
 
-  function handleLogout() {
-    setToken(null);
-    setArticle(null);
-    localStorage.removeItem("doornegar_token");
+  if (stories.length === 0) {
+    return (
+      <div dir="rtl" className="mx-auto max-w-7xl px-6 lg:px-8 py-12 text-center">
+        <p className="text-sm text-slate-500">هنوز خبری برای بازبینی وجود ندارد</p>
+      </div>
+    );
   }
 
-  // Login screen
-  if (!token) {
-    return (
-      <div className="mx-auto max-w-md px-4 py-16">
-        <div className="card">
-          <div className="mb-6 text-center">
-            <EyeOff className="mx-auto mb-3 h-10 w-10 text-diaspora" />
-            <h1 className="text-xl font-bold text-slate-900 dark:text-white">
-              ورود ارزیابان
-            </h1>
-            <p className="mt-1 text-sm text-slate-500">
-              فقط ارزیابان دعوت‌شده می‌توانند وارد شوند
+  const hero = stories[0];
+  const thumbs1 = stories.slice(1, 5);
+  const feature = stories[5];
+  const textRow = stories.slice(6, 9);
+  const thumbs2 = stories.slice(9, 13);
+  const remaining = stories.slice(13, 20);
+
+  return (
+    <div dir="rtl" className="mx-auto max-w-7xl px-4 md:px-6 lg:px-8 py-4">
+      {/* Help banner — shows first time */}
+      {helpShown && (
+        <div className="mb-6 p-4 border border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/30 flex items-start gap-3">
+          <Sparkles className="h-5 w-5 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-1">
+              حالت بازخورد
+            </h3>
+            <p className="text-[12px] leading-6 text-slate-600 dark:text-slate-400">
+              این همان صفحه اصلی است، اما با امکان ثبت بازخورد. روی هر تصویر، عنوان
+              یا خلاصه‌ای که می‌خواهید نظر بدهید کلیک کنید. پیشنهاد شما بدون نام
+              ارسال می‌شود و مستقیماً به فهرست کارهای تیم می‌رود.
             </p>
           </div>
-
-          {loginError && (
-            <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">
-              {loginError}
-            </div>
-          )}
-
-          <div className="space-y-4">
-            <input
-              type="text"
-              placeholder="نام کاربری"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm dark:border-slate-600 dark:bg-slate-800"
-              dir="ltr"
-            />
-            <input
-              type="password"
-              placeholder="رمز عبور"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleLogin()}
-              className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm dark:border-slate-600 dark:bg-slate-800"
-              dir="ltr"
-            />
-            <button
-              onClick={handleLogin}
-              className="flex w-full items-center justify-center gap-2 rounded-lg bg-diaspora px-4 py-2.5 text-sm font-semibold text-white hover:bg-diaspora-dark"
-            >
-              <LogIn className="h-4 w-4" />
-              ورود
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Submitted screen
-  if (submitted) {
-    return (
-      <div className="mx-auto max-w-md px-4 py-16">
-        <div className="card text-center">
-          <CheckCircle className="mx-auto mb-4 h-12 w-12 text-emerald-500" />
-          <h2 className="text-lg font-bold text-slate-900 dark:text-white">
-            امتیاز ثبت شد!
-          </h2>
-          <p className="mt-2 text-sm text-slate-500">
-            تعداد ارزیابی‌های شما: {totalRated}
-          </p>
           <button
-            onClick={() => loadNextArticle()}
-            className="mt-6 flex items-center justify-center gap-2 mx-auto rounded-lg bg-diaspora px-6 py-2.5 text-sm font-semibold text-white hover:bg-diaspora-dark"
+            onClick={() => setHelpShown(false)}
+            className="text-[11px] text-blue-600 dark:text-blue-400 hover:underline shrink-0"
           >
-            مقاله بعدی
-            <ChevronRight className="h-4 w-4" />
+            بستن
           </button>
         </div>
-      </div>
-    );
-  }
+      )}
 
-  // No more articles
-  if (!article && !loading) {
-    return (
-      <div className="mx-auto max-w-md px-4 py-16">
-        <div className="card text-center">
-          <CheckCircle className="mx-auto mb-4 h-10 w-10 text-emerald-500" />
-          <h2 className="text-lg font-bold text-slate-900 dark:text-white">
-            همه مقالات ارزیابی شدند!
-          </h2>
-          <p className="mt-2 text-sm text-slate-500">
-            در حال حاضر مقاله جدیدی برای ارزیابی وجود ندارد
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  // Rating interface
-  return (
-    <div className="mx-auto max-w-3xl px-4 py-8">
-      {/* Header */}
-      <div className="mb-6 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <EyeOff className="h-5 w-5 text-amber-500" />
-          <h1 className="text-lg font-bold text-slate-900 dark:text-white">
-            ارزیابی کور
-          </h1>
-          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
-            منبع مخفی
-          </span>
-        </div>
-        <button onClick={handleLogout} className="text-xs text-slate-400 hover:text-red-500">
-          خروج
+      {/* Quick general feedback buttons */}
+      <div className="mb-6 flex flex-wrap gap-2">
+        <button
+          onClick={() =>
+            openModal({
+              targetType: "homepage",
+              defaultIssueType: "layout_issue",
+              contextLabel: "صفحه اصلی / چیدمان",
+            })
+          }
+          className="px-3 py-1.5 text-xs border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:border-slate-900 dark:hover:border-white flex items-center gap-1.5"
+        >
+          <LayoutGrid className="h-3 w-3" />
+          پیشنهاد درباره چیدمان
+        </button>
+        <button
+          onClick={() =>
+            openModal({
+              targetType: "other",
+              defaultIssueType: "feature_request",
+              contextLabel: "پیشنهاد کلی",
+            })
+          }
+          className="px-3 py-1.5 text-xs border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:border-slate-900 dark:hover:border-white flex items-center gap-1.5"
+        >
+          <MessageSquare className="h-3 w-3" />
+          پیشنهاد ویژگی
+        </button>
+        <button
+          onClick={() =>
+            openModal({
+              targetType: "other",
+              defaultIssueType: "bug",
+              contextLabel: "گزارش مشکل",
+            })
+          }
+          className="px-3 py-1.5 text-xs border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:border-slate-900 dark:hover:border-white flex items-center gap-1.5"
+        >
+          <Info className="h-3 w-3" />
+          گزارش باگ
         </button>
       </div>
 
-      {loading ? (
-        <div className="card text-center text-slate-500 py-12">در حال بارگذاری...</div>
-      ) : article ? (
-        <div className="space-y-6">
-          {/* Article (blind — no source shown) */}
-          <div className="card">
-            <h2 className="text-lg font-bold leading-relaxed text-slate-900 dark:text-white">
-              {article.title}
-            </h2>
-            {article.summary && (
-              <p className="mt-3 text-sm leading-relaxed text-slate-600 dark:text-slate-400">
-                {article.summary}
+      {/* ROW 1: Hero */}
+      {hero && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 border-b border-slate-200 dark:border-slate-800 py-8 gap-8">
+          <div className="lg:col-span-4 flex flex-col justify-center relative group">
+            <div className="group block">
+              <h1 className="text-[26px] font-black leading-snug text-slate-900 dark:text-white pr-8">
+                {hero.title_fa}
+              </h1>
+              <FeedbackIcon
+                icon={Type}
+                label="بازخورد درباره عنوان"
+                onClick={() =>
+                  openModal({
+                    targetType: "story_title",
+                    targetId: hero.id,
+                    currentValue: hero.title_fa,
+                    defaultIssueType: "wrong_title",
+                    contextLabel: hero.title_fa,
+                  })
+                }
+                position="top-right"
+              />
+              <p className="mt-1.5 text-[13px] text-slate-400 dark:text-slate-500">
+                <span>{hero.source_count} رسانه</span>
+                <span>{" · "}</span>
+                <span>{hero.article_count} مقاله</span>
+                {hero.state_pct > 0 && <span className="text-red-500 mr-2">{" · "}حکومتی {hero.state_pct}٪</span>}
+                {hero.independent_pct > 0 && <span className="text-emerald-600 mr-2">{" · "}مستقل {hero.independent_pct}٪</span>}
+                {hero.diaspora_pct > 0 && <span className="text-blue-600 mr-2">{" · "}برون‌مرزی {hero.diaspora_pct}٪</span>}
               </p>
-            )}
-            {article.content_text && (
-              <div className="mt-4 max-h-60 overflow-y-auto rounded-lg bg-slate-50 p-4 text-sm leading-relaxed text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                {article.content_text.slice(0, 2000)}
-                {article.content_text.length > 2000 && "..."}
-              </div>
-            )}
-          </div>
-
-          {/* Rating Form */}
-          <div className="card space-y-6">
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white">ارزیابی شما</h3>
-
-            {/* 1. Political Alignment */}
-            <div>
-              <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">
-                گرایش سیاسی
-              </label>
-              <input
-                type="range" min={-2} max={2} step={0.5}
-                value={politicalAlignment}
-                onChange={(e) => setPoliticalAlignment(parseFloat(e.target.value))}
-                className="w-full accent-diaspora"
-              />
-              <div className="flex justify-between text-[10px] text-slate-500">
-                <span>حکومتی</span>
-                <span>میانه</span>
-                <span>اپوزیسیون</span>
-              </div>
-            </div>
-
-            {/* 2. Factuality */}
-            <div>
-              <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">
-                واقعیت‌محوری
-              </label>
-              <input
-                type="range" min={1} max={5} step={1}
-                value={factuality}
-                onChange={(e) => setFactuality(parseInt(e.target.value))}
-                className="w-full accent-diaspora"
-              />
-              <div className="flex justify-between text-[10px] text-slate-500">
-                <span>نظر محض</span>
-                <span>ترکیبی</span>
-                <span>کاملاً مستند</span>
-              </div>
-            </div>
-
-            {/* 3. Tone */}
-            <div>
-              <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">
-                لحن
-              </label>
-              <input
-                type="range" min={-2} max={2} step={0.5}
-                value={tone}
-                onChange={(e) => setTone(parseFloat(e.target.value))}
-                className="w-full accent-diaspora"
-              />
-              <div className="flex justify-between text-[10px] text-slate-500">
-                <span>بسیار منفی</span>
-                <span>خنثی</span>
-                <span>بسیار مثبت</span>
-              </div>
-            </div>
-
-            {/* 4. Emotional Language */}
-            <div>
-              <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">
-                زبان احساسی
-              </label>
-              <input
-                type="range" min={1} max={5} step={1}
-                value={emotionalLanguage}
-                onChange={(e) => setEmotionalLanguage(parseInt(e.target.value))}
-                className="w-full accent-diaspora"
-              />
-              <div className="flex justify-between text-[10px] text-slate-500">
-                <span>بدون احساس</span>
-                <span>متوسط</span>
-                <span>بسیار احساسی</span>
-              </div>
-            </div>
-
-            {/* 5. Framing Labels */}
-            <div>
-              <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">
-                چارچوب‌بندی (چند گزینه)
-              </label>
-              <div className="flex flex-wrap gap-2">
-                {FRAMING_OPTIONS.map((opt) => (
+              {summaries[hero.id] && (
+                <div className="mt-4 relative group/summary">
+                  <p className="text-[13px] leading-7 text-slate-500 dark:text-slate-400 line-clamp-5 pl-8">
+                    {summaries[hero.id]}
+                  </p>
                   <button
-                    key={opt.value}
-                    onClick={() => toggleFraming(opt.value)}
-                    className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                      framingLabels.includes(opt.value)
-                        ? "bg-diaspora text-white"
-                        : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-400"
-                    }`}
+                    onClick={() =>
+                      openModal({
+                        targetType: "story_summary",
+                        targetId: hero.id,
+                        currentValue: summaries[hero.id] || "",
+                        defaultIssueType: "bad_summary",
+                        contextLabel: hero.title_fa,
+                      })
+                    }
+                    title="بازخورد درباره خلاصه"
+                    className="absolute top-0 left-0 p-1.5 bg-slate-900/90 dark:bg-white/90 text-white dark:text-slate-900 hover:scale-110 transition-transform opacity-0 group-hover/summary:opacity-100 focus:opacity-100"
                   >
-                    {opt.fa}
+                    <FileText className="h-3 w-3" />
                   </button>
-                ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="lg:col-span-5 relative group">
+            <div className="aspect-[16/10] w-full overflow-hidden bg-slate-100 dark:bg-slate-800">
+              <SafeImage src={hero.image_url} className="h-full w-full object-cover" />
+            </div>
+            <FeedbackIcon
+              icon={ImageIcon}
+              label="بازخورد درباره تصویر"
+              onClick={() =>
+                openModal({
+                  targetType: "story_image",
+                  targetId: hero.id,
+                  defaultIssueType: "bad_image",
+                  contextLabel: hero.title_fa,
+                })
+              }
+              position="top-right"
+            />
+          </div>
+
+          {thumbs1[0] && (
+            <div className="lg:col-span-3 lg:border-r border-slate-200 dark:border-slate-800 lg:pr-6 flex flex-col justify-center relative group">
+              <div className="block">
+                <div className="aspect-[3/2] overflow-hidden bg-slate-100 dark:bg-slate-800 relative">
+                  <SafeImage src={thumbs1[0].image_url} className="h-full w-full object-cover" />
+                  <FeedbackIcon
+                    icon={ImageIcon}
+                    label="تصویر"
+                    onClick={() =>
+                      openModal({
+                        targetType: "story_image",
+                        targetId: thumbs1[0].id,
+                        defaultIssueType: "bad_image",
+                        contextLabel: thumbs1[0].title_fa,
+                      })
+                    }
+                  />
+                </div>
+                <h3 className="mt-2 text-[14px] font-bold leading-snug text-slate-900 dark:text-white line-clamp-2 pl-6 relative">
+                  {thumbs1[0].title_fa}
+                  <button
+                    onClick={() =>
+                      openModal({
+                        targetType: "story_title",
+                        targetId: thumbs1[0].id,
+                        currentValue: thumbs1[0].title_fa,
+                        defaultIssueType: "wrong_title",
+                        contextLabel: thumbs1[0].title_fa,
+                      })
+                    }
+                    title="عنوان"
+                    className="absolute top-0 left-0 p-1 bg-slate-900/90 dark:bg-white/90 text-white dark:text-slate-900 opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <Type className="h-3 w-3" />
+                  </button>
+                </h3>
+                <p className="mt-1 text-[12px] text-slate-400">
+                  {thumbs1[0].source_count} رسانه · {thumbs1[0].article_count} مقاله
+                </p>
               </div>
             </div>
-
-            {/* Notes */}
-            <div>
-              <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">
-                یادداشت (اختیاری)
-              </label>
-              <textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                rows={2}
-                className="w-full rounded-lg border border-slate-300 px-4 py-2 text-sm dark:border-slate-600 dark:bg-slate-800"
-                placeholder="توضیحات اضافی..."
-              />
-            </div>
-
-            {/* Submit */}
-            <button
-              onClick={submitRating}
-              disabled={loading}
-              className="flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
-            >
-              <Send className="h-4 w-4" />
-              ثبت ارزیابی
-            </button>
-          </div>
+          )}
         </div>
-      ) : null}
+      )}
+
+      {/* ROW 2: Thumbnails */}
+      {thumbs1.length > 1 && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 border-b border-slate-200 dark:border-slate-800 py-6">
+          {thumbs1.slice(1).map((s) => (
+            <div key={s.id} className="group block">
+              <div className="aspect-[4/3] w-full overflow-hidden bg-slate-100 dark:bg-slate-800 mb-3 relative">
+                <SafeImage src={s.image_url} className="h-full w-full object-cover" />
+                <FeedbackIcon
+                  icon={ImageIcon}
+                  label="تصویر"
+                  onClick={() =>
+                    openModal({
+                      targetType: "story_image",
+                      targetId: s.id,
+                      defaultIssueType: "bad_image",
+                      contextLabel: s.title_fa,
+                    })
+                  }
+                />
+              </div>
+              <div className="relative">
+                <h3 className="text-[14px] font-extrabold leading-snug text-slate-900 dark:text-white line-clamp-2 pl-6">
+                  {s.title_fa}
+                </h3>
+                <button
+                  onClick={() =>
+                    openModal({
+                      targetType: "story_title",
+                      targetId: s.id,
+                      currentValue: s.title_fa,
+                      defaultIssueType: "wrong_title",
+                      contextLabel: s.title_fa,
+                    })
+                  }
+                  title="عنوان"
+                  className="absolute top-0 left-0 p-1 bg-slate-900/90 dark:bg-white/90 text-white dark:text-slate-900 opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <Type className="h-3 w-3" />
+                </button>
+              </div>
+              <p className="mt-1 text-[11px] text-slate-400">
+                {s.source_count} رسانه · {s.article_count} مقاله
+              </p>
+              <button
+                onClick={() =>
+                  openModal({
+                    targetType: "story",
+                    targetId: s.id,
+                    defaultIssueType: "wrong_clustering",
+                    contextLabel: s.title_fa,
+                  })
+                }
+                className="mt-2 text-[10px] text-slate-400 hover:text-slate-900 dark:hover:text-white underline decoration-dotted"
+              >
+                بازخورد درباره دسته‌بندی
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ROW 3: Text-only stories */}
+      {textRow.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-3 border-b border-slate-200 dark:border-slate-800">
+          {textRow.map((s, i) => (
+            <div
+              key={s.id}
+              className={`group py-6 relative ${i > 0 ? "md:pr-6 md:border-r border-slate-200 dark:border-slate-800" : ""} ${i < textRow.length - 1 ? "md:pl-6" : ""}`}
+            >
+              <h3 className="text-[15px] font-extrabold leading-snug text-slate-900 dark:text-white pl-6 line-clamp-2">
+                {s.title_fa}
+              </h3>
+              <button
+                onClick={() =>
+                  openModal({
+                    targetType: "story_title",
+                    targetId: s.id,
+                    currentValue: s.title_fa,
+                    defaultIssueType: "wrong_title",
+                    contextLabel: s.title_fa,
+                  })
+                }
+                title="عنوان"
+                className="absolute top-6 left-0 p-1 bg-slate-900/90 dark:bg-white/90 text-white dark:text-slate-900 opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                <Type className="h-3 w-3" />
+              </button>
+              <p className="mt-1.5 text-[12px] text-slate-400 dark:text-slate-500">
+                <span>{s.source_count} رسانه</span>
+                <span>{" · "}</span>
+                <span>{s.article_count} مقاله</span>
+              </p>
+              {summaries[s.id] && (
+                <div className="mt-2 relative group/sum">
+                  <p className="text-[12px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-3 pl-6">
+                    {summaries[s.id]}
+                  </p>
+                  <button
+                    onClick={() =>
+                      openModal({
+                        targetType: "story_summary",
+                        targetId: s.id,
+                        currentValue: summaries[s.id] || "",
+                        defaultIssueType: "bad_summary",
+                        contextLabel: s.title_fa,
+                      })
+                    }
+                    title="خلاصه"
+                    className="absolute top-0 left-0 p-1 bg-slate-900/90 dark:bg-white/90 text-white dark:text-slate-900 opacity-0 group-hover/sum:opacity-100 transition-opacity"
+                  >
+                    <FileText className="h-3 w-3" />
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* More thumbnails */}
+      {thumbs2.length > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 border-b border-slate-200 dark:border-slate-800 py-6">
+          {thumbs2.map((s) => (
+            <div key={s.id} className="group block">
+              <div className="aspect-[4/3] w-full overflow-hidden bg-slate-100 dark:bg-slate-800 mb-3 relative">
+                <SafeImage src={s.image_url} className="h-full w-full object-cover" />
+                <FeedbackIcon
+                  icon={ImageIcon}
+                  label="تصویر"
+                  onClick={() =>
+                    openModal({
+                      targetType: "story_image",
+                      targetId: s.id,
+                      defaultIssueType: "bad_image",
+                      contextLabel: s.title_fa,
+                    })
+                  }
+                />
+              </div>
+              <div className="relative">
+                <h3 className="text-[13px] font-bold leading-snug text-slate-900 dark:text-white line-clamp-2 pl-6">
+                  {s.title_fa}
+                </h3>
+                <button
+                  onClick={() =>
+                    openModal({
+                      targetType: "story_title",
+                      targetId: s.id,
+                      currentValue: s.title_fa,
+                      defaultIssueType: "wrong_title",
+                      contextLabel: s.title_fa,
+                    })
+                  }
+                  title="عنوان"
+                  className="absolute top-0 left-0 p-1 bg-slate-900/90 dark:bg-white/90 text-white dark:text-slate-900 opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <Type className="h-3 w-3" />
+                </button>
+              </div>
+              <p className="mt-1 text-[11px] text-slate-400">
+                {s.source_count} رسانه · {s.article_count} مقاله
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Remaining as compact text */}
+      {remaining.length > 0 && (
+        <div className="divide-y divide-slate-200 dark:divide-slate-800 py-2">
+          {remaining.map((s) => (
+            <div key={s.id} className="group py-4 flex items-start justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <h3 className="text-[13px] font-bold leading-snug text-slate-900 dark:text-white line-clamp-2">
+                  {s.title_fa}
+                </h3>
+                <p className="mt-1 text-[11px] text-slate-400">
+                  {s.source_count} رسانه · {s.article_count} مقاله
+                </p>
+              </div>
+              <div className="flex items-center gap-1 shrink-0 opacity-60 group-hover:opacity-100 transition-opacity">
+                <button
+                  onClick={() =>
+                    openModal({
+                      targetType: "story_title",
+                      targetId: s.id,
+                      currentValue: s.title_fa,
+                      defaultIssueType: "wrong_title",
+                      contextLabel: s.title_fa,
+                    })
+                  }
+                  title="عنوان"
+                  className="p-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-900 dark:hover:bg-white hover:text-white dark:hover:text-slate-900"
+                >
+                  <Type className="h-3 w-3" />
+                </button>
+                <button
+                  onClick={() =>
+                    openModal({
+                      targetType: "story",
+                      targetId: s.id,
+                      defaultIssueType: "wrong_clustering",
+                      contextLabel: s.title_fa,
+                    })
+                  }
+                  title="دسته‌بندی"
+                  className="p-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-900 dark:hover:bg-white hover:text-white dark:hover:text-slate-900"
+                >
+                  <LayoutGrid className="h-3 w-3" />
+                </button>
+                <button
+                  onClick={() =>
+                    openModal({
+                      targetType: "story",
+                      targetId: s.id,
+                      defaultIssueType: "other",
+                      contextLabel: s.title_fa,
+                    })
+                  }
+                  title="سایر"
+                  className="p-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-900 dark:hover:bg-white hover:text-white dark:hover:text-slate-900"
+                >
+                  <MessageSquare className="h-3 w-3" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <ImprovementModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        targetType={context.targetType}
+        targetId={context.targetId}
+        currentValue={context.currentValue}
+        defaultIssueType={context.defaultIssueType}
+        contextLabel={context.contextLabel}
+      />
     </div>
   );
 }

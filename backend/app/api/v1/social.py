@@ -61,22 +61,42 @@ async def get_story_social_data(
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get Telegram posts and sentiment data linked to a story."""
-    # Get posts
-    result = await db.execute(
+    """Get Telegram posts and sentiment data linked to a story.
+
+    Posts from channels mapped to Source records (via CHANNEL_SOURCE_MAP) are
+    excluded — those posts are already shown as articles in the main article
+    list. Only true "social reaction" posts from unmapped channels are returned.
+    """
+    from app.services.telegram_service import CHANNEL_SOURCE_MAP
+
+    mapped_usernames = set(CHANNEL_SOURCE_MAP.keys())
+
+    # Get posts, excluding those from mapped channels (to avoid duplication)
+    query = (
         select(TelegramPost)
         .options(selectinload(TelegramPost.channel))
+        .join(TelegramPost.channel)
         .where(TelegramPost.story_id == story_id)
         .order_by(TelegramPost.date.desc())
         .limit(limit)
     )
+    if mapped_usernames:
+        from app.models.social import TelegramChannel
+        query = query.where(~TelegramChannel.username.in_(mapped_usernames))
+
+    result = await db.execute(query)
     posts = result.scalars().all()
 
-    # Get total count
-    count_result = await db.execute(
+    # Get total count (also excluding mapped channels)
+    from app.models.social import TelegramChannel as _TC
+    count_query = (
         select(func.count(TelegramPost.id))
+        .join(TelegramPost.channel)
         .where(TelegramPost.story_id == story_id)
     )
+    if mapped_usernames:
+        count_query = count_query.where(~_TC.username.in_(mapped_usernames))
+    count_result = await db.execute(count_query)
     total = count_result.scalar() or 0
 
     # Get latest sentiment snapshot

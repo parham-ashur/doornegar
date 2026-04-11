@@ -49,7 +49,6 @@ export default function ImprovementModal({
   const [issueType, setIssueType] = useState<IssueType>(defaultIssueType);
   const [suggestedValue, setSuggestedValue] = useState("");
   const [reason, setReason] = useState("");
-  const [raterName, setRaterName] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
 
@@ -70,15 +69,10 @@ export default function ImprovementModal({
           current_value: currentValue || null,
           suggested_value: suggestedValue || null,
           reason: reason || null,
-          rater_name: raterName || null,
         }),
       });
       if (res.ok) {
         setSuccess(true);
-        // Remember the rater name for next submissions
-        if (raterName && typeof window !== "undefined") {
-          localStorage.setItem("doornegar_rater_name", raterName);
-        }
         setTimeout(() => {
           setSuccess(false);
           setSuggestedValue("");
@@ -93,12 +87,6 @@ export default function ImprovementModal({
     }
     setSubmitting(false);
   };
-
-  // Load saved rater name
-  if (!raterName && typeof window !== "undefined") {
-    const saved = localStorage.getItem("doornegar_rater_name");
-    if (saved) setRaterName(saved);
-  }
 
   return (
     <div
@@ -185,19 +173,6 @@ export default function ImprovementModal({
                   onChange={(e) => setReason(e.target.value)}
                   placeholder="چرا باید این تغییر انجام شود؟"
                   rows={2}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none focus:border-slate-900 dark:focus:border-white"
-                />
-              </div>
-
-              {/* Rater name */}
-              <div>
-                <label className="block text-xs font-bold text-slate-900 dark:text-white mb-1.5">
-                  نام شما (اختیاری)
-                </label>
-                <input
-                  type="text"
-                  value={raterName}
-                  onChange={(e) => setRaterName(e.target.value)}
                   className="w-full px-3 py-2 text-xs border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none focus:border-slate-900 dark:focus:border-white"
                 />
               </div>

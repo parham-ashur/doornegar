@@ -16,9 +16,6 @@ export default function SuggestPage() {
     language: "fa",
     suggested_category: "not_sure" as Category,
     description: "",
-    submitter_name: "",
-    submitter_contact: "",
-    submitter_notes: "",
   });
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<{ type: "success" | "error" | "duplicate"; message: string } | null>(null);
@@ -36,9 +33,6 @@ export default function SuggestPage() {
       const payload = {
         ...form,
         description: form.description || null,
-        submitter_name: form.submitter_name || null,
-        submitter_contact: form.submitter_contact || null,
-        submitter_notes: form.submitter_notes || null,
       };
       const res = await fetch(`${API}/api/v1/suggestions`, {
         method: "POST",
@@ -69,9 +63,6 @@ export default function SuggestPage() {
           language: "fa",
           suggested_category: "not_sure",
           description: "",
-          submitter_name: "",
-          submitter_contact: "",
-          submitter_notes: "",
         });
       }
     } catch (err) {
@@ -215,54 +206,6 @@ export default function SuggestPage() {
           />
         </div>
 
-        {/* Optional submitter info */}
-        <div className="pt-4 mt-4 border-t border-slate-200 dark:border-slate-800">
-          <p className="text-[12px] text-slate-500 dark:text-slate-400 mb-4 leading-6">
-            اطلاعات زیر اختیاری است — اگر مایل هستید، می‌توانیم در صورت نیاز با شما
-            تماس بگیریم.
-          </p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-            <div>
-              <label className="block text-[13px] font-bold text-slate-900 dark:text-white mb-1.5">
-                نام شما
-              </label>
-              <input
-                type="text"
-                value={form.submitter_name}
-                onChange={(e) => update("submitter_name", e.target.value)}
-                className="w-full px-3 py-2 text-[13px] border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none focus:border-slate-900 dark:focus:border-white"
-              />
-            </div>
-            <div>
-              <label className="block text-[13px] font-bold text-slate-900 dark:text-white mb-1.5">
-                راه تماس
-              </label>
-              <input
-                type="text"
-                dir="ltr"
-                value={form.submitter_contact}
-                onChange={(e) => update("submitter_contact", e.target.value)}
-                placeholder="ایمیل یا تلگرام"
-                className="w-full px-3 py-2 text-[13px] border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none focus:border-slate-900 dark:focus:border-white text-left"
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Notes */}
-        <div>
-          <label className="block text-[13px] font-bold text-slate-900 dark:text-white mb-1.5">
-            یادداشت‌های تکمیلی
-          </label>
-          <textarea
-            value={form.submitter_notes}
-            onChange={(e) => update("submitter_notes", e.target.value)}
-            placeholder="هر اطلاعات دیگری که فکر می‌کنید مفید است"
-            rows={2}
-            className="w-full px-3 py-2 text-[13px] border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none focus:border-slate-900 dark:focus:border-white"
-          />
-        </div>
-
         {/* Submit */}
         <div className="pt-2">
           <button
@@ -278,9 +221,8 @@ export default function SuggestPage() {
       {/* Privacy note */}
       <div className="mt-12 pt-6 border-t border-slate-200 dark:border-slate-800">
         <p className="text-[11px] leading-6 text-slate-400 dark:text-slate-500">
-          پیشنهادها توسط تیم به‌صورت دستی بررسی می‌شوند. اطلاعات تماس شما فقط برای
-          پیگیری پیشنهاد استفاده می‌شود و با هیچ شخص ثالثی به اشتراک گذاشته
-          نمی‌شود.
+          پیشنهادها به‌صورت ناشناس ارسال می‌شوند و توسط تیم دستی بررسی می‌شوند.
+          هیچ اطلاعات شخصی جمع‌آوری یا ذخیره نمی‌شود.
         </p>
       </div>
     </div>
