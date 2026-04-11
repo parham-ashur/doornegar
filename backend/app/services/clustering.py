@@ -17,9 +17,23 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from openai import OpenAI
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
+
+
+async def _keepalive(db: AsyncSession) -> None:
+    """Ping the DB connection with SELECT 1 to reset Neon's idle timer.
+
+    Neon closes connections after ~5 minutes of idleness. Long-running
+    clustering (many LLM calls per session) would otherwise kill the
+    held connection mid-work. Call this before every long-running LLM
+    batch so the session's underlying connection stays warm.
+    """
+    try:
+        await db.execute(text("SELECT 1"))
+    except Exception as e:
+        logger.warning(f"Keepalive ping failed: {e}")
 
 from app.config import settings
 from app.models.article import Article
@@ -324,6 +338,7 @@ async def _match_to_existing_stories(
             articles_block=articles_block,
         )
 
+        await _keepalive(db)
         result_json = await _call_openai(prompt, max_tokens=4096)
         matches = result_json.get("matches", [])
 
@@ -452,6 +467,7 @@ async def _cluster_new_articles(
         )
         articles_block = _build_articles_block(batch, source_names)
         prompt = CLUSTERING_PROMPT.format(articles_block=articles_block)
+        await _keepalive(db)
         result_json = await _call_openai(prompt, max_tokens=4096)
 
         for group in result_json.get("groups", []):
@@ -534,6 +550,7 @@ async def _merge_hidden_stories(db: AsyncSession) -> int:
     stories_block = "\n".join(stories_lines)
 
     prompt = MERGE_PROMPT.format(stories_block=stories_block)
+    await _keepalive(db)
     result_json = await _call_openai(prompt, max_tokens=2048)
     merge_groups = result_json.get("merge_groups", [])
 

@@ -11,7 +11,12 @@ engine = create_async_engine(
     pool_size=20,
     max_overflow=20,
     pool_pre_ping=True,
-    pool_recycle=3600,
+    # Neon closes idle connections after ~5 minutes. Recycle at 4 minutes
+    # so pool_pre_ping never sees a stale connection at checkout time.
+    # Note: pool_recycle only triggers at checkout, not mid-session.
+    # For long-running sessions (e.g. clustering), see _keepalive() in
+    # app/services/clustering.py which pings before each LLM call.
+    pool_recycle=240,
 )
 
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
