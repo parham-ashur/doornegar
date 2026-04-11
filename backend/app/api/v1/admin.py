@@ -325,86 +325,78 @@ async def diagnostics(db: AsyncSession = Depends(get_db)):
     }
 
 
-# Simple in-memory tracker for the most recent maintenance run.
-# Not durable across restarts, but fine for the dashboard progress UI.
-_maintenance_state: dict = {
-    "status": "idle",  # idle | running | success | error
-    "started_at": None,
-    "finished_at": None,
-    "elapsed_s": None,
-    "results": None,
-    "error": None,
-}
+# Lock so we don't start two maintenance runs at once.
 _maintenance_lock = asyncio.Lock()
 
 
 async def _run_maintenance_background():
     """Run the full maintenance cycle as a background task.
 
-    Updates _maintenance_state so the frontend can poll /maintenance/status.
+    The per-step progress is tracked in app.services.maintenance_state.STATE
+    (populated by auto_maintenance.run_maintenance).
     """
     import sys
-    import time
+    from app.services import maintenance_state
 
-    _maintenance_state.update({
-        "status": "running",
-        "started_at": datetime.now(timezone.utc).isoformat(),
-        "finished_at": None,
-        "elapsed_s": None,
-        "results": None,
-        "error": None,
-    })
-
-    t0 = time.time()
     try:
         backend_dir = str(Path(__file__).parent.parent.parent.parent)
         if backend_dir not in sys.path:
             sys.path.insert(0, backend_dir)
         from auto_maintenance import run_maintenance
 
-        results = await run_maintenance()
-        _maintenance_state.update({
-            "status": "success",
-            "finished_at": datetime.now(timezone.utc).isoformat(),
-            "elapsed_s": round(time.time() - t0, 1),
-            "results": results,
-        })
+        await run_maintenance()
     except Exception as e:
         logger.exception("Background maintenance failed")
-        _maintenance_state.update({
-            "status": "error",
-            "finished_at": datetime.now(timezone.utc).isoformat(),
-            "elapsed_s": round(time.time() - t0, 1),
-            "error": str(e),
-        })
+        maintenance_state.finish_run("error", error=str(e))
 
 
 @router.post("/maintenance/run")
 async def run_maintenance_endpoint():
     """Kick off a maintenance run in the background and return immediately.
 
-    Poll /maintenance/status to see progress. The previous synchronous
-    implementation hit Railway's 2-minute proxy timeout on long runs.
+    Poll /maintenance/status to see per-step progress. The previous
+    synchronous implementation hit Railway's 2-minute proxy timeout.
     """
+    from app.services import maintenance_state as _ms
+
     async with _maintenance_lock:
-        if _maintenance_state.get("status") == "running":
+        if _ms.STATE.get("status") == "running":
             return {
                 "status": "already_running",
                 "message": "A maintenance run is already in progress",
-                "state": _maintenance_state,
+                "state": _ms.STATE,
             }
         # Fire and forget — uvicorn keeps the coroutine alive
         asyncio.create_task(_run_maintenance_background())
     return {
         "status": "started",
-        "message": "Maintenance is running in the background. Watch the dashboard numbers or poll /admin/maintenance/status.",
+        "message": "Maintenance is running in the background. Poll /admin/maintenance/status.",
     }
 
 
 @router.get("/maintenance/status")
 async def maintenance_status():
-    """Return the current maintenance run state (for dashboard polling)."""
-    return _maintenance_state
+    """Return the current maintenance run state (for dashboard polling).
+
+    Shape:
+    {
+      status: idle | running | success | error,
+      started_at, finished_at, elapsed_s,
+      current_step: str | null,             # step currently executing
+      current_step_started: float | null,
+      steps: [{name, status, elapsed_s, stats}, ...],  # completed so far
+      results: dict | null,                 # final results (populated at end)
+      error: str | null,
+    }
+    """
+    from app.services import maintenance_state as _ms
+    import time
+
+    state = dict(_ms.STATE)
+    # Add current step elapsed for a live ticker
+    if state.get("current_step") and state.get("current_step_started"):
+        state["current_step_elapsed_s"] = round(time.time() - state["current_step_started"], 1)
+    return state
 
 
 @router.post("/ingest/trigger")

@@ -156,6 +156,8 @@ export default function DashboardPage() {
   const [maintStart, setMaintStart] = useState<number | null>(null);
   const [maintElapsed, setMaintElapsed] = useState(0);
   const [maintResult, setMaintResult] = useState<any>(null);
+  // Live per-step status from the backend, updated by the polling effect
+  const [maintLive, setMaintLive] = useState<any>(null);
 
   // Tick elapsed time every second while running
   useEffect(() => {
@@ -173,7 +175,7 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, [running, fetchDashboard]);
 
-  // Poll maintenance status every 5s while running (fire-and-forget pattern)
+  // Poll maintenance status every 3s while running (fire-and-forget pattern)
   useEffect(() => {
     if (running !== "maintenance") return;
     const poll = async () => {
@@ -181,6 +183,7 @@ export default function DashboardPage() {
         const res = await fetch(`${API}/api/v1/admin/maintenance/status`, { headers: authHeaders() });
         if (!res.ok) return;
         const state = await res.json();
+        setMaintLive(state);
         if (state.status === "success" || state.status === "error") {
           setMaintResult(state);
           setRunning(null);
@@ -188,7 +191,8 @@ export default function DashboardPage() {
         }
       } catch {}
     };
-    const interval = setInterval(poll, 5000);
+    poll(); // immediate first call
+    const interval = setInterval(poll, 3000);
     return () => clearInterval(interval);
   }, [running, authHeaders, fetchDashboard]);
 
@@ -226,6 +230,7 @@ export default function DashboardPage() {
       setMaintStart(Date.now());
       setMaintElapsed(0);
       setMaintResult(null);
+      setMaintLive(null);
       setRunning("maintenance");
       try {
         const res = await fetch(`${API}/api/v1/admin/maintenance/run`, { method: "POST", headers: authHeaders() });
@@ -338,25 +343,76 @@ export default function DashboardPage() {
         </div>
 
         <div className="px-6 py-5 space-y-4">
-          {running === "maintenance" && (
+          {running === "maintenance" && maintLive && (
             <>
-              {/* Indeterminate bar */}
-              <div className="h-1.5 w-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
-                <div className="h-full bg-blue-500 animate-pulse" style={{ width: "40%" }} />
-              </div>
-              <p className="text-xs text-slate-600 dark:text-slate-400 leading-6">
-                The pipeline is running through these steps in order. Numbers below refresh every 5 seconds.
-              </p>
-              <ul className="text-xs space-y-1 text-slate-600 dark:text-slate-400 list-disc pr-5" dir="ltr">
-                <li>Ingest RSS feeds + Telegram channels</li>
-                <li>NLP: normalize, embed, translate new articles</li>
-                <li>Backfill Farsi titles (up to 300/run)</li>
-                <li>Cluster articles into stories</li>
-                <li>Summarize new stories</li>
-                <li>Bias scoring (up to 150/run)</li>
-                <li>Image fixes, dedup, quality checks, backups...</li>
-              </ul>
+              {/* Progress bar based on # completed steps */}
+              {(() => {
+                const TOTAL = 23; // matches pipeline length in auto_maintenance.run_maintenance
+                const done = (maintLive.steps || []).length;
+                const pct = Math.min(100, Math.round((done / TOTAL) * 100));
+                return (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-[10px] text-slate-500">
+                      <span>Step {done + 1} of {TOTAL}</span>
+                      <span>{pct}%</span>
+                    </div>
+                    <div className="h-1.5 w-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
+                      <div className="h-full bg-blue-500 transition-all duration-500" style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Currently running step */}
+              {maintLive.current_step && (
+                <div className="flex items-center gap-2 text-xs text-slate-900 dark:text-white py-2 px-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900/50">
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin text-blue-600 dark:text-blue-400 shrink-0" />
+                  <span className="font-semibold flex-1">{maintLive.current_step}</span>
+                  {maintLive.current_step_elapsed_s !== undefined && (
+                    <span className="font-mono text-[10px] text-slate-500">
+                      {maintLive.current_step_elapsed_s}s
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {/* Scrollable list of steps completed so far (most recent first) */}
+              {(maintLive.steps || []).length > 0 && (
+                <div className="border border-slate-200 dark:border-slate-800 max-h-48 overflow-y-auto" dir="ltr">
+                  {[...maintLive.steps].reverse().map((step: any, idx: number) => (
+                    <div
+                      key={`${step.name}-${idx}`}
+                      className="flex items-start gap-2 px-3 py-1.5 text-[11px] border-b border-slate-100 dark:border-slate-800/50 last:border-b-0"
+                    >
+                      {step.status === "ok" ? (
+                        <CheckCircle className="h-3 w-3 mt-0.5 shrink-0 text-emerald-500" />
+                      ) : (
+                        <XCircle className="h-3 w-3 mt-0.5 shrink-0 text-red-500" />
+                      )}
+                      <span className="flex-1 text-slate-700 dark:text-slate-300">{step.name}</span>
+                      <span className="font-mono text-slate-400 text-[10px]">{step.elapsed_s}s</span>
+                      {step.stats && typeof step.stats === "object" && (
+                        <span className="text-slate-500 text-[10px] max-w-[50%] truncate">
+                          {Object.entries(step.stats as Record<string, any>)
+                            .filter(([k, v]) => typeof v === "number" && v > 0 && k !== "error")
+                            .slice(0, 3)
+                            .map(([k, v]) => `${k}:${v}`)
+                            .join(" ") || ""}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </>
+          )}
+
+          {/* Before the first status poll lands */}
+          {running === "maintenance" && !maintLive && (
+            <div className="flex items-center gap-2 text-xs text-slate-500">
+              <RefreshCw className="h-3 w-3 animate-spin" />
+              Starting maintenance…
+            </div>
           )}
 
           {/* Live counters — refreshes every 5s while running */}
@@ -408,7 +464,7 @@ export default function DashboardPage() {
             </p>
           ) : (
             <button
-              onClick={() => { setMaintResult(null); setMaintStart(null); }}
+              onClick={() => { setMaintResult(null); setMaintStart(null); setMaintLive(null); }}
               className="px-4 py-2 text-xs font-bold text-white bg-slate-900 dark:bg-white dark:text-slate-900 hover:opacity-90"
             >
               Close
