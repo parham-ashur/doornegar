@@ -178,20 +178,42 @@ export default function DashboardPage() {
   // Poll maintenance status every 3s while running (fire-and-forget pattern)
   useEffect(() => {
     if (running !== "maintenance") return;
+    // Track how long we've been polling; if the backend reports "idle"
+    // for >15s AFTER we've already seen a "running" state, the background
+    // task died (most likely a backend restart killed it).
+    let sawRunning = false;
+    let firstIdleTs: number | null = null;
     const poll = async () => {
       try {
         const res = await fetch(`${API}/api/v1/admin/maintenance/status`, { headers: authHeaders() });
         if (!res.ok) return;
         const state = await res.json();
         setMaintLive(state);
+        if (state.status === "running") {
+          sawRunning = true;
+          firstIdleTs = null;
+        }
         if (state.status === "success" || state.status === "error") {
           setMaintResult(state);
           setRunning(null);
           fetchDashboard();
+          return;
+        }
+        // Idle-after-running = backend restarted, task died
+        if (state.status === "idle" && sawRunning) {
+          if (firstIdleTs === null) firstIdleTs = Date.now();
+          else if (Date.now() - firstIdleTs > 15000) {
+            setMaintResult({
+              status: "error",
+              error: "Backend reports idle after a run was in progress. Most likely the backend was restarted (deploy, timeout, or crash) and the asyncio task was killed. Any work that completed before the kill is already saved to the database — just start a new run to continue.",
+            });
+            setRunning(null);
+            fetchDashboard();
+          }
         }
       } catch {}
     };
-    poll(); // immediate first call
+    poll();
     const interval = setInterval(poll, 3000);
     return () => clearInterval(interval);
   }, [running, authHeaders, fetchDashboard]);
