@@ -168,6 +168,61 @@ export default function DashboardPage() {
     setRecentLoading(false);
   }, [authHeaders]);
 
+  // Data repair actions
+  const [repairRunning, setRepairRunning] = useState<string | null>(null);
+
+  const nullifyLocalhostImages = useCallback(async () => {
+    const ok = confirm(
+      "Null every article.image_url pointing to http://localhost (broken dev URLs).\n\n" +
+      "Safe operation — affects only broken URLs that are guaranteed not in R2.\n" +
+      "Next maintenance run will re-fetch og:images from article sources."
+    );
+    if (!ok) return;
+    setRepairRunning("nullify");
+    try {
+      const res = await fetch(`${API}/api/v1/admin/nullify-localhost-images`, {
+        method: "POST",
+        headers: authHeaders(),
+      });
+      const data = await res.json();
+      alert(`${data.nullified ?? 0} article image URLs nulled.`);
+    } catch (e: any) {
+      alert(`Error: ${e.message}`);
+    }
+    setRepairRunning(null);
+  }, [authHeaders]);
+
+  const unclaimStoryArticles = useCallback(async () => {
+    const storyId = prompt(
+      "Story ID to unclaim (all articles detached, story hidden):\n\n" +
+      "This is destructive — use it to blow away a badly-clustered story so\n" +
+      "its articles redistribute on the next clustering run."
+    );
+    if (!storyId || !storyId.trim()) return;
+    const ok = confirm(
+      `Detach all articles from story ${storyId.trim().slice(0, 8)}... and hide it?\n\n` +
+      "The story row is kept but marked priority = -100 and article_count = 0."
+    );
+    if (!ok) return;
+    setRepairRunning("unclaim");
+    try {
+      const res = await fetch(
+        `${API}/api/v1/admin/stories/${storyId.trim()}/unclaim-articles`,
+        { method: "POST", headers: authHeaders() }
+      );
+      const data = await res.json();
+      alert(
+        data.status === "ok"
+          ? `${data.articles_unclaimed} articles detached. Story hidden.\n\nRun maintenance to re-cluster them.`
+          : `Error: ${data.error || "unknown"}`
+      );
+      fetchRecentSummaries();
+    } catch (e: any) {
+      alert(`Error: ${e.message}`);
+    }
+    setRepairRunning(null);
+  }, [authHeaders, fetchRecentSummaries]);
+
   // Force re-summarize N stories with the current model
   const [forceRunning, setForceRunning] = useState(false);
   const forceResummarize = useCallback(async (limit: number) => {
@@ -850,6 +905,40 @@ export default function DashboardPage() {
             })}
           </div>
         )}
+      </div>
+
+      {/* Data Repair — destructive one-shot actions */}
+      <div className="mb-6 border border-red-200 dark:border-red-900/50 bg-red-50/30 dark:bg-red-950/10 p-5">
+        <h2 className="mb-4 text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+          <AlertTriangle className="h-4 w-4 text-red-500" /> Data Repair
+          <span className="text-xs font-normal text-slate-500">(one-shot admin actions)</span>
+        </h2>
+        <div className="flex flex-wrap gap-3">
+          <button
+            onClick={nullifyLocalhostImages}
+            disabled={repairRunning !== null}
+            title="Null every article.image_url starting with http://localhost — these are dev-only URLs never migrated to R2. Next maintenance run will re-fetch og:images."
+            className="flex items-center gap-2 border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/10 px-4 py-2 text-sm text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/20 disabled:opacity-50"
+          >
+            {repairRunning === "nullify" && <RefreshCw className="h-3 w-3 animate-spin" />}
+            Null localhost image URLs
+          </button>
+
+          <button
+            onClick={unclaimStoryArticles}
+            disabled={repairRunning !== null}
+            title="Detach all articles from a specific story and hide it. Use this to blow away a badly-clustered story — articles redistribute on the next clustering run."
+            className="flex items-center gap-2 border border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/10 px-4 py-2 text-sm text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/20 disabled:opacity-50"
+          >
+            {repairRunning === "unclaim" && <RefreshCw className="h-3 w-3 animate-spin" />}
+            Unclaim story articles…
+          </button>
+        </div>
+        <p className="text-[11px] text-slate-500 leading-5 mt-3">
+          These actions are destructive and take effect immediately. <strong>Null localhost URLs</strong> affects only broken-by-definition rows
+          (dev-only image paths never moved to Cloudflare R2). <strong>Unclaim story articles</strong> requires a story ID — use it to nuke a
+          badly-clustered story like the &quot;Strait of Hormuz&quot; 209-article cluster.
+        </p>
       </div>
 
       {/* Pipeline Controls */}
