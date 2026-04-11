@@ -229,6 +229,9 @@ export default function ImprovementModal({
   const [reason, setReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [lastSubmittedId, setLastSubmittedId] = useState<string | null>(null);
+  const [similarCount, setSimilarCount] = useState(0);
+  const [undoCountdown, setUndoCountdown] = useState(0);
 
   // Reset state when the modal opens with a new target
   useEffect(() => {
@@ -237,10 +240,42 @@ export default function ImprovementModal({
       setSuggestedValue("");
       setReason("");
       setSuccess(false);
+      setLastSubmittedId(null);
+      setSimilarCount(0);
+      setUndoCountdown(0);
     }
   }, [open, defaultIssueType, targetType]);
 
+  // Undo countdown tick
+  useEffect(() => {
+    if (undoCountdown <= 0) return;
+    const t = setTimeout(() => setUndoCountdown((c) => Math.max(0, c - 1)), 1000);
+    return () => clearTimeout(t);
+  }, [undoCountdown]);
+
   if (!open) return null;
+
+  const undo = async () => {
+    if (!lastSubmittedId) return;
+    try {
+      await fetch(`${API}/api/v1/improvements/self/${lastSubmittedId}`, { method: "DELETE" });
+      // Remove from local history
+      if (typeof window !== "undefined") {
+        try {
+          const raw = localStorage.getItem("doornegar_my_feedback") || "[]";
+          const arr = JSON.parse(raw) as { id: string }[];
+          const next = arr.filter((x) => x.id !== lastSubmittedId);
+          localStorage.setItem("doornegar_my_feedback", JSON.stringify(next));
+        } catch {}
+      }
+      setLastSubmittedId(null);
+      setUndoCountdown(0);
+      setSuccess(false);
+      onClose();
+    } catch {
+      // Ignore errors — deletion may have timed out
+    }
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -264,13 +299,29 @@ export default function ImprovementModal({
         }),
       });
       if (res.ok) {
+        const data = await res.json();
         setSuccess(true);
-        setTimeout(() => {
-          setSuccess(false);
-          setSuggestedValue("");
-          setReason("");
-          onClose();
-        }, 1500);
+        setLastSubmittedId(data.id);
+        setSimilarCount(data.similar_count || 0);
+        setUndoCountdown(10);
+        // Save to local history
+        if (typeof window !== "undefined") {
+          try {
+            const raw = localStorage.getItem("doornegar_my_feedback") || "[]";
+            const arr = JSON.parse(raw) as unknown[];
+            arr.unshift({
+              id: data.id,
+              target_type: targetType,
+              target_id: targetId || null,
+              issue_type: issueType,
+              reason: reason || suggestedValue || "",
+              context_label: contextLabel || "",
+              created_at: new Date().toISOString(),
+            });
+            // Keep only last 50
+            localStorage.setItem("doornegar_my_feedback", JSON.stringify(arr.slice(0, 50)));
+          } catch {}
+        }
       } else {
         alert("ارسال ناموفق بود. دوباره تلاش کنید.");
       }
@@ -311,10 +362,35 @@ export default function ImprovementModal({
           )}
 
           {success ? (
-            <div className="py-8 text-center">
+            <div className="py-8 text-center space-y-4">
               <p className="text-emerald-600 dark:text-emerald-400 font-bold">
                 متشکریم. پیشنهاد شما ثبت شد.
               </p>
+              {similarCount > 0 && (
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {similarCount === 1
+                    ? "۱ نفر دیگر هم این مورد را گزارش داده است"
+                    : `${similarCount} نفر دیگر هم این مورد را گزارش داده‌اند`}
+                </p>
+              )}
+              {undoCountdown > 0 && (
+                <button
+                  type="button"
+                  onClick={undo}
+                  className="text-xs text-red-500 hover:text-red-600 underline"
+                >
+                  بازگرداندن ({undoCountdown})
+                </button>
+              )}
+              <div>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="text-xs text-slate-500 hover:text-slate-900 dark:hover:text-white"
+                >
+                  بستن
+                </button>
+              </div>
             </div>
           ) : (
             <form onSubmit={submit} className="space-y-4">

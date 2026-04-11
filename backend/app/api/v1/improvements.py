@@ -2,10 +2,10 @@
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.admin import require_admin
@@ -36,7 +36,23 @@ async def submit_feedback(
     body: ImprovementSubmit,
     db: AsyncSession = Depends(get_db),
 ):
-    """Submit improvement feedback. Rate-limited to 30/hour/IP."""
+    """Submit improvement feedback. Rate-limited to 60/hour/IP."""
+    # Count similar open/in_progress items flagged by others with the same
+    # target and issue type. Used for the "X others flagged this" hint.
+    similar_count = 0
+    if body.target_id:
+        result = await db.execute(
+            select(func.count(ImprovementFeedback.id)).where(
+                and_(
+                    ImprovementFeedback.target_type == body.target_type,
+                    ImprovementFeedback.target_id == body.target_id,
+                    ImprovementFeedback.issue_type == body.issue_type,
+                    ImprovementFeedback.status.in_(["open", "in_progress"]),
+                )
+            )
+        )
+        similar_count = result.scalar() or 0
+
     item = ImprovementFeedback(
         target_type=body.target_type,
         target_id=body.target_id,
@@ -60,7 +76,40 @@ async def submit_feedback(
         id=item.id,
         status="open",
         message="متشکریم. پیشنهاد شما ثبت شد.",
+        similar_count=similar_count,
     )
+
+
+# ─── Self-service retraction (Undo within 60 seconds) ────────
+
+@router.delete("/self/{item_id}", status_code=200)
+@_limiter.limit("30/hour")
+async def retract_feedback(
+    request: Request,
+    item_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Allow a rater to delete their own feedback within 60 seconds of creation.
+
+    This is a self-service undo. No auth required, but the item must have
+    been created within the last 60 seconds and must still be in 'open' status.
+    """
+    result = await db.execute(
+        select(ImprovementFeedback).where(ImprovementFeedback.id == item_id)
+    )
+    item = result.scalar_one_or_none()
+    if not item:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    age = datetime.now(timezone.utc) - item.created_at
+    if age > timedelta(seconds=60):
+        raise HTTPException(status_code=403, detail="Too late to undo")
+    if item.status != "open":
+        raise HTTPException(status_code=403, detail="Already being processed")
+
+    await db.delete(item)
+    await db.commit()
+    return {"status": "deleted"}
 
 
 # ─── Admin endpoints ──────────────────────────────────────────

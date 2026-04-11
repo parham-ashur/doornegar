@@ -1,5 +1,6 @@
 import { setRequestLocale } from "next-intl/server";
 import HomepageLayout from "@/components/home/HomepageLayout";
+import RaterOnboarding from "@/components/improvement/RaterOnboarding";
 import type { StoryBrief } from "@/lib/types";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -51,6 +52,9 @@ export default async function RatePage({
 
   return (
     <>
+      {/* Onboarding modal (shown once) + history panel (shown if any submissions exist) */}
+      <RaterOnboarding />
+
       {/* Feedback mode banner */}
       <div dir="rtl" className="bg-blue-50 dark:bg-blue-950/30 border-b border-blue-200 dark:border-blue-900/50 px-4 py-3">
         <div className="mx-auto max-w-7xl flex items-center justify-between gap-4">

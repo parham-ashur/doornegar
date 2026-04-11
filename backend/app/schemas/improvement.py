@@ -38,6 +38,7 @@ class ImprovementResponse(BaseModel):
     id: uuid.UUID
     status: str
     message: str
+    similar_count: int = 0  # How many others flagged the same target+issue
 
 
 class ImprovementDetail(BaseModel):

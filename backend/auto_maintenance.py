@@ -460,6 +460,152 @@ async def step_rater_feedback_apply():
     return stats
 
 
+async def step_feedback_health():
+    """Monitor the improvement feedback and source suggestion systems.
+
+    Tracks:
+    - New items received in last 24h (raters are engaged?)
+    - Open items waiting for review
+    - Stale items (open for >14 days — may need attention or archival)
+    - Oldest unresolved item age
+    """
+    from datetime import datetime, timedelta, timezone
+    from sqlalchemy import select, func
+
+    from app.database import async_session
+    from app.models.improvement import ImprovementFeedback
+    from app.models.suggestion import SourceSuggestion
+
+    stats = {
+        "improvements": {},
+        "suggestions": {},
+        "alerts": [],
+    }
+
+    now = datetime.now(timezone.utc)
+    last_24h = now - timedelta(hours=24)
+    stale_threshold = now - timedelta(days=14)
+
+    async with async_session() as db:
+        # ─── Improvement feedback stats ─────────────────────────
+        total_improvements = (
+            await db.execute(select(func.count(ImprovementFeedback.id)))
+        ).scalar() or 0
+        new_24h = (
+            await db.execute(
+                select(func.count(ImprovementFeedback.id)).where(
+                    ImprovementFeedback.created_at >= last_24h
+                )
+            )
+        ).scalar() or 0
+        open_count = (
+            await db.execute(
+                select(func.count(ImprovementFeedback.id)).where(
+                    ImprovementFeedback.status == "open"
+                )
+            )
+        ).scalar() or 0
+        in_progress_count = (
+            await db.execute(
+                select(func.count(ImprovementFeedback.id)).where(
+                    ImprovementFeedback.status == "in_progress"
+                )
+            )
+        ).scalar() or 0
+        done_count = (
+            await db.execute(
+                select(func.count(ImprovementFeedback.id)).where(
+                    ImprovementFeedback.status == "done"
+                )
+            )
+        ).scalar() or 0
+        stale_open = (
+            await db.execute(
+                select(func.count(ImprovementFeedback.id)).where(
+                    ImprovementFeedback.status == "open",
+                    ImprovementFeedback.created_at < stale_threshold,
+                )
+            )
+        ).scalar() or 0
+        oldest_open_dt = (
+            await db.execute(
+                select(func.min(ImprovementFeedback.created_at)).where(
+                    ImprovementFeedback.status == "open"
+                )
+            )
+        ).scalar()
+
+        stats["improvements"] = {
+            "total": total_improvements,
+            "new_24h": new_24h,
+            "open": open_count,
+            "in_progress": in_progress_count,
+            "done": done_count,
+            "stale_open": stale_open,
+            "oldest_open_days": (
+                (now - oldest_open_dt).days if oldest_open_dt else None
+            ),
+        }
+
+        if stale_open > 0:
+            stats["alerts"].append(
+                f"{stale_open} improvement feedback item(s) open for more than 14 days"
+            )
+        if open_count > 50:
+            stats["alerts"].append(
+                f"Backlog is large: {open_count} open improvement items (consider batch review)"
+            )
+
+        # ─── Source suggestion stats ─────────────────────────
+        total_suggestions = (
+            await db.execute(select(func.count(SourceSuggestion.id)))
+        ).scalar() or 0
+        sugg_new_24h = (
+            await db.execute(
+                select(func.count(SourceSuggestion.id)).where(
+                    SourceSuggestion.created_at >= last_24h
+                )
+            )
+        ).scalar() or 0
+        sugg_pending = (
+            await db.execute(
+                select(func.count(SourceSuggestion.id)).where(
+                    SourceSuggestion.status == "pending"
+                )
+            )
+        ).scalar() or 0
+        sugg_stale_pending = (
+            await db.execute(
+                select(func.count(SourceSuggestion.id)).where(
+                    SourceSuggestion.status == "pending",
+                    SourceSuggestion.created_at < stale_threshold,
+                )
+            )
+        ).scalar() or 0
+
+        stats["suggestions"] = {
+            "total": total_suggestions,
+            "new_24h": sugg_new_24h,
+            "pending": sugg_pending,
+            "stale_pending": sugg_stale_pending,
+        }
+
+        if sugg_stale_pending > 0:
+            stats["alerts"].append(
+                f"{sugg_stale_pending} source suggestion(s) pending for more than 14 days"
+            )
+
+    logger.info(
+        f"Feedback health: {new_24h} new improvements + {sugg_new_24h} new suggestions in last 24h; "
+        f"{open_count} open, {sugg_pending} pending review"
+    )
+    if stats["alerts"]:
+        for alert in stats["alerts"]:
+            logger.warning(f"  ⚠ {alert}")
+
+    return stats
+
+
 async def step_archive_stale():
     """Archive stories older than 30 days with no new articles."""
     from sqlalchemy import select, update, func, delete
@@ -1153,6 +1299,7 @@ async def run_maintenance():
         ("dedup_articles", step_deduplicate_articles),
         ("fixes", step_fix_issues),
         ("rater_feedback", step_rater_feedback_apply),
+        ("feedback_health", step_feedback_health),
         ("telegram_health", step_telegram_health),
         ("visual", step_visual_check),
         ("uptime", step_uptime_check),
