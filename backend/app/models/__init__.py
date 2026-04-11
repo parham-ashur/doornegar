@@ -6,6 +6,7 @@ from app.models.rating import CommunityRating
 from app.models.social import SocialSentimentSnapshot, TelegramChannel, TelegramPost
 from app.models.source import Source
 from app.models.story import Story
+from app.models.suggestion import SourceSuggestion
 from app.models.topic import Topic, TopicArticle
 from app.models.user import User
 
@@ -17,6 +18,7 @@ __all__ = [
     "RaterFeedback",
     "SocialSentimentSnapshot",
     "Source",
+    "SourceSuggestion",
     "Story",
     "TelegramChannel",
     "TelegramPost",

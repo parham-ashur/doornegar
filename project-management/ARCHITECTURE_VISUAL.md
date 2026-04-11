@@ -546,9 +546,11 @@ flowchart TD
 
 
 
+
+
 ---
 
-## Auto-detected changes (2026-04-10 16:29)
+## Auto-detected changes (2026-04-11 12:37)
 
 **New service files**: image_downloader.py, llm_utils.py, rating_aggregation.py, scraper.py, seed_telegram.py, social_posting.py
 

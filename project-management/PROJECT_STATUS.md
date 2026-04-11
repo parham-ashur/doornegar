@@ -1,6 +1,6 @@
 # Doornegar - Project Status
 
-**Last updated**: 2026-04-10 16:29 (auto-maintenance)
+**Last updated**: 2026-04-11 12:37 (auto-maintenance)
 
 ## What is Doornegar?
 
@@ -55,7 +55,7 @@ From local development DB, April 10, 2026:
 | News sources | 28 |
 | Articles ingested | ~1,300+ |
 | Stories (visible, ≥2 sources) | 294 |
-| Stories with AI summaries | 132 |
+| Stories with AI summaries | 180 |
 | Images stored in R2 | 765 |
 | Telegram channels tracked | 16 |
 | Media dimension scores | 28 sources × 8 dimensions |
