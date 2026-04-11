@@ -281,18 +281,45 @@ async def score_article_bias(
         return None
 
 
+async def _keepalive(db: AsyncSession) -> None:
+    """Ping the DB connection with SELECT 1 to reset Neon's idle timer.
+
+    Neon closes idle connections after ~5 min. Bias scoring loops through
+    articles with a ~5-10s LLM call per article — if the loop is long
+    enough, the session's underlying connection dies. Calling this before
+    each LLM call keeps the gap between DB touches far under 5 min.
+    """
+    from sqlalchemy import text
+    try:
+        await db.execute(text("SELECT 1"))
+    except Exception as e:
+        logger.warning(f"Bias scoring keepalive ping failed: {e}")
+
+
 async def score_unscored_articles(db: AsyncSession, batch_size: int = 20) -> dict:
     """Score all articles that don't have bias scores yet.
 
+    - Skips articles whose last LLM attempt failed <24h ago (retry backoff)
+    - Keeps Neon connection warm via _keepalive() before each LLM call
+    - Commits per-article so partial progress survives session death
+
     Returns stats: {scored, failed, skipped}.
     """
-    # Find articles without bias scores
+    from datetime import timedelta as _td
+
+    # Find articles without bias scores (and not recently-failed)
     scored_article_ids = select(BiasScore.article_id).distinct()
+    now = datetime.now(timezone.utc)
+    retry_cutoff = now - _td(hours=24)
+
     result = await db.execute(
         select(Article)
         .where(
             Article.id.notin_(scored_article_ids),
             Article.story_id.isnot(None),  # Only score articles in stories
+            # Skip articles whose LLM attempt failed in the last 24h (if the column exists)
+            # (llm_failed_at IS NULL OR llm_failed_at < retry_cutoff)
+            (Article.llm_failed_at.is_(None)) | (Article.llm_failed_at < retry_cutoff),
         )
         .limit(batch_size)
     )
@@ -305,13 +332,16 @@ async def score_unscored_articles(db: AsyncSession, batch_size: int = 20) -> dic
             stats["skipped"] += 1
             continue
 
+        await _keepalive(db)
         bias_score = await score_article_bias(article, db)
         if bias_score:
             stats["scored"] += 1
+            article.llm_failed_at = None  # clear any previous failure flag
         else:
             stats["failed"] += 1
+            article.llm_failed_at = now  # mark so we don't retry for 24h
+        await db.commit()  # commit per article — partial progress survives
 
-    await db.commit()
     logger.info(f"Bias scoring complete: {stats}")
     return stats
 

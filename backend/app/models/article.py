@@ -46,6 +46,13 @@ class Article(Base):
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+    # Reliability / backoff flags
+    # Set when an LLM call (bias scoring) fails; skipped on retry for 24h
+    llm_failed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Set when step_fix_images last HEAD-checked this article's image_url;
+    # checks within the last 24h are skipped to avoid wasted HTTP calls
+    image_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     # Relationships
     source: Mapped["Source"] = relationship(back_populates="articles")  # noqa: F821
     story: Mapped["Story | None"] = relationship(back_populates="articles")  # noqa: F821

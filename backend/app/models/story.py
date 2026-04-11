@@ -50,6 +50,8 @@ class Story(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+    # Reliability flag: set when summary generation fails; story is skipped for 24h before retry
+    llm_failed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     articles: Mapped[list["Article"]] = relationship(back_populates="story")  # noqa: F821

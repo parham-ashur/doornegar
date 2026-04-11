@@ -199,14 +199,20 @@ async def step_cluster():
 async def step_summarize():
     """Step 4: Generate summaries for stories without one.
 
-    Uses TIERED model selection:
+    Tiered model selection:
     - Stories in the top `premium_story_top_n` trending → premium model
       (e.g. gpt-5-mini, better quality for homepage-visible content)
     - All other stories → baseline model (e.g. gpt-4o-mini, cheaper)
+
+    Reliability features:
+    - _keepalive() ping before each LLM call to keep Neon connection warm
+    - Skips stories where last LLM attempt failed <24h ago (retry backoff)
+    - Loads only the 10 most recent articles per story (memory-efficient)
+    - Commits per story so partial progress survives crashes
     """
     import json as _json
 
-    from sqlalchemy import select
+    from sqlalchemy import select, text
     from sqlalchemy.orm import selectinload
 
     from app.config import settings
@@ -215,8 +221,16 @@ async def step_summarize():
     from app.models.story import Story
     from app.services.story_analysis import generate_story_analysis
 
+    async def _keepalive(db):
+        try:
+            await db.execute(text("SELECT 1"))
+        except Exception as e:
+            logger.warning(f"Summarize keepalive ping failed: {e}")
+
+    MAX_ARTICLES_PER_STORY = 10  # cap memory + prompt cost
+
     async with async_session() as db:
-        # 1. Pre-compute the set of top-N trending story IDs (homepage tier)
+        # 1. Pre-compute top-N trending story IDs (homepage tier)
         top_result = await db.execute(
             select(Story.id)
             .where(Story.article_count >= 5)
@@ -225,18 +239,22 @@ async def step_summarize():
         )
         top_ids = {row[0] for row in top_result.all()}
 
-        # 2. Find stories that need summarization
+        # 2. Find stories that need a summary (skip recently-failed)
+        retry_cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
         result = await db.execute(
             select(Story)
-            .options(selectinload(Story.articles).selectinload(Article.source))
-            .where(Story.summary_fa.is_(None), Story.article_count >= 5)
+            .where(
+                Story.summary_fa.is_(None),
+                Story.article_count >= 5,
+                (Story.llm_failed_at.is_(None)) | (Story.llm_failed_at < retry_cutoff),
+            )
             .order_by(Story.article_count.desc())
         )
         stories = list(result.scalars().all())
 
         if not stories:
             logger.info("Summarize: all visible stories have summaries")
-            return {"generated": 0, "premium": 0, "baseline": 0}
+            return {"generated": 0, "premium": 0, "baseline": 0, "failed": 0}
 
         logger.info(
             f"Generating summaries for {len(stories)} stories "
@@ -244,9 +262,21 @@ async def step_summarize():
             f"rest → {settings.story_analysis_model})..."
         )
         success = 0
+        failed = 0
         premium_used = 0
         baseline_used = 0
         for story in stories:
+            # Lazy-load only the N most recent articles with their sources —
+            # avoids eager-loading hundreds of rows per story.
+            art_result = await db.execute(
+                select(Article)
+                .options(selectinload(Article.source))
+                .where(Article.story_id == story.id)
+                .order_by(Article.published_at.desc().nullslast())
+                .limit(MAX_ARTICLES_PER_STORY)
+            )
+            top_articles = list(art_result.scalars().all())
+
             articles_info = [
                 {
                     "title": a.title_original or a.title_fa or a.title_en or "",
@@ -254,7 +284,7 @@ async def step_summarize():
                     "source_name_fa": a.source.name_fa if a.source else "نامشخص",
                     "state_alignment": a.source.state_alignment if a.source else "",
                 }
-                for a in story.articles
+                for a in top_articles
             ]
             # Tier selection
             if story.id in top_ids:
@@ -264,6 +294,7 @@ async def step_summarize():
                 chosen_model = settings.story_analysis_model
                 tier_label = "baseline"
             try:
+                await _keepalive(db)
                 analysis = await generate_story_analysis(story, articles_info, model=chosen_model)
                 story.summary_fa = analysis.get("summary_fa")
                 story.summary_en = _json.dumps({
@@ -274,17 +305,31 @@ async def step_summarize():
                     "scores": analysis.get("scores"),
                     "llm_model_used": chosen_model,
                 }, ensure_ascii=False)
+                story.llm_failed_at = None  # clear any previous failure
                 await db.commit()
                 success += 1
                 if tier_label == "premium":
                     premium_used += 1
                 else:
                     baseline_used += 1
-                logger.info(f"  ✓ [{tier_label}] {story.title_fa[:40]}")
+                logger.info(f"  ✓ [{tier_label}] {(story.title_fa or '')[:40]}")
             except Exception as e:
-                logger.warning(f"  ✗ [{tier_label}] {story.title_fa[:40]}: {e}")
+                logger.warning(f"  ✗ [{tier_label}] {(story.title_fa or '')[:40]}: {e}")
+                failed += 1
+                # Mark as recently-failed so we don't retry for 24h.
+                # Guard the mark itself in case the session is broken.
+                try:
+                    story.llm_failed_at = datetime.now(timezone.utc)
+                    await db.commit()
+                except Exception:
+                    await db.rollback()
 
-        return {"generated": success, "premium": premium_used, "baseline": baseline_used}
+        return {
+            "generated": success,
+            "premium": premium_used,
+            "baseline": baseline_used,
+            "failed": failed,
+        }
 
 
 async def step_fix_images():
@@ -326,10 +371,20 @@ async def step_fix_images():
 
     async with async_session() as db:
         # --- Pass 1: HEAD-check up to 300 article images, null out broken ones ---
+        # Skip articles checked within the last 24h (stable URLs don't need
+        # re-checking every run — saves ~5-10 min of HTTP HEAD waste).
+        check_cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
         result = await db.execute(
-            select(Article).where(Article.image_url.isnot(None)).limit(300)
+            select(Article)
+            .where(
+                Article.image_url.isnot(None),
+                (Article.image_checked_at.is_(None)) | (Article.image_checked_at < check_cutoff),
+            )
+            .limit(300)
         )
         articles = list(result.scalars().all())
+        stats["skipped_recent"] = 0  # will be set when we know how many we skipped
+        now_ts = datetime.now(timezone.utc)
 
         async with httpx.AsyncClient(timeout=5, follow_redirects=True) as client:
             for a in articles:
@@ -337,6 +392,7 @@ async def step_fix_images():
                 # localhost URLs are definitely broken on production; null fast
                 if a.image_url and a.image_url.startswith("http://localhost"):
                     a.image_url = None
+                    a.image_checked_at = now_ts  # don't re-check NULL either
                     stats["nulled"] += 1
                     continue
                 try:
@@ -344,8 +400,10 @@ async def step_fix_images():
                     if r.status_code != 200:
                         a.image_url = None
                         stats["nulled"] += 1
+                    a.image_checked_at = now_ts
                 except Exception:
                     a.image_url = None
+                    a.image_checked_at = now_ts
                     stats["nulled"] += 1
 
         await db.commit()
@@ -924,10 +982,15 @@ async def step_deduplicate_articles():
     stats = {"duplicates_found": 0, "removed": 0}
 
     async with async_session() as db:
-        # Find articles with the same title_fa that belong to different stories
+        # Find articles with the same non-trivial title_fa.
+        # Guard against NULL, empty string, and very short titles — those
+        # would group unrelated articles together and false-positive.
         result = await db.execute(
             select(Article.title_fa, func.count(Article.id).label("cnt"))
-            .where(Article.title_fa.isnot(None))
+            .where(
+                Article.title_fa.isnot(None),
+                func.length(func.trim(Article.title_fa)) >= 10,
+            )
             .group_by(Article.title_fa)
             .having(func.count(Article.id) > 1)
             .limit(50)
@@ -1113,17 +1176,20 @@ async def step_fix_issues():
 
         if english_in_fa and settings.openai_api_key:
             from openai import OpenAI
+            from app.services.llm_helper import build_openai_params
             client = OpenAI(api_key=settings.openai_api_key)
             fixed = 0
             for batch_start in range(0, len(english_in_fa), 30):
                 batch = english_in_fa[batch_start:batch_start + 30]
                 titles = "\n".join(f"{i+1}. {a.title_fa}" for i, a in enumerate(batch))
                 try:
-                    resp = client.chat.completions.create(
-                        model="gpt-4o-mini",
-                        messages=[{"role": "user", "content": f"Translate these English headlines to Farsi. Return ONLY translations, numbered.\n\n{titles}"}],
-                        max_tokens=2000, temperature=0,
+                    params = build_openai_params(
+                        model=settings.translation_model,
+                        prompt=f"Translate these English headlines to Farsi. Return ONLY translations, numbered.\n\n{titles}",
+                        max_tokens=2000,
+                        temperature=0,
                     )
+                    resp = client.chat.completions.create(**params)
                     lines = resp.choices[0].message.content.strip().split("\n")
                     for i, article in enumerate(batch):
                         if i < len(lines):
