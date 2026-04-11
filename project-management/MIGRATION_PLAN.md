@@ -1,5 +1,41 @@
 # Doornegar - OVHcloud VPS Migration Plan
 
+**Last updated**: 2026-04-12 (after the maintenance pipeline audit session)
+
+## Strategic context — when to migrate
+
+Do **not** migrate right now. We hardened the Railway + Neon setup this session with connection keepalives, retry backoffs, memory caps, and batched queries. That code is good. Moving infra now would be churn.
+
+**Migrate when any of these become true:**
+
+| Trigger | Why it matters |
+|---|---|
+| Railway free credit runs out (~$5/month) | Hard cost event |
+| Steady-state monthly bill on Railway > $20 | OVH VPS Value plan is $6/month fixed |
+| You need > 512 MB RAM sustained (frequent OOM) | OVH gives 4 GB on $6 plan |
+| You get > 10 concurrent users / Neon pool exhausts | Self-hosted Postgres removes the cap |
+| IID (nonprofit) is legally formed and has a bank account | Proper entity to own infra contracts |
+| A co-maintainer joins who can share ops burden | VPS requires ~1 hour/month ongoing work |
+
+**Also migrate if the data-sovereignty narrative becomes strategically important** — e.g., applying for French civic-tech grants, or public messaging that "Iranian reader data lives on French soil under GDPR." OVH is a French company; Railway and Neon are US-based.
+
+## What moving to OVH actually fixes vs what it doesn't
+
+### Fixes ✅
+- **Container restart killing async tasks** — a VPS runs systemd; restarts only happen when you ask for them. No more Railway-rebuilds-mid-run frustrations.
+- **Ephemeral filesystem** — real disk; `maintenance.log` survives, durable file history possible.
+- **Memory ceiling** — 4 GB vs 512 MB. No OOM anxiety.
+- **Cron reliability** — systemd timers with `journalctl` logs, much more observable than Railway's cron.
+- **Cost predictability** — $6/month fixed.
+- **Data sovereignty** — French compute + (optionally) French Postgres.
+- **Deploy control** — no auto-deploy unless you wire it up yourself.
+
+### Doesn't fix ❌
+- **Neon idle-connection timeout** — this is a Neon thing, not a Railway thing. Moving compute to OVH but keeping Neon as the DB still requires the `_keepalive` patches we added on 2026-04-11/12. Only way to truly eliminate it is to self-host Postgres on the same VPS.
+- **OpenAI LLM costs** — same bills either way.
+- **Deploy discipline** — if you set up auto-deploy on OVH (e.g. via GitHub Actions), same "don't push during a run" issue applies.
+- **Actual code bugs** (clustering drift, retry loops, image relevance) — all code-level, infra-independent.
+
 ## Overview
 
 Migrate all Doornegar services from multiple cloud providers to a single OVHcloud VPS to reduce costs and simplify infrastructure.
@@ -8,13 +44,24 @@ Migrate all Doornegar services from multiple cloud providers to a single OVHclou
 
 | Service | Current Provider | Monthly Cost | Migration Target |
 |---------|-----------------|--------------|------------------|
-| Backend API | Railway | ~$5-20 | VPS: Docker + FastAPI |
-| PostgreSQL | Neon (free tier) | $0 | VPS: PostgreSQL 16 + pgvector |
-| Redis | Upstash (free tier) | $0 | VPS: Redis 7 |
-| Frontend | Vercel (free tier) | $0 | VPS: Nginx + Next.js standalone |
-| Domain/DNS | (current provider) | varies | OVHcloud DNS or Cloudflare |
+| Backend API (web) | Railway | $5 free credit, then ~$10-20 | VPS: Docker + FastAPI via Nginx |
+| Maintenance cron | Railway cron service | Included in Railway credit | VPS: systemd timer |
+| PostgreSQL | Neon (free tier) | $0 | VPS Option A: self-hosted with pgvector<br>VPS Option B: keep Neon |
+| Redis | Upstash (free tier) | $0 | VPS: Redis 7 (or keep Upstash) |
+| Frontend | Vercel (free tier) | $0 | VPS: Nginx + Next.js standalone<br>OR keep Vercel (simpler) |
+| Image storage | Cloudflare R2 | $0 (under 10 GB) | **Keep R2** — CDN-backed, cheap, portable |
+| LLM APIs | OpenAI + (unused) Anthropic | ~$8-10 (post 3-tier refactor) | No change |
+| Domain/DNS | (to be purchased) | ~$10/year | OVHcloud DNS or Cloudflare |
 
-**Estimated VPS cost**: ~$6-12/month for a VPS with 4GB RAM, 2 vCPUs, 80GB SSD
+**Estimated VPS cost**: **~$6/month** for OVH VPS Value (2 vCPUs, 4 GB RAM,
+80 GB SSD) — the recommended plan. Bigger tiers are available if you outgrow
+it, but for prelaunch this is plenty.
+
+**Total monthly cost after migration**:
+- **Option A (self-hosted Postgres + keep R2 + keep Vercel)**: ~$14-16/month ($6 VPS + $8-10 LLM)
+- **Option B (keep Neon + keep R2 + keep Vercel)**: same ~$14-16/month
+- **Option C (everything on VPS, no Vercel, no R2)**: still ~$14-16/month,
+  but you own more ops burden — not recommended unless scale demands it.
 
 ## Prerequisites
 
@@ -110,31 +157,13 @@ Before starting the migration:
         redis:
           condition: service_healthy
 
-    worker:
-      build:
-        context: ./backend
-        dockerfile: Dockerfile
-      restart: always
-      command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=2
-      env_file: .env
-      depends_on:
-        db:
-          condition: service_healthy
-        redis:
-          condition: service_healthy
-
-    beat:
-      build:
-        context: ./backend
-        dockerfile: Dockerfile
-      restart: always
-      command: celery -A app.workers.celery_app beat --loglevel=info
-      env_file: .env
-      depends_on:
-        db:
-          condition: service_healthy
-        redis:
-          condition: service_healthy
+    # Maintenance cron: runs auto_maintenance.py once a day.
+    # NOTE: we don't use Celery in production anymore. The maintenance
+    # pipeline is a standalone script (backend/auto_maintenance.py) and
+    # the web service exposes /admin/maintenance/run for on-demand runs
+    # via the dashboard. For scheduled runs on a VPS, use a HOST crontab
+    # or systemd timer instead of a long-running container. Example
+    # systemd unit files are in section "Phase 2b" below.
 
     frontend:
       build:
@@ -151,30 +180,127 @@ Before starting the migration:
     redisdata:
   ```
 
-- [ ] **2.3** Create production `.env` file (store securely, never commit):
+- [ ] **2.3** Create production `.env` file (store securely, never commit). The
+  canonical reference for every variable is `backend/.env.example` — keep
+  that file in sync whenever config fields are added. Current set:
   ```
-  # Database
+  # --- Core app ---
+  ENVIRONMENT=production
+  DEBUG=false
+  PORT=8000
+  SECRET_KEY=GENERATE_WITH_openssl_rand_hex_48
+  ADMIN_TOKEN=GENERATE_WITH_openssl_rand_hex_48
+  CORS_ORIGINS=https://doornegar.yourdomain.com,https://www.yourdomain.com
+
+  # --- Database ---
+  # If self-hosted on this VPS:
   DATABASE_URL=postgresql+asyncpg://doornegar:STRONG_PASSWORD@db:5432/doornegar
   DB_PASSWORD=STRONG_PASSWORD
+  # OR keep Neon (no change needed) — still requires the _keepalive fixes in
+  # clustering.py, bias_scoring.py, and auto_maintenance.step_summarize
 
-  # Redis
+  # --- Redis ---
   REDIS_URL=redis://:REDIS_STRONG_PASSWORD@redis:6379/0
   REDIS_PASSWORD=REDIS_STRONG_PASSWORD
 
-  # App
-  ENVIRONMENT=production
-  DEBUG=false
-  SECRET_KEY=GENERATE_A_LONG_RANDOM_STRING
-  CORS_ORIGINS=https://yourdomain.com,https://www.yourdomain.com
+  # --- LLM (3-tier strategy) ---
+  OPENAI_API_KEY=sk-...
+  ANTHROPIC_API_KEY=               # optional fallback, not required
+  BIAS_SCORING_MODEL=gpt-4o-mini
+  STORY_ANALYSIS_MODEL=gpt-4o-mini
+  STORY_ANALYSIS_PREMIUM_MODEL=gpt-5-mini
+  TRANSLATION_MODEL=gpt-4.1-nano
+  CLUSTERING_MODEL=gpt-5-mini
+  PREMIUM_STORY_TOP_N=30
 
-  # LLM
-  ANTHROPIC_API_KEY=sk-ant-...
-  BIAS_SCORING_MODEL=claude-haiku-4-5-20251001
+  # --- Clustering safety limits ---
+  MAX_CLUSTER_SIZE=30
+  CLUSTERING_TIME_WINDOW_DAYS=7
+  CLUSTERING_SIMILARITY_THRESHOLD=0.45
+  STORY_MERGE_THRESHOLD=0.55
 
-  # Telegram
-  TELEGRAM_API_ID=your_api_id
-  TELEGRAM_API_HASH=your_api_hash
+  # --- Cloudflare R2 (keep even on OVH — migrating images is not worth it) ---
+  R2_ACCOUNT_ID=...
+  R2_ACCESS_KEY_ID=...
+  R2_SECRET_ACCESS_KEY=...
+  R2_BUCKET_NAME=doornegar-images
+  R2_PUBLIC_URL=https://pub-xxx.r2.dev
+
+  # --- Telegram ---
+  TELEGRAM_API_ID=0
+  TELEGRAM_API_HASH=
+  TELEGRAM_CHANNEL_USERNAME=
+
+  # --- Ingestion tunables ---
+  INGESTION_INTERVAL_MINUTES=15
+  INGESTION_TIMEOUT_SECONDS=30
+  MAX_ARTICLES_PER_FEED=50
   ```
+
+  **Generate secrets**:
+  ```bash
+  python3 -c "import secrets; print(secrets.token_urlsafe(48))"
+  # run 4x for SECRET_KEY, ADMIN_TOKEN, DB_PASSWORD, REDIS_PASSWORD
+  ```
+
+### Phase 2b: Maintenance cron via systemd timer (Day 1-2)
+
+Instead of running Celery workers, schedule the maintenance pipeline with
+a host-level systemd timer that `docker exec`s into the backend container.
+More transparent than Railway's cron service, with `journalctl` logs.
+
+- [ ] **2b.1** Create `/etc/systemd/system/doornegar-maintenance.service`:
+  ```ini
+  [Unit]
+  Description=Doornegar maintenance pipeline (one-shot)
+  After=docker.service network-online.target
+  Requires=docker.service
+
+  [Service]
+  Type=oneshot
+  WorkingDirectory=/opt/doornegar
+  User=doornegar
+  ExecStart=/usr/bin/docker exec doornegar-backend python auto_maintenance.py
+  TimeoutStartSec=3600
+  StandardOutput=journal
+  StandardError=journal
+  ```
+
+- [ ] **2b.2** Create `/etc/systemd/system/doornegar-maintenance.timer`:
+  ```ini
+  [Unit]
+  Description=Run Doornegar maintenance nightly
+  After=docker.service
+
+  [Timer]
+  OnCalendar=*-*-* 04:00:00 Europe/Paris
+  # 06:00 summer time / 05:00 winter time — runs while you're asleep
+  Persistent=true
+
+  [Install]
+  WantedBy=timers.target
+  ```
+
+- [ ] **2b.3** Enable and start:
+  ```bash
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now doornegar-maintenance.timer
+  systemctl list-timers doornegar-maintenance.timer
+  journalctl -u doornegar-maintenance.service -n 100 --follow
+  ```
+
+- [ ] **2b.4** Manual trigger (for testing):
+  ```bash
+  sudo systemctl start doornegar-maintenance.service
+  journalctl -u doornegar-maintenance.service -f
+  ```
+
+**Why not Celery beat?**: we don't use it in production anymore. The pipeline
+is a single script (`auto_maintenance.py`) and the dashboard triggers on-demand
+runs via `POST /admin/maintenance/run` (fire-and-forget asyncio task). On a
+VPS, systemd timers + journalctl give more durability and visibility than
+a Celery beat container — and the daily cadence means no long-lived worker
+is needed.
 
 ### Phase 3: Database Migration (Day 2)
 
@@ -370,3 +496,131 @@ If something goes wrong during migration:
 - Consider fail2ban for SSH brute-force protection
 - All traffic through HTTPS (redirect HTTP to HTTPS in Nginx)
 - Backend only listens on 127.0.0.1 (not exposed to internet directly)
+- `ADMIN_TOKEN` must be rotated if it was ever exposed (e.g. shared in chat
+  or committed accidentally). Check `backend/.env.example` for the full
+  list of secrets that need rotation.
+
+## Postgres strategy: self-host vs keep Neon
+
+You have two reasonable options for the database when migrating to OVH.
+Pick ONE.
+
+### Option A — Self-host Postgres on the same VPS (recommended long-term)
+```
+Pros:
++ Zero idle-connection timeout (same-machine, no Neon 5-min kill)
++ No external DB dependency
++ Lower latency (Unix socket or localhost TCP)
++ Full data sovereignty
++ No separate backup provider needed (backups live on the same VPS)
+Cons:
+- You're now responsible for PostgreSQL operations:
+  - Daily backups + offsite copies
+  - Point-in-time recovery if you need it
+  - Security patches
+  - pgvector extension installation
+- If the VPS dies, BOTH the app and the database die with it
+```
+
+**When to pick this**: if you're migrating anyway, and you want to fully
+decommission Neon for cost/sovereignty reasons.
+
+### Option B — Keep Neon as the database
+```
+Pros:
++ Zero DB operations work for you
++ Neon handles backups, PITR, failover
++ Simpler cutover (only compute moves)
++ Can roll back by pointing Railway DNS at Neon
+Cons:
+- Still requires the _keepalive patches we added on 2026-04-11
+  (Neon doesn't care which compute host connects to it)
+- US-based; weaker data sovereignty story
+- Additional network hop from OVH → Neon EU region (~20-50ms)
+- You still have an external dependency
+```
+
+**When to pick this**: if you want the LEAST risky migration. Move compute
+first, prove it works, then migrate Postgres later in a separate session.
+
+### Hybrid phased approach (safest)
+
+Phase A (now): keep Neon, move everything else to OVH. 2-3 days of work, low
+risk because the DB stays stable.
+
+Phase B (later, 1-3 months): export Neon → restore onto the VPS's Postgres
+container. Cutover during a maintenance window. ~1 day of work.
+
+## Pre-migration checklist (do these BEFORE starting Phase 1)
+
+- [ ] Full Neon DB snapshot downloaded (`pg_dump` → local file)
+- [ ] All env vars documented in `backend/.env.example` (already done)
+- [ ] All secrets rotated if they were ever shared in chat:
+      R2 token, Neon password, Upstash password, Anthropic key, ADMIN_TOKEN
+- [ ] Current deployment URLs documented so you can update DNS later
+- [ ] `maintenance.log` and any local artifacts either committed or archived
+- [ ] Decide Postgres strategy (A, B, or hybrid A)
+- [ ] Domain name purchased (if not already) — needed for DNS cutover
+- [ ] Railway + Vercel + Neon accounts' billing status confirmed (don't
+      accidentally get surprised by a charge mid-migration)
+
+## Post-migration verification checklist
+
+Run these after Phase 7 to confirm everything works:
+
+- [ ] `/health` endpoint returns 200 on HTTPS
+- [ ] `/fa` homepage loads, shows trending stories with images
+- [ ] `/fa/dashboard` loads after admin password + token
+- [ ] Diagnostics panel shows the new DB URL, LLM keys set
+- [ ] Recently re-summarized stories card lists stories
+- [ ] Click "Run Maintenance" from the dashboard — watch for all 23 steps
+      complete in green (no connection-closed errors, no OOM)
+- [ ] Verify systemd timer fires the next cron run: `journalctl -u doornegar-maintenance.service --since "1 hour ago"`
+- [ ] Check no Railway/Vercel references remain in the frontend API config
+- [ ] SSL cert auto-renewal test: `sudo certbot renew --dry-run`
+- [ ] Firewall status: `sudo ufw status verbose`
+- [ ] Backup script ran overnight: `ls -lah /opt/doornegar/backups/`
+- [ ] Disk usage sane: `df -h`
+- [ ] Memory usage sane at rest: `free -h`
+- [ ] Uptime monitoring configured (Uptime Kuma or UptimeRobot) and pinging
+- [ ] At least one full maintenance run completed on the VPS without
+      manual intervention
+
+## Post-migration code changes (none required, but consider these)
+
+Once you're running on OVH with self-hosted Postgres (Option A above), the
+following defensive code from 2026-04-11/12 is no longer strictly necessary,
+but it's harmless to keep:
+
+- `app/services/clustering.py` `_keepalive()` calls (Neon-specific defense)
+- `app/services/bias_scoring.py` `_keepalive()` calls (same)
+- `auto_maintenance.step_summarize` keepalive inner function (same)
+- `app/database.py` `pool_recycle=240` (can go back to default `pool_recycle=3600`)
+
+**Recommendation**: leave them in. They cost nothing, and if you ever move
+back to a managed DB (or a Postgres that does have idle timeouts) you'll
+thank yourself.
+
+## Lessons learned before migration (2026-04-11/12)
+
+Things we fixed in the Railway/Neon setup that you MUST verify still work
+on OVH:
+
+1. **Neon idle timeout** — fixed via `_keepalive()` pings. Only matters if
+   you keep Neon. If self-hosting Postgres, the underlying issue goes away.
+2. **Asyncio background tasks dying on deploy** — fixed by splitting the
+   web service (uvicorn) from the maintenance trigger (fire-and-forget via
+   shared state). On OVH, systemd-based deploys don't have this problem
+   at all because you restart the service explicitly.
+3. **Container ephemeral filesystem** — `maintenance.log` was never
+   reliably written on Railway. OVH has a real disk; the log will work.
+4. **Local-only image URLs** (`http://localhost:8000/images/*`) — legacy
+   dev artifacts that need one-shot nullification. Use the admin endpoint
+   `POST /admin/nullify-localhost-images` before or after migration.
+5. **Clustering drift (209-article attractor clusters)** — fixed via size
+   ceiling + time window + strict prompt + article content in prompt.
+   Works the same on either host.
+6. **LLM retry loops** — fixed via `llm_failed_at` column added in the
+   `b5e9f3a1c2d8` Alembic migration. Runs automatically on first deploy.
+
+See `CHANGELOG.md` entry for April 11-12 for the full list of changes.
