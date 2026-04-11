@@ -247,6 +247,95 @@ async def get_dashboard(db: AsyncSession = Depends(get_db)):
     }
 
 
+@router.post("/force-resummarize")
+async def force_resummarize(
+    limit: int = Query(5, ge=1, le=200),
+    mode: str = Query("immediate", pattern="^(immediate|queue)$"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Force re-generation of summaries on N visible stories with the current model.
+
+    Modes:
+      - "immediate" (default): clears summary_fa AND runs story_analysis
+        inline for each story, returning once done. Slower but instant feedback.
+      - "queue": just clears summary_fa on N stories so the next maintenance
+        run picks them up via step_summarize. Fast but requires a run.
+
+    Picks the N most-recent visible stories (article_count >= 5).
+    """
+    import json as _json
+    from sqlalchemy.orm import selectinload
+    from app.models.article import Article
+    from app.models.story import Story
+
+    result = await db.execute(
+        select(Story)
+        .options(selectinload(Story.articles).selectinload(Article.source))
+        .where(Story.article_count >= 5)
+        .order_by(Story.updated_at.desc().nullslast(), Story.first_published_at.desc().nullslast())
+        .limit(limit)
+    )
+    stories = list(result.scalars().all())
+
+    if not stories:
+        return {"status": "ok", "cleared": 0, "regenerated": 0, "message": "No visible stories found"}
+
+    if mode == "queue":
+        for story in stories:
+            story.summary_fa = None
+        await db.commit()
+        return {
+            "status": "ok",
+            "cleared": len(stories),
+            "regenerated": 0,
+            "message": f"Cleared summary_fa on {len(stories)} stories. Next maintenance run will regenerate them.",
+            "story_ids": [str(s.id) for s in stories],
+        }
+
+    # Immediate mode: run story_analysis inline
+    from app.services.story_analysis import generate_story_analysis
+
+    regenerated = 0
+    failed = 0
+    errors = []
+    for story in stories:
+        articles_info = [
+            {
+                "title": a.title_original or a.title_fa or a.title_en or "",
+                "content": (a.content_text or a.summary or "")[:1500],
+                "source_name_fa": a.source.name_fa if a.source else "نامشخص",
+                "state_alignment": a.source.state_alignment if a.source else "",
+            }
+            for a in story.articles
+        ]
+        try:
+            analysis = await generate_story_analysis(story, articles_info)
+            story.summary_fa = analysis.get("summary_fa")
+            story.summary_en = _json.dumps({
+                "state_summary_fa": analysis.get("state_summary_fa"),
+                "diaspora_summary_fa": analysis.get("diaspora_summary_fa"),
+                "independent_summary_fa": analysis.get("independent_summary_fa"),
+                "bias_explanation_fa": analysis.get("bias_explanation_fa"),
+                "scores": analysis.get("scores"),
+            }, ensure_ascii=False)
+            await db.commit()
+            regenerated += 1
+        except Exception as e:
+            failed += 1
+            errors.append(f"{str(story.id)[:8]}: {e}")
+            logger.warning(f"Force-resummarize failed for {story.id}: {e}")
+
+    return {
+        "status": "ok",
+        "cleared": len(stories),
+        "regenerated": regenerated,
+        "failed": failed,
+        "errors": errors[:10],
+        "message": f"Regenerated {regenerated}/{len(stories)} stories with {settings.story_analysis_model}.",
+        "story_ids": [str(s.id) for s in stories],
+    }
+
+
 @router.get("/recently-summarized")
 async def recently_summarized(
     limit: int = Query(20, ge=1, le=100),

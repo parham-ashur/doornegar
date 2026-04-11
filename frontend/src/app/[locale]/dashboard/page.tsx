@@ -168,6 +168,30 @@ export default function DashboardPage() {
     setRecentLoading(false);
   }, [authHeaders]);
 
+  // Force re-summarize N stories with the current model
+  const [forceRunning, setForceRunning] = useState(false);
+  const forceResummarize = useCallback(async (limit: number) => {
+    const ok = confirm(
+      `Force re-summarize ${limit} most-recent stories using ${limit} LLM calls now?\n\n` +
+      `Cost: roughly $${(limit * 0.03).toFixed(2)}-$${(limit * 0.06).toFixed(2)} on gpt-5-mini.\n` +
+      `Time: ~${Math.ceil(limit * 15 / 60)} minutes.`
+    );
+    if (!ok) return;
+    setForceRunning(true);
+    try {
+      const res = await fetch(`${API}/api/v1/admin/force-resummarize?limit=${limit}&mode=immediate`, {
+        method: "POST",
+        headers: authHeaders(),
+      });
+      const data = await res.json();
+      alert(`${data.message}\n\nRegenerated: ${data.regenerated}\nFailed: ${data.failed || 0}\n\nRefreshing...`);
+      fetchRecentSummaries();
+    } catch (e: any) {
+      alert(`Error: ${e.message}`);
+    }
+    setForceRunning(false);
+  }, [authHeaders, fetchRecentSummaries]);
+
   // Progress tracking for maintenance runs
   const [maintStart, setMaintStart] = useState<number | null>(null);
   const [maintElapsed, setMaintElapsed] = useState(0);
@@ -733,19 +757,38 @@ export default function DashboardPage() {
 
       {/* Recently re-summarized stories */}
       <div className="mb-6 border border-slate-200 dark:border-slate-800 p-5">
-        <div className="mb-4 flex items-center justify-between">
+        <div className="mb-4 flex items-center justify-between flex-wrap gap-2">
           <h2 className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
             <Newspaper className="h-4 w-4 text-indigo-500" /> Recently re-summarized stories
             <span className="text-xs font-normal text-slate-400">(verify new LLM output)</span>
           </h2>
-          <button
-            onClick={fetchRecentSummaries}
-            disabled={recentLoading}
-            className="flex items-center gap-2 border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-xs text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50"
-          >
-            <RefreshCw className={`h-3 w-3 ${recentLoading ? "animate-spin" : ""}`} />
-            {recentSummaries ? "Refresh" : "Load"}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => forceResummarize(5)}
+              disabled={forceRunning || recentLoading}
+              title="Clear summary_fa on the 5 newest stories and regenerate them immediately with the current model"
+              className="flex items-center gap-1 border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/10 px-3 py-1.5 text-xs text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/20 disabled:opacity-50"
+            >
+              {forceRunning ? <RefreshCw className="h-3 w-3 animate-spin" /> : null}
+              Test: refresh 5
+            </button>
+            <button
+              onClick={() => forceResummarize(30)}
+              disabled={forceRunning || recentLoading}
+              title="Clear and regenerate the 30 newest visible stories"
+              className="flex items-center gap-1 border border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/10 px-3 py-1.5 text-xs text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/20 disabled:opacity-50"
+            >
+              Refresh 30
+            </button>
+            <button
+              onClick={fetchRecentSummaries}
+              disabled={recentLoading}
+              className="flex items-center gap-2 border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-xs text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50"
+            >
+              <RefreshCw className={`h-3 w-3 ${recentLoading ? "animate-spin" : ""}`} />
+              {recentSummaries ? "Reload" : "Load"}
+            </button>
+          </div>
         </div>
 
         {!recentSummaries && !recentLoading && (
