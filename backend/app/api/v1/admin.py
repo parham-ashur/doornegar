@@ -247,6 +247,51 @@ async def get_dashboard(db: AsyncSession = Depends(get_db)):
     }
 
 
+@router.get("/recently-summarized")
+async def recently_summarized(
+    limit: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    """List stories ordered by updated_at desc, with summary previews.
+
+    Useful for verifying that a new LLM model's output is live — sort by
+    most recently updated and read the new-style prompt signals
+    (guillemet-quoted terms, explicit tone labels, etc.) in the
+    bias_explanation_fa field.
+    """
+    import json as _json
+    from app.models.story import Story
+
+    result = await db.execute(
+        select(Story)
+        .where(Story.summary_fa.isnot(None))
+        .order_by(Story.updated_at.desc())
+        .limit(limit)
+    )
+    stories = list(result.scalars().all())
+
+    items = []
+    for s in stories:
+        extras: dict = {}
+        # State/diaspora/bias extras are stashed in summary_en as JSON
+        if s.summary_en:
+            try:
+                extras = _json.loads(s.summary_en)
+            except Exception:
+                extras = {}
+        items.append({
+            "id": str(s.id),
+            "title_fa": s.title_fa,
+            "updated_at": s.updated_at.isoformat() if s.updated_at else None,
+            "article_count": s.article_count,
+            "summary_fa_preview": (s.summary_fa or "")[:200],
+            "bias_explanation_fa": extras.get("bias_explanation_fa"),
+            "has_state_summary": bool(extras.get("state_summary_fa")),
+            "has_diaspora_summary": bool(extras.get("diaspora_summary_fa")),
+        })
+    return {"items": items}
+
+
 @router.get("/diagnostics")
 async def diagnostics(db: AsyncSession = Depends(get_db)):
     """Diagnostic info to explain why backfills aren't fully catching up.

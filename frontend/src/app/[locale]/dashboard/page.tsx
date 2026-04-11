@@ -152,6 +152,22 @@ export default function DashboardPage() {
     setDiagLoading(false);
   }, [authHeaders]);
 
+  // Recently re-summarized stories (to verify new LLM model output)
+  const [recentSummaries, setRecentSummaries] = useState<any[] | null>(null);
+  const [recentLoading, setRecentLoading] = useState(false);
+
+  const fetchRecentSummaries = useCallback(async () => {
+    setRecentLoading(true);
+    try {
+      const res = await fetch(`${API}/api/v1/admin/recently-summarized?limit=15`, { headers: authHeaders() });
+      if (res.ok) {
+        const data = await res.json();
+        setRecentSummaries(data.items || []);
+      }
+    } catch {}
+    setRecentLoading(false);
+  }, [authHeaders]);
+
   // Progress tracking for maintenance runs
   const [maintStart, setMaintStart] = useState<number | null>(null);
   const [maintElapsed, setMaintElapsed] = useState(0);
@@ -711,6 +727,84 @@ export default function DashboardPage() {
                 </p>
               )}
             </div>
+          </div>
+        )}
+      </div>
+
+      {/* Recently re-summarized stories */}
+      <div className="mb-6 border border-slate-200 dark:border-slate-800 p-5">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+            <Newspaper className="h-4 w-4 text-indigo-500" /> Recently re-summarized stories
+            <span className="text-xs font-normal text-slate-400">(verify new LLM output)</span>
+          </h2>
+          <button
+            onClick={fetchRecentSummaries}
+            disabled={recentLoading}
+            className="flex items-center gap-2 border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-xs text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50"
+          >
+            <RefreshCw className={`h-3 w-3 ${recentLoading ? "animate-spin" : ""}`} />
+            {recentSummaries ? "Refresh" : "Load"}
+          </button>
+        </div>
+
+        {!recentSummaries && !recentLoading && (
+          <p className="text-xs text-slate-500 leading-6">
+            Click Load to see the 15 stories with the most recent <code>updated_at</code>. These are the ones freshly summarized by the pipeline. Look for <strong>guillemets « »</strong> around quoted terms and explicit tone labels (هشداردهنده، پیروزمندانه، سوگوار) in <code>bias_explanation_fa</code> — those are signatures of the new gpt-5-mini prompt.
+          </p>
+        )}
+
+        {recentSummaries && recentSummaries.length === 0 && (
+          <p className="text-xs text-slate-500">No summarized stories found.</p>
+        )}
+
+        {recentSummaries && recentSummaries.length > 0 && (
+          <div className="space-y-3">
+            {recentSummaries.map((s: any) => {
+              const updatedAt = s.updated_at ? new Date(s.updated_at) : null;
+              const minutesAgo = updatedAt ? Math.floor((Date.now() - updatedAt.getTime()) / 60000) : null;
+              const isRecent = minutesAgo !== null && minutesAgo < 120;
+              const hasGuillemets = s.bias_explanation_fa && /[«»]/.test(s.bias_explanation_fa);
+              return (
+                <div
+                  key={s.id}
+                  className={`border p-3 ${isRecent ? "border-emerald-300 dark:border-emerald-800 bg-emerald-50/30 dark:bg-emerald-950/10" : "border-slate-200 dark:border-slate-800"}`}
+                  dir="rtl"
+                >
+                  <div className="flex items-start justify-between gap-3 mb-1">
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white flex-1">{s.title_fa}</h3>
+                    <div className="flex items-center gap-2 shrink-0 text-[10px] text-slate-500" dir="ltr">
+                      {hasGuillemets && (
+                        <span className="px-1.5 py-0.5 border border-emerald-400 text-emerald-600">« » new prompt</span>
+                      )}
+                      {minutesAgo !== null && (
+                        <span className={isRecent ? "font-semibold text-emerald-600" : ""}>
+                          {minutesAgo < 60 ? `${minutesAgo}m ago` : `${Math.floor(minutesAgo / 60)}h ago`}
+                        </span>
+                      )}
+                      <span>· {s.article_count} articles</span>
+                    </div>
+                  </div>
+                  {s.bias_explanation_fa && (
+                    <p className="text-[11px] leading-6 text-slate-700 dark:text-slate-300 mt-2 pr-2 border-r-2 border-slate-200 dark:border-slate-800">
+                      <span className="text-slate-400 text-[10px] font-mono" dir="ltr">bias_explanation_fa:</span><br />
+                      {s.bias_explanation_fa}
+                    </p>
+                  )}
+                  <div className="flex items-center gap-3 mt-2 text-[10px]" dir="ltr">
+                    <a
+                      href={`/fa/stories/${s.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 dark:text-blue-400 hover:underline"
+                    >
+                      View story →
+                    </a>
+                    <span className="text-slate-400">{s.id.slice(0, 8)}</span>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
