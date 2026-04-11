@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     embedding_model: str = "paraphrase-multilingual-MiniLM-L12-v2"
     clustering_similarity_threshold: float = 0.45
     story_merge_threshold: float = 0.55
+    # Clustering safety limits
+    max_cluster_size: int = 30           # refuse to grow a story past this
+    clustering_time_window_days: int = 7  # only match within this window
+    clustering_model: str = "gpt-4o-mini"  # override for clustering LLM
 
     # Telegram
     telegram_api_id: int = 0

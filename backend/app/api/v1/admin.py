@@ -836,6 +836,70 @@ async def edit_story(story_id: str, request: _EditStoryRequest, db: AsyncSession
     }
 
 
+@router.post("/nullify-localhost-images")
+async def nullify_localhost_images(db: AsyncSession = Depends(get_db)):
+    """Nullify all article.image_url values pointing to http://localhost:*
+
+    Background: 14/15 articles in a sample had image_url values like
+    'http://localhost:8000/images/HASH.jpg' from the dev-only image
+    server. These files were never migrated to R2 (verified — R2
+    returns 404 for those hashes). Nulling them triggers
+    step_fix_images to re-fetch og:image from the article URL on
+    the next maintenance run.
+    """
+    from sqlalchemy import update
+    from app.models.article import Article
+
+    result = await db.execute(
+        update(Article)
+        .where(Article.image_url.like("http://localhost%"))
+        .values(image_url=None)
+        .execution_options(synchronize_session=False)
+    )
+    await db.commit()
+    return {"status": "ok", "nullified": result.rowcount}
+
+
+@router.post("/stories/{story_id}/unclaim-articles")
+async def unclaim_story_articles(
+    story_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Detach all articles from a story so they re-cluster in the next run.
+
+    Useful for nuking a badly-clustered story (e.g. the Hormuz story with
+    209 mixed articles). The story itself is kept but becomes empty; it
+    falls below the visibility threshold (article_count < 5) and
+    disappears from the homepage until the next clustering run
+    re-populates OR rebuilds a cleaner version.
+    """
+    import uuid
+    from sqlalchemy import update as _update
+    from app.models.article import Article
+    from app.models.story import Story
+
+    story_uuid = uuid.UUID(story_id)
+    result = await db.execute(
+        _update(Article)
+        .where(Article.story_id == story_uuid)
+        .values(story_id=None)
+        .execution_options(synchronize_session=False)
+    )
+    # Zero out the story row's counts so it disappears from the homepage
+    await db.execute(
+        _update(Story)
+        .where(Story.id == story_uuid)
+        .values(article_count=0, source_count=0, priority=-100)
+    )
+    await db.commit()
+    return {
+        "status": "ok",
+        "story_id": story_id,
+        "articles_unclaimed": result.rowcount,
+        "message": "Articles detached and story hidden. Next clustering run will redistribute them.",
+    }
+
+
 @router.post("/cluster-llm/trigger")
 async def trigger_llm_clustering(db: AsyncSession = Depends(get_db)):
     """Cluster articles using LLM topic extraction (more accurate, costs ~$0.001/article)."""

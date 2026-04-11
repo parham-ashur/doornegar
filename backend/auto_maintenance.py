@@ -288,7 +288,18 @@ async def step_summarize():
 
 
 async def step_fix_images():
-    """Step 4b: Fix broken images and ensure every visible story has an image."""
+    """Step 4b: Fix broken images and pick a relevant image per visible story.
+
+    Passes:
+    1. HEAD-check 300 article images per run; null-out any that return non-200.
+       (Null-out lets step 2 re-fetch from article URL.)
+    2. For each visible story, pick an explicit story.image_url from the
+       article whose title overlaps most with the story title (best-available
+       heuristic for "the image most likely to be relevant"). Only articles
+       with a live image_url are considered.
+    3. For stories where NO article has a working image, try to fetch an
+       og:image from the first article's source URL.
+    """
     import httpx
     from sqlalchemy import select
     from sqlalchemy.orm import selectinload
@@ -297,64 +308,92 @@ async def step_fix_images():
     from app.models.article import Article
     from app.models.story import Story
 
-    stats = {"checked": 0, "broken": 0, "replaced": 0, "stories_fixed": 0}
+    stats = {
+        "checked": 0,
+        "nulled": 0,
+        "replaced": 0,
+        "story_images_set": 0,
+        "stories_without_image": 0,
+    }
+
+    def _title_overlap(a: str, b: str) -> int:
+        """Return the number of shared word-tokens (>=3 chars) between two titles."""
+        if not a or not b:
+            return 0
+        aw = {w for w in a.split() if len(w) >= 3}
+        bw = {w for w in b.split() if len(w) >= 3}
+        return len(aw & bw)
 
     async with async_session() as db:
-        # 1. Fix broken article images
+        # --- Pass 1: HEAD-check up to 300 article images, null out broken ones ---
         result = await db.execute(
-            select(Article).where(Article.image_url.isnot(None)).limit(100)
+            select(Article).where(Article.image_url.isnot(None)).limit(300)
         )
         articles = list(result.scalars().all())
 
-        async with httpx.AsyncClient(timeout=5) as client:
+        async with httpx.AsyncClient(timeout=5, follow_redirects=True) as client:
             for a in articles:
                 stats["checked"] += 1
+                # localhost URLs are definitely broken on production; null fast
+                if a.image_url and a.image_url.startswith("http://localhost"):
+                    a.image_url = None
+                    stats["nulled"] += 1
+                    continue
                 try:
                     r = await client.head(a.image_url)
                     if r.status_code != 200:
-                        stats["broken"] += 1
-                        if a.url and "t.me/" not in a.url:
-                            from app.services.nlp_pipeline import _fetch_og_image
-                            new_img = await _fetch_og_image(a.url)
-                            if new_img:
-                                a.image_url = new_img
-                                stats["replaced"] += 1
-                            else:
-                                a.image_url = None
-                        else:
-                            a.image_url = None
+                        a.image_url = None
+                        stats["nulled"] += 1
                 except Exception:
-                    pass
+                    a.image_url = None
+                    stats["nulled"] += 1
 
-        # 2. Ensure every visible story has at least one article with an image
+        await db.commit()
+
+        # --- Pass 2: For each visible story, pick an explicit image_url ---
         result = await db.execute(
             select(Story).options(selectinload(Story.articles))
             .where(Story.article_count >= 5)
         )
         for story in result.scalars().all():
-            has_img = any(a.image_url for a in story.articles)
-            if not has_img:
-                # Try to find an image for any article in this story
+            # Candidate articles = those with a live image_url
+            candidates = [a for a in story.articles if a.image_url]
+            if not candidates:
+                # Last-ditch: fetch an og:image from the first article's URL
                 for a in story.articles:
                     if a.url and "t.me/" not in a.url:
                         from app.services.nlp_pipeline import _fetch_og_image
                         img = await _fetch_og_image(a.url)
                         if img:
                             a.image_url = img
-                            stats["stories_fixed"] += 1
+                            candidates = [a]
+                            stats["replaced"] += 1
                             break
-                else:
-                    # Fallback: search Wikimedia using story title
-                    from app.services.nlp_pipeline import _search_free_image
-                    img = await _search_free_image(story.title_en or story.title_fa or "")
-                    if img and story.articles:
-                        story.articles[0].image_url = img
-                        stats["stories_fixed"] += 1
+                if not candidates:
+                    stats["stories_without_image"] += 1
+                    # Clear the story image so frontend knows there's nothing
+                    if story.image_url:
+                        story.image_url = None
+                    continue
+
+            # Pick the article whose title overlaps most with the story title.
+            # If no overlap, fall back to the most recent article with an image.
+            story_title = story.title_fa or story.title_en or ""
+            best = max(
+                candidates,
+                key=lambda a: (
+                    _title_overlap(story_title, a.title_fa or a.title_original or ""),
+                    a.published_at or datetime.min.replace(tzinfo=timezone.utc),
+                ),
+            )
+            if story.image_url != best.image_url:
+                story.image_url = best.image_url
+                stats["story_images_set"] += 1
 
         await db.commit()
 
-    if stats["broken"] > 0 or stats["stories_fixed"] > 0:
-        logger.info(f"Image fix: {stats['broken']} broken, {stats['replaced']} replaced, {stats['stories_fixed']} stories given images")
+    if any(v > 0 for v in stats.values()):
+        logger.info(f"Image fix: {stats}")
     return stats
 
 

@@ -38,16 +38,21 @@ STORY_BATCH_SIZE = 50
 # ---------------------------------------------------------------------------
 
 MATCHING_PROMPT = """\
-You are a news editor specializing in Iranian media. Match each new article \
-to an existing story, or say null if it doesn't match any.
+You are a strict news editor specializing in Iranian media. Your job is to decide \
+whether each new article is a direct continuation of an EXISTING story in the list \
+below, or whether it is a SEPARATE story that needs its own entry.
 
-Existing stories:
+**REJECTION IS THE DEFAULT.** Most articles will NOT match any existing story. \
+Only match when you are highly confident that the new article is reporting the \
+EXACT SAME specific event/announcement/development as the existing story.
+
+Existing stories (story titles only — assume the story is tightly scoped to that headline):
 {stories_block}
 
-New articles:
+New articles (title + source):
 {articles_block}
 
-Return valid JSON with this exact structure:
+Return valid JSON:
 {{
   "matches": [
     {{"article_idx": 1, "story_idx": 2}},
@@ -55,12 +60,21 @@ Return valid JSON with this exact structure:
   ]
 }}
 
-Rules:
-- Only match if the article is about the EXACT SAME specific event as the story
-- If unsure, say null — don't force matches
-- Only Iran-related articles should be matched
-- article_idx and story_idx are the numbers shown before each item (1-based)
-- Return ONLY the JSON object, no extra text
+STRICT RULES (follow all):
+1. Match ONLY if the article is about the EXACT SAME specific event named in the story title.
+2. "Iran-related" is NOT enough. "Same general topic" is NOT enough. "Same politician mentioned" is NOT enough.
+3. Examples of what to REJECT (use story_idx: null):
+   - Article about a different attack → separate story
+   - Article about a follow-up days/weeks later → separate story
+   - Article about a related but distinct event → separate story
+   - Article mentioning Iran but primarily about another country → separate story
+4. Examples of what to ACCEPT:
+   - Same specific speech by the same official → match
+   - Different outlets covering the exact same announcement → match
+   - Same exact attack on the same target → match
+5. Every article MUST get an entry in matches (either with a story_idx or with null).
+6. If unsure, OUTPUT NULL. There is no penalty for nulls — there is a big penalty for wrong matches.
+7. Return ONLY the JSON object, no commentary.
 """
 
 CLUSTERING_PROMPT = """\
@@ -200,17 +214,19 @@ def _build_articles_block(articles: list, source_names: dict[str, str] | None = 
 
 
 async def _call_openai(prompt: str, max_tokens: int = 4096) -> dict:
-    """Send a prompt to GPT-4o-mini and return parsed JSON."""
+    """Send a prompt to the configured clustering LLM and return parsed JSON."""
+    from app.services.llm_helper import build_openai_params
 
     def _sync_call():
         client = OpenAI(api_key=settings.openai_api_key)
         try:
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
+            params = build_openai_params(
+                model=settings.clustering_model,
+                prompt=prompt,
                 max_tokens=max_tokens,
                 temperature=0,
             )
+            response = client.chat.completions.create(**params)
             response_text = response.choices[0].message.content
             logger.debug(f"OpenAI response: {response_text[:300]}")
             return _parse_llm_response(response_text)
@@ -231,17 +247,37 @@ async def _match_to_existing_stories(
     articles: list[Article],
     source_names: dict[str, str],
 ) -> list[Article]:
-    """Try to match new articles to existing visible stories (article_count >= 5).
+    """Try to match new articles to existing visible stories.
+
+    Safety constraints:
+    - Story must have article_count < settings.max_cluster_size (so we don't
+      grow clusters indefinitely — oversized stories become "closed")
+    - Story must have been active (last_updated_at) within the last
+      settings.clustering_time_window_days days (news has a natural shelf life)
+    - article_count must be >= 5 (visibility threshold)
 
     Returns the list of articles that were NOT matched (still need clustering).
     """
-    # Get existing visible stories
+    from datetime import timedelta as _timedelta
+
+    time_cutoff = datetime.now(timezone.utc) - _timedelta(days=settings.clustering_time_window_days)
+
+    # Get existing visible stories that are still "open" for matching
     result = await db.execute(
-        select(Story.id, Story.title_fa, Story.title_en)
-        .where(Story.article_count >= 5)
+        select(Story.id, Story.title_fa, Story.title_en, Story.article_count)
+        .where(
+            Story.article_count >= 5,
+            Story.article_count < settings.max_cluster_size,
+            Story.last_updated_at >= time_cutoff,
+        )
         .order_by(Story.last_updated_at.desc().nullslast())
     )
-    existing_stories = result.all()  # list of (id, title_fa, title_en)
+    existing_stories = result.all()  # list of (id, title_fa, title_en, article_count)
+    logger.info(
+        f"Matching against {len(existing_stories)} open stories "
+        f"(article_count 5 .. {settings.max_cluster_size - 1}, "
+        f"active within {settings.clustering_time_window_days}d)"
+    )
 
     if not existing_stories:
         logger.info("No existing visible stories to match against")
@@ -260,7 +296,8 @@ async def _match_to_existing_stories(
 
         # Build stories block
         stories_lines = []
-        for i, (sid, title_fa, title_en) in enumerate(story_batch, 1):
+        for i, row in enumerate(story_batch, 1):
+            sid, title_fa, title_en = row[0], row[1], row[2]
             display = title_fa or title_en or "(no title)"
             stories_lines.append(f"S{i}. {display}")
         stories_block = "\n".join(stories_lines)
