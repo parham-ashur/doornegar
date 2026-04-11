@@ -88,13 +88,16 @@ async def generate_story_analysis(
     prompt = STORY_ANALYSIS_PROMPT.format(articles_block=articles_block)
 
     try:
+        from app.services.llm_helper import build_openai_params
+
         client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
-        response = await client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
+        params = build_openai_params(
+            model=settings.story_analysis_model,
+            prompt=prompt,
             max_tokens=4096,
             temperature=0.3,
         )
+        response = await client.chat.completions.create(**params)
         response_text = response.choices[0].message.content
         return _parse_analysis_response(response_text)
 

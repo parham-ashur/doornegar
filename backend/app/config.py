@@ -32,7 +32,10 @@ class Settings(BaseSettings):
     # LLM
     anthropic_api_key: str = ""
     openai_api_key: str = ""
-    bias_scoring_model: str = "claude-haiku-4-5-20251001"
+    # Unified default — override per task via env vars below if needed
+    bias_scoring_model: str = "gpt-5-mini"
+    story_analysis_model: str = "gpt-5-mini"
+    translation_model: str = "gpt-5-mini"
 
     # NLP
     embedding_model: str = "paraphrase-multilingual-MiniLM-L12-v2"

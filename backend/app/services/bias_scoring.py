@@ -183,12 +183,18 @@ async def _call_llm(prompt: str) -> str:
 
 
 async def _call_anthropic(prompt: str) -> str:
-    """Call Anthropic Claude API."""
+    """Call Anthropic Claude API (fallback only — primary path is OpenAI)."""
     import anthropic
+
+    # bias_scoring_model may be an OpenAI model name; fall back to a
+    # reasonable Claude default if so.
+    model = settings.bias_scoring_model
+    if not model.startswith("claude-"):
+        model = "claude-haiku-4-5-20251001"
 
     client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
     message = await client.messages.create(
-        model=settings.bias_scoring_model,
+        model=model,
         max_tokens=1024,
         messages=[{"role": "user", "content": prompt}],
     )
@@ -199,13 +205,16 @@ async def _call_openai(prompt: str) -> str:
     """Call OpenAI API."""
     import openai
 
+    from app.services.llm_helper import build_openai_params
+
     client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
-    response = await client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}],
+    params = build_openai_params(
+        model=settings.bias_scoring_model,
+        prompt=prompt,
         max_tokens=1024,
         temperature=0.3,
     )
+    response = await client.chat.completions.create(**params)
     return response.choices[0].message.content
 
 

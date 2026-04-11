@@ -118,6 +118,7 @@ async def step_backfill_farsi_titles():
             return {"backfilled": 0}
 
         from openai import OpenAI
+        from app.services.llm_helper import build_openai_params
         client = OpenAI(api_key=settings.openai_api_key)
         import re as _re
 
@@ -127,15 +128,13 @@ async def step_backfill_farsi_titles():
             batch = articles[batch_start:batch_start + 30]
             titles = "\n".join(f"{i+1}. {a.title_original}" for i, a in enumerate(batch))
             try:
-                resp = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[{
-                        "role": "user",
-                        "content": f"Translate these news headlines to Farsi. Return ONLY the translations, one per line, numbered.\n\n{titles}",
-                    }],
+                params = build_openai_params(
+                    model=settings.translation_model,
+                    prompt=f"Translate these news headlines to Farsi. Return ONLY the translations, one per line, numbered.\n\n{titles}",
                     max_tokens=2500,
                     temperature=0,
                 )
+                resp = client.chat.completions.create(**params)
                 lines = resp.choices[0].message.content.strip().split("\n")
                 for i, article in enumerate(batch):
                     if i >= len(lines):

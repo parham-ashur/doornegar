@@ -159,17 +159,19 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
         still_en = [a for a in articles if a.language == "en" and not a.title_fa and a.title_original]
         if still_en and settings.openai_api_key:
             from openai import OpenAI
+            from app.services.llm_helper import build_openai_params
             client = OpenAI(api_key=settings.openai_api_key)
             # Batch translate up to 30 at a time
             for batch_start in range(0, len(still_en), 30):
                 batch = still_en[batch_start:batch_start + 30]
                 titles = "\n".join(f"{i+1}. {a.title_original}" for i, a in enumerate(batch))
-                resp = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[{"role": "user", "content": f"Translate these English news headlines to Farsi. Return ONLY the translations, one per line, numbered.\n\n{titles}"}],
+                params = build_openai_params(
+                    model=settings.translation_model,
+                    prompt=f"Translate these English news headlines to Farsi. Return ONLY the translations, one per line, numbered.\n\n{titles}",
                     max_tokens=2000,
                     temperature=0,
                 )
+                resp = client.chat.completions.create(**params)
                 lines = resp.choices[0].message.content.strip().split("\n")
                 for i, article in enumerate(batch):
                     if i < len(lines):
