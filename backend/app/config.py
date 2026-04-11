@@ -51,7 +51,9 @@ class Settings(BaseSettings):
     # Clustering safety limits
     max_cluster_size: int = 30           # refuse to grow a story past this
     clustering_time_window_days: int = 7  # only match within this window
-    clustering_model: str = "gpt-4o-mini"  # override for clustering LLM
+    # Clustering is a reasoning task; the ~$0.20/month delta for gpt-5-mini
+    # is worth it. Override via CLUSTERING_MODEL env var if needed.
+    clustering_model: str = "gpt-5-mini"
 
     # Telegram
     telegram_api_id: int = 0

@@ -193,7 +193,10 @@ def _parse_llm_response(response_text: str) -> dict:
 
 
 def _build_articles_block(articles: list, source_names: dict[str, str] | None = None) -> str:
-    """Build the numbered article list for the prompt.
+    """Build the numbered article list for the clustering prompt.
+
+    Includes title + first ~400 chars of content so the LLM can actually
+    understand what each article is about, not just match on title keywords.
 
     source_names: optional pre-extracted mapping of article.id -> source name
     """
@@ -204,7 +207,14 @@ def _build_articles_block(articles: list, source_names: dict[str, str] | None = 
             sname = source_names.get(str(article.id), "Unknown")
         else:
             sname = "Unknown"
-        lines.append(f"{i}. {title} (source: {sname})")
+        # First ~400 chars of content (or fall back to summary); strip whitespace
+        body = (article.content_text or article.summary or "").strip()
+        # Collapse whitespace so token usage is predictable
+        body = " ".join(body.split())[:400]
+        if body:
+            lines.append(f"{i}. [{sname}] {title}\n    {body}")
+        else:
+            lines.append(f"{i}. [{sname}] {title}")
     return "\n".join(lines)
 
 
