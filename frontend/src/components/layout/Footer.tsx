@@ -1,12 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import Link from "next/link";
-import { useLocale } from "next-intl";
 import DoornegarAnimation, { getTodayIcon } from "@/components/common/DoornegarAnimation";
 
 export default function Footer() {
-  const locale = useLocale();
   const [showIcon, setShowIcon] = useState(false);
   const icon = getTodayIcon();
 
@@ -36,14 +33,6 @@ export default function Footer() {
             <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-500">
               پلتفرم شفافیت رسانه‌ای ایران — مقایسه پوشش خبری رسانه‌های داخل و خارج ایران.
               ببینید کدام رسانه چه خبری را پوشش داده و چه خبری را پنهان کرده.
-            </p>
-            <p className="text-[11px] mt-1">
-              <Link
-                href={`/${locale}/suggest`}
-                className="text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white transition-colors"
-              >
-                منبعی پیشنهاد دهید ←
-              </Link>
             </p>
             <p className="text-[10px] leading-4 text-slate-400/60 dark:text-slate-600/60 mt-2">
               ما هیچ اطلاعاتی از بازدیدکنندگان ذخیره نمی‌کنیم. بدون کوکی ردیابی، بدون تحلیل رفتار، بدون اشتراک‌گذاری داده. حریم خصوصی شما برای ما مهم است.

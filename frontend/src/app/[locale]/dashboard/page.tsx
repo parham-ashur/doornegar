@@ -118,6 +118,27 @@ export default function DashboardPage() {
 
   useEffect(() => { fetchDashboard(); }, [fetchDashboard]);
 
+  // Progress tracking for maintenance runs
+  const [maintStart, setMaintStart] = useState<number | null>(null);
+  const [maintElapsed, setMaintElapsed] = useState(0);
+  const [maintResult, setMaintResult] = useState<any>(null);
+
+  // Tick elapsed time every second while running
+  useEffect(() => {
+    if (!maintStart) return;
+    const interval = setInterval(() => {
+      setMaintElapsed(Math.floor((Date.now() - maintStart) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [maintStart]);
+
+  // Refresh dashboard every 5 seconds while maintenance is running
+  useEffect(() => {
+    if (running !== "maintenance") return;
+    const interval = setInterval(() => { fetchDashboard(); }, 5000);
+    return () => clearInterval(interval);
+  }, [running, fetchDashboard]);
+
   if (!authed) {
     return (
       <div className="mx-auto max-w-sm px-4 py-24">
@@ -146,27 +167,6 @@ export default function DashboardPage() {
       </div>
     );
   }
-
-  // Progress tracking for maintenance runs
-  const [maintStart, setMaintStart] = useState<number | null>(null);
-  const [maintElapsed, setMaintElapsed] = useState(0);
-  const [maintResult, setMaintResult] = useState<any>(null);
-
-  // Tick elapsed time every second while running
-  useEffect(() => {
-    if (!maintStart) return;
-    const interval = setInterval(() => {
-      setMaintElapsed(Math.floor((Date.now() - maintStart) / 1000));
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [maintStart]);
-
-  // Refresh dashboard every 5 seconds while maintenance is running
-  useEffect(() => {
-    if (running !== "maintenance") return;
-    const interval = setInterval(() => { fetchDashboard(); }, 5000);
-    return () => clearInterval(interval);
-  }, [running, fetchDashboard]);
 
   async function triggerPipeline(step: string) {
     setRunning(step);
