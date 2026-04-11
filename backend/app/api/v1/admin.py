@@ -308,9 +308,12 @@ async def force_resummarize(
             "story_ids": [str(s.id) for s in stories],
         }
 
-    # Immediate mode: run story_analysis inline
+    # Immediate mode: run story_analysis inline.
+    # Always use the PREMIUM model for force-refreshes — if Parham is
+    # manually regenerating, it's worth the cost for the best output.
     from app.services.story_analysis import generate_story_analysis
 
+    chosen_model = settings.story_analysis_premium_model
     regenerated = 0
     failed = 0
     errors = []
@@ -325,7 +328,7 @@ async def force_resummarize(
             for a in story.articles
         ]
         try:
-            analysis = await generate_story_analysis(story, articles_info)
+            analysis = await generate_story_analysis(story, articles_info, model=chosen_model)
             story.summary_fa = analysis.get("summary_fa")
             story.summary_en = _json.dumps({
                 "state_summary_fa": analysis.get("state_summary_fa"),
@@ -333,6 +336,7 @@ async def force_resummarize(
                 "independent_summary_fa": analysis.get("independent_summary_fa"),
                 "bias_explanation_fa": analysis.get("bias_explanation_fa"),
                 "scores": analysis.get("scores"),
+                "llm_model_used": chosen_model,
             }, ensure_ascii=False)
             await db.commit()
             regenerated += 1
@@ -347,7 +351,7 @@ async def force_resummarize(
         "regenerated": regenerated,
         "failed": failed,
         "errors": errors[:10],
-        "message": f"Regenerated {regenerated}/{len(stories)} stories with {settings.story_analysis_model}.",
+        "message": f"Regenerated {regenerated}/{len(stories)} stories with {chosen_model}.",
         "story_ids": [str(s.id) for s in stories],
     }
 

@@ -197,18 +197,35 @@ async def step_cluster():
 
 
 async def step_summarize():
-    """Step 4: Generate summaries for stories without one."""
+    """Step 4: Generate summaries for stories without one.
+
+    Uses TIERED model selection:
+    - Stories in the top `premium_story_top_n` trending → premium model
+      (e.g. gpt-5-mini, better quality for homepage-visible content)
+    - All other stories → baseline model (e.g. gpt-4o-mini, cheaper)
+    """
     import json as _json
 
     from sqlalchemy import select
     from sqlalchemy.orm import selectinload
 
+    from app.config import settings
     from app.database import async_session
     from app.models.article import Article
     from app.models.story import Story
     from app.services.story_analysis import generate_story_analysis
 
     async with async_session() as db:
+        # 1. Pre-compute the set of top-N trending story IDs (homepage tier)
+        top_result = await db.execute(
+            select(Story.id)
+            .where(Story.article_count >= 5)
+            .order_by(Story.priority.desc(), Story.trending_score.desc())
+            .limit(settings.premium_story_top_n)
+        )
+        top_ids = {row[0] for row in top_result.all()}
+
+        # 2. Find stories that need summarization
         result = await db.execute(
             select(Story)
             .options(selectinload(Story.articles).selectinload(Article.source))
@@ -219,10 +236,16 @@ async def step_summarize():
 
         if not stories:
             logger.info("Summarize: all visible stories have summaries")
-            return {"generated": 0}
+            return {"generated": 0, "premium": 0, "baseline": 0}
 
-        logger.info(f"Generating summaries for {len(stories)} stories...")
+        logger.info(
+            f"Generating summaries for {len(stories)} stories "
+            f"(top {len(top_ids)} trending → {settings.story_analysis_premium_model}, "
+            f"rest → {settings.story_analysis_model})..."
+        )
         success = 0
+        premium_used = 0
+        baseline_used = 0
         for story in stories:
             articles_info = [
                 {
@@ -233,8 +256,15 @@ async def step_summarize():
                 }
                 for a in story.articles
             ]
+            # Tier selection
+            if story.id in top_ids:
+                chosen_model = settings.story_analysis_premium_model
+                tier_label = "premium"
+            else:
+                chosen_model = settings.story_analysis_model
+                tier_label = "baseline"
             try:
-                analysis = await generate_story_analysis(story, articles_info)
+                analysis = await generate_story_analysis(story, articles_info, model=chosen_model)
                 story.summary_fa = analysis.get("summary_fa")
                 story.summary_en = _json.dumps({
                     "state_summary_fa": analysis.get("state_summary_fa"),
@@ -242,14 +272,19 @@ async def step_summarize():
                     "independent_summary_fa": analysis.get("independent_summary_fa"),
                     "bias_explanation_fa": analysis.get("bias_explanation_fa"),
                     "scores": analysis.get("scores"),
+                    "llm_model_used": chosen_model,
                 }, ensure_ascii=False)
                 await db.commit()
                 success += 1
-                logger.info(f"  ✓ {story.title_fa[:40]}")
+                if tier_label == "premium":
+                    premium_used += 1
+                else:
+                    baseline_used += 1
+                logger.info(f"  ✓ [{tier_label}] {story.title_fa[:40]}")
             except Exception as e:
-                logger.warning(f"  ✗ {story.title_fa[:40]}: {e}")
+                logger.warning(f"  ✗ [{tier_label}] {story.title_fa[:40]}: {e}")
 
-        return {"generated": success}
+        return {"generated": success, "premium": premium_used, "baseline": baseline_used}
 
 
 async def step_fix_images():

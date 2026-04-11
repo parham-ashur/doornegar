@@ -99,6 +99,7 @@ STORY_ANALYSIS_PROMPT = """\
 async def generate_story_analysis(
     story,
     articles_with_sources: list[dict],
+    model: str | None = None,
 ) -> dict:
     """Generate rich analysis for a story using article content.
 
@@ -106,6 +107,10 @@ async def generate_story_analysis(
         story: The Story ORM object.
         articles_with_sources: List of dicts with keys:
             title, content, source_name_fa, state_alignment
+        model: Optional explicit model name. If None, uses
+            settings.story_analysis_model (the baseline model).
+            Callers that want the premium model for top-N trending
+            stories should pass settings.story_analysis_premium_model.
 
     Returns:
         dict with keys: summary_fa, state_summary_fa, diaspora_summary_fa,
@@ -142,7 +147,7 @@ async def generate_story_analysis(
 
         client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
         params = build_openai_params(
-            model=settings.story_analysis_model,
+            model=model or settings.story_analysis_model,
             prompt=prompt,
             max_tokens=4096,
             temperature=0.3,

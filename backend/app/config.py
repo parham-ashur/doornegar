@@ -32,10 +32,15 @@ class Settings(BaseSettings):
     # LLM
     anthropic_api_key: str = ""
     openai_api_key: str = ""
-    # Unified default — override per task via env vars below if needed
-    bias_scoring_model: str = "gpt-5-mini"
-    story_analysis_model: str = "gpt-5-mini"
-    translation_model: str = "gpt-5-mini"
+    # Default (baseline) models — cheap, run on everything
+    bias_scoring_model: str = "gpt-4o-mini"
+    story_analysis_model: str = "gpt-4o-mini"
+    translation_model: str = "gpt-4o-mini"
+    # Premium model — used ONLY for story analysis on the top N trending
+    # stories (the ones visible on the homepage). Quality where it counts,
+    # cheap everywhere else.
+    story_analysis_premium_model: str = "gpt-5-mini"
+    premium_story_top_n: int = 30
 
     # NLP
     embedding_model: str = "paraphrase-multilingual-MiniLM-L12-v2"
