@@ -11,6 +11,8 @@ from sqlalchemy.orm import selectinload
 from app.api.v1.admin import require_admin
 from app.config import settings
 from app.database import get_db
+from app.models.analyst import Analyst
+from app.models.analyst_take import AnalystTake
 from app.models.article import Article
 from app.models.bias_score import BiasScore
 from app.models.source import Source
@@ -271,6 +273,43 @@ async def summarize_story(request: Request, story_id: uuid.UUID, db: AsyncSessio
         scores=analysis.get("scores"),
         analyst=analysis.get("analyst"),
     )
+
+
+@router.get("/{story_id}/analyst-takes")
+@_limiter.limit("60/minute")
+async def get_analyst_takes(
+    request: Request,
+    story_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return analyst takes for a story, joined with analyst info."""
+    result = await db.execute(
+        select(AnalystTake)
+        .options(selectinload(AnalystTake.analyst))
+        .where(AnalystTake.story_id == story_id)
+        .order_by(AnalystTake.published_at.desc().nullslast())
+    )
+    takes = result.scalars().all()
+
+    return [
+        {
+            "id": str(t.id),
+            "analyst_id": str(t.analyst_id) if t.analyst_id else None,
+            "analyst_name_fa": t.analyst.name_fa if t.analyst else None,
+            "analyst_name_en": t.analyst.name_en if t.analyst else None,
+            "analyst_slug": t.analyst.slug if t.analyst else None,
+            "analyst_photo_url": t.analyst.photo_url if t.analyst else None,
+            "analyst_political_leaning": t.analyst.political_leaning if t.analyst else None,
+            "summary_fa": t.summary_fa,
+            "key_claim": t.key_claim,
+            "take_type": t.take_type,
+            "confidence_direction": t.confidence_direction,
+            "verified_later": t.verified_later,
+            "verification_note": t.verification_note,
+            "published_at": t.published_at.isoformat() if t.published_at else None,
+        }
+        for t in takes
+    ]
 
 
 @router.get("/{story_id}/article-positions")

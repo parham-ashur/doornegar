@@ -43,6 +43,10 @@ class TelegramChannel(Base):
     subscriber_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     language: Mapped[str] = mapped_column(String(5), default="fa")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_aggregator: Mapped[bool] = mapped_column(
+        Boolean, default=False,
+        comment="True for channels that aggregate links to articles from many sources",
+    )
 
     # Tracking
     last_fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

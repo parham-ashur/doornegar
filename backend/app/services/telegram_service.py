@@ -454,6 +454,11 @@ async def convert_telegram_posts_to_articles(db: AsyncSession) -> dict:
             stats["skipped_no_source"] += 1
             continue
 
+        # Skip aggregator channels — their posts are processed for links,
+        # not converted into articles themselves.
+        if getattr(channel, "is_aggregator", False) or channel.username in AGGREGATOR_USERNAMES:
+            continue
+
         # Must have enough text
         raw_text = post.text or ""
         if len(raw_text) < _MIN_POST_LENGTH:
@@ -503,6 +508,371 @@ async def convert_telegram_posts_to_articles(db: AsyncSession) -> dict:
 
     await db.commit()
     logger.info(f"Telegram → Article conversion: {stats}")
+    return stats
+
+
+# ---------------------------------------------------------------------------
+# Aggregator channel link extraction
+# ---------------------------------------------------------------------------
+
+# Telegram channel usernames that are aggregators (share links, not original content).
+# Posts from these channels are mined for article URLs instead of being
+# converted into articles themselves.
+AGGREGATOR_USERNAMES: set[str] = {
+    "akhbarefori",
+    "akaborz",
+    "VahidOnline",
+    "mamlekate",
+}
+
+# Domains to skip when extracting links from aggregator posts.
+_SKIP_DOMAINS: set[str] = {
+    "t.me",
+    "telegram.me",
+    "telegram.org",
+    "twitter.com",
+    "x.com",
+    "instagram.com",
+    "facebook.com",
+    "youtube.com",
+    "youtu.be",
+    "tiktok.com",
+    "linkedin.com",
+    "aparat.com",
+}
+
+
+def _is_news_link(url: str) -> bool:
+    """Return True if the URL looks like a news article (not social media / Telegram)."""
+    try:
+        parsed = urlparse(url)
+        hostname = (parsed.hostname or "").lower().replace("www.", "")
+        if not hostname:
+            return False
+        # Skip social media and Telegram links
+        for skip in _SKIP_DOMAINS:
+            if hostname == skip or hostname.endswith(f".{skip}"):
+                return False
+        # Must have a path beyond just "/" to look like an article
+        path = parsed.path.rstrip("/")
+        if not path or path == "":
+            return False
+        return True
+    except Exception:
+        return False
+
+
+def _domain_from_url(url: str) -> str:
+    """Extract the base domain from a URL (without www.)."""
+    try:
+        parsed = urlparse(url)
+        hostname = (parsed.hostname or "").lower().replace("www.", "")
+        return hostname
+    except Exception:
+        return ""
+
+
+def _build_domain_to_source_slug() -> dict[str, str]:
+    """Build a static mapping from known news domains to source slugs.
+
+    Uses the website_url from INITIAL_SOURCES in the seed data.
+    We hard-code it here so the function works without a DB call and stays
+    fast. Update this when new sources are added.
+    """
+    return {
+        # Diaspora / international
+        "bbc.com": "bbc-persian",
+        "bbc.co.uk": "bbc-persian",
+        "iranintl.com": "iran-international",
+        "iranwire.com": "iranwire",
+        "radiozamaneh.com": "radio-zamaneh",
+        "dw.com": "dw-persian",
+        "rfi.fr": "rfi-farsi",
+        "radiofarda.com": "radio-farda",
+        "ir.voanews.com": "voa-farsi",
+        "fa.euronews.com": "euronews-persian",
+        "kayhan.london": "kayhan-london",
+        "zeitoons.com": "zeitoons",
+        # State / semi-state
+        "tasnimnews.com": "tasnim",
+        "presstv.ir": "press-tv",
+        "mehrnews.com": "mehr-news",
+        "isna.ir": "isna",
+        "farsnews.ir": "fars-news",
+        "tabnak.ir": "tabnak",
+        "khabaronline.ir": "khabar-online",
+        # Additional common domains seen in the CHANNEL_SOURCE_MAP outlets
+        "irna.ir": "irna",
+        "iribnews.ir": "irib",
+        "mashreghnews.ir": "mashregh",
+        "sharghDaily.ir": "shargh",
+        "etemadnewspaper.ir": "etemad",
+        "hammihan.com": "hammihan",
+    }
+
+
+_DOMAIN_TO_SLUG = _build_domain_to_source_slug()
+
+
+def _match_domain_to_slug(url: str) -> str | None:
+    """Try to match a URL's domain to a known source slug.
+
+    Checks exact domain first, then tries parent domain (e.g.
+    ``fa.euronews.com`` matches ``fa.euronews.com`` directly, but
+    ``news.isna.ir`` would match ``isna.ir`` via suffix).
+    """
+    domain = _domain_from_url(url)
+    if not domain:
+        return None
+    # Exact match
+    if domain in _DOMAIN_TO_SLUG:
+        return _DOMAIN_TO_SLUG[domain]
+    # Try parent domain (strip first subdomain)
+    parts = domain.split(".")
+    if len(parts) > 2:
+        parent = ".".join(parts[1:])
+        if parent in _DOMAIN_TO_SLUG:
+            return _DOMAIN_TO_SLUG[parent]
+    return None
+
+
+async def _fetch_page_metadata(url: str) -> dict | None:
+    """Fetch a page and extract title, description, image, and publish date.
+
+    Uses httpx + trafilatura for content extraction and regex for OG tags.
+    Returns None if the page cannot be fetched.
+    """
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(
+            timeout=15,
+            follow_redirects=True,
+            headers={
+                "User-Agent": "Mozilla/5.0 (compatible; Doornegar/0.1)",
+                "Accept-Language": "fa,en;q=0.9",
+            },
+        ) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            html = response.text
+
+        metadata: dict = {"url": str(response.url)}  # follow redirects
+
+        # Extract og:title
+        og_title = re.search(
+            r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']',
+            html, re.IGNORECASE,
+        ) or re.search(
+            r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:title["\']',
+            html, re.IGNORECASE,
+        )
+        if og_title:
+            metadata["title"] = og_title.group(1).strip()
+        else:
+            # Fallback to <title> tag
+            title_match = re.search(r"<title[^>]*>([^<]+)</title>", html, re.IGNORECASE)
+            if title_match:
+                metadata["title"] = title_match.group(1).strip()
+
+        # Extract og:description
+        og_desc = re.search(
+            r'<meta[^>]+property=["\']og:description["\'][^>]+content=["\']([^"\']+)["\']',
+            html, re.IGNORECASE,
+        ) or re.search(
+            r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:description["\']',
+            html, re.IGNORECASE,
+        )
+        if og_desc:
+            metadata["description"] = og_desc.group(1).strip()
+
+        # Extract og:image
+        og_image = re.search(
+            r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
+            html, re.IGNORECASE,
+        ) or re.search(
+            r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']',
+            html, re.IGNORECASE,
+        )
+        if og_image:
+            metadata["image_url"] = og_image.group(1).strip()
+
+        # Try to extract publish date from og/meta tags
+        for date_prop in (
+            "article:published_time",
+            "og:article:published_time",
+            "datePublished",
+            "publish_date",
+        ):
+            date_match = re.search(
+                rf'<meta[^>]+(?:property|name)=["\'](?:{re.escape(date_prop)})["\'][^>]+content=["\']([^"\']+)["\']',
+                html, re.IGNORECASE,
+            )
+            if date_match:
+                try:
+                    from dateutil.parser import parse as parse_date
+                    metadata["published_at"] = parse_date(date_match.group(1))
+                except Exception:
+                    pass
+                break
+
+        # Extract article text via trafilatura (optional, best-effort)
+        try:
+            from trafilatura import extract as traf_extract
+            content = traf_extract(html, include_comments=False, include_tables=False)
+            if content and len(content) > 50:
+                metadata["content_text"] = content
+        except Exception:
+            pass
+
+        return metadata if metadata.get("title") else None
+
+    except Exception as e:
+        logger.debug(f"Failed to fetch metadata from {url}: {e}")
+        return None
+
+
+async def extract_articles_from_aggregators(db: AsyncSession) -> dict:
+    """Process posts from aggregator channels and create Article records
+    for the news links they contain.
+
+    For each aggregator channel:
+    1. Get recent posts (already ingested by ingest_all_channels)
+    2. Extract non-social-media URLs from each post
+    3. Skip URLs we already have as articles
+    4. Fetch the page and extract metadata (title, og:image, etc.)
+    5. Create an Article record linked to the matching source
+
+    Returns stats dict with counts.
+    """
+    stats = {
+        "posts_checked": 0,
+        "links_found": 0,
+        "links_skipped_social": 0,
+        "links_already_known": 0,
+        "links_no_source_match": 0,
+        "links_fetch_failed": 0,
+        "articles_created": 0,
+    }
+
+    # Get aggregator channels
+    result = await db.execute(
+        select(TelegramChannel).where(
+            TelegramChannel.is_active.is_(True),
+            TelegramChannel.is_aggregator.is_(True),
+        )
+    )
+    aggregator_channels = result.scalars().all()
+
+    if not aggregator_channels:
+        # Fallback: identify aggregators by username
+        result = await db.execute(
+            select(TelegramChannel).where(
+                TelegramChannel.username.in_(AGGREGATOR_USERNAMES),
+            )
+        )
+        aggregator_channels = result.scalars().all()
+
+    if not aggregator_channels:
+        logger.info("No aggregator channels found — skipping link extraction")
+        return stats
+
+    channel_ids = [ch.id for ch in aggregator_channels]
+    channel_names = {ch.id: ch.username for ch in aggregator_channels}
+
+    # Get posts from aggregator channels that haven't been fully processed.
+    # We look at posts from the last 3 days to avoid re-processing very old posts.
+    cutoff = datetime.now(timezone.utc) - timedelta(days=3)
+    posts_result = await db.execute(
+        select(TelegramPost)
+        .where(
+            TelegramPost.channel_id.in_(channel_ids),
+            TelegramPost.date >= cutoff,
+        )
+        .order_by(TelegramPost.date.desc())
+    )
+    posts = posts_result.scalars().all()
+
+    # Pre-load existing article URLs for duplicate checking
+    existing_urls_result = await db.execute(select(Article.url))
+    existing_urls: set[str] = {row[0] for row in existing_urls_result.all()}
+
+    # Pre-load sources by slug
+    source_result = await db.execute(select(Source))
+    sources_by_slug: dict[str, Source] = {
+        s.slug: s for s in source_result.scalars().all()
+    }
+
+    for post in posts:
+        stats["posts_checked"] += 1
+        urls = post.urls or []
+
+        for url in urls:
+            stats["links_found"] += 1
+
+            # Filter out social media links
+            if not _is_news_link(url):
+                stats["links_skipped_social"] += 1
+                continue
+
+            # Check if we already have this URL
+            if url in existing_urls:
+                stats["links_already_known"] += 1
+                continue
+
+            # Try to match domain to a source
+            source_slug = _match_domain_to_slug(url)
+            if not source_slug or source_slug not in sources_by_slug:
+                stats["links_no_source_match"] += 1
+                continue
+
+            source = sources_by_slug[source_slug]
+
+            # Fetch the page metadata
+            metadata = await _fetch_page_metadata(url)
+            if not metadata or not metadata.get("title"):
+                stats["links_fetch_failed"] += 1
+                continue
+
+            # Determine the canonical URL (may differ after redirects)
+            canonical_url = metadata.get("url", url)
+            if canonical_url in existing_urls:
+                stats["links_already_known"] += 1
+                continue
+
+            # Detect language from title
+            from app.services.ingestion import detect_language
+            title = metadata["title"]
+            language = detect_language(title)
+
+            # Create the article
+            stmt = (
+                insert(Article)
+                .values(
+                    source_id=source.id,
+                    title_original=title,
+                    title_fa=title if language == "fa" else None,
+                    url=canonical_url,
+                    summary=metadata.get("description"),
+                    image_url=metadata.get("image_url"),
+                    content_text=metadata.get("content_text"),
+                    language=language,
+                    published_at=metadata.get("published_at"),
+                )
+                .on_conflict_do_nothing(index_elements=["url"])
+                .returning(Article.id)
+            )
+            result = await db.execute(stmt)
+            if result.scalar_one_or_none() is not None:
+                stats["articles_created"] += 1
+                existing_urls.add(canonical_url)  # prevent re-processing in this batch
+                logger.info(
+                    f"Created article from aggregator @{channel_names.get(post.channel_id, '?')}: "
+                    f"{title[:60]} ({source_slug})"
+                )
+
+    await db.commit()
+    logger.info(f"Aggregator link extraction complete: {stats}")
     return stats
 
 

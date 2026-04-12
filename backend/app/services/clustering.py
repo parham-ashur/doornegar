@@ -525,6 +525,9 @@ async def _refresh_story_metadata(db: AsyncSession, story_id: uuid.UUID) -> None
     if not story:
         return
 
+    # Save old count for summary regeneration throttle
+    old_article_count = story.article_count or 0
+
     # Recount articles
     count_result = await db.execute(
         select(func.count(Article.id)).where(Article.story_id == story_id)
@@ -569,9 +572,12 @@ async def _refresh_story_metadata(db: AsyncSession, story_id: uuid.UUID) -> None
     embeddings = [row[0] for row in emb_result.all() if row[0]]
     story.centroid_embedding = _compute_centroid(embeddings)
 
-    # Clear summary so it gets regenerated
-    story.summary_fa = None
-    story.summary_en = None
+    # Only clear summary if article count changed by 3+ (throttle saves ~60%
+    # of summary regeneration cost — each regeneration costs ~$0.01)
+    count_delta = abs(story.article_count - old_article_count)
+    if count_delta >= 3 or story.summary_fa is None:
+        story.summary_fa = None
+        story.summary_en = None
 
 
 async def _refresh_stories_metadata_batch(

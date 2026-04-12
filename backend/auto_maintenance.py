@@ -40,6 +40,7 @@ async def step_ingest():
     from app.services.ingestion import ingest_all_sources
     from app.services.telegram_service import (
         convert_telegram_posts_to_articles,
+        extract_articles_from_aggregators,
         ingest_all_channels,
     )
 
@@ -59,10 +60,16 @@ async def step_ingest():
         convert_stats = await convert_telegram_posts_to_articles(db)
         logger.info(f"Converted: {convert_stats}")
 
+        # Extract articles from aggregator channel links
+        logger.info("Extracting articles from aggregator channels...")
+        aggregator_stats = await extract_articles_from_aggregators(db)
+        logger.info(f"Aggregator extraction: {aggregator_stats}")
+
     return {
         "rss_new": rss_stats.get("new", 0),
         "telegram_new": tg_stats.get("new", 0),
         "converted": convert_stats.get("created", 0),
+        "aggregator_articles": aggregator_stats.get("articles_created", 0),
     }
 
 
@@ -158,8 +165,11 @@ async def step_backfill_farsi_titles():
 async def step_bias_score():
     """Score articles that don't yet have a bias score.
 
+    Cost optimization: only score articles in VISIBLE stories (article_count >= 5).
+    Also limits to one article per source per story (we don't need 5 Fars articles
+    scored when 1 tells us their framing).
+
     Runs multiple batches per maintenance cycle so coverage catches up over time.
-    Capped to avoid runaway LLM spend.
     """
     from app.config import settings
     from app.database import async_session
@@ -169,16 +179,17 @@ async def step_bias_score():
         logger.warning("No LLM API key set — skipping bias scoring")
         return {"skipped": "no_llm_key"}
 
-    MAX_PER_RUN = 150  # ~$3-5/run at Haiku prices; adjust as needed
+    MAX_PER_RUN = 100  # reduced from 150 — priority scoring saves cost
     BATCH = 30
-    total = {"scored": 0, "failed": 0, "skipped": 0}
+    total = {"scored": 0, "failed": 0, "skipped": 0, "skipped_visible_only": 0}
     async with async_session() as db:
         for _ in range(MAX_PER_RUN // BATCH):
-            stats = await score_unscored_articles(db, batch_size=BATCH)
+            stats = await score_unscored_articles(
+                db, batch_size=BATCH, visible_stories_only=True,
+            )
             total["scored"] += stats.get("scored", 0)
             total["failed"] += stats.get("failed", 0)
             total["skipped"] += stats.get("skipped", 0)
-            # Stop early if nothing left
             if stats.get("scored", 0) + stats.get("failed", 0) == 0:
                 break
     logger.info(f"Bias scoring: {total}")
@@ -806,6 +817,206 @@ async def step_rater_feedback_apply():
     return stats
 
 
+async def step_extract_analyst_takes():
+    """Extract structured analyst takes from Telegram posts.
+
+    For each analyst with a telegram_handle, finds their channel's unprocessed
+    posts, uses the LLM to match each post to a story and extract:
+    - summary_fa: a concise Persian summary of the argument
+    - key_claim: the main claim in one sentence
+    - take_type: prediction | reasoning | insider_signal | fact_check | historical_parallel | commentary
+    - confidence_direction: bullish | bearish | neutral
+
+    Only processes posts that don't already have an AnalystTake record.
+    """
+    import json as _json
+
+    from sqlalchemy import select
+
+    from app.config import settings
+    from app.database import async_session
+    from app.models.analyst import Analyst
+    from app.models.analyst_take import AnalystTake
+    from app.models.social import TelegramChannel, TelegramPost
+    from app.models.story import Story
+
+    if not settings.openai_api_key:
+        logger.warning("OPENAI_API_KEY not set — skipping analyst take extraction")
+        return {"skipped": "no_openai_key"}
+
+    stats = {"processed": 0, "matched": 0, "failed": 0, "no_match": 0}
+
+    async with async_session() as db:
+        # 1. Get all analysts with a telegram_handle
+        analyst_result = await db.execute(
+            select(Analyst).where(
+                Analyst.telegram_handle.isnot(None),
+                Analyst.is_active.is_(True),
+            )
+        )
+        analysts = list(analyst_result.scalars().all())
+        if not analysts:
+            logger.info("No analysts with telegram_handle — skipping")
+            return stats
+
+        # Build mapping: telegram_handle (lowered, no @) -> analyst
+        handle_to_analyst: dict[str, Analyst] = {}
+        for a in analysts:
+            handle = a.telegram_handle.lstrip("@").lower()
+            handle_to_analyst[handle] = a
+
+        if not handle_to_analyst:
+            return stats
+
+        # 2. Find telegram channels matching analyst handles
+        channel_result = await db.execute(
+            select(TelegramChannel).where(
+                TelegramChannel.is_active.is_(True),
+            )
+        )
+        channels = list(channel_result.scalars().all())
+
+        # Map channel_id -> analyst for channels that belong to an analyst
+        channel_to_analyst: dict = {}
+        for ch in channels:
+            ch_username = ch.username.lstrip("@").lower()
+            if ch_username in handle_to_analyst:
+                channel_to_analyst[ch.id] = handle_to_analyst[ch_username]
+
+        if not channel_to_analyst:
+            logger.info("No telegram channels match analyst handles — skipping")
+            return stats
+
+        # 3. Get posts from those channels that don't have an AnalystTake yet
+        existing_post_ids_result = await db.execute(
+            select(AnalystTake.telegram_post_id).where(
+                AnalystTake.telegram_post_id.isnot(None)
+            )
+        )
+        existing_post_ids = {row[0] for row in existing_post_ids_result.all()}
+
+        posts_result = await db.execute(
+            select(TelegramPost)
+            .where(
+                TelegramPost.channel_id.in_(list(channel_to_analyst.keys())),
+                TelegramPost.text.isnot(None),
+            )
+            .order_by(TelegramPost.date.desc())
+            .limit(200)  # cap per run
+        )
+        posts = [p for p in posts_result.scalars().all() if p.id not in existing_post_ids]
+
+        if not posts:
+            logger.info("No new analyst posts to process")
+            return stats
+
+        # 4. Get current story titles for matching
+        story_result = await db.execute(
+            select(Story)
+            .where(Story.article_count >= 3)
+            .order_by(Story.trending_score.desc())
+            .limit(50)
+        )
+        stories = list(story_result.scalars().all())
+        story_list_text = "\n".join(
+            f"{i+1}. [{str(s.id)[:8]}] {s.title_fa or s.title_en or '(no title)'}"
+            for i, s in enumerate(stories)
+        )
+        story_id_map = {str(s.id)[:8]: s.id for s in stories}
+
+        # 5. Process each post with LLM
+        from openai import OpenAI
+        from app.services.llm_helper import build_openai_params
+
+        client = OpenAI(api_key=settings.openai_api_key)
+
+        EXTRACT_PROMPT = """You are analyzing a Telegram post by an Iranian political analyst.
+
+Given the post text and a list of current news stories, extract:
+1. story_match: The short ID (8 chars in brackets) of the most relevant story, or "none" if no match
+2. summary_fa: A 1-2 sentence Persian summary of the analyst's argument (max 200 chars)
+3. key_claim: The main claim in one Persian sentence (max 150 chars), or null
+4. take_type: One of: prediction, reasoning, insider_signal, fact_check, historical_parallel, commentary
+5. confidence_direction: bullish (optimistic about outcome), bearish (pessimistic), or neutral
+
+Return ONLY valid JSON with these 5 keys. No markdown, no explanation.
+
+Current stories:
+{stories}
+
+Analyst post:
+{post_text}"""
+
+        for post in posts:
+            analyst = channel_to_analyst.get(post.channel_id)
+            if not analyst:
+                continue
+
+            post_text = (post.text or "")[:2000]
+            if len(post_text.strip()) < 20:
+                continue  # skip very short posts
+
+            try:
+                prompt = EXTRACT_PROMPT.format(
+                    stories=story_list_text,
+                    post_text=post_text,
+                )
+                params = build_openai_params(
+                    model=settings.bias_scoring_model,
+                    prompt=prompt,
+                    max_tokens=500,
+                    temperature=0.2,
+                )
+                resp = client.chat.completions.create(**params)
+                raw_response = resp.choices[0].message.content.strip()
+
+                # Clean markdown fences if present
+                if raw_response.startswith("```"):
+                    raw_response = re.sub(r"^```(?:json)?\s*", "", raw_response)
+                    raw_response = re.sub(r"\s*```$", "", raw_response)
+
+                data = _json.loads(raw_response)
+
+                # Resolve story match
+                matched_story_id = None
+                story_match = data.get("story_match", "none")
+                if story_match and story_match != "none":
+                    matched_story_id = story_id_map.get(story_match)
+
+                take = AnalystTake(
+                    analyst_id=analyst.id,
+                    story_id=matched_story_id,
+                    telegram_post_id=post.id,
+                    raw_text=post_text,
+                    summary_fa=str(data.get("summary_fa", ""))[:500] or None,
+                    key_claim=str(data.get("key_claim", ""))[:300] or None,
+                    take_type=data.get("take_type", "commentary"),
+                    confidence_direction=data.get("confidence_direction"),
+                    published_at=post.date,
+                )
+                db.add(take)
+                stats["processed"] += 1
+                if matched_story_id:
+                    stats["matched"] += 1
+                else:
+                    stats["no_match"] += 1
+
+            except Exception as e:
+                logger.warning(f"Failed to extract analyst take from post {post.id}: {e}")
+                stats["failed"] += 1
+
+        await db.commit()
+
+    if stats["processed"] > 0:
+        logger.info(
+            f"Analyst takes: {stats['processed']} extracted, "
+            f"{stats['matched']} matched to stories, "
+            f"{stats['no_match']} unmatched, "
+            f"{stats['failed']} failed"
+        )
+    return stats
+
+
 async def step_feedback_health():
     """Monitor the improvement feedback and source suggestion systems.
 
@@ -1087,20 +1298,24 @@ async def step_telegram_health():
 
 
 async def step_deduplicate_articles():
-    """Find and merge duplicate articles (same content from RSS + Telegram)."""
-    from sqlalchemy import select, func, update
+    """Three-layer dedup: title match, URL match, embedding similarity.
+
+    Layer 1: Exact title_fa match (existing)
+    Layer 2: Same URL (different titles, same article)
+    Layer 3: Embedding cosine similarity > 0.92 within 48h (paraphrased reposts)
+    """
+    from sqlalchemy import select, func
+    from datetime import timedelta
 
     from app.database import async_session
     from app.models.article import Article
 
-    stats = {"duplicates_found": 0, "removed": 0}
+    stats = {"title_dupes": 0, "url_dupes": 0, "embedding_dupes": 0, "removed": 0}
 
     async with async_session() as db:
-        # Find articles with the same non-trivial title_fa.
-        # Guard against NULL, empty string, and very short titles — those
-        # would group unrelated articles together and false-positive.
+        # Layer 1: Exact title match
         result = await db.execute(
-            select(Article.title_fa, func.count(Article.id).label("cnt"))
+            select(Article.title_fa, func.count(Article.id))
             .where(
                 Article.title_fa.isnot(None),
                 func.length(func.trim(Article.title_fa)) >= 10,
@@ -1109,28 +1324,84 @@ async def step_deduplicate_articles():
             .having(func.count(Article.id) > 1)
             .limit(50)
         )
-
         for title, count in result.all():
-            stats["duplicates_found"] += 1
-            # Get all articles with this title
+            stats["title_dupes"] += 1
             dupes = await db.execute(
                 select(Article).where(Article.title_fa == title).order_by(Article.ingested_at)
             )
             articles = list(dupes.scalars().all())
             if len(articles) <= 1:
                 continue
-
-            # Keep the first one (earliest ingested), remove story_id from others if same story
             keeper = articles[0]
             for dupe in articles[1:]:
                 if dupe.story_id and dupe.story_id == keeper.story_id:
-                    dupe.story_id = None  # Remove duplicate from same story
+                    dupe.story_id = None
                     stats["removed"] += 1
+
+        # Layer 2: URL match
+        url_result = await db.execute(
+            select(Article.url, func.count(Article.id))
+            .where(
+                Article.url.isnot(None),
+                func.length(Article.url) >= 10,
+                ~Article.url.like("%t.me/%"),
+            )
+            .group_by(Article.url)
+            .having(func.count(Article.id) > 1)
+            .limit(50)
+        )
+        for url, count in url_result.all():
+            stats["url_dupes"] += 1
+            dupes = await db.execute(
+                select(Article).where(Article.url == url).order_by(Article.ingested_at)
+            )
+            articles = list(dupes.scalars().all())
+            if len(articles) <= 1:
+                continue
+            keeper = articles[0]
+            for dupe in articles[1:]:
+                if dupe.story_id and dupe.story_id == keeper.story_id:
+                    dupe.story_id = None
+                    stats["removed"] += 1
+
+        # Layer 3: Embedding similarity > 0.92 within 48h
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=48)
+        recent = await db.execute(
+            select(Article)
+            .where(
+                Article.ingested_at >= cutoff,
+                Article.embedding.isnot(None),
+                Article.story_id.isnot(None),
+            )
+            .order_by(Article.ingested_at.desc())
+            .limit(200)
+        )
+        recent_articles = list(recent.scalars().all())
+
+        if len(recent_articles) >= 2:
+            from app.nlp.embeddings import cosine_similarity
+            seen_ids = set()
+            for i, a in enumerate(recent_articles):
+                if a.id in seen_ids or not a.embedding:
+                    continue
+                for b in recent_articles[i + 1:]:
+                    if b.id in seen_ids or not b.embedding:
+                        continue
+                    if a.story_id == b.story_id:
+                        sim = cosine_similarity(a.embedding, b.embedding)
+                        if sim > 0.92:
+                            keeper = a if len(a.content_text or "") >= len(b.content_text or "") else b
+                            dupe = b if keeper is a else a
+                            dupe.story_id = None
+                            seen_ids.add(dupe.id)
+                            stats["embedding_dupes"] += 1
+                            stats["removed"] += 1
 
         await db.commit()
 
-    if stats["duplicates_found"] > 0:
-        logger.info(f"Dedup: {stats['duplicates_found']} duplicate titles, {stats['removed']} removed from stories")
+    total = stats["title_dupes"] + stats["url_dupes"] + stats["embedding_dupes"]
+    if total > 0:
+        logger.info(f"Dedup: title={stats['title_dupes']} url={stats['url_dupes']} embed={stats['embedding_dupes']} removed={stats['removed']}")
     return stats
 
 

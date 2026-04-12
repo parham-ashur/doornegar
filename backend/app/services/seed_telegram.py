@@ -88,6 +88,43 @@ INITIAL_CHANNELS = [
         "language": "fa",
         "description": "Khabar Online news channel — inside Iran",
     },
+    # Aggregator channels — share links to articles from many sources
+    {
+        "username": "akhbarefori",
+        "title": "اخبار فوری",
+        "channel_type": "aggregator",
+        "political_leaning": "neutral",
+        "language": "fa",
+        "is_aggregator": True,
+        "description": "Major news aggregator channel (~2.6M subscribers). Shares links to articles from many sources.",
+    },
+    {
+        "username": "akaborz",
+        "title": "اخبار برز",
+        "channel_type": "aggregator",
+        "political_leaning": "neutral",
+        "language": "fa",
+        "is_aggregator": True,
+        "description": "News aggregator channel. Shares links to articles from various outlets.",
+    },
+    {
+        "username": "VahidOnline",
+        "title": "وحید آنلاین",
+        "channel_type": "aggregator",
+        "political_leaning": "neutral",
+        "language": "fa",
+        "is_aggregator": True,
+        "description": "Major news aggregator channel (~1.33M subscribers). Curates links from many sources.",
+    },
+    {
+        "username": "mamlekate",
+        "title": "مملکته",
+        "channel_type": "aggregator",
+        "political_leaning": "neutral",
+        "language": "fa",
+        "is_aggregator": True,
+        "description": "News aggregator channel. Shares links to articles across the political spectrum.",
+    },
 ]
 
 

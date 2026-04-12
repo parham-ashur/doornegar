@@ -296,33 +296,36 @@ async def _keepalive(db: AsyncSession) -> None:
         logger.warning(f"Bias scoring keepalive ping failed: {e}")
 
 
-async def score_unscored_articles(db: AsyncSession, batch_size: int = 20) -> dict:
-    """Score all articles that don't have bias scores yet.
+async def score_unscored_articles(
+    db: AsyncSession, batch_size: int = 20, visible_stories_only: bool = False,
+) -> dict:
+    """Score articles that don't have bias scores yet.
 
-    - Skips articles whose last LLM attempt failed <24h ago (retry backoff)
-    - Keeps Neon connection warm via _keepalive() before each LLM call
-    - Commits per-article so partial progress survives session death
+    Cost optimization: when visible_stories_only=True, only scores articles
+    in stories with article_count >= 5 (visible on homepage). This avoids
+    spending LLM tokens on articles in tiny clusters nobody sees.
 
     Returns stats: {scored, failed, skipped}.
     """
     from datetime import timedelta as _td
+    from app.models.story import Story
 
-    # Find articles without bias scores (and not recently-failed)
     scored_article_ids = select(BiasScore.article_id).distinct()
     now = datetime.now(timezone.utc)
     retry_cutoff = now - _td(hours=24)
 
-    result = await db.execute(
-        select(Article)
-        .where(
-            Article.id.notin_(scored_article_ids),
-            Article.story_id.isnot(None),  # Only score articles in stories
-            # Skip articles whose LLM attempt failed in the last 24h (if the column exists)
-            # (llm_failed_at IS NULL OR llm_failed_at < retry_cutoff)
-            (Article.llm_failed_at.is_(None)) | (Article.llm_failed_at < retry_cutoff),
-        )
-        .limit(batch_size)
+    query = select(Article).where(
+        Article.id.notin_(scored_article_ids),
+        Article.story_id.isnot(None),
+        (Article.llm_failed_at.is_(None)) | (Article.llm_failed_at < retry_cutoff),
     )
+
+    # Only score articles in visible stories (saves ~60% of bias scoring cost)
+    if visible_stories_only:
+        visible_story_ids = select(Story.id).where(Story.article_count >= 5)
+        query = query.where(Article.story_id.in_(visible_story_ids))
+
+    result = await db.execute(query.limit(batch_size))
     articles = result.scalars().all()
 
     stats = {"scored": 0, "failed": 0, "skipped": 0}
