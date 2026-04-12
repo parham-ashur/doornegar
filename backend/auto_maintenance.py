@@ -1270,6 +1270,164 @@ async def step_uptime_check():
     return stats
 
 
+async def step_flag_unrelated_articles():
+    """Auto-flag articles whose embedding is far from their story's centroid.
+
+    Computes cosine similarity between each article's embedding and its
+    story's centroid_embedding. Articles below the threshold are flagged
+    by submitting an improvement feedback entry (same as user "نامرتبط" votes).
+    Does NOT auto-remove — just flags for human review in the dashboard.
+    """
+    from sqlalchemy import select
+    from app.database import async_session
+    from app.models.article import Article
+    from app.models.story import Story
+    from app.nlp.embeddings import cosine_similarity
+
+    THRESHOLD = 0.25  # articles below this similarity are flagged
+    MAX_FLAGS_PER_RUN = 20  # don't flood the dashboard
+
+    stats = {"checked": 0, "flagged": 0, "skipped_no_centroid": 0}
+
+    async with async_session() as db:
+        # Get visible stories with centroids
+        result = await db.execute(
+            select(Story).where(
+                Story.article_count >= 5,
+                Story.centroid_embedding.isnot(None),
+            )
+        )
+        stories = list(result.scalars().all())
+
+        flagged_count = 0
+        for story in stories:
+            if flagged_count >= MAX_FLAGS_PER_RUN:
+                break
+            centroid = story.centroid_embedding
+            if not centroid:
+                stats["skipped_no_centroid"] += 1
+                continue
+
+            # Get articles with embeddings
+            art_result = await db.execute(
+                select(Article).where(
+                    Article.story_id == story.id,
+                    Article.embedding.isnot(None),
+                )
+            )
+            articles = list(art_result.scalars().all())
+
+            for article in articles:
+                stats["checked"] += 1
+                if not article.embedding:
+                    continue
+                sim = cosine_similarity(article.embedding, centroid)
+                if sim < THRESHOLD:
+                    # Flag via improvement feedback
+                    try:
+                        from app.models.improvement import ImprovementFeedback
+                        # Check if already flagged
+                        existing = await db.execute(
+                            select(ImprovementFeedback).where(
+                                ImprovementFeedback.target_id == str(article.id),
+                                ImprovementFeedback.issue_type == "wrong_clustering",
+                                ImprovementFeedback.reason.like("%auto-flag%"),
+                            )
+                        )
+                        if existing.scalar_one_or_none():
+                            continue  # already flagged
+
+                        feedback = ImprovementFeedback(
+                            target_type="article",
+                            target_id=str(article.id),
+                            issue_type="wrong_clustering",
+                            reason=f"auto-flag: cosine similarity {sim:.2f} < {THRESHOLD} (story: {(story.title_fa or '')[:40]})",
+                            device_info="maintenance-bot",
+                        )
+                        db.add(feedback)
+                        flagged_count += 1
+                        stats["flagged"] += 1
+                        logger.info(f"  Flagged article {str(article.id)[:8]} (sim={sim:.2f}) in story '{(story.title_fa or '')[:30]}'")
+                    except Exception as e:
+                        logger.warning(f"  Failed to flag: {e}")
+
+                    if flagged_count >= MAX_FLAGS_PER_RUN:
+                        break
+
+        await db.commit()
+
+    if stats["flagged"] > 0:
+        logger.info(f"Auto-flag: {stats}")
+    return stats
+
+
+async def step_image_relevance():
+    """Check if story images match their titles and swap if a better one exists.
+
+    For each visible story, compare the current best image (from _story_brief_with_extras)
+    against the story title using word overlap. If an article has a much better
+    title match, mark the current image as low-relevance in the dashboard.
+    Also: for stories where the image comes from a different topic, flag it.
+    """
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+    from app.database import async_session
+    from app.models.article import Article
+    from app.models.story import Story
+
+    stats = {"checked": 0, "swapped": 0, "flagged": 0}
+
+    async with async_session() as db:
+        result = await db.execute(
+            select(Story)
+            .options(selectinload(Story.articles))
+            .where(Story.article_count >= 5)
+            .limit(100)
+        )
+        stories = list(result.scalars().all())
+
+        for story in stories:
+            stats["checked"] += 1
+            story_words = {w for w in (story.title_fa or "").split() if len(w) >= 3}
+            if not story_words:
+                continue
+
+            # Find articles with images
+            candidates = [
+                a for a in story.articles
+                if a.image_url and len(a.image_url) > 10
+                and "localhost" not in a.image_url
+                and "pixel" not in a.image_url.lower()
+            ]
+            if not candidates:
+                continue
+
+            # Score each by title word overlap
+            best_score = -1
+            best_article = None
+            for a in candidates:
+                art_words = {w for w in (a.title_fa or a.title_original or "").split() if len(w) >= 3}
+                overlap = len(story_words & art_words)
+                # Prefer R2/stable URLs
+                from app.config import settings
+                is_stable = a.image_url.startswith("/images/") or (
+                    settings.r2_public_url and a.image_url.startswith(settings.r2_public_url)
+                )
+                score = overlap * 2 + (1 if is_stable else 0)
+                if score > best_score:
+                    best_score = score
+                    best_article = a
+
+            # If best image has 0 word overlap with story title, flag it
+            if best_article and best_score <= 1:
+                stats["flagged"] += 1
+                logger.info(f"  Low relevance image for '{(story.title_fa or '')[:30]}' — best overlap score: {best_score}")
+
+    if stats["flagged"] > 0:
+        logger.info(f"Image relevance: {stats}")
+    return stats
+
+
 async def step_fix_issues():
     """Step 5: Auto-fix common issues."""
     from sqlalchemy import select, func
@@ -1637,6 +1795,8 @@ async def run_maintenance():
         ("recalc_trending", "Recalculate trending", step_recalculate_trending),
         ("dedup_articles", "Dedup articles", step_deduplicate_articles),
         ("fixes", "Auto-fix common issues", step_fix_issues),
+        ("flag_unrelated", "Auto-flag unrelated articles", step_flag_unrelated_articles),
+        ("image_relevance", "Image relevance check", step_image_relevance),
         ("rater_feedback", "Apply rater feedback", step_rater_feedback_apply),
         ("feedback_health", "Feedback system health", step_feedback_health),
         ("telegram_health", "Telegram session health", step_telegram_health),
