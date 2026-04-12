@@ -42,25 +42,21 @@ export default function PoliticalSpectrum({ sources, sourceNeutrality }: Props) 
 
   return (
     <div dir="rtl">
-      {/* X-axis labels: conservative (right in RTL) — opposition (left in RTL) */}
-      <div className="flex items-center justify-between mb-1 text-[9px] text-slate-400 dark:text-slate-500">
-        <span>محافظه‌کار</span>
-        <span>اپوزیسیون</span>
-      </div>
-
       {/* Chart: columns + Y-axis on left */}
       <div className="flex items-stretch gap-0">
         {/* 5 columns */}
         <div className="flex-1 relative">
-          {/* X-axis: horizontal gradient line in center — reversed: dark blue (right/conservative) → orange (left/opposition) */}
-          <div className="absolute left-0 right-0 h-[3px] z-0" style={{
-            top: "50%",
-            transform: "translateY(-50%)",
-            background: "linear-gradient(to left, #1e3a5f, #2563eb, #94a3b8, #f97316, #c2410c)",
-          }} />
+          {/* X-axis: horizontal gradient line in center with labels */}
+          <div className="absolute left-0 right-0 z-0 flex items-center" style={{ top: "50%", transform: "translateY(-50%)" }}>
+            <span className="text-[9px] text-slate-500 dark:text-slate-400 shrink-0 pl-1">محافظه‌کار</span>
+            <div className="flex-1 h-[3px]" style={{
+              background: "linear-gradient(to left, #1e3a5f, #2563eb, #94a3b8, #f97316, #c2410c)",
+            }} />
+            <span className="text-[9px] text-slate-500 dark:text-slate-400 shrink-0 pr-1">اپوزیسیون</span>
+          </div>
 
-          {/* Vertical neutrality axis line (left side) */}
-          <div className="absolute top-0 bottom-0 w-px bg-slate-300 dark:bg-slate-600 z-0" style={{ right: 0 }} />
+          {/* Y-axis vertical line (left side in visual / right in RTL) */}
+          <div className="absolute top-0 bottom-0 w-px bg-slate-400 dark:bg-slate-500 z-0" style={{ left: 0 }} />
 
           {/* 4 vertical separator lines */}
           {[1, 2, 3, 4].map((i) => (

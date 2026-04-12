@@ -1,4 +1,5 @@
 import { BarChart3, Brain } from "lucide-react";
+// Analyst first, then stats
 import type { StoryAnalysis } from "@/lib/types";
 
 export default function StatsPanel({ analysis }: { analysis: StoryAnalysis | null }) {
@@ -13,8 +14,25 @@ export default function StatsPanel({ analysis }: { analysis: StoryAnalysis | nul
 
   return (
     <div dir="rtl" className="space-y-5">
-      {/* Summary stats */}
+      {/* Analyst (top) */}
       <div>
+        <div className="flex items-center gap-2 mb-3">
+          <Brain className="h-4 w-4 text-slate-400" />
+          <h4 className="text-[12px] font-bold text-slate-900 dark:text-white">تحلیلگر دورنگر</h4>
+        </div>
+        {hasAnalyst ? (
+          <p className="text-[11px] text-slate-500">تحلیل عمیق در دسترس است</p>
+        ) : (
+          <div className="space-y-2">
+            <div className="h-3 w-3/4 bg-slate-100 dark:bg-slate-800 animate-pulse" />
+            <div className="h-3 w-1/2 bg-slate-100 dark:bg-slate-800 animate-pulse" />
+            <p className="text-[10px] text-slate-400 mt-2">تحلیل عمیق پس از اجرای بعدی در دسترس خواهد بود</p>
+          </div>
+        )}
+      </div>
+
+      {/* Summary stats (below analyst) */}
+      <div className="border-t border-slate-200 dark:border-slate-800 pt-4">
         <div className="flex items-center gap-2 mb-3">
           <BarChart3 className="h-4 w-4 text-slate-400" />
           <h4 className="text-[12px] font-bold text-slate-900 dark:text-white">آمار خلاصه</h4>
@@ -62,23 +80,6 @@ export default function StatsPanel({ analysis }: { analysis: StoryAnalysis | nul
             <p className="text-[10px] text-slate-400">آمار پس از اجرای تحلیل در دسترس خواهد بود</p>
           )}
         </div>
-      </div>
-
-      {/* Analyst placeholder */}
-      <div className="border-t border-slate-200 dark:border-slate-800 pt-4">
-        <div className="flex items-center gap-2 mb-3">
-          <Brain className="h-4 w-4 text-slate-400" />
-          <h4 className="text-[12px] font-bold text-slate-900 dark:text-white">تحلیلگر دورنگر</h4>
-        </div>
-        {hasAnalyst ? (
-          <p className="text-[11px] text-slate-500">تحلیل عمیق در دسترس است</p>
-        ) : (
-          <div className="space-y-2">
-            <div className="h-3 w-3/4 bg-slate-100 dark:bg-slate-800 animate-pulse" />
-            <div className="h-3 w-1/2 bg-slate-100 dark:bg-slate-800 animate-pulse" />
-            <p className="text-[10px] text-slate-400 mt-2">تحلیل عمیق پس از اجرای بعدی در دسترس خواهد بود</p>
-          </div>
-        )}
       </div>
     </div>
   );
