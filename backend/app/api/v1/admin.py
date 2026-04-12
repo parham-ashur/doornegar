@@ -1040,6 +1040,137 @@ async def patch_source(
     return {"status": "ok", "slug": slug, "updated": changed}
 
 
+@router.post("/migrate-and-seed")
+async def migrate_and_seed(db: AsyncSession = Depends(get_db)):
+    """Run alembic migration + seed new sources and analysts. One-time setup."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    backend_dir = Path(__file__).parent.parent.parent.parent
+    results = {"migration": None, "seed": None}
+
+    # 1. Run alembic autogenerate + upgrade
+    try:
+        env = {**__import__("os").environ, "PYTHONPATH": str(backend_dir)}
+        rev = subprocess.run(
+            [sys.executable, "-m", "alembic", "revision", "--autogenerate", "-m", "add_analysts_table"],
+            cwd=str(backend_dir), capture_output=True, text=True, timeout=30, env=env,
+        )
+        upgrade = subprocess.run(
+            [sys.executable, "-m", "alembic", "upgrade", "head"],
+            cwd=str(backend_dir), capture_output=True, text=True, timeout=30, env=env,
+        )
+        results["migration"] = {
+            "revision": rev.stdout[-200:] if rev.returncode == 0 else rev.stderr[-200:],
+            "upgrade": upgrade.stdout[-200:] if upgrade.returncode == 0 else upgrade.stderr[-200:],
+            "success": upgrade.returncode == 0,
+        }
+    except Exception as e:
+        results["migration"] = {"error": str(e), "success": False}
+
+    # 2. Run seed script
+    try:
+        seed_script = backend_dir / "scripts" / "seed_sources_v2.py"
+        if seed_script.exists():
+            seed = subprocess.run(
+                [sys.executable, str(seed_script)],
+                cwd=str(backend_dir), capture_output=True, text=True, timeout=60,
+                env={**__import__("os").environ, "PYTHONPATH": str(backend_dir)},
+            )
+            results["seed"] = {
+                "output": seed.stdout[-500:],
+                "errors": seed.stderr[-200:] if seed.returncode != 0 else None,
+                "success": seed.returncode == 0,
+            }
+        else:
+            results["seed"] = {"error": "seed script not found", "success": False}
+    except Exception as e:
+        results["seed"] = {"error": str(e), "success": False}
+
+    return {"status": "ok", "results": results}
+
+
+@router.post("/cleanup-unrelated")
+async def cleanup_unrelated_articles(
+    threshold: float = Query(0.20, ge=0.0, le=1.0),
+    dry_run: bool = Query(True),
+    db: AsyncSession = Depends(get_db),
+):
+    """Find and optionally remove articles with low similarity to their story centroid.
+
+    This directly addresses the problem of unrelated articles polluting bias comparison.
+
+    Args:
+        threshold: cosine similarity below this = unrelated (default 0.20)
+        dry_run: if True, just report what would be removed (default True)
+    """
+    from app.nlp.embeddings import cosine_similarity
+
+    result = await db.execute(
+        select(Story).where(
+            Story.article_count >= 5,
+            Story.centroid_embedding.isnot(None),
+        )
+    )
+    stories = list(result.scalars().all())
+
+    flagged = []
+    for story in stories:
+        centroid = story.centroid_embedding
+        if not centroid:
+            continue
+
+        art_result = await db.execute(
+            select(Article).where(
+                Article.story_id == story.id,
+                Article.embedding.isnot(None),
+            )
+        )
+        articles = list(art_result.scalars().all())
+
+        for article in articles:
+            if not article.embedding:
+                continue
+            sim = cosine_similarity(article.embedding, centroid)
+            if sim < threshold:
+                flagged.append({
+                    "article_id": str(article.id),
+                    "story_id": str(story.id),
+                    "story_title": (story.title_fa or "")[:50],
+                    "article_title": (article.title_fa or article.title_original or "")[:50],
+                    "similarity": round(sim, 3),
+                })
+
+                if not dry_run:
+                    article.story_id = None  # detach from story
+
+    if not dry_run and flagged:
+        # Refresh affected stories
+        affected_ids = {f["story_id"] for f in flagged}
+        for sid in affected_ids:
+            story_obj = await db.execute(select(Story).where(Story.id == sid))
+            s = story_obj.scalar_one_or_none()
+            if s:
+                # Recount
+                count_result = await db.execute(
+                    select(func.count(Article.id)).where(Article.story_id == s.id)
+                )
+                s.article_count = count_result.scalar() or 0
+                s.summary_fa = None  # force re-summarize
+                s.summary_en = None
+        await db.commit()
+
+    return {
+        "status": "ok",
+        "dry_run": dry_run,
+        "threshold": threshold,
+        "flagged_count": len(flagged),
+        "flagged": flagged[:50],  # cap response size
+        "message": f"{'Would remove' if dry_run else 'Removed'} {len(flagged)} unrelated articles",
+    }
+
+
 @router.patch("/articles/{article_id}")
 async def patch_article(
     article_id: str,
