@@ -66,18 +66,26 @@ function Meta({ story }: { story: StoryBrief }) {
   const updated = story.updated_at
     ? formatRelativeTime(story.updated_at, "fa")
     : null;
-  // Only show "updated" if it differs meaningfully from "published" (>1h apart)
   const showUpdated = updated && story.updated_at && story.first_published_at
     && Math.abs(new Date(story.updated_at).getTime() - new Date(story.first_published_at).getTime()) > 3600000;
+  const hasSides = story.state_pct > 0 || story.independent_pct > 0 || story.diaspora_pct > 0;
   return (
-    <p className="mt-1.5 text-[11px] text-slate-400 dark:text-slate-500 leading-5" dir="rtl">
-      <span>{story.source_count} رسانه · {story.article_count} مقاله</span>
-      {published && <span>{" · "}{published}</span>}
-      {showUpdated && <span className="text-slate-400/70">{" · "}به‌روز: {updated}</span>}
-      {story.state_pct > 0 && <span className="text-red-500 mr-1">{" · "}حکومتی {story.state_pct}٪</span>}
-      {story.independent_pct > 0 && <span className="text-emerald-600 mr-1">{" · "}مستقل {story.independent_pct}٪</span>}
-      {story.diaspora_pct > 0 && <span className="text-blue-600 mr-1">{" · "}برون‌مرزی {story.diaspora_pct}٪</span>}
-    </p>
+    <div className="mt-1.5" dir="rtl">
+      <p className="text-[11px] text-slate-400 dark:text-slate-500 leading-5">
+        {story.source_count} رسانه · {story.article_count} مقاله
+        {published && <span>{" · "}{published}</span>}
+        {showUpdated && <span className="text-slate-400/70">{" · "}به‌روز: {updated}</span>}
+      </p>
+      {hasSides && (
+        <p className="text-[11px] leading-5 mt-0.5">
+          {story.state_pct > 0 && <span className="text-red-500">حکومتی {story.state_pct}٪</span>}
+          {story.state_pct > 0 && (story.independent_pct > 0 || story.diaspora_pct > 0) && <span className="text-slate-300 dark:text-slate-600"> · </span>}
+          {story.independent_pct > 0 && <span className="text-emerald-600">مستقل {story.independent_pct}٪</span>}
+          {story.independent_pct > 0 && story.diaspora_pct > 0 && <span className="text-slate-300 dark:text-slate-600"> · </span>}
+          {story.diaspora_pct > 0 && <span className="text-blue-600">برون‌مرزی {story.diaspora_pct}٪</span>}
+        </p>
+      )}
+    </div>
   );
 }
 
