@@ -2616,6 +2616,7 @@ async def run_maintenance():
         ("flag_unrelated", "Auto-flag unrelated articles", step_flag_unrelated_articles),
         ("image_relevance", "Image relevance check", step_image_relevance),
         ("analyst_takes", "Extract analyst takes from Telegram", step_extract_analyst_takes),
+        ("verify_predictions", "Verify analyst predictions", step_verify_predictions),
         ("rater_feedback", "Apply rater feedback", step_rater_feedback_apply),
         ("feedback_health", "Feedback system health", step_feedback_health),
         ("telegram_health", "Telegram session health", step_telegram_health),
