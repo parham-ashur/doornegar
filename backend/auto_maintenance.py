@@ -196,6 +196,55 @@ async def step_cluster():
     return stats
 
 
+async def step_recompute_centroids():
+    """Step 3b: Recompute story centroid embeddings.
+
+    After clustering and embedding, each story needs an up-to-date centroid
+    (mean of its articles' embeddings). This is used by the embedding
+    pre-filter in _match_to_existing_stories to skip irrelevant story/article
+    pairs before calling the LLM.
+
+    Only updates stories whose centroid is NULL (new or invalidated).
+    """
+    from sqlalchemy import select
+
+    from app.database import async_session
+    from app.models.article import Article
+    from app.models.story import Story
+    from app.services.clustering import _compute_centroid
+
+    stats = {"updated": 0, "skipped": 0}
+
+    async with async_session() as db:
+        result = await db.execute(
+            select(Story)
+            .where(
+                Story.article_count >= 2,
+                Story.centroid_embedding.is_(None),
+            )
+        )
+        stories = list(result.scalars().all())
+
+        for story in stories:
+            emb_result = await db.execute(
+                select(Article.embedding)
+                .where(Article.story_id == story.id, Article.embedding.isnot(None))
+            )
+            embeddings = [row[0] for row in emb_result.all() if row[0]]
+            centroid = _compute_centroid(embeddings)
+            if centroid:
+                story.centroid_embedding = centroid
+                stats["updated"] += 1
+            else:
+                stats["skipped"] += 1
+
+        await db.commit()
+
+    if stats["updated"] > 0:
+        logger.info(f"Centroid recompute: {stats['updated']} stories updated")
+    return stats
+
+
 async def step_summarize():
     """Step 4: Generate summaries for stories without one.
 
@@ -1521,6 +1570,7 @@ async def run_maintenance():
         ("process", "NLP process (embed, translate, extract)", step_process),
         ("backfill_farsi_titles", "Backfill Farsi titles", step_backfill_farsi_titles),
         ("cluster", "Cluster articles into stories", step_cluster),
+        ("centroids", "Recompute story centroid embeddings", step_recompute_centroids),
         ("summarize", "Summarize new stories", step_summarize),
         ("bias_score", "Bias scoring", step_bias_score),
         ("fix_images", "Fix broken images", step_fix_images),

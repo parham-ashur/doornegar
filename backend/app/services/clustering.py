@@ -273,22 +273,32 @@ async def _match_to_existing_stories(
 ) -> list[Article]:
     """Try to match new articles to existing visible stories.
 
+    Two-phase matching:
+    1. EMBEDDING PRE-FILTER: compute cosine similarity between each
+       article's embedding and each story's centroid embedding. Only
+       pairs with sim > 0.3 are sent to the LLM. This dramatically
+       reduces LLM calls (e.g. 30 articles × 200 stories → only ~5
+       articles × ~3 stories each get LLM-checked).
+    2. LLM CONFIRMATION: for each (article, candidate_stories) pair
+       that passed the pre-filter, ask the LLM to confirm the match.
+
     Safety constraints:
-    - Story must have article_count < settings.max_cluster_size (so we don't
-      grow clusters indefinitely — oversized stories become "closed")
-    - Story must have been active (last_updated_at) within the last
-      settings.clustering_time_window_days days (news has a natural shelf life)
+    - Story must have article_count < settings.max_cluster_size
+    - Story must have been active within clustering_time_window_days
     - article_count must be >= 5 (visibility threshold)
 
-    Returns the list of articles that were NOT matched (still need clustering).
+    Returns the list of articles that were NOT matched.
     """
     from datetime import timedelta as _timedelta
+    from app.nlp.embeddings import cosine_similarity as _cosine_sim
+
+    EMBEDDING_SIM_THRESHOLD = 0.30  # loose — let the LLM reject false positives
 
     time_cutoff = datetime.now(timezone.utc) - _timedelta(days=settings.clustering_time_window_days)
 
-    # Get existing visible stories that are still "open" for matching
+    # Get existing visible stories with their centroid embeddings
     result = await db.execute(
-        select(Story.id, Story.title_fa, Story.title_en, Story.article_count)
+        select(Story.id, Story.title_fa, Story.title_en, Story.article_count, Story.centroid_embedding)
         .where(
             Story.article_count >= 5,
             Story.article_count < settings.max_cluster_size,
@@ -296,7 +306,7 @@ async def _match_to_existing_stories(
         )
         .order_by(Story.last_updated_at.desc().nullslast())
     )
-    existing_stories = result.all()  # list of (id, title_fa, title_en, article_count)
+    existing_stories = result.all()  # (id, title_fa, title_en, article_count, centroid_embedding)
     logger.info(
         f"Matching against {len(existing_stories)} open stories "
         f"(article_count 5 .. {settings.max_cluster_size - 1}, "
@@ -307,16 +317,78 @@ async def _match_to_existing_stories(
         logger.info("No existing visible stories to match against")
         return articles
 
+    # ── Phase 1: Embedding pre-filter ─────────────────────────────
+    # For each article, find which stories are plausible matches based
+    # on embedding similarity. Articles or stories without embeddings
+    # fall through to the LLM without pre-filtering (conservative).
+    stories_with_centroids = {
+        row[0]: row[4]  # story_id → centroid_embedding
+        for row in existing_stories
+        if row[4]  # has a centroid
+    }
+
+    # Build per-article candidate story sets
+    # article_id → set of story_ids that passed the embedding threshold
+    article_candidates: dict[uuid.UUID, set[uuid.UUID]] = {}
+    articles_without_embedding: list[Article] = []
+
+    for article in articles:
+        if not article.embedding or not any(v != 0.0 for v in (article.embedding or [])[:5]):
+            articles_without_embedding.append(article)
+            continue
+
+        candidates = set()
+        for story_id, centroid in stories_with_centroids.items():
+            sim = _cosine_sim(article.embedding, centroid)
+            if sim >= EMBEDDING_SIM_THRESHOLD:
+                candidates.add(story_id)
+
+        if candidates:
+            article_candidates[article.id] = candidates
+        # else: no candidates → article won't be sent to LLM for matching
+        #       (it'll fall through to new-cluster creation in step 3)
+
+    # Stats
+    pre_filtered_articles = len(article_candidates) + len(articles_without_embedding)
+    total_candidate_pairs = sum(len(c) for c in article_candidates.values())
     logger.info(
-        f"Matching {len(articles)} articles against {len(existing_stories)} existing stories"
+        f"Embedding pre-filter: {len(article_candidates)} articles have candidates "
+        f"({total_candidate_pairs} pairs), {len(articles_without_embedding)} articles "
+        f"have no embedding (sent to LLM unfiltered), "
+        f"{len(articles) - pre_filtered_articles} articles have no candidate stories"
     )
 
-    # Build a lookup: 1-based story index -> story row
-    # We'll process stories in batches of STORY_BATCH_SIZE
+    # ── Phase 2: LLM confirmation ─────────────────────────────────
+    # Build a combined set of articles to LLM-check: those with embedding
+    # candidates + those without embeddings (conservative fallback).
+    articles_to_check = [
+        a for a in articles
+        if a.id in article_candidates or a in articles_without_embedding
+    ]
+
+    if not articles_to_check:
+        logger.info("No articles to send to LLM for matching (all filtered out by embeddings)")
+        return articles
+
+    # Collect the union of candidate story IDs across all articles
+    candidate_story_ids = set()
+    for cands in article_candidates.values():
+        candidate_story_ids.update(cands)
+    # For articles without embeddings, consider ALL stories (conservative)
+    if articles_without_embedding:
+        candidate_story_ids.update(row[0] for row in existing_stories)
+
+    # Filter existing_stories to only the candidates
+    filtered_stories = [row for row in existing_stories if row[0] in candidate_story_ids]
+
+    logger.info(
+        f"Sending {len(articles_to_check)} articles × {len(filtered_stories)} candidate stories to LLM"
+    )
+
     matched_article_ids: set[uuid.UUID] = set()
 
-    for story_batch_start in range(0, len(existing_stories), STORY_BATCH_SIZE):
-        story_batch = existing_stories[story_batch_start: story_batch_start + STORY_BATCH_SIZE]
+    for story_batch_start in range(0, len(filtered_stories), STORY_BATCH_SIZE):
+        story_batch = filtered_stories[story_batch_start: story_batch_start + STORY_BATCH_SIZE]
 
         # Build stories block
         stories_lines = []
@@ -326,10 +398,18 @@ async def _match_to_existing_stories(
             stories_lines.append(f"S{i}. {display}")
         stories_block = "\n".join(stories_lines)
 
-        # Only send unmatched articles
-        remaining = [a for a in articles if a.id not in matched_article_ids]
+        # Only send unmatched articles that have candidates in THIS batch
+        batch_story_ids = {row[0] for row in story_batch}
+        remaining = [
+            a for a in articles_to_check
+            if a.id not in matched_article_ids
+            and (
+                a.id in article_candidates and article_candidates[a.id] & batch_story_ids
+                or a in articles_without_embedding  # conservative fallback
+            )
+        ]
         if not remaining:
-            break
+            continue
 
         articles_block = _build_articles_block(remaining, source_names)
 
@@ -446,6 +526,11 @@ async def _refresh_story_metadata(db: AsyncSession, story_id: uuid.UUID) -> None
         story.article_count, story.first_published_at
     )
 
+    # Recompute centroid embedding (mean of article embeddings)
+    story.centroid_embedding = _compute_centroid(
+        [a.embedding for a in story.articles if a.embedding]
+    )
+
     # Clear summary so it gets regenerated
     story.summary_fa = None
     story.summary_en = None
@@ -513,6 +598,35 @@ async def _refresh_stories_metadata_batch(
         # Clear summary so it gets regenerated by step_summarize
         story.summary_fa = None
         story.summary_en = None
+
+    # 5. Recompute centroid embeddings for affected stories (batch query)
+    for sid in id_list:
+        story = stories_by_id.get(sid)
+        if not story:
+            continue
+        emb_result = await db.execute(
+            select(Article.embedding)
+            .where(Article.story_id == sid, Article.embedding.isnot(None))
+        )
+        embeddings = [row[0] for row in emb_result.all() if row[0]]
+        story.centroid_embedding = _compute_centroid(embeddings)
+
+
+def _compute_centroid(embeddings: list[list[float] | None]) -> list[float] | None:
+    """Compute the mean (centroid) of a list of embedding vectors.
+
+    Returns None if no valid embeddings are provided.
+    """
+    valid = [e for e in embeddings if e and any(v != 0.0 for v in e[:5])]
+    if not valid:
+        return None
+    import numpy as np
+    matrix = np.array(valid)
+    centroid = matrix.mean(axis=0)
+    norm = np.linalg.norm(centroid)
+    if norm > 0:
+        centroid = centroid / norm  # L2-normalize the centroid
+    return centroid.tolist()
 
 
 # ---------------------------------------------------------------------------
@@ -748,6 +862,9 @@ async def _create_story(
     # Unique sources
     source_ids = {a.source_id for a in articles}
 
+    # Compute centroid from article embeddings
+    centroid = _compute_centroid([a.embedding for a in articles if a.embedding])
+
     story = Story(
         title_en=title_en,
         title_fa=title_fa,
@@ -763,6 +880,7 @@ async def _create_story(
         first_published_at=first_published,
         last_updated_at=datetime.now(timezone.utc),
         trending_score=_compute_trending_score(len(articles), first_published),
+        centroid_embedding=centroid,
     )
     db.add(story)
     await db.flush()  # Get the story ID

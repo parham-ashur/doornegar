@@ -894,6 +894,58 @@ async def edit_story(story_id: str, request: _EditStoryRequest, db: AsyncSession
     }
 
 
+@router.post("/re-embed-all")
+async def re_embed_all_articles(
+    limit: int = Query(500, ge=1, le=5000),
+    db: AsyncSession = Depends(get_db),
+):
+    """Re-generate embeddings for all articles using OpenAI text-embedding-3-small.
+
+    Processes in batches of 100. Safe to re-run — overwrites existing embeddings.
+    Cost: ~2200 articles ≈ $0.01 total.
+    """
+    from sqlalchemy import text as _text
+    from app.models.article import Article
+    from app.nlp.embeddings import generate_embeddings_batch
+    from app.nlp.persian import extract_text_for_embedding, normalize
+
+    result = await db.execute(
+        select(Article)
+        .where(Article.content_text.isnot(None) | Article.summary.isnot(None))
+        .order_by(Article.ingested_at.desc())
+        .limit(limit)
+    )
+    articles = list(result.scalars().all())
+
+    if not articles:
+        return {"status": "ok", "embedded": 0}
+
+    # Build texts for embedding
+    texts = []
+    for a in articles:
+        title = a.title_original or a.title_fa or a.title_en or ""
+        body = a.content_text or a.summary or ""
+        raw = f"{title}. {body[:2000]}"
+        try:
+            raw = normalize(raw)
+        except Exception:
+            pass
+        texts.append(raw)
+
+    # Generate in batches
+    embeddings = generate_embeddings_batch(texts, batch_size=100)
+
+    updated = 0
+    for article, embedding in zip(articles, embeddings):
+        if embedding and any(v != 0.0 for v in embedding[:10]):
+            article.embedding = embedding
+            updated += 1
+
+    await db.commit()
+    logger.info(f"Re-embedded {updated}/{len(articles)} articles with OpenAI")
+    return {"status": "ok", "total": len(articles), "embedded": updated}
+
+
 @router.post("/nullify-localhost-images")
 async def nullify_localhost_images(db: AsyncSession = Depends(get_db)):
     """Nullify all article.image_url values pointing to http://localhost:*

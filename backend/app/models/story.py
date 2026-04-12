@@ -52,6 +52,10 @@ class Story(Base):
     )
     # Reliability flag: set when summary generation fails; story is skipped for 24h before retry
     llm_failed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Mean of all article embeddings in this story. Used by the clustering
+    # pre-filter to quickly find candidate stories for new articles via
+    # cosine similarity (avoids sending irrelevant stories to the LLM).
+    centroid_embedding: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     # Relationships
     articles: Mapped[list["Article"]] = relationship(back_populates="story")  # noqa: F821
