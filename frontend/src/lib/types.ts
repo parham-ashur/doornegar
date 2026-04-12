@@ -116,6 +116,12 @@ export interface SideBiasScores {
   framing: string | string[] | null;
 }
 
+export interface NarrativeArc {
+  evolution: string | null;
+  vocabulary_shift: string[];
+  direction: "escalating" | "de-escalating" | "shifting" | "stable" | null;
+}
+
 export interface StoryAnalysis {
   summary_fa: string | null;
   state_summary_fa: string | null;
@@ -130,6 +136,21 @@ export interface StoryAnalysis {
   source_neutrality: Record<string, number> | null;
   dispute_score: number | null;
   loaded_words: { conservative: string[]; opposition: string[] } | null;
+  narrative_arc: NarrativeArc | null;
+  delta: string | null;
+  silence_analysis: {
+    silent_side: string;
+    loud_side: string;
+    loud_count: number;
+    loud_sources: string[];
+    hypothesis_fa?: string;
+  } | null;
+  coordinated_messaging: {
+    side: string;
+    sources: string[];
+    similarity: number;
+    time_window_hours: number;
+  } | null;
 }
 
 // ─── Lab / Topics ──────────────────────────────

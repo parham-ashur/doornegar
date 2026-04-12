@@ -73,5 +73,13 @@ class StoryAnalysisResponse(BaseModel):
     dispute_score: float | None = None
     # Loaded words per side for "words of the week"
     loaded_words: dict | None = None
+    # Narrative arc — how the story evolved from related stories
+    narrative_arc: dict | None = None
+    # Delta — what's new since the last analysis
+    delta: str | None = None
     # Deep analyst factors — populated only for premium-tier stories
     analyst: dict | None = None
+    # Silence detection — which side is ignoring this story
+    silence_analysis: dict | None = None
+    # Coordinated messaging — same-side sources publishing near-identical content
+    coordinated_messaging: dict | None = None

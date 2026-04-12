@@ -108,7 +108,13 @@ bias_explanation_fa باید عمیق و مشخص باشد. ۵ تا ۷ نکته 
   "loaded_words": {{
     "conservative": ["<واژه بارگذاری‌شده ۱ محافظه‌کار>", "<واژه ۲>", "<واژه ۳>"],
     "opposition": ["<واژه بارگذاری‌شده ۱ اپوزیسیون>", "<واژه ۲>", "<واژه ۳>"]
-  }}
+  }},
+  "narrative_arc": {{
+    "evolution": "<اگر موضوعات مرتبط اخیر ارائه شده: چگونه روایت از آن زمان تا حالا تغییر کرده، ۱-۲ جمله. اگر ارائه نشده: null>",
+    "vocabulary_shift": ["<واژه‌ای که در پوشش قبلی بود ولی در جدید نیست>", "<واژه جدیدی که جایگزین شده>"],
+    "direction": "<escalating | de-escalating | shifting | stable>"
+  }},
+  "delta": "<اگر خلاصه قبلی ارائه شده: فقط اطلاعات جدید نسبت به تحلیل قبلی، ۱-۲ جمله. تکرار نکن. اگر ارائه نشده: null>"
 }}"""
 
 
@@ -230,6 +236,7 @@ async def generate_story_analysis(
     include_analyst_factors: bool = False,
     related_stories: list[dict] | None = None,
     source_track_records: dict | None = None,
+    old_summary: str | None = None,
 ) -> dict:
     """Two-pass story analysis for maximum quality.
 
@@ -239,6 +246,7 @@ async def generate_story_analysis(
     Context injected into Pass 2 (no extra LLM cost):
     - related_stories: summaries of similar stories for cross-story memory
     - source_track_records: historical reliability per source
+    - old_summary: previous summary for delta generation
 
     Returns:
         dict with all analysis fields
@@ -289,6 +297,12 @@ async def generate_story_analysis(
         for slug, record in list(source_track_records.items())[:6]:
             lines.append(f"  - {slug}: {record}")
         lines.append("  از این سابقه برای ارزیابی اعتبار ادعاها استفاده کن.\n")
+
+    # Inject previous summary for delta detection
+    if old_summary:
+        lines.append("# خلاصه قبلی (تحلیل پیشین این موضوع)")
+        lines.append(f"  {old_summary[:300]}")
+        lines.append("  فقط اطلاعات جدید را در فیلد delta بنویس. تکرار نکن.\n")
 
     # Add raw articles (shorter since facts are already extracted)
     for i, art in enumerate(articles_with_sources, 1):
@@ -367,6 +381,8 @@ def _parse_analysis_response(response_text: str) -> dict:
         "source_neutrality": None,
         "dispute_score": None,
         "loaded_words": None,
+        "narrative_arc": None,
+        "delta": None,
     }
     for key, default in defaults.items():
         if key not in result:

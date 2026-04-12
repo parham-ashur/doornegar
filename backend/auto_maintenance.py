@@ -316,6 +316,7 @@ async def step_summarize():
         top_ids = {row[0] for row in top_result.all()}
 
         # 2. Find stories that need a summary (skip recently-failed)
+        #    Also re-summarize stories that have new articles since last analysis
         MAX_STORIES_PER_RUN = 15  # quality over quantity — deep analysis on top 15 only
         retry_cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
         result = await db.execute(
@@ -454,12 +455,16 @@ async def step_summarize():
                         elif align == "diaspora":
                             source_records[slug] = "اپوزیسیون — تمایل به تأکید بر سرکوب و نقض حقوق بشر"
 
+                # Save old summary for delta detection before overwriting
+                _old_summary = story.summary_fa
+
                 analysis = await generate_story_analysis(
                     story, articles_info,
                     model=chosen_model,
                     include_analyst_factors=is_premium,
                     related_stories=related if related else None,
                     source_track_records=source_records if source_records else None,
+                    old_summary=_old_summary,
                 )
                 story.summary_fa = analysis.get("summary_fa")
                 # Update title if LLM returned a better one
@@ -484,6 +489,12 @@ async def step_summarize():
                 # Store loaded words for homepage "words of the week" section
                 if analysis.get("loaded_words"):
                     extras["loaded_words"] = analysis["loaded_words"]
+                # Store narrative arc for story evolution tracking
+                if analysis.get("narrative_arc"):
+                    extras["narrative_arc"] = analysis["narrative_arc"]
+                # Store delta — what's new since last analysis
+                if analysis.get("delta"):
+                    extras["delta"] = analysis["delta"]
                 # Store analyst factors for premium stories
                 if is_premium and analysis.get("analyst"):
                     extras["analyst"] = analysis["analyst"]
@@ -1091,6 +1102,133 @@ Analyst post:
             f"{stats['no_match']} unmatched, "
             f"{stats['failed']} failed"
         )
+    return stats
+
+
+async def step_verify_predictions():
+    """Verify analyst predictions against what actually happened.
+
+    Finds AnalystTake records where:
+    - take_type = "prediction"
+    - verified_later IS NULL (not yet checked)
+    - published_at > 3 days ago (give predictions time to play out)
+
+    Uses the nano model to compare the prediction's key_claim against
+    the story's current summary, then updates verified_later (bool)
+    and verification_note.
+
+    Max 5 verifications per run to keep costs minimal.
+    """
+    import json as _json
+
+    import openai
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    from app.config import settings
+    from app.database import async_session
+    from app.models.analyst_take import AnalystTake
+    from app.models.story import Story
+
+    if not settings.openai_api_key:
+        logger.warning("Verify predictions: OPENAI_API_KEY not set, skipping")
+        return {"verified": 0, "skipped_no_key": True}
+
+    MAX_PER_RUN = 5
+    cutoff = datetime.now(timezone.utc) - timedelta(days=3)
+
+    stats = {"verified": 0, "correct": 0, "incorrect": 0, "inconclusive": 0, "failed": 0}
+
+    async with async_session() as db:
+        result = await db.execute(
+            select(AnalystTake)
+            .options(selectinload(AnalystTake.story))
+            .where(
+                AnalystTake.take_type == "prediction",
+                AnalystTake.verified_later.is_(None),
+                AnalystTake.published_at.isnot(None),
+                AnalystTake.published_at < cutoff,
+                AnalystTake.key_claim.isnot(None),
+                AnalystTake.story_id.isnot(None),
+            )
+            .order_by(AnalystTake.published_at.asc())
+            .limit(MAX_PER_RUN)
+        )
+        predictions = list(result.scalars().all())
+
+        if not predictions:
+            logger.info("Verify predictions: no pending predictions to check")
+            return stats
+
+        logger.info(f"Verifying {len(predictions)} analyst predictions...")
+
+        from app.services.llm_helper import build_openai_params
+        client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
+
+        for take in predictions:
+            story = take.story
+            if not story or not story.summary_fa:
+                # Story doesn't have a summary yet — skip, will retry next run
+                continue
+
+            prompt = (
+                "یک تحلیلگر پیش‌بینی زیر را کرده بود:\n"
+                f"پیش‌بینی: {take.key_claim}\n\n"
+                f"آنچه واقعاً اتفاق افتاد (خلاصه فعلی خبر):\n{story.summary_fa[:500]}\n\n"
+                "آیا این پیش‌بینی درست بود؟ فقط JSON برگردان:\n"
+                '{"correct": true/false/null, "note": "<توضیح کوتاه فارسی ۱ جمله>"}\n'
+                "اگر هنوز مشخص نیست null بگذار."
+            )
+
+            try:
+                params = build_openai_params(
+                    model=settings.translation_model,  # nano — cheapest
+                    prompt=prompt,
+                    max_tokens=256,
+                    temperature=0,
+                )
+                response = await client.chat.completions.create(**params)
+                text = response.choices[0].message.content.strip()
+
+                # Parse JSON
+                if "```json" in text:
+                    text = text.split("```json")[1].split("```")[0].strip()
+                elif "```" in text:
+                    text = text.split("```")[1].split("```")[0].strip()
+
+                parsed = _json.loads(text)
+                correct = parsed.get("correct")
+                note = parsed.get("note", "")
+
+                if correct is None:
+                    # Inconclusive — leave verified_later as None, add note
+                    take.verification_note = f"بررسی شد — هنوز مشخص نیست: {note}"
+                    stats["inconclusive"] += 1
+                else:
+                    take.verified_later = bool(correct)
+                    take.verification_note = note
+                    if correct:
+                        stats["correct"] += 1
+                    else:
+                        stats["incorrect"] += 1
+
+                stats["verified"] += 1
+                await db.commit()
+                logger.info(
+                    f"  ✓ Prediction verified: correct={correct} — "
+                    f"{(take.key_claim or '')[:50]}"
+                )
+
+            except Exception as e:
+                logger.warning(f"  ✗ Failed to verify prediction {take.id}: {e}")
+                stats["failed"] += 1
+                await db.rollback()
+
+    logger.info(
+        f"Prediction verification: {stats['verified']} verified "
+        f"({stats['correct']} correct, {stats['incorrect']} incorrect, "
+        f"{stats['inconclusive']} inconclusive), {stats['failed']} failed"
+    )
     return stats
 
 
@@ -1776,6 +1914,336 @@ async def step_image_relevance():
     return stats
 
 
+async def step_detect_silences():
+    """Detect one-sided coverage silences in visible stories.
+
+    For each visible story (article_count >= 5):
+    1. Check which source alignments covered it
+    2. If 3+ articles from one side and 0 from the other -> silence
+    3. Store silence record in story's summary_en JSON
+    4. For top 5 most significant silences, use LLM to generate a hypothesis
+    """
+    import json as _json
+
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    from app.config import settings
+    from app.database import async_session
+    from app.models.article import Article
+    from app.models.story import Story
+
+    stats = {"checked": 0, "silences_found": 0, "hypotheses_generated": 0, "failed": 0}
+
+    # Define the two opposing sides
+    STATE_SIDE = {"state", "semi_state"}
+    DIASPORA_SIDE = {"diaspora", "independent"}
+
+    async with async_session() as db:
+        result = await db.execute(
+            select(Story)
+            .options(selectinload(Story.articles).selectinload(Article.source))
+            .where(Story.article_count >= 5)
+            .order_by(Story.trending_score.desc())
+            .limit(200)
+        )
+        stories = list(result.scalars().all())
+
+        silences: list[tuple[Story, str, int, dict]] = []  # (story, silent_side, loud_count, existing_extra)
+
+        for story in stories:
+            stats["checked"] += 1
+
+            # Count articles per alignment side
+            state_count = 0
+            diaspora_count = 0
+            state_sources: list[str] = []
+            diaspora_sources: list[str] = []
+
+            for a in story.articles:
+                if not a.source:
+                    continue
+                align = a.source.state_alignment
+                if align in STATE_SIDE:
+                    state_count += 1
+                    slug = a.source.slug
+                    if slug not in state_sources:
+                        state_sources.append(slug)
+                elif align in DIASPORA_SIDE:
+                    diaspora_count += 1
+                    slug = a.source.slug
+                    if slug not in diaspora_sources:
+                        diaspora_sources.append(slug)
+
+            # Parse existing summary_en JSON
+            extra = {}
+            if story.summary_en:
+                try:
+                    extra = _json.loads(story.summary_en)
+                except Exception:
+                    pass
+
+            # Check for silence: 3+ from one side, 0 from the other
+            silent_side = None
+            loud_count = 0
+            if state_count >= 3 and diaspora_count == 0:
+                silent_side = "diaspora"
+                loud_count = state_count
+            elif diaspora_count >= 3 and state_count == 0:
+                silent_side = "state"
+                loud_count = diaspora_count
+
+            if silent_side:
+                stats["silences_found"] += 1
+                silence_record = {
+                    "silent_side": silent_side,
+                    "loud_side": "state" if silent_side == "diaspora" else "diaspora",
+                    "loud_count": loud_count,
+                    "loud_sources": state_sources if silent_side == "diaspora" else diaspora_sources,
+                }
+                extra["silence_analysis"] = silence_record
+                story.summary_en = _json.dumps(extra, ensure_ascii=False)
+                silences.append((story, silent_side, loud_count, extra))
+            elif "silence_analysis" in extra:
+                # Clear stale silence if story now has coverage from both sides
+                del extra["silence_analysis"]
+                story.summary_en = _json.dumps(extra, ensure_ascii=False)
+
+        # Sort silences by significance (loud_count * trending_score)
+        silences.sort(
+            key=lambda x: x[2] * (x[0].trending_score or 0),
+            reverse=True,
+        )
+
+        # Generate LLM hypotheses for top 5 silences only
+        top_silences = silences[:5]
+        if top_silences and settings.openai_api_key:
+            from openai import OpenAI
+            from app.services.llm_helper import build_openai_params
+
+            client = OpenAI(api_key=settings.openai_api_key)
+
+            for story, silent_side, loud_count, extra in top_silences:
+                side_label = "دولتی" if silent_side == "state" else "اپوزیسیون/مستقل"
+                title = story.title_fa or story.title_en or "(بدون عنوان)"
+
+                try:
+                    params = build_openai_params(
+                        model=settings.translation_model,  # nano — cheap
+                        prompt=(
+                            f"این خبر فقط توسط رسانه‌های {'دولتی' if silent_side == 'diaspora' else 'اپوزیسیون'} پوشش داده شده و "
+                            f"رسانه‌های {side_label} آن را نادیده گرفته‌اند.\n\n"
+                            f"عنوان خبر: {title}\n\n"
+                            f"یک جمله فارسی بنویس که فرضیه‌ای درباره دلیل این سکوت ارائه دهد. "
+                            f"فقط یک جمله، بدون توضیح اضافی."
+                        ),
+                        max_tokens=200,
+                        temperature=0.3,
+                    )
+                    resp = client.chat.completions.create(**params)
+                    hypothesis = resp.choices[0].message.content.strip()
+
+                    extra["silence_analysis"]["hypothesis_fa"] = hypothesis
+                    story.summary_en = _json.dumps(extra, ensure_ascii=False)
+                    stats["hypotheses_generated"] += 1
+                    logger.info(f"  Silence: {side_label} silent on '{title[:40]}' — hypothesis generated")
+                except Exception as e:
+                    logger.warning(f"  Silence hypothesis failed for '{(story.title_fa or '')[:30]}': {e}")
+                    stats["failed"] += 1
+
+        await db.commit()
+
+    if stats["silences_found"] > 0:
+        logger.info(
+            f"Silence detection: {stats['silences_found']} silences found, "
+            f"{stats['hypotheses_generated']} hypotheses generated"
+        )
+    return stats
+
+
+async def step_detect_coordination():
+    """Detect coordinated messaging within alignment groups.
+
+    1. Get all articles from the last 24 hours
+    2. Group by source alignment
+    3. Within each group, compute pairwise cosine similarity
+    4. If 3+ articles from different sources have cosine > 0.85
+       AND were published within 6 hours of each other -> flag as coordinated
+    5. Store in story's summary_en JSON under "coordinated_messaging"
+    """
+    import json as _json
+
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    from app.database import async_session
+    from app.models.article import Article
+    from app.models.story import Story
+    from app.nlp.embeddings import cosine_similarity
+
+    stats = {"checked": 0, "coordination_detected": 0, "stories_flagged": 0}
+
+    async with async_session() as db:
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+
+        # Get recent articles with embeddings and sources
+        result = await db.execute(
+            select(Article)
+            .options(selectinload(Article.source))
+            .where(
+                Article.published_at >= cutoff,
+                Article.embedding.isnot(None),
+                Article.source_id.isnot(None),
+                Article.story_id.isnot(None),
+            )
+            .order_by(Article.published_at.desc())
+            .limit(500)
+        )
+        articles = list(result.scalars().all())
+        stats["checked"] = len(articles)
+
+        if len(articles) < 3:
+            return stats
+
+        # Group by source alignment
+        by_alignment: dict[str, list[Article]] = {}
+        for a in articles:
+            if not a.source:
+                continue
+            align = a.source.state_alignment or "unknown"
+            by_alignment.setdefault(align, []).append(a)
+
+        # Within each alignment group, find coordinated clusters
+        coordination_by_story: dict[str, dict] = {}  # story_id -> coordination record
+
+        for align, group_articles in by_alignment.items():
+            if len(group_articles) < 3:
+                continue
+
+            # Cap group size to avoid O(n^2) explosion
+            if len(group_articles) > 50:
+                group_articles = group_articles[:50]
+
+            # Build pairwise similarity for qualifying pairs
+            pairs_cache: dict[tuple, float] = {}
+            for i, a in enumerate(group_articles):
+                for j in range(i + 1, len(group_articles)):
+                    b = group_articles[j]
+                    # Only compare articles from DIFFERENT sources
+                    if a.source_id == b.source_id:
+                        continue
+                    if not a.embedding or not b.embedding:
+                        continue
+                    sim = cosine_similarity(a.embedding, b.embedding)
+                    if sim > 0.85:
+                        # Check time window: within 6 hours
+                        if a.published_at and b.published_at:
+                            time_diff = abs((a.published_at - b.published_at).total_seconds()) / 3600
+                            if time_diff <= 6:
+                                pairs_cache[(i, j)] = sim
+
+            if not pairs_cache:
+                continue
+
+            # Build adjacency from qualifying pairs
+            adj: dict[int, set[int]] = {}
+            for (i, j) in pairs_cache:
+                adj.setdefault(i, set()).add(j)
+                adj.setdefault(j, set()).add(i)
+
+            # Find connected components (BFS)
+            visited: set[int] = set()
+            clusters: list[list[int]] = []
+            for node in adj:
+                if node in visited:
+                    continue
+                component = []
+                queue = [node]
+                while queue:
+                    curr = queue.pop(0)
+                    if curr in visited:
+                        continue
+                    visited.add(curr)
+                    component.append(curr)
+                    for neighbor in adj.get(curr, set()):
+                        if neighbor not in visited:
+                            queue.append(neighbor)
+                if len(component) >= 3:
+                    clusters.append(component)
+
+            for cluster_indices in clusters:
+                cluster_articles = [group_articles[i] for i in cluster_indices]
+
+                # Ensure at least 3 different sources
+                unique_sources = {a.source.slug for a in cluster_articles if a.source}
+                if len(unique_sources) < 3:
+                    continue
+
+                stats["coordination_detected"] += 1
+
+                # Compute average similarity across the cluster
+                sim_values = []
+                for (i, j), sim in pairs_cache.items():
+                    if i in cluster_indices and j in cluster_indices:
+                        sim_values.append(sim)
+                avg_sim = sum(sim_values) / len(sim_values) if sim_values else 0
+
+                # Compute time window
+                pub_times = [a.published_at for a in cluster_articles if a.published_at]
+                if pub_times:
+                    time_window = (max(pub_times) - min(pub_times)).total_seconds() / 3600
+                else:
+                    time_window = 0
+
+                # Group by story_id and store
+                for a in cluster_articles:
+                    sid = str(a.story_id)
+                    if sid not in coordination_by_story:
+                        coordination_by_story[sid] = {
+                            "side": align,
+                            "sources": list(unique_sources),
+                            "similarity": round(avg_sim, 2),
+                            "time_window_hours": round(time_window, 1),
+                        }
+
+        # Write coordination records into story summary_en JSON
+        if coordination_by_story:
+            import uuid as _uuid
+            story_ids = []
+            for sid in coordination_by_story:
+                try:
+                    story_ids.append(_uuid.UUID(sid))
+                except (ValueError, AttributeError):
+                    continue
+
+            if story_ids:
+                story_result = await db.execute(
+                    select(Story).where(Story.id.in_(story_ids))
+                )
+                for story in story_result.scalars().all():
+                    extra = {}
+                    if story.summary_en:
+                        try:
+                            extra = _json.loads(story.summary_en)
+                        except Exception:
+                            pass
+
+                    coord = coordination_by_story.get(str(story.id))
+                    if coord:
+                        extra["coordinated_messaging"] = coord
+                        story.summary_en = _json.dumps(extra, ensure_ascii=False)
+                        stats["stories_flagged"] += 1
+
+                await db.commit()
+
+    if stats["coordination_detected"] > 0:
+        logger.info(
+            f"Coordination detection: {stats['coordination_detected']} clusters found, "
+            f"{stats['stories_flagged']} stories flagged"
+        )
+    return stats
+
+
 async def step_fix_issues():
     """Step 5: Auto-fix common issues."""
     from sqlalchemy import select, func
@@ -2138,6 +2606,8 @@ async def run_maintenance():
         ("bias_score", "Bias scoring", step_bias_score),
         ("fix_images", "Fix broken images", step_fix_images),
         ("story_quality", "Story quality checks", step_story_quality),
+        ("detect_silences", "Detect coverage silences", step_detect_silences),
+        ("detect_coordination", "Detect coordinated messaging", step_detect_coordination),
         ("source_health", "Source health", step_source_health),
         ("archive_stale", "Archive stale stories", step_archive_stale),
         ("recalc_trending", "Recalculate trending", step_recalculate_trending),
