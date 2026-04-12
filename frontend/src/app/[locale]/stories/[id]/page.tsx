@@ -139,7 +139,13 @@ export default async function StoryDetailPage({
         </div>
       </div>
 
-      {/* Main layout: articles left, analysis+spectrum right */}
+      {/* Analysis tabs — full width, above articles */}
+      <div className="mb-6">
+        <StoryAnalysisPanel analysis={analysis} />
+        <SummaryRating storyId={id} />
+      </div>
+
+      {/* Main layout: articles left, spectrum right */}
       <div className="grid gap-8 lg:grid-cols-2 lg:items-start">
         {/* Articles (left half) */}
         <div>
@@ -152,13 +158,10 @@ export default async function StoryDetailPage({
           <TelegramPanel storyId={id} />
         </div>
 
-        {/* Analysis + spectrum (right half) */}
+        {/* Spectrum (right half) */}
         <div className="space-y-6 lg:border-r border-slate-200 dark:border-slate-800 lg:pr-6 lg:sticky lg:top-4" id="story-sidebar">
-          <StoryAnalysisPanel analysis={analysis} />
-          <SummaryRating storyId={id} />
-
           {coveringSources.length > 0 && (
-            <div className="pt-4 border-t border-slate-200 dark:border-slate-800">
+            <div>
               <h3 className="text-sm font-black text-slate-900 dark:text-white mb-4 pb-2 border-b border-slate-200 dark:border-slate-800">
                 جایگاه رسانه‌ها
               </h3>

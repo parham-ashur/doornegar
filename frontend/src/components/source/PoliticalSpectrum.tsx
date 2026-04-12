@@ -1,7 +1,6 @@
 "use client";
 
 import type { Source } from "@/lib/types";
-import SafeImage from "@/components/common/SafeImage";
 
 // 7-point Likert: 1 = strongly conservative/pro-regime, 7 = strongly opposition
 function getSpectrumScore(source: Source): number {
@@ -43,23 +42,23 @@ export default function PoliticalSpectrum({ sources }: { sources: Source[] }) {
     <div dir="rtl">
       {/* Labels */}
       <div className="flex items-center justify-between mb-2 text-[10px] text-slate-500">
-        <span>اپوزیسیون</span>
         <span>محافظه‌کار</span>
+        <span>اپوزیسیون</span>
       </div>
 
-      {/* Gradient bar */}
+      {/* Gradient bar: dark blue (conservative/right) → orange (opposition/left) */}
       <div className="h-1.5 w-full" style={{
-        background: "linear-gradient(to left, #1e3a5f, #2563eb, #60a5fa, #94a3b8, #f97316, #ea580c, #c2410c)"
+        background: "linear-gradient(to left, #c2410c, #ea580c, #f97316, #94a3b8, #60a5fa, #2563eb, #1e3a5f)"
       }} />
 
       {/* 7 columns with logos stacked vertically */}
-      <div className="grid grid-cols-7 gap-0 mt-3" style={{ minHeight: "60px" }}>
-        {[7, 6, 5, 4, 3, 2, 1].map((score) => {
+      <div className="grid grid-cols-7 gap-0 mt-3" style={{ minHeight: "50px" }}>
+        {[1, 2, 3, 4, 5, 6, 7].map((score) => {
           const items = groups[score] || [];
           return (
             <div key={score} className="flex flex-col items-center gap-2 px-0.5">
               {items.map((s) => (
-                <div key={s.slug} className="flex flex-col items-center gap-0.5" title={s.name_fa || s.name_en}>
+                <div key={s.slug} className="group relative flex flex-col items-center" title={s.name_fa || s.name_en}>
                   {s.logo_url ? (
                     <div className="w-8 h-8 rounded-full overflow-hidden bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
                       <img
@@ -74,7 +73,8 @@ export default function PoliticalSpectrum({ sources }: { sources: Source[] }) {
                       {(s.name_fa || s.name_en || "?").charAt(0)}
                     </div>
                   )}
-                  <span className="text-[8px] text-slate-500 dark:text-slate-400 text-center leading-tight max-w-[40px] truncate">
+                  {/* Name: hover only on desktop, hidden on mobile */}
+                  <span className="hidden md:block absolute -bottom-5 opacity-0 group-hover:opacity-100 transition-opacity text-[8px] text-slate-500 dark:text-slate-400 text-center whitespace-nowrap pointer-events-none">
                     {s.name_fa || s.name_en}
                   </span>
                 </div>
