@@ -41,28 +41,28 @@ logger = logging.getLogger(__name__)
 MAINTENANCE_LOG_PATH = Path(__file__).parent.parent.parent.parent / "maintenance.log"
 
 
-def _parse_maintenance_log() -> dict:
-    """Return last maintenance run info.
+async def _get_maintenance_info(db: AsyncSession) -> dict:
+    """Return last maintenance run info from three sources (in priority order):
 
-    Primary source: in-memory STATE from app.services.maintenance_state
-    (populated by auto_maintenance.run_maintenance via begin_step/end_step).
-    This is accurate for runs started via the web service's
-    POST /admin/maintenance/run endpoint.
+    1. In-memory STATE (accurate for runs in the current container lifetime)
+    2. DB evidence (survives deploys — looks at max(ingested_at) as a proxy
+       for "when did the pipeline last run?")
+    3. File fallback (local dev only)
 
-    Fallback: maintenance.log file (only works in local dev; the file
-    never gets written reliably on Railway because the FileHandler
-    attachment relies on logging.basicConfig running first).
+    The key insight: in-memory state resets on every Railway deploy, and
+    the log file is ephemeral. The DB is the only durable source. We use
+    max(Article.ingested_at) as a reliable proxy because step_ingest is
+    always the first step — if it ran, the pipeline ran.
     """
     info = {"last_run": None, "last_result": "unknown", "next_run_approx": None}
 
-    # ── 1. In-memory state (preferred) ──────────────────────────────
+    # ── 1. In-memory state (current container only) ─────────────────
     try:
         from app.services import maintenance_state as _ms
 
         state = _ms.STATE
         status = state.get("status")
         started = state.get("started_at")
-        finished = state.get("finished_at")
 
         if status == "running" and started:
             info["last_run"] = started
@@ -71,63 +71,49 @@ def _parse_maintenance_log() -> dict:
 
         if status in ("success", "error") and started:
             info["last_run"] = started
-            if status == "success":
-                # Check if any steps errored (partial success)
-                any_error = any(s.get("status") != "ok" for s in state.get("steps", []))
-                info["last_result"] = "partial_success" if any_error else "success"
-            else:
-                info["last_result"] = "partial_success"  # error at run level
-            # Approximate next run: cron fires daily, so +24h from start
+            any_error = any(s.get("status") != "ok" for s in state.get("steps", []))
+            info["last_result"] = "partial_success" if (status == "error" or any_error) else "success"
             try:
                 dt = datetime.fromisoformat(started.replace("Z", "+00:00"))
                 info["next_run_approx"] = (dt + timedelta(hours=24)).isoformat()
             except (ValueError, AttributeError):
                 pass
             return info
-    except Exception as e:
-        logger.warning(f"Could not read in-memory maintenance state: {e}")
+    except Exception:
+        pass
 
-    # ── 2. File fallback (only works in local dev) ──────────────────
-    if not MAINTENANCE_LOG_PATH.exists():
-        return info
-
+    # ── 2. DB evidence (survives deploys) ───────────────────────────
     try:
-        lines = MAINTENANCE_LOG_PATH.read_text(encoding="utf-8", errors="replace").splitlines()
-        last_lines = lines[-200:] if len(lines) > 200 else lines
+        latest_ingested = (await db.execute(
+            select(func.max(Article.ingested_at))
+        )).scalar()
 
-        last_start = None
-        last_complete = None
-        has_error = False
-
-        for line in last_lines:
-            if "Maintenance started at" in line:
-                m = re.match(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", line)
-                if m:
-                    last_start = m.group(1)
-                    has_error = False
-            if "Maintenance complete in" in line:
-                m = re.match(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", line)
-                if m:
-                    last_complete = m.group(1)
-            if "[ERROR]" in line:
-                has_error = True
-
-        if last_start:
-            try:
-                dt = datetime.strptime(last_start, "%Y-%m-%d %H:%M:%S")
-                dt = dt.replace(tzinfo=timezone.utc)
-                info["last_run"] = dt.isoformat()
-                info["next_run_approx"] = (dt + timedelta(hours=24)).isoformat()
-            except ValueError:
-                pass
-
-        if last_complete:
-            info["last_result"] = "success" if not has_error else "partial_success"
-        elif last_start:
-            info["last_result"] = "in_progress_or_incomplete"
-
+        if latest_ingested:
+            info["last_run"] = latest_ingested.isoformat()
+            hours_ago = (datetime.now(timezone.utc) - latest_ingested).total_seconds() / 3600
+            info["last_result"] = "success" if hours_ago < 26 else "unknown"
+            info["next_run_approx"] = (latest_ingested + timedelta(hours=24)).isoformat()
+            return info
     except Exception as e:
-        logger.warning(f"Could not parse maintenance log: {e}")
+        logger.warning(f"Could not query DB for maintenance info: {e}")
+
+    # ── 3. File fallback (local dev) ────────────────────────────────
+    if MAINTENANCE_LOG_PATH.exists():
+        try:
+            lines = MAINTENANCE_LOG_PATH.read_text(encoding="utf-8", errors="replace").splitlines()[-200:]
+            last_start = None
+            for line in lines:
+                if "Maintenance started at" in line:
+                    m = re.match(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", line)
+                    if m:
+                        last_start = m.group(1)
+            if last_start:
+                dt = datetime.strptime(last_start, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                info["last_run"] = dt.isoformat()
+                info["last_result"] = "success"
+                info["next_run_approx"] = (dt + timedelta(hours=24)).isoformat()
+        except Exception:
+            pass
 
     return info
 
@@ -183,7 +169,7 @@ async def get_dashboard(db: AsyncSession = Depends(get_db)):
     bias_pct = round(total_bias * 100 / max(total_articles, 1))
 
     # --- Maintenance info ---
-    maintenance = _parse_maintenance_log()
+    maintenance = await _get_maintenance_info(db)
 
     # --- Issues detection ---
     issues = []
