@@ -1,5 +1,4 @@
-import { BarChart3, Brain } from "lucide-react";
-// Analyst first, then stats
+import { BarChart3, Brain, VolumeX, Radio, TrendingUp } from "lucide-react";
 import type { StoryAnalysis } from "@/lib/types";
 
 export default function StatsPanel({ analysis }: { analysis: StoryAnalysis | null }) {
@@ -11,6 +10,11 @@ export default function StatsPanel({ analysis }: { analysis: StoryAnalysis | nul
   const avgNeutrality = neutralityValues.length > 0
     ? neutralityValues.reduce((a, b) => a + b, 0) / neutralityValues.length
     : null;
+
+  const silenceAnalysis = (analysis as any)?.silence_analysis;
+  const coordination = (analysis as any)?.coordinated_messaging;
+  const narrativeArc = (analysis as any)?.narrative_arc;
+  const delta = (analysis as any)?.delta;
 
   return (
     <div dir="rtl" className="space-y-5">
@@ -30,6 +34,70 @@ export default function StatsPanel({ analysis }: { analysis: StoryAnalysis | nul
           </div>
         )}
       </div>
+
+      {/* Delta — what's new */}
+      {delta && (
+        <div className="border-t border-slate-200 dark:border-slate-800 pt-4">
+          <div className="flex items-center gap-2 mb-2">
+            <TrendingUp className="h-3.5 w-3.5 text-emerald-500" />
+            <h4 className="text-[12px] font-bold text-slate-900 dark:text-white">تغییرات جدید</h4>
+          </div>
+          <p className="text-[12px] leading-5 text-emerald-600 dark:text-emerald-400">{delta}</p>
+        </div>
+      )}
+
+      {/* Narrative arc */}
+      {narrativeArc?.evolution && (
+        <div className="border-t border-slate-200 dark:border-slate-800 pt-4">
+          <h4 className="text-[12px] font-bold text-slate-900 dark:text-white mb-2">تحول روایت</h4>
+          <p className="text-[12px] leading-5 text-slate-500 dark:text-slate-400">{narrativeArc.evolution}</p>
+          {narrativeArc.vocabulary_shift?.length >= 2 && (
+            <p className="text-[11px] text-slate-400 mt-1">
+              <span className="line-through text-slate-300">{narrativeArc.vocabulary_shift[0]}</span>
+              {" → "}
+              <span className="font-medium text-slate-700 dark:text-slate-300">{narrativeArc.vocabulary_shift[1]}</span>
+            </p>
+          )}
+          {narrativeArc.direction && (
+            <span className={`inline-block mt-1 text-[10px] px-2 py-0.5 border ${
+              narrativeArc.direction === "escalating" ? "text-red-500 border-red-300 dark:border-red-800" :
+              narrativeArc.direction === "de-escalating" ? "text-emerald-500 border-emerald-300 dark:border-emerald-800" :
+              "text-slate-500 border-slate-300 dark:border-slate-700"
+            }`}>
+              {narrativeArc.direction === "escalating" ? "تشدید ↑" :
+               narrativeArc.direction === "de-escalating" ? "کاهش ↓" :
+               narrativeArc.direction === "shifting" ? "تغییر ↔" : "پایدار —"}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Silence detection */}
+      {silenceAnalysis && (
+        <div className="border-t border-slate-200 dark:border-slate-800 pt-4">
+          <div className="flex items-center gap-2 mb-2">
+            <VolumeX className="h-3.5 w-3.5 text-amber-500" />
+            <h4 className="text-[12px] font-bold text-slate-900 dark:text-white">سکوت رسانه‌ای</h4>
+          </div>
+          <p className="text-[12px] leading-5 text-amber-600 dark:text-amber-400">{silenceAnalysis}</p>
+        </div>
+      )}
+
+      {/* Coordinated messaging */}
+      {coordination && (
+        <div className="border-t border-slate-200 dark:border-slate-800 pt-4">
+          <div className="flex items-center gap-2 mb-2">
+            <Radio className="h-3.5 w-3.5 text-red-500" />
+            <h4 className="text-[12px] font-bold text-slate-900 dark:text-white">پیام هماهنگ</h4>
+          </div>
+          <p className="text-[12px] text-slate-500 dark:text-slate-400">
+            {coordination.sources?.length || 0} رسانه {coordination.side === "state" ? "محافظه‌کار" : "اپوزیسیون"} پیام مشابه منتشر کردند
+          </p>
+          {coordination.sources && (
+            <p className="text-[11px] text-slate-400 mt-1">{coordination.sources.join(" · ")}</p>
+          )}
+        </div>
+      )}
 
       {/* Summary stats (below analyst) */}
       <div className="border-t border-slate-200 dark:border-slate-800 pt-4">
