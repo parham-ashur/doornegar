@@ -1017,6 +1017,29 @@ async def unclaim_story_articles(
     }
 
 
+@router.patch("/sources/{slug}")
+async def patch_source(
+    slug: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """Update editable fields on a source (logo_url, etc.)."""
+    result = await db.execute(select(Source).where(Source.slug == slug))
+    source = result.scalar_one_or_none()
+    if not source:
+        raise HTTPException(status_code=404, detail="Source not found")
+    allowed = {"logo_url", "name_fa", "name_en"}
+    changed = []
+    for key in allowed:
+        if key in body:
+            setattr(source, key, body[key])
+            changed.append(key)
+    if not changed:
+        raise HTTPException(status_code=400, detail=f"No valid fields. Allowed: {allowed}")
+    await db.commit()
+    return {"status": "ok", "slug": slug, "updated": changed}
+
+
 @router.patch("/articles/{article_id}")
 async def patch_article(
     article_id: str,
