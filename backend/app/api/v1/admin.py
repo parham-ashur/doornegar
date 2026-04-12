@@ -589,6 +589,38 @@ async def run_maintenance_endpoint():
     }
 
 
+@router.get("/maintenance/logs")
+async def maintenance_logs(
+    limit: int = Query(5, ge=1, le=20),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return recent maintenance run logs from the database.
+
+    Survives container restarts — use this to check what happened at 4am.
+    """
+    from sqlalchemy import text
+    try:
+        result = await db.execute(text(
+            "SELECT run_at, status, elapsed_s, results, steps, error "
+            "FROM maintenance_logs ORDER BY run_at DESC LIMIT :limit"
+        ), {"limit": limit})
+        rows = result.all()
+        import json as _json
+        return [
+            {
+                "run_at": str(r[0]),
+                "status": r[1],
+                "elapsed_s": r[2],
+                "results": _json.loads(r[3]) if r[3] else None,
+                "steps": _json.loads(r[4]) if r[4] else None,
+                "error": r[5],
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        return {"error": str(e), "hint": "Run /admin/create-tables to create the maintenance_logs table"}
+
+
 @router.get("/maintenance/status")
 async def maintenance_status():
     """Return the current maintenance run state (for dashboard polling).

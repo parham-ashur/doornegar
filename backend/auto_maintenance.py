@@ -2804,6 +2804,30 @@ async def run_maintenance():
         logger.info(f"Results: {results}")
         logger.info("=" * 50)
         maintenance_state.finish_run("success", results=results, total_elapsed_s=elapsed)
+
+        # Persist log to database so it survives container restarts
+        try:
+            import json as _json
+            from app.database import async_session as _as
+            from sqlalchemy import text as _text
+            async with _as() as _db:
+                await _db.execute(_text(
+                    "INSERT INTO maintenance_logs (run_at, status, elapsed_s, results, steps) "
+                    "VALUES (NOW(), 'success', :elapsed, :results, :steps)"
+                ), {
+                    "elapsed": round(elapsed, 1),
+                    "results": _json.dumps(results, ensure_ascii=False, default=str),
+                    "steps": _json.dumps(
+                        [{"name": s["name"], "status": s["status"], "elapsed_s": s["elapsed_s"]}
+                         for s in maintenance_state.STATE.get("steps", [])],
+                        ensure_ascii=False,
+                    ),
+                })
+                await _db.commit()
+                logger.info("Maintenance log persisted to database")
+        except Exception as log_err:
+            logger.warning(f"Failed to persist maintenance log: {log_err}")
+
         return results
 
     except Exception as e:
@@ -2811,6 +2835,25 @@ async def run_maintenance():
         maintenance_state.finish_run(
             "error", results=results, error=str(e), total_elapsed_s=time.time() - start
         )
+
+        # Persist error log too
+        try:
+            import json as _json
+            from app.database import async_session as _as
+            from sqlalchemy import text as _text
+            async with _as() as _db:
+                await _db.execute(_text(
+                    "INSERT INTO maintenance_logs (run_at, status, elapsed_s, results, error) "
+                    "VALUES (NOW(), 'error', :elapsed, :results, :error)"
+                ), {
+                    "elapsed": round(time.time() - start, 1),
+                    "results": _json.dumps(results, ensure_ascii=False, default=str),
+                    "error": str(e),
+                })
+                await _db.commit()
+        except Exception:
+            pass
+
         raise
 
 
