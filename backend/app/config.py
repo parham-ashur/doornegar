@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     story_analysis_model: str = "gpt-4o-mini"       # baseline (non-trending)
     story_analysis_premium_model: str = "gpt-5-mini"  # premium (top-N)
     translation_model: str = "gpt-4.1-nano"         # economy
-    premium_story_top_n: int = 30
+    premium_story_top_n: int = 16
 
     # NLP
     embedding_model: str = "paraphrase-multilingual-MiniLM-L12-v2"

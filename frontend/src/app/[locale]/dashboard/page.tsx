@@ -845,12 +845,12 @@ export default function DashboardPage() {
               Test: refresh 5
             </button>
             <button
-              onClick={() => forceResummarize(30)}
+              onClick={() => forceResummarize(16)}
               disabled={forceRunning || recentLoading}
-              title="Regenerate summaries on the 30 top trending stories — matches the homepage"
+              title="Regenerate summaries on the 16 homepage-visible stories with premium model + analyst factors"
               className="flex items-center gap-1 border border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/10 px-3 py-1.5 text-xs text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/20 disabled:opacity-50"
             >
-              Refresh 30
+              Refresh 16
             </button>
             <button
               onClick={fetchRecentSummaries}
