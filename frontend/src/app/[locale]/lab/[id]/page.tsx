@@ -116,7 +116,7 @@ function NewsView({ analysis }: { analysis: TopicDetail["analysis"] }) {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {analysis.state_summary_fa && (
           <div className="border-t border-slate-200 dark:border-slate-800 pt-4">
-            <h4 className="text-xs font-bold mb-2 text-red-600 dark:text-red-400">دیدگاه حکومتی</h4>
+            <h4 className="text-xs font-bold mb-2 text-red-600 dark:text-red-400">دیدگاه محافظه‌کار</h4>
             <p className="text-[13px] leading-6 text-slate-600 dark:text-slate-400">{analysis.state_summary_fa}</p>
             {analysis.scores?.state?.framing && (
               <div className="mt-3 flex items-center gap-1.5 flex-wrap text-[11px]">
@@ -144,7 +144,7 @@ function NewsView({ analysis }: { analysis: TopicDetail["analysis"] }) {
         )}
         {analysis.diaspora_summary_fa && (
           <div className="border-t border-slate-200 dark:border-slate-800 pt-4">
-            <h4 className="text-xs font-bold mb-2 text-blue-600 dark:text-blue-400">دیدگاه برون‌مرزی</h4>
+            <h4 className="text-xs font-bold mb-2 text-blue-600 dark:text-blue-400">دیدگاه اپوزیسیون</h4>
             <p className="text-[13px] leading-6 text-slate-600 dark:text-slate-400">{analysis.diaspora_summary_fa}</p>
             {analysis.scores?.diaspora?.framing && (
               <div className="mt-3 flex items-center gap-1.5 flex-wrap text-[11px]">
@@ -247,7 +247,7 @@ export default async function TopicDetailPage({
                 neutral: "border-emerald-400 text-emerald-600 dark:text-emerald-400",
               };
               const leaningLabel: Record<string, string> = {
-                pro_regime: "حکومتی",
+                pro_regime: "محافظه‌کار",
                 reformist: "اصلاح‌طلب",
                 opposition: "اپوزیسیون",
                 monarchist: "سلطنت‌طلب",
@@ -306,9 +306,9 @@ export default async function TopicDetailPage({
                             ? "text-blue-500"
                             : "text-emerald-500"
                         }`}>
-                          {art.source_state_alignment === "state" ? "حکومتی"
-                            : art.source_state_alignment === "semi_state" ? "نیمه‌حکومتی"
-                            : art.source_state_alignment === "diaspora" ? "برون‌مرزی"
+                          {art.source_state_alignment === "state" ? "محافظه‌کار"
+                            : art.source_state_alignment === "semi_state" ? "نیمه‌محافظه‌کار"
+                            : art.source_state_alignment === "diaspora" ? "اپوزیسیون"
                             : "مستقل"}
                         </span>
                       )}

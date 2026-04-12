@@ -18,10 +18,10 @@ const segmentColors: Record<StateAlignment, string> = {
 };
 
 const segmentLabels: Record<StateAlignment, string> = {
-  state: "حکومتی",
+  state: "محافظه‌کار",
   semi_state: "نیمه‌دولتی",
   independent: "مستقل",
-  diaspora: "برون‌مرزی",
+  diaspora: "اپوزیسیون",
 };
 
 const segmentTextColors: Record<StateAlignment, string> = {

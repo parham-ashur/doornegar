@@ -6,10 +6,10 @@ import { useFeedback } from "./FeedbackProvider";
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 const ALIGNMENT_OPTIONS = [
-  { value: "state", label: "حکومتی" },
+  { value: "state", label: "محافظه‌کار" },
   { value: "semi_state", label: "نیمه‌دولتی" },
   { value: "independent", label: "مستقل" },
-  { value: "diaspora", label: "برون‌مرزی" },
+  { value: "diaspora", label: "اپوزیسیون" },
 ] as const;
 
 interface SourceCategorizationProps {

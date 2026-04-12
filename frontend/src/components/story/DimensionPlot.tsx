@@ -103,13 +103,13 @@ export default function DimensionPlot({ sources }: { sources: Source[] }) {
       {/* Legend */}
       <div className="flex items-center gap-3 mt-4 pt-3 border-t border-slate-100 dark:border-slate-800/50">
         <span className="flex items-center gap-1 text-[9px] text-red-500">
-          <span className="inline-block w-1.5 h-1.5 bg-red-500" /> حکومتی
+          <span className="inline-block w-1.5 h-1.5 bg-red-500" /> محافظه‌کار
         </span>
         <span className="flex items-center gap-1 text-[9px] text-emerald-500">
           <span className="inline-block w-1.5 h-1.5 bg-emerald-500" /> مستقل
         </span>
         <span className="flex items-center gap-1 text-[9px] text-blue-500">
-          <span className="inline-block w-1.5 h-1.5 bg-blue-500" /> برون‌مرزی
+          <span className="inline-block w-1.5 h-1.5 bg-blue-500" /> اپوزیسیون
         </span>
       </div>
     </div>

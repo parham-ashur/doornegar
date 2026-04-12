@@ -23,10 +23,10 @@ interface TrackedChannel {
 }
 
 const CATEGORY_LABELS: Record<string, { label: string; color: string }> = {
-  state: { label: "حکومتی", color: "text-red-600 dark:text-red-400 border-red-200 dark:border-red-900/50" },
-  semi_state: { label: "نیمه‌حکومتی", color: "text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-900/50" },
+  state: { label: "محافظه‌کار", color: "text-red-600 dark:text-red-400 border-red-200 dark:border-red-900/50" },
+  semi_state: { label: "نیمه‌محافظه‌کار", color: "text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-900/50" },
   independent: { label: "مستقل", color: "text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/50" },
-  diaspora: { label: "برون‌مرزی", color: "text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-900/50" },
+  diaspora: { label: "اپوزیسیون", color: "text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-900/50" },
 };
 
 export default function SuggestPage() {
@@ -148,7 +148,7 @@ export default function SuggestPage() {
           {trackedOpen && (
             <div className="border-t border-slate-200 dark:border-slate-800 px-4 py-4 space-y-5">
               <p className="text-[11px] leading-6 text-slate-500 dark:text-slate-400">
-                قبل از پیشنهاد، بررسی کنید که منبع موردنظر در این فهرست نباشد. طیف فعلی ما شامل رسانه‌های حکومتی، نیمه‌حکومتی، مستقل و برون‌مرزی است.
+                قبل از پیشنهاد، بررسی کنید که منبع موردنظر در این فهرست نباشد. طیف فعلی ما شامل رسانه‌های محافظه‌کار، نیمه‌محافظه‌کار، مستقل و اپوزیسیون است.
               </p>
 
               {/* Sources grouped by alignment */}
@@ -315,10 +315,10 @@ export default function SuggestPage() {
               className="w-full px-3 py-2 text-[13px] border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none focus:border-slate-900 dark:focus:border-white"
             >
               <option value="not_sure">نمی‌دانم</option>
-              <option value="state">حکومتی</option>
-              <option value="semi_state">نیمه‌حکومتی</option>
+              <option value="state">محافظه‌کار</option>
+              <option value="semi_state">نیمه‌محافظه‌کار</option>
               <option value="independent">مستقل</option>
-              <option value="diaspora">برون‌مرزی</option>
+              <option value="diaspora">اپوزیسیون</option>
             </select>
           </div>
         </div>

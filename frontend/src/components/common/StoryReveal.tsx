@@ -141,9 +141,9 @@ export default function StoryReveal({ story, scrollArticles, locale, summary }: 
             </p>
             {hasSides && (
               <div className="mt-1.5 flex items-center gap-2">
-                {state_pct > 0 && <span className="text-[9px] font-medium text-red-500">حکومتی {state_pct}٪</span>}
+                {state_pct > 0 && <span className="text-[9px] font-medium text-red-500">محافظه‌کار {state_pct}٪</span>}
                 {independent_pct > 0 && <span className="text-[9px] font-medium text-emerald-600">مستقل {independent_pct}٪</span>}
-                {diaspora_pct > 0 && <span className="text-[9px] font-medium text-blue-600">برون‌مرزی {diaspora_pct}٪</span>}
+                {diaspora_pct > 0 && <span className="text-[9px] font-medium text-blue-600">اپوزیسیون {diaspora_pct}٪</span>}
               </div>
             )}
             {summary && (

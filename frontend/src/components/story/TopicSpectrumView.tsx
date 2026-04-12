@@ -20,9 +20,9 @@ function categorizeArticle(article: StoryArticleWithBias): SpectrumCategory {
 
 function getCategoryLabel(cat: SpectrumCategory, locale: string) {
   const labels = {
-    right: { en: "Pro-Establishment", fa: "حکومتی" },
+    right: { en: "Pro-Establishment", fa: "محافظه‌کار" },
     center: { en: "Center / Independent", fa: "میانه / مستقل" },
-    left: { en: "Opposition / Diaspora", fa: "اپوزیسیون / برون‌مرزی" },
+    left: { en: "Opposition / Diaspora", fa: "اپوزیسیون / اپوزیسیون" },
   };
   return labels[cat][locale === "fa" ? "fa" : "en"];
 }

@@ -47,7 +47,7 @@ export default function BiasSpectrum({
       {/* Labels */}
       {showLabel && (
         <div className="mt-1.5 flex justify-between text-xs text-slate-500 dark:text-slate-400">
-          <span>{locale === "fa" ? "حکومتی" : "Pro-regime"}</span>
+          <span>{locale === "fa" ? "محافظه‌کار" : "Pro-regime"}</span>
           <span className="font-medium text-slate-700 dark:text-slate-300">
             {biasAlignmentLabel(value, locale)}
           </span>

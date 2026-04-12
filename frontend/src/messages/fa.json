@@ -27,7 +27,7 @@
     "social_reaction": "واکنش شبکه‌های اجتماعی",
     "covered_by": "پوشش توسط",
     "state_only": "فقط رسانه‌های دولتی",
-    "diaspora_only": "فقط رسانه‌های برون‌مرزی",
+    "diaspora_only": "فقط رسانه‌های اپوزیسیون",
     "blind_spot": "نقطه کور",
     "framing": "چارچوب‌بندی",
     "no_stories": "هنوز خبری وجود ندارد"
@@ -36,7 +36,7 @@
     "state": "دولتی",
     "semi_state": "نیمه‌دولتی",
     "independent": "مستقل",
-    "diaspora": "برون‌مرزی",
+    "diaspora": "اپوزیسیون",
     "irgc": "وابسته به سپاه",
     "inside_iran": "داخل ایران",
     "outside_iran": "خارج از ایران",
@@ -45,7 +45,7 @@
   },
   "bias": {
     "political_alignment": "گرایش سیاسی",
-    "pro_regime": "حکومتی",
+    "pro_regime": "محافظه‌کار",
     "reformist": "اصلاح‌طلب",
     "opposition": "اپوزیسیون",
     "center": "میانه",

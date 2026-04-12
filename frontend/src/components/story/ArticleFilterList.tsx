@@ -16,17 +16,17 @@ type FilterKey = "all" | "state" | "independent" | "diaspora";
 
 const filters: { key: FilterKey; label: string }[] = [
   { key: "all", label: "همه" },
-  { key: "state", label: "حکومتی" },
+  { key: "state", label: "محافظه‌کار" },
   { key: "independent", label: "مستقل" },
-  { key: "diaspora", label: "برون‌مرزی" },
+  { key: "diaspora", label: "اپوزیسیون" },
 ];
 
 function getAlignmentBadge(alignment: string | null) {
   const map: Record<string, { label: string; color: string }> = {
-    state: { label: "حکومتی", color: "text-red-600 dark:text-red-400" },
+    state: { label: "محافظه‌کار", color: "text-red-600 dark:text-red-400" },
     semi_state: { label: "نیمه‌دولتی", color: "text-orange-600 dark:text-orange-400" },
     independent: { label: "مستقل", color: "text-emerald-600 dark:text-emerald-400" },
-    diaspora: { label: "برون‌مرزی", color: "text-blue-600 dark:text-blue-400" },
+    diaspora: { label: "اپوزیسیون", color: "text-blue-600 dark:text-blue-400" },
   };
   if (!alignment || !map[alignment]) return null;
   return map[alignment];

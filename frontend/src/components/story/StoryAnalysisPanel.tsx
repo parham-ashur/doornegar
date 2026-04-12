@@ -7,7 +7,7 @@ type TabKey = "bias" | "conservative" | "opposition";
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "bias", label: "مقایسه سوگیری" },
-  { key: "conservative", label: "حکومتی" },
+  { key: "conservative", label: "محافظه‌کار" },
   { key: "opposition", label: "اپوزیسیون" },
 ];
 
@@ -83,7 +83,7 @@ export default function StoryAnalysisPanel({ analysis }: { analysis: StoryAnalys
                 <FramingTags framing={analysis.scores?.state?.framing || null} />
               </>
             ) : (
-              <p className="text-[13px] text-slate-400">پوششی از سوی رسانه‌های حکومتی یافت نشد</p>
+              <p className="text-[13px] text-slate-400">پوششی از سوی رسانه‌های محافظه‌کار یافت نشد</p>
             )}
           </div>
         )}

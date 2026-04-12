@@ -122,7 +122,7 @@ export default async function StoryDetailPage({
           <div className="flex items-center gap-3 text-[10px]">
             {statePct > 0 && (
               <span className="flex items-center gap-1 text-red-600 dark:text-red-400">
-                <span className="inline-block h-1.5 w-1.5 bg-red-500" /> حکومتی {statePct}٪
+                <span className="inline-block h-1.5 w-1.5 bg-red-500" /> محافظه‌کار {statePct}٪
               </span>
             )}
             {independentPct > 0 && (
@@ -132,7 +132,7 @@ export default async function StoryDetailPage({
             )}
             {diasporaPct > 0 && (
               <span className="flex items-center gap-1 text-blue-600 dark:text-blue-400">
-                <span className="inline-block h-1.5 w-1.5 bg-blue-500" /> برون‌مرزی {diasporaPct}٪
+                <span className="inline-block h-1.5 w-1.5 bg-blue-500" /> اپوزیسیون {diasporaPct}٪
               </span>
             )}
           </div>

@@ -25,7 +25,7 @@ const LEANING_COLORS: Record<string, string> = {
 };
 
 const LEANING_LABELS: Record<string, string> = {
-  pro_regime: "حکومتی",
+  pro_regime: "محافظه‌کار",
   reformist: "اصلاح‌طلب",
   opposition: "اپوزیسیون",
   monarchist: "سلطنت‌طلب",

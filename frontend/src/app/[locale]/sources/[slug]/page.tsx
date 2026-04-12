@@ -23,10 +23,10 @@ export default async function SourceProfilePage({
   }
 
   const alignmentLabels: Record<string, string> = {
-    state: "حکومتی",
+    state: "محافظه‌کار",
     semi_state: "نیمه‌دولتی",
     independent: "مستقل",
-    diaspora: "برون‌مرزی",
+    diaspora: "اپوزیسیون",
   };
 
   const factionalLabels: Record<string, string> = {

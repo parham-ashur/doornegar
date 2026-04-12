@@ -152,7 +152,7 @@ const SCHEMAS: Record<TargetType, FormSchema> = {
     showCurrentValue: false,
     showSuggestedValue: true,
     suggestedLabel: "دسته‌بندی پیشنهادی",
-    suggestedPlaceholder: "مثلاً: حکومتی، مستقل، برون‌مرزی",
+    suggestedPlaceholder: "مثلاً: محافظه‌کار، مستقل، اپوزیسیون",
     reasonLabel: "توضیح",
     reasonPlaceholder: "کدام رسانه و چرا؟",
   },
