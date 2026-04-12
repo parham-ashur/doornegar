@@ -171,6 +171,28 @@ export default function DashboardPage() {
   // Data repair actions
   const [repairRunning, setRepairRunning] = useState<string | null>(null);
 
+  const reEmbedAll = useCallback(async () => {
+    const ok = confirm(
+      "Re-embed ALL articles with OpenAI text-embedding-3-small.\n\n" +
+      "Replaces old TF-IDF/sentence-transformer embeddings with high-quality\n" +
+      "multilingual vectors. Used by the clustering pre-filter.\n\n" +
+      "Cost: ~$0.01 for ~2500 articles. Takes ~30 seconds."
+    );
+    if (!ok) return;
+    setRepairRunning("reembed");
+    try {
+      const res = await fetch(`${API}/api/v1/admin/re-embed-all?limit=2500`, {
+        method: "POST",
+        headers: authHeaders(),
+      });
+      const data = await res.json();
+      alert(`Re-embedded ${data.embedded ?? 0} / ${data.total ?? 0} articles.`);
+    } catch (e: any) {
+      alert(`Error: ${e.message}`);
+    }
+    setRepairRunning(null);
+  }, [authHeaders]);
+
   const nullifyLocalhostImages = useCallback(async () => {
     const ok = confirm(
       "Null every article.image_url pointing to http://localhost (broken dev URLs).\n\n" +
@@ -932,6 +954,16 @@ export default function DashboardPage() {
         </h2>
         <div className="flex flex-wrap gap-3">
           <button
+            onClick={reEmbedAll}
+            disabled={repairRunning !== null}
+            title="Re-embed all articles with OpenAI text-embedding-3-small. Replaces old TF-IDF vectors with high-quality multilingual embeddings. ~$0.01, ~30 seconds."
+            className="flex items-center gap-2 border border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/10 px-4 py-2 text-sm text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/20 disabled:opacity-50"
+          >
+            {repairRunning === "reembed" && <RefreshCw className="h-3 w-3 animate-spin" />}
+            Re-embed all articles
+          </button>
+
+          <button
             onClick={nullifyLocalhostImages}
             disabled={repairRunning !== null}
             title="Null every article.image_url starting with http://localhost — these are dev-only URLs never migrated to R2. Next maintenance run will re-fetch og:images."
@@ -952,9 +984,9 @@ export default function DashboardPage() {
           </button>
         </div>
         <p className="text-[11px] text-slate-500 leading-5 mt-3">
-          These actions are destructive and take effect immediately. <strong>Null localhost URLs</strong> affects only broken-by-definition rows
-          (dev-only image paths never moved to Cloudflare R2). <strong>Unclaim story articles</strong> requires a story ID — use it to nuke a
-          badly-clustered story like the &quot;Strait of Hormuz&quot; 209-article cluster.
+          <strong>Re-embed all articles</strong> — replaces old TF-IDF vectors with OpenAI text-embedding-3-small. Run once after switching embedding models, then new articles get embedded automatically. ~$0.01 total.
+          {" "}<strong>Null localhost URLs</strong> — clears broken dev-only image paths.
+          {" "}<strong>Unclaim story articles</strong> — detaches all articles from a story and hides it.
         </p>
       </div>
 
