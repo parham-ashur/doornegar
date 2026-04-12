@@ -3,6 +3,7 @@ import Link from "next/link";
 import SafeImage from "@/components/common/SafeImage";
 import AnalystTicker from "@/components/common/AnalystTicker";
 import type { StoryBrief } from "@/lib/types";
+import { formatRelativeTime } from "@/lib/utils";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -28,14 +29,22 @@ async function fetchSummary(storyId: string): Promise<string | null> {
 }
 
 function Meta({ story }: { story: StoryBrief }) {
+  const published = story.first_published_at
+    ? formatRelativeTime(story.first_published_at, "fa")
+    : null;
+  const updated = story.updated_at
+    ? formatRelativeTime(story.updated_at, "fa")
+    : null;
+  const showUpdated = updated && story.updated_at && story.first_published_at
+    && Math.abs(new Date(story.updated_at).getTime() - new Date(story.first_published_at).getTime()) > 3600000;
   return (
-    <p className="mt-1.5 text-[13px] text-slate-400 dark:text-slate-500" dir="rtl">
-      <span>{story.source_count} رسانه</span>
-      <span>{" · "}</span>
-      <span>{story.article_count} مقاله</span>
-      {story.state_pct > 0 && <span className="text-red-500 mr-2">{" · "}حکومتی {story.state_pct}٪</span>}
-      {story.independent_pct > 0 && <span className="text-emerald-600 mr-2">{" · "}مستقل {story.independent_pct}٪</span>}
-      {story.diaspora_pct > 0 && <span className="text-blue-600 mr-2">{" · "}برون‌مرزی {story.diaspora_pct}٪</span>}
+    <p className="mt-1.5 text-[11px] text-slate-400 dark:text-slate-500 leading-5" dir="rtl">
+      <span>{story.source_count} رسانه · {story.article_count} مقاله</span>
+      {published && <span>{" · "}{published}</span>}
+      {showUpdated && <span className="text-slate-400/70">{" · "}به‌روز: {updated}</span>}
+      {story.state_pct > 0 && <span className="text-red-500 mr-1">{" · "}حکومتی {story.state_pct}٪</span>}
+      {story.independent_pct > 0 && <span className="text-emerald-600 mr-1">{" · "}مستقل {story.independent_pct}٪</span>}
+      {story.diaspora_pct > 0 && <span className="text-blue-600 mr-1">{" · "}برون‌مرزی {story.diaspora_pct}٪</span>}
     </p>
   );
 }
