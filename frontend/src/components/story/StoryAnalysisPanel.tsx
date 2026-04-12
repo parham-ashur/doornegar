@@ -1,76 +1,142 @@
+"use client";
+
+import { useState } from "react";
 import type { StoryAnalysis } from "@/lib/types";
 
-function SidePanel({ title, summary, scores, color }: {
-  title: string;
-  summary: string | null;
-  scores: { tone: number | null; factuality: number | null; emotional_language: number | null; framing: string | string[] | null } | null;
-  color: string;
-}) {
-  if (!summary) return null;
+// ─── Tabs: مقایسه سوگیری | محافظه‌کار و اوپوزیسیون ────
+
+type TabKey = "bias" | "conservative" | "opposition";
+
+const TABS: { key: TabKey; label: string }[] = [
+  { key: "bias", label: "مقایسه سوگیری" },
+  { key: "conservative", label: "حکومتی" },
+  { key: "opposition", label: "اپوزیسیون" },
+];
+
+function ScoreBar({ label, value, max = 5 }: { label: string; value: number | null; max?: number }) {
+  if (value === null || value === undefined) return null;
+  const pct = Math.min(100, Math.max(0, (Math.abs(value) / max) * 100));
   return (
-    <div className="border-t border-slate-200 dark:border-slate-800 pt-4 flex flex-col">
-      <h4 className={`text-xs font-bold mb-2 ${color}`}>{title}</h4>
-      {summary && (
-        <p className="text-[13px] leading-6 text-slate-600 dark:text-slate-400">{summary}</p>
-      )}
-      {scores?.framing && (
-        <div className="mt-auto pt-3 flex items-center gap-1.5 flex-wrap text-[11px]">
-          <span className="text-slate-500 dark:text-slate-400">چارچوب‌بندی:</span>
-          {(Array.isArray(scores.framing) ? scores.framing : [scores.framing]).map((f, i) => (
-            <span key={i} className="px-2 py-0.5 border border-slate-300 dark:border-slate-700 font-medium text-slate-700 dark:text-slate-300">
-              {f}
-            </span>
-          ))}
-        </div>
-      )}
+    <div className="flex items-center gap-2 text-[11px]">
+      <span className="w-24 text-slate-500 dark:text-slate-400 shrink-0">{label}</span>
+      <div className="flex-1 h-1.5 bg-slate-200 dark:bg-slate-800 overflow-hidden">
+        <div className="h-full bg-slate-500" style={{ width: `${pct}%` }} />
+      </div>
+      <span className="w-6 text-left font-mono text-slate-400">{value}</span>
+    </div>
+  );
+}
+
+function FramingTags({ framing }: { framing: string | string[] | null }) {
+  if (!framing) return null;
+  const items = Array.isArray(framing) ? framing : [framing];
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap mt-2">
+      <span className="text-[10px] text-slate-500">چارچوب‌بندی:</span>
+      {items.map((f, i) => (
+        <span key={i} className="px-2 py-0.5 text-[10px] border border-slate-300 dark:border-slate-700 font-medium text-slate-700 dark:text-slate-300">
+          {f}
+        </span>
+      ))}
     </div>
   );
 }
 
 export default function StoryAnalysisPanel({ analysis }: { analysis: StoryAnalysis | null }) {
-  if (!analysis) return null;
+  const [activeTab, setActiveTab] = useState<TabKey>("bias");
 
-  const hasSummary = analysis.summary_fa;
-
-  if (!hasSummary) return null;
+  if (!analysis || !analysis.summary_fa) return null;
 
   return (
-    <div className="border-t border-b border-slate-200 dark:border-slate-800 py-6 space-y-5" dir="rtl">
-      {/* Overall summary */}
-      <div>
-        <h3 className="text-sm font-black text-slate-900 dark:text-white mb-2">خلاصه</h3>
-        <p className="text-[13px] leading-7 text-slate-600 dark:text-slate-400">{analysis.summary_fa}</p>
+    <div dir="rtl" className="space-y-4">
+      {/* Summary */}
+      <div className="pb-4">
+        <p className="text-[14px] leading-7 text-slate-700 dark:text-slate-300">{analysis.summary_fa}</p>
       </div>
 
-      {/* Per-side summaries with scores */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <SidePanel
-          title="دیدگاه حکومتی"
-          summary={analysis.state_summary_fa}
-          scores={analysis.scores?.state || null}
-          color="text-red-600 dark:text-red-400"
-        />
-        <SidePanel
-          title="دیدگاه مستقل"
-          summary={analysis.independent_summary_fa}
-          scores={analysis.scores?.independent || null}
-          color="text-emerald-600 dark:text-emerald-400"
-        />
-        <SidePanel
-          title="دیدگاه برون‌مرزی"
-          summary={analysis.diaspora_summary_fa}
-          scores={analysis.scores?.diaspora || null}
-          color="text-blue-600 dark:text-blue-400"
-        />
+      {/* Tab bar */}
+      <div className="flex gap-0 border-b border-slate-200 dark:border-slate-800">
+        {TABS.map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
+            className={`px-5 py-2.5 text-[13px] font-bold border-b-2 transition-colors ${
+              activeTab === tab.key
+                ? "border-slate-900 dark:border-white text-slate-900 dark:text-white"
+                : "border-transparent text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
-      {/* Bias comparison */}
-      {analysis.bias_explanation_fa && (
-        <div className="border-t border-slate-200 dark:border-slate-800 pt-4">
-          <h3 className="text-sm font-black text-slate-900 dark:text-white mb-2">مقایسه سوگیری</h3>
-          <p className="text-[13px] leading-7 text-slate-600 dark:text-slate-400">{analysis.bias_explanation_fa}</p>
-        </div>
-      )}
+      {/* Tab content */}
+      <div className="py-4">
+        {activeTab === "bias" && (
+          <div className="space-y-4">
+            {/* Bias comparison as bullet points */}
+            {analysis.bias_explanation_fa && (
+              <div className="space-y-2">
+                {analysis.bias_explanation_fa
+                  .split(/[.؛]/)
+                  .map((s) => s.trim())
+                  .filter((s) => s.length > 10)
+                  .map((point, i) => (
+                    <div key={i} className="flex gap-2 text-[13px] leading-6">
+                      <span className="text-slate-400 mt-1 shrink-0">•</span>
+                      <span className="text-slate-600 dark:text-slate-400">{point}</span>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === "conservative" && (
+          <div className="space-y-4">
+            {analysis.state_summary_fa ? (
+              <>
+                <p className="text-[13px] leading-7 text-slate-600 dark:text-slate-400">
+                  {analysis.state_summary_fa}
+                </p>
+                {analysis.scores?.state && (
+                  <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                    <ScoreBar label="لحن" value={analysis.scores.state.tone} max={2} />
+                    <ScoreBar label="واقع‌گرایی" value={analysis.scores.state.factuality} />
+                    <ScoreBar label="ادبیات احساسی" value={analysis.scores.state.emotional_language} />
+                    <FramingTags framing={analysis.scores.state.framing} />
+                  </div>
+                )}
+              </>
+            ) : (
+              <p className="text-[13px] text-slate-400">پوششی از سوی رسانه‌های حکومتی یافت نشد</p>
+            )}
+          </div>
+        )}
+
+        {activeTab === "opposition" && (
+          <div className="space-y-4">
+            {analysis.diaspora_summary_fa ? (
+              <>
+                <p className="text-[13px] leading-7 text-slate-600 dark:text-slate-400">
+                  {analysis.diaspora_summary_fa}
+                </p>
+                {analysis.scores?.diaspora && (
+                  <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                    <ScoreBar label="لحن" value={analysis.scores.diaspora.tone} max={2} />
+                    <ScoreBar label="واقع‌گرایی" value={analysis.scores.diaspora.factuality} />
+                    <ScoreBar label="ادبیات احساسی" value={analysis.scores.diaspora.emotional_language} />
+                    <FramingTags framing={analysis.scores.diaspora.framing} />
+                  </div>
+                )}
+              </>
+            ) : (
+              <p className="text-[13px] text-slate-400">پوششی از سوی رسانه‌های اپوزیسیون یافت نشد</p>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

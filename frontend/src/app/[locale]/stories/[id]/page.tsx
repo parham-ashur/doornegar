@@ -2,8 +2,7 @@ import { setRequestLocale } from "next-intl/server";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Newspaper } from "lucide-react";
-import SourceSpectrum from "@/components/source/SourceSpectrum";
-import DimensionPlot from "@/components/story/DimensionPlot";
+import PoliticalSpectrum from "@/components/source/PoliticalSpectrum";
 import StoryAnalysisPanel from "@/components/story/StoryAnalysisPanel";
 import ArticleFilterList from "@/components/story/ArticleFilterList";
 import TelegramPanel from "@/components/story/TelegramPanel";
@@ -28,11 +27,6 @@ export async function generateMetadata({
     return {
       title: `${title} — دورنگر`,
       description,
-      openGraph: {
-        title,
-        description,
-        ...(story.articles?.[0]?.url ? {} : {}),
-      },
     };
   } catch {
     return { title: "دورنگر" };
@@ -89,7 +83,6 @@ export default async function StoryDetailPage({
   const coveringSlugs = new Set(story.articles.map((a) => a.source_slug).filter(Boolean));
   const coveringSources = allSources.filter((s) => coveringSlugs.has(s.slug));
 
-
   return (
     <FeedbackProvider>
     <StoryFeedbackOverlay storyId={id} storyTitle={title} />
@@ -108,13 +101,13 @@ export default async function StoryDetailPage({
             {story.source_count} رسانه · {story.article_count} مقاله
           </span>
           {story.first_published_at && (
-            <span title="زمان انتشار اولین مقاله">
-              خبر: {formatRelativeTime(story.first_published_at, "fa")}
+            <span>
+              نشر {formatRelativeTime(story.first_published_at, "fa")}
             </span>
           )}
           {story.updated_at && (
-            <span title="آخرین به‌روزرسانی تحلیل توسط دورنگر" className="text-[11px] text-slate-400">
-              تحلیل: {formatRelativeTime(story.updated_at, "fa")}
+            <span className="text-sm text-slate-500">
+              به‌روز: {formatRelativeTime(story.updated_at, "fa")}
             </span>
           )}
         </div>
@@ -146,7 +139,7 @@ export default async function StoryDetailPage({
         </div>
       </div>
 
-      {/* Analysis (OpenAI summary + bias) */}
+      {/* Analysis with tabs */}
       <div className="mb-8">
         <StoryAnalysisPanel analysis={analysis} />
         <SummaryRating storyId={id} />
@@ -170,16 +163,11 @@ export default async function StoryDetailPage({
           {coveringSources.length > 0 && (
             <div>
               <h3 className="text-sm font-black text-slate-900 dark:text-white mb-4 pb-2 border-b border-slate-200 dark:border-slate-800">
-                جایگاه رسانه‌ها
+                محافظه‌کار و اپوزیسیون
               </h3>
-              <SourceSpectrum sources={coveringSources} locale="fa" showFeedback />
+              <PoliticalSpectrum sources={coveringSources} />
             </div>
           )}
-
-          {coveringSources.length > 0 && (
-            <DimensionPlot sources={coveringSources} />
-          )}
-
         </div>
       </div>
     </div>

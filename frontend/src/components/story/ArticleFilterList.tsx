@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, Clock } from "lucide-react";
+import { formatRelativeTime } from "@/lib/utils";
 import ArticleRelevanceButton from "@/components/feedback/ArticleRelevanceButton";
 import type { StoryArticleWithBias } from "@/lib/types";
 
@@ -126,15 +127,23 @@ export default function ArticleFilterList({ articles, storyId, sidebarSync }: Ar
                     <h3 className="text-sm font-bold leading-snug text-slate-900 dark:text-white line-clamp-2">
                       {title}
                     </h3>
-                    <a
-                      href={article.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-[11px] text-blue-600 dark:text-blue-400 hover:underline mt-1"
-                    >
-                      مشاهده مقاله اصلی
-                      <ExternalLink className="h-3 w-3" />
-                    </a>
+                    <div className="flex items-center gap-3 mt-1.5">
+                      {article.published_at && (
+                        <span className="inline-flex items-center gap-1 text-[10px] text-slate-400">
+                          <Clock className="h-3 w-3" />
+                          نشر {formatRelativeTime(article.published_at, "fa")}
+                        </span>
+                      )}
+                      <a
+                        href={article.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-[11px] text-blue-600 dark:text-blue-400 hover:underline"
+                      >
+                        مشاهده مقاله اصلی
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    </div>
                     {storyId && (
                       <ArticleRelevanceButton storyId={storyId} articleId={article.id} />
                     )}
