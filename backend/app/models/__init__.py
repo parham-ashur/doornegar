@@ -1,3 +1,4 @@
+from app.models.analyst import Analyst
 from app.models.article import Article
 from app.models.bias_score import BiasScore
 from app.models.feedback import RaterFeedback
@@ -12,6 +13,7 @@ from app.models.topic import Topic, TopicArticle
 from app.models.user import User
 
 __all__ = [
+    "Analyst",
     "Article",
     "BiasScore",
     "CommunityRating",
