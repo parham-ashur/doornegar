@@ -165,7 +165,7 @@ export default async function StoryDetailPage({
               <h3 className="text-sm font-black text-slate-900 dark:text-white mb-4 pb-2 border-b border-slate-200 dark:border-slate-800">
                 جایگاه رسانه‌ها
               </h3>
-              <PoliticalSpectrum sources={coveringSources} />
+              <PoliticalSpectrum sources={coveringSources} sourceNeutrality={analysis?.source_neutrality || null} />
             </div>
           )}
         </div>

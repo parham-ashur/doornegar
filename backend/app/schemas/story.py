@@ -67,5 +67,7 @@ class StoryAnalysisResponse(BaseModel):
     independent_summary_fa: str | None = None
     bias_explanation_fa: str | None = None
     scores: dict[str, BiasScores | None] | None = None
+    # Per-source neutrality scores for 2D spectrum (-1.0 to +1.0)
+    source_neutrality: dict[str, float] | None = None
     # Deep analyst factors — populated only for premium-tier stories
     analyst: dict | None = None

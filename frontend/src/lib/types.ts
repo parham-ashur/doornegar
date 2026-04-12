@@ -127,6 +127,7 @@ export interface StoryAnalysis {
     diaspora: SideBiasScores | null;
     independent: SideBiasScores | null;
   } | null;
+  source_neutrality: Record<string, number> | null;
 }
 
 // ─── Lab / Topics ──────────────────────────────

@@ -387,6 +387,9 @@ async def step_summarize():
                     "scores": analysis.get("scores"),
                     "llm_model_used": chosen_model,
                 }
+                # Store source neutrality scores for 2D spectrum chart
+                if analysis.get("source_neutrality"):
+                    extras["source_neutrality"] = analysis["source_neutrality"]
                 # Store analyst factors for premium stories
                 if is_premium and analysis.get("analyst"):
                     extras["analyst"] = analysis["analyst"]
