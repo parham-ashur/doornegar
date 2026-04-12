@@ -365,36 +365,51 @@ async def article_positions(
             })
         return JSONResponse(content=positions)
 
-    # PCA reduction using numpy
+    # Hybrid positioning: X = source alignment (meaningful), Y = PCA content variation
     import numpy as np
 
+    # X: based on source alignment with jitter to avoid overlap
+    align_jitter: dict[str, int] = {}
+    ALIGNMENT_X_BASE = {
+        "state": 80, "semi_state": 65, "independent": 50, "diaspora": 20,
+    }
+
+    # Y: PCA first component for content variation within the story
     embeddings = [a.embedding for a in articles_with_emb]
     matrix = np.array(embeddings, dtype=np.float64)
     mean = matrix.mean(axis=0)
     centered = matrix - mean
-    cov = np.cov(centered.T)
-    eigenvalues, eigenvectors = np.linalg.eigh(cov)
-    # Take top 2 eigenvectors (eigh returns ascending order)
-    top2 = eigenvectors[:, -2:]
-    projected = centered @ top2
 
-    # Normalize each dimension to 0-100
-    for dim in range(2):
-        mn, mx = projected[:, dim].min(), projected[:, dim].max()
+    # Get first principal component for Y spread
+    try:
+        cov = np.cov(centered.T)
+        eigenvalues, eigenvectors = np.linalg.eigh(cov)
+        pc1 = eigenvectors[:, -1]  # top eigenvector
+        y_projected = centered @ pc1
+        # Normalize to 15-85 range
+        mn, mx = y_projected.min(), y_projected.max()
         if mx > mn:
-            projected[:, dim] = (projected[:, dim] - mn) / (mx - mn) * 100
+            y_normalized = 15 + (y_projected - mn) / (mx - mn) * 70
         else:
-            projected[:, dim] = 50.0
+            y_normalized = np.full(len(y_projected), 50.0)
+    except Exception:
+        y_normalized = np.linspace(20, 80, len(articles_with_emb))
 
     positions = []
     for i, a in enumerate(articles_with_emb):
+        align = a.source.state_alignment if a.source else "independent"
+        jitter_idx = align_jitter.get(align, 0)
+        align_jitter[align] = jitter_idx + 1
+        # X: alignment base + small jitter to separate same-source articles
+        x = ALIGNMENT_X_BASE.get(align, 50) + (jitter_idx % 3 - 1) * 5
+
         positions.append({
             "article_id": str(a.id),
             "title_fa": a.title_fa or a.title_original or "",
             "source_slug": a.source.slug if a.source else None,
-            "source_alignment": a.source.state_alignment if a.source else "independent",
-            "x": round(float(projected[i, 0]), 2),
-            "y": round(float(projected[i, 1]), 2),
+            "source_alignment": align,
+            "x": round(max(5, min(95, x)), 2),
+            "y": round(float(y_normalized[i]), 2),
         })
 
     return JSONResponse(content=positions)
