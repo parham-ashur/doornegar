@@ -42,7 +42,7 @@ export default function Header() {
     { href: `/${locale}`, label: "خانه" },
     { href: `/${locale}/stories`, label: "خبرها" },
     { href: `/${locale}/sources`, label: "رسانه‌ها" },
-    { href: `/${locale}/blindspots`, label: "نقاط کور" },
+    { href: `/${locale}/blindspots`, label: "نگاه یک‌طرفه" },
     { href: `/${locale}/lab`, label: "آزمایشگاه" },
   ];
 

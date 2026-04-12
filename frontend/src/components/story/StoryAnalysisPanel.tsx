@@ -6,9 +6,9 @@ import type { StoryAnalysis } from "@/lib/types";
 type TabKey = "bias" | "conservative" | "opposition";
 
 const TABS: { key: TabKey; label: string }[] = [
-  { key: "bias", label: "مقایسه سوگیری" },
-  { key: "conservative", label: "محافظه‌کار" },
-  { key: "opposition", label: "اپوزیسیون" },
+  { key: "bias", label: "مقایسه روایت‌ها" },
+  { key: "conservative", label: "روایت محافظه‌کار" },
+  { key: "opposition", label: "روایت اپوزیسیون" },
 ];
 
 function FramingTags({ framing }: { framing: string | string[] | null }) {
@@ -16,9 +16,9 @@ function FramingTags({ framing }: { framing: string | string[] | null }) {
   const items = Array.isArray(framing) ? framing : [framing];
   return (
     <div className="flex items-center gap-1.5 flex-wrap mt-3">
-      <span className="text-[10px] text-slate-500">چارچوب‌بندی:</span>
+      <span className="text-[11px] text-slate-500">چارچوب‌بندی:</span>
       {items.map((f, i) => (
-        <span key={i} className="px-2 py-0.5 text-[10px] border border-slate-300 dark:border-slate-700 font-medium text-slate-700 dark:text-slate-300">
+        <span key={i} className="px-2 py-0.5 text-[11px] border border-slate-300 dark:border-slate-700 font-medium text-slate-700 dark:text-slate-300">
           {f}
         </span>
       ))}
@@ -78,7 +78,7 @@ export default function StoryAnalysisPanel({ analysis }: { analysis: StoryAnalys
                 <FramingTags framing={analysis.scores?.state?.framing || null} />
               </>
             ) : (
-              <p className="text-[13px] text-slate-400">پوششی از سوی رسانه‌های محافظه‌کار یافت نشد</p>
+              <p className="text-[13px] text-slate-400">روایتی از سوی رسانه‌های محافظه‌کار یافت نشد</p>
             )}
           </div>
         )}
@@ -91,7 +91,7 @@ export default function StoryAnalysisPanel({ analysis }: { analysis: StoryAnalys
                 <FramingTags framing={analysis.scores?.diaspora?.framing || null} />
               </>
             ) : (
-              <p className="text-[13px] text-slate-400">پوششی از سوی رسانه‌های اپوزیسیون یافت نشد</p>
+              <p className="text-[13px] text-slate-400">روایتی از سوی رسانه‌های اپوزیسیون یافت نشد</p>
             )}
           </div>
         )}

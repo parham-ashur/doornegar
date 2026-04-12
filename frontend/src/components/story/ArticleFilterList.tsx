@@ -114,7 +114,7 @@ export default function ArticleFilterList({ articles, storyId, sidebarSync }: Ar
                     <div className="flex items-center gap-2 mb-1">
                       <span className="text-xs font-semibold text-slate-500">{sourceName}</span>
                       {badge && (
-                        <span className={`text-[10px] font-bold ${badge.color}`}>
+                        <span className={`text-[11px] font-bold ${badge.color}`}>
                           {badge.label}
                         </span>
                       )}
@@ -124,7 +124,7 @@ export default function ArticleFilterList({ articles, storyId, sidebarSync }: Ar
                     </h3>
                     <div className="flex items-center gap-3 mt-1.5">
                       {article.published_at && (
-                        <span className="inline-flex items-center gap-1 text-[10px] text-slate-400">
+                        <span className="inline-flex items-center gap-1 text-[11px] text-slate-400">
                           <Clock className="h-3 w-3" />
                           نشر {formatRelativeTime(article.published_at, "fa")}
                         </span>

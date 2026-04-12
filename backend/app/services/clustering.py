@@ -201,14 +201,21 @@ def _compute_trending_score(article_count: int, first_published: datetime | None
     """Compute a trending score based on article count and recency.
 
     Score = article_count * recency_factor
-    recency_factor decays from 1.0 to 0.1 over 30 days.
+    Uses exponential decay with half-life of 2 days:
+    - 0 hours ago: 1.0x
+    - 24 hours:    0.71x
+    - 48 hours:    0.50x
+    - 72 hours:    0.35x
+    - 7 days:      0.09x
+    - 14 days:     0.008x (essentially gone)
     """
+    import math
     if first_published:
         hours_ago = (datetime.now(timezone.utc) - first_published).total_seconds() / 3600
-        max_hours = 30 * 24  # 30 days
-        recency_factor = max(0.1, 1.0 - (hours_ago / max_hours) * 0.9)
+        half_life_hours = 48  # 2 days
+        recency_factor = max(0.01, math.pow(0.5, hours_ago / half_life_hours))
     else:
-        recency_factor = 0.5
+        recency_factor = 0.1
 
     return article_count * recency_factor
 

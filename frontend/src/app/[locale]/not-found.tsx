@@ -10,7 +10,7 @@ export default function NotFound() {
         صفحه‌ای پیدا نشد
       </h1>
       <p className="mt-3 text-sm text-slate-500 dark:text-slate-400 max-w-md">
-        مثل یک نقطه کور در پوشش خبری — این صفحه وجود ندارد یا جابجا شده.
+        مثل یک نگاه یک‌طرفه در پوشش خبری — این صفحه وجود ندارد یا جابجا شده.
         شاید از زاویه دیگری نگاه کنید.
       </p>
       <div className="mt-8 flex items-center gap-4">

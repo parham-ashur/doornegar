@@ -118,7 +118,7 @@ export default async function StoryDetailPage({
             {statePct > 0 && <div className="bg-[#1e3a5f]" style={{ width: `${statePct}%` }} />}
             {diasporaPct > 0 && <div className="bg-[#ea580c]" style={{ width: `${diasporaPct}%` }} />}
           </div>
-          <div className="flex items-center gap-3 text-[10px]">
+          <div className="flex items-center gap-3 text-[11px]">
             {statePct > 0 && (
               <span className="flex items-center gap-1 text-[#1e3a5f] dark:text-blue-300">
                 <span className="inline-block h-1.5 w-1.5 bg-[#1e3a5f]" /> محافظه‌کار {statePct}٪

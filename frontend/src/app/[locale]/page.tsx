@@ -3,6 +3,8 @@ import Link from "next/link";
 import SafeImage from "@/components/common/SafeImage";
 import AnalystTicker from "@/components/common/AnalystTicker";
 import type { StoryBrief } from "@/lib/types";
+import NarrativeMap from "@/components/home/NarrativeMap";
+import WordsOfWeek from "@/components/home/WordsOfWeek";
 import { formatRelativeTime } from "@/lib/utils";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -23,6 +25,16 @@ async function fetchSummary(storyId: string): Promise<string | null> {
     if (!res.ok) return null;
     const data = await res.json();
     return data.summary_fa || null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchAnalysis(storyId: string): Promise<{ summary_fa?: string; bias_explanation_fa?: string } | null> {
+  try {
+    const res = await fetch(`${API}/api/v1/stories/${storyId}/analysis`, { next: { revalidate: 120 } });
+    if (!res.ok) return null;
+    return res.json();
   } catch {
     return null;
   }
@@ -154,7 +166,10 @@ export default async function HomePage({
   params: { locale: string };
 }) {
   setRequestLocale(locale);
-  const stories = await fetchAPI<StoryBrief[]>("/api/v1/stories/trending?limit=50") || [];
+  const [stories, blindspots] = await Promise.all([
+    fetchAPI<StoryBrief[]>("/api/v1/stories/trending?limit=50").then(d => d || []),
+    fetchAPI<StoryBrief[]>("/api/v1/stories/blindspots?limit=10").then(d => d || []),
+  ]);
 
   if (stories.length === 0) {
     return (
@@ -164,6 +179,23 @@ export default async function HomePage({
       </div>
     );
   }
+
+  // Blind spots: one from each side
+  const conservativeBlind = blindspots.find(s => s.blindspot_type === "state_only");
+  const oppositionBlind = blindspots.find(s => s.blindspot_type === "diaspora_only");
+
+  // Most disputed: stories with biggest gap between conservative and opposition coverage
+  const disputedCandidates = [...stories]
+    .filter(s => s.state_pct > 0 && s.diaspora_pct > 0 && !s.is_blindspot)
+    .sort((a, b) => Math.abs(b.state_pct - b.diaspora_pct) - Math.abs(a.state_pct - a.diaspora_pct));
+  const mostDisputed = disputedCandidates[0] || null;
+  const secondDisputed = disputedCandidates[1] || null;
+
+  // Common ground: stories where both sides have similar coverage (smallest gap)
+  const commonGround = [...stories]
+    .filter(s => s.state_pct > 10 && s.diaspora_pct > 10 && !s.is_blindspot)
+    .sort((a, b) => Math.abs(a.state_pct - a.diaspora_pct) - Math.abs(b.state_pct - b.diaspora_pct))
+    .slice(0, 2);
 
   const sorted = [...stories];
 
@@ -224,6 +256,19 @@ export default async function HomePage({
   const allSummaries: Record<string, string | null> = {};
   summaryIds.forEach((id, i) => { allSummaries[id] = summaryResults[i]; });
 
+  // Fetch full analysis for weekly briefing + most disputed + most read
+  const briefingStories = sorted.slice(1, 4);
+  const mostRead = [...sorted].sort((a, b) => b.article_count - a.article_count).slice(0, 5);
+  const analysisFetchIds = [hero.id, ...briefingStories.map(s => s.id)];
+  if (mostDisputed && !analysisFetchIds.includes(mostDisputed.id)) analysisFetchIds.push(mostDisputed.id);
+  if (secondDisputed && !analysisFetchIds.includes(secondDisputed.id)) analysisFetchIds.push(secondDisputed.id);
+  for (const s of mostRead) {
+    if (!analysisFetchIds.includes(s.id)) analysisFetchIds.push(s.id);
+  }
+  const analysisResults = await Promise.all(analysisFetchIds.map((id) => fetchAnalysis(id)));
+  const allAnalyses: Record<string, { bias_explanation_fa?: string; state_summary_fa?: string; diaspora_summary_fa?: string } | null> = {};
+  analysisFetchIds.forEach((id, i) => { allAnalyses[id] = analysisResults[i]; });
+
   return (
     <div dir="rtl" className="mx-auto max-w-7xl px-0 md:px-6 lg:px-8">
 
@@ -242,261 +287,287 @@ export default async function HomePage({
       {/* ════════════════════════════════════════════ */}
       <div className="hidden md:block">
 
-      {/* ROW 1: Hero */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 border-b border-slate-200 dark:border-slate-800 py-8 gap-8">
-        {hero && (
-          <div className="lg:col-span-4 flex flex-col justify-center">
-            <Link href={`/${locale}/stories/${hero.id}`} className="group block">
-              <h1 className="text-[26px] font-black leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400">
-                {hero.title_fa}
-              </h1>
-              <Meta story={hero} />
-              {allSummaries[hero.id] && (
-                <div className="mt-4">
-                  <p className="text-[13px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-4">{allSummaries[hero.id]}</p>
-                  <span className="text-[13px] text-blue-600 dark:text-blue-400 mt-1 inline-block">ادامه ←</span>
-                </div>
-              )}
-            </Link>
-            <AnalystTicker />
+      {/* ═══ TOP SECTION: Blind spots | Hero | Telegram ═══ */}
+      <div className="grid grid-cols-12 gap-0 border-b-2 border-slate-300 dark:border-slate-700">
+
+        {/* RIGHT: Telegram discussions */}
+        <div className="col-span-3 py-6 pl-6 border-l border-slate-200 dark:border-slate-800">
+          <h3 className="text-[13px] font-black text-slate-900 dark:text-white mb-4 pb-2 border-b border-slate-200 dark:border-slate-800">
+            بحث‌های تلگرام
+          </h3>
+          <div className="space-y-4">
+            <div className="border-b border-slate-100 dark:border-slate-800 pb-3">
+              <p className="text-[13px] leading-6 text-slate-600 dark:text-slate-400">
+                واکنش کاربران به اعلام آتش‌بس؛ بسیاری از شکننده بودن توافق ابراز نگرانی کرده‌اند.
+              </p>
+              <span className="text-[11px] text-slate-400 mt-1 block">نشر ۲ ساعت پیش</span>
+            </div>
+            <div className="border-b border-slate-100 dark:border-slate-800 pb-3">
+              <p className="text-[13px] leading-6 text-slate-600 dark:text-slate-400">
+                انتقاد از قطع طولانی‌مدت اینترنت؛ کاربران خواستار شفافیت بیشتر هستند.
+              </p>
+              <span className="text-[11px] text-slate-400 mt-1 block">نشر ۴ ساعت پیش</span>
+            </div>
+            <div className="border-b border-slate-100 dark:border-slate-800 pb-3">
+              <p className="text-[13px] leading-6 text-slate-600 dark:text-slate-400">
+                بازتاب مذاکرات اسلام‌آباد در کانال‌های تلگرامی؛ نظرات متفاوت درباره نتایج.
+              </p>
+              <span className="text-[11px] text-slate-400 mt-1 block">نشر ۶ ساعت پیش</span>
+            </div>
+            <div className="pb-1">
+              <p className="text-[13px] leading-6 text-slate-600 dark:text-slate-400">
+                گزارش‌هایی از تجمعات خیابانی پس از اعلام آتش‌بس در شهرهای مختلف.
+              </p>
+              <span className="text-[11px] text-slate-400 mt-1 block">نشر ۸ ساعت پیش</span>
+            </div>
           </div>
-        )}
+
+          {/* Words of the week — compact, rotating */}
+          <div className="mt-4 pt-4 border-t border-slate-200 dark:border-slate-800">
+            <WordsOfWeek />
+          </div>
+        </div>
+
+        {/* CENTER: Hero story — image + title below */}
         {hero && (
-          <div className="lg:col-span-5">
-            <Link href={`/${locale}/stories/${hero.id}`} className="block">
-              <div className="aspect-[16/10] w-full overflow-hidden bg-slate-100 dark:bg-slate-800">
+          <div className="col-span-6 py-6">
+            <Link href={`/${locale}/stories/${hero.id}`} className="group block">
+              <div className="aspect-[16/9] overflow-hidden bg-slate-100 dark:bg-slate-800">
                 <SafeImage src={hero.image_url} className="h-full w-full object-cover" />
               </div>
+              <h1 className="mt-4 text-[26px] font-black leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-3">
+                {hero.title_fa}
+              </h1>
             </Link>
+            <Meta story={hero} />
+            {/* Bias + analyst summary */}
+            {(() => {
+              const analysis = allAnalyses[hero.id];
+              const bias = analysis?.bias_explanation_fa;
+              const points = bias?.split(/[.؛]/).map((p: string) => p.trim()).filter((p: string) => p.length > 10).slice(0, 2) || [];
+              if (!points.length) return null;
+              return (
+                <div className="mt-3 space-y-1">
+                  {points.map((point, i) => (
+                    <p key={i} className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-1">• {point}</p>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
         )}
-        <div className="lg:col-span-3 lg:border-r border-slate-200 dark:border-slate-800 lg:pr-6 flex flex-col justify-center">
-          {leftTextStories.length > 0 && (() => {
-            const s = leftTextStories[leftTextStories.length - 1];
-            return (
-              <Link href={`/${locale}/stories/${s.id}`} className="group block">
-                <div className="aspect-[3/2] overflow-hidden bg-slate-100 dark:bg-slate-800">
-                  <SafeImage src={s.image_url} className="h-full w-full object-cover" />
-                </div>
-                <h3 className="mt-2 text-[14px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
-                  {s.title_fa}
+
+        {/* LEFT: Blind spot stories (one from each side) */}
+        <div className="col-span-3 py-6 pr-6 border-r border-slate-200 dark:border-slate-800 space-y-5">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
+            <span className="text-[13px] font-black text-slate-900 dark:text-white shrink-0">نگاه یک‌طرفه</span>
+            <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
+          </div>
+          {conservativeBlind && (
+            <Link href={`/${locale}/stories/${conservativeBlind.id}`} className="group block border-2 border-[#3b82f6] shadow-[0_0_14px_rgba(59,130,246,0.5)] hover:shadow-[0_0_22px_rgba(59,130,246,0.7)] transition-shadow animate-pulse-subtle">
+              <div className="aspect-[4/3] overflow-hidden bg-slate-100 dark:bg-slate-800">
+                <SafeImage src={conservativeBlind.image_url} className="h-full w-full object-cover" />
+              </div>
+              <div className="p-3">
+                <h3 className="text-[14px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
+                  {conservativeBlind.title_fa}
                 </h3>
-                <Meta story={s} />
-                {allSummaries[s.id] && (
-                  <p className="mt-1.5 text-[12px] leading-[20px] text-slate-400 dark:text-slate-500 line-clamp-3">{allSummaries[s.id]}</p>
-                )}
-              </Link>
-            );
-          })()}
+                <p className="mt-1.5 text-[11px] text-slate-400">
+                  فقط روایت محافظه‌کار · {conservativeBlind.article_count} مقاله
+                </p>
+              </div>
+            </Link>
+          )}
+          {oppositionBlind && (
+            <Link href={`/${locale}/stories/${oppositionBlind.id}`} className="group block border-2 border-[#ea580c] shadow-[0_0_10px_rgba(234,88,12,0.3)] hover:shadow-[0_0_16px_rgba(234,88,12,0.5)] transition-shadow animate-pulse-subtle">
+              <div className="aspect-[4/3] overflow-hidden bg-slate-100 dark:bg-slate-800">
+                <SafeImage src={oppositionBlind.image_url} className="h-full w-full object-cover" />
+              </div>
+              <div className="p-3">
+                <h3 className="text-[14px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
+                  {oppositionBlind.title_fa}
+                </h3>
+                <p className="mt-1.5 text-[11px] text-orange-500">
+                  فقط روایت اپوزیسیون · {oppositionBlind.article_count} مقاله
+                </p>
+              </div>
+            </Link>
+          )}
+
         </div>
       </div>
 
-      {/* ROW 2: hero-thumb layout (thumbnail right, big image+text left) */}
-      {row2Stories.length >= 2 && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 border-b border-slate-200 dark:border-slate-800 py-8 gap-8">
-          {/* Right (RTL first): thumbnail with summary */}
-          <div className="lg:col-span-3 lg:border-l border-slate-200 dark:border-slate-800 lg:pl-6 flex flex-col justify-center">
-            <Link href={`/${locale}/stories/${row2Stories[1].id}`} className="group block">
-              <div className="aspect-[3/2] overflow-hidden bg-slate-100 dark:bg-slate-800">
-                <SafeImage src={row2Stories[1].image_url} className="h-full w-full object-cover" />
-              </div>
-              <h3 className="mt-2 text-[14px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
-                {row2Stories[1].title_fa}
-              </h3>
-              <Meta story={row2Stories[1]} />
-              <p className="mt-1.5 text-[12px] leading-[20px] text-slate-400 dark:text-slate-500 line-clamp-3">{allSummaries[row2Stories[1].id] || row2Stories[1].title_fa}</p>
-            </Link>
-          </div>
-          {/* Center: title + summary */}
-          <div className="lg:col-span-4 flex flex-col justify-center">
-            <Link href={`/${locale}/stories/${row2Stories[0].id}`} className="group block">
-              <h2 className="text-[24px] font-black leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400">
-                {row2Stories[0].title_fa}
-              </h2>
-              <Meta story={row2Stories[0]} />
-              {allSummaries[row2Stories[0].id] && (
-                <div className="mt-4">
-                  <p className="text-[13px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-4">{allSummaries[row2Stories[0].id]}</p>
-                  <span className="text-[13px] text-blue-600 dark:text-blue-400 mt-1 inline-block">ادامه ←</span>
-                </div>
-              )}
-            </Link>
-          </div>
-          {/* Left (RTL last): big image */}
-          <div className="lg:col-span-5">
-            <Link href={`/${locale}/stories/${row2Stories[0].id}`} className="block">
-              <div className="aspect-[16/10] w-full overflow-hidden bg-slate-100 dark:bg-slate-800">
-                <SafeImage src={row2Stories[0].image_url} className="h-full w-full object-cover" />
-              </div>
-            </Link>
-          </div>
-        </div>
-      )}
-
-      {/* ROW 3: Text-only */}
-      <TextRow stories={midRow} summaries={allSummaries} locale={locale} />
-
-      {/* ROW 4: Feature + thumbnails */}
-      {(bottomLeft.length > 0 || bottomRight.length > 0) && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 border-b border-slate-200 dark:border-slate-800">
-          <div className="lg:col-span-8 py-7 lg:pl-8 lg:border-l border-slate-200 dark:border-slate-800">
-            {bottomLeft.map((s, i) => (
-              <Link key={s.id} href={`/${locale}/stories/${s.id}`}
-                className={`group grid grid-cols-1 sm:grid-cols-5 gap-5 ${i > 0 ? "pt-5 mt-5 border-t border-slate-200 dark:border-slate-800" : ""}`}>
-                <div className="sm:col-span-2">
-                  <h3 className="text-[20px] font-extrabold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400">
+      {/* ═══ WEEKLY BRIEFING + MOST DISPUTED ═══ */}
+      {sorted.length > 1 && (
+        <div className="grid grid-cols-12 gap-0 py-8 border-b border-slate-200 dark:border-slate-800">
+          {/* Weekly briefing (8 cols) */}
+          <div className="col-span-7 pl-6 border-l border-slate-200 dark:border-slate-800">
+            <h2 className="text-[22px] font-black text-slate-900 dark:text-white mb-6">هفته گذشته ...</h2>
+            <div className="mr-8">
+              {sorted.slice(1, 4).map((s, i) => (
+                <Link key={s.id} href={`/${locale}/stories/${s.id}`}
+                  className={`group block py-5 ${i > 0 ? "border-t border-slate-100 dark:border-slate-800/60" : ""}`}>
+                  <h3 className="text-[24px] font-black leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
                     {s.title_fa}
                   </h3>
                   <Meta story={s} />
-                  {allSummaries[s.id] && (
-                    <div className="mt-2">
-                      <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 line-clamp-4">{allSummaries[s.id]}</p>
-                      <span className="text-[12px] text-blue-600 dark:text-blue-400 mt-0.5 inline-block">ادامه ←</span>
-                    </div>
-                  )}
-                </div>
-                <div className="sm:col-span-3 aspect-[16/10] overflow-hidden bg-slate-100 dark:bg-slate-800">
-                  <SafeImage src={s.image_url} className="h-full w-full object-cover" />
-                </div>
-              </Link>
-            ))}
-          </div>
-          <div className="lg:col-span-4 py-7 lg:pr-6">
-            <div className="grid grid-cols-2 gap-5">
-              {bottomRight.map((s) => (
-                <Link key={s.id} href={`/${locale}/stories/${s.id}`} className="group block">
-                  <div className="aspect-[4/3] overflow-hidden bg-slate-100 dark:bg-slate-800">
-                    <SafeImage src={s.image_url} className="h-full w-full object-cover" />
-                  </div>
-                  <h3 className="mt-2 text-[14px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
-                    {s.title_fa}
-                  </h3>
-                  <Meta story={s} />
-                  {allSummaries[s.id] && (
-                    <p className="mt-1 text-[11px] leading-4 text-slate-400 dark:text-slate-500 line-clamp-2">{allSummaries[s.id]}</p>
-                  )}
+                  {(() => {
+                    const bias = allAnalyses[s.id]?.bias_explanation_fa;
+                    if (!bias) return null;
+                    const firstPoint = bias.split(/[.؛]/).map((p: string) => p.trim()).find((p: string) => p.length > 10);
+                    if (!firstPoint) return null;
+                    return <p className="mt-1.5 text-[13px] leading-5 text-slate-400 dark:text-slate-500 line-clamp-1">• {firstPoint}</p>;
+                  })()}
                 </Link>
               ))}
             </div>
-            {bottomTextRow.map((s) => (
-              <Link key={s.id} href={`/${locale}/stories/${s.id}`}
-                className="group block pt-5 mt-5 border-t border-slate-200 dark:border-slate-800">
-                <h3 className="text-[14px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400">
-                  {s.title_fa}
-                </h3>
-                <Meta story={s} />
-                {allSummaries[s.id] && (
-                  <p className="mt-1.5 text-[12px] leading-5 text-slate-400 dark:text-slate-500 line-clamp-2">{allSummaries[s.id]}</p>
-                )}
-              </Link>
-            ))}
+          </div>
+
+          {/* Most read (5 cols) */}
+          <div className="col-span-5 pr-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
+              <span className="text-[13px] font-black text-slate-900 dark:text-white shrink-0">پرخواننده‌ترین</span>
+              <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
+            </div>
+
+            <div className="space-y-0">
+              {mostRead.map((s, i) => {
+                const bias = allAnalyses[s.id]?.bias_explanation_fa;
+                const firstPoint = bias?.split(/[.؛]/).map((p: string) => p.trim()).find((p: string) => p.length > 10);
+                return (
+                  <Link key={s.id} href={`/${locale}/stories/${s.id}`}
+                    className={`group flex items-start gap-3 py-3 ${i > 0 ? "border-t border-slate-100 dark:border-slate-800/60" : ""}`}>
+                    <span className="text-[20px] font-black text-slate-200 dark:text-slate-700 shrink-0 w-7 text-center mt-0.5">{i + 1}</span>
+                    <div className="flex-1 min-w-0">
+                      <h3 className="text-[14px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-1">
+                        {s.title_fa}
+                      </h3>
+                      <p className="text-[11px] text-slate-400 mt-0.5">{s.article_count} مقاله · {s.source_count} رسانه</p>
+                      {firstPoint && (
+                        <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1 line-clamp-1">• {firstPoint}</p>
+                      )}
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}
 
-      {/* ════════════════════════════════════════════ */}
-      {/* OVERFLOW: Sections cycle text(3)→images(4)→feature(2) */}
-      {/* ════════════════════════════════════════════ */}
-      {sections.map((sec, i) => {
-        if (sec.type === "text") {
-          return <TextRow key={`s${i}`} stories={sec.stories} summaries={allSummaries} locale={locale} />;
-        }
-        if (sec.type === "hero-thumb") {
-          // Thumbnail on RIGHT, big image center, text on LEFT
-          const mainStory = sec.stories[0];
-          const thumbStory = sec.stories[1];
-          if (!mainStory) return null;
-          return (
-            <div key={`s${i}`} className="grid grid-cols-1 lg:grid-cols-12 border-b border-slate-200 dark:border-slate-800 py-8 gap-8">
-              {/* Right (RTL first): 1 thumbnail with summary */}
-              {thumbStory && (
-                <div className="lg:col-span-3 lg:border-l border-slate-200 dark:border-slate-800 lg:pl-6 flex flex-col justify-center">
-                  <Link href={`/${locale}/stories/${thumbStory.id}`} className="group block">
-                    <div className="aspect-[3/2] overflow-hidden bg-slate-100 dark:bg-slate-800">
-                      <SafeImage src={thumbStory.image_url} className="h-full w-full object-cover" />
-                    </div>
-                    <h3 className="mt-2 text-[14px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
-                      {thumbStory.title_fa}
-                    </h3>
-                    <Meta story={thumbStory} />
-                    <p className="mt-1.5 text-[12px] leading-[20px] text-slate-400 dark:text-slate-500 line-clamp-3">{allSummaries[thumbStory.id] || thumbStory.title_fa}</p>
-                  </Link>
-                </div>
-              )}
-              {/* Center: title + summary */}
-              <div className="lg:col-span-4 flex flex-col justify-center">
-                <Link href={`/${locale}/stories/${mainStory.id}`} className="group block">
-                  <h2 className="text-[24px] font-black leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400">
-                    {mainStory.title_fa}
-                  </h2>
-                  <Meta story={mainStory} />
-                  {allSummaries[mainStory.id] && (
-                    <div className="mt-4">
-                      <p className="text-[13px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-4">{allSummaries[mainStory.id]}</p>
-                      <span className="text-[13px] text-blue-600 dark:text-blue-400 mt-1 inline-block">ادامه ←</span>
-                    </div>
-                  )}
-                </Link>
-              </div>
-              {/* Left (RTL last): big image */}
-              <div className="lg:col-span-5">
-                <Link href={`/${locale}/stories/${mainStory.id}`} className="block">
-                  <div className="aspect-[16/10] w-full overflow-hidden bg-slate-100 dark:bg-slate-800">
-                    <SafeImage src={mainStory.image_url} className="h-full w-full object-cover" />
-                  </div>
-                </Link>
-              </div>
+      {/* ═══ COMMON GROUND + BATTLE OF NUMBERS ═══ */}
+      <div className="grid grid-cols-2 gap-6 py-8 border-b border-slate-200 dark:border-slate-800 items-stretch">
+
+        {/* Most disputed */}
+        <div>
+          <div className="border border-slate-300 dark:border-slate-600 h-full flex flex-col">
+            <div className="flex items-center -mt-3 mx-4">
+              <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
+              <span className="text-[13px] font-black text-slate-900 dark:text-white px-3 bg-white dark:bg-[#0a0e1a]">بیشترین اختلاف نظر</span>
+              <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
             </div>
-          );
-        }
-        if (sec.type === "hero-repeat") {
-          // Same as ROW 1: title+summary right, big image center, 3 text stories left
-          const heroStory = sec.stories[0];
-          const sideStories = sec.stories.slice(1);
-          if (!heroStory) return null;
-          return (
-            <div key={`s${i}`} className="grid grid-cols-1 lg:grid-cols-12 border-b border-slate-200 dark:border-slate-800 py-8 gap-8">
-              {/* Right (RTL): title + summary */}
-              <div className="lg:col-span-4 flex flex-col justify-center">
-                <Link href={`/${locale}/stories/${heroStory.id}`} className="group block">
-                  <h1 className="text-[26px] font-black leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400">
-                    {heroStory.title_fa}
-                  </h1>
-                  <Meta story={heroStory} />
-                  <div className="mt-4">
-                    <p className="text-[13px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-4">{allSummaries[heroStory.id] || heroStory.title_fa}</p>
-                    <span className="text-[13px] text-blue-600 dark:text-blue-400 mt-1 inline-block">ادامه ←</span>
-                  </div>
-                </Link>
-              </div>
-              {/* Center: big image */}
-              <div className="lg:col-span-5">
-                <Link href={`/${locale}/stories/${heroStory.id}`} className="block">
-                  <div className="aspect-[16/10] w-full overflow-hidden bg-slate-100 dark:bg-slate-800">
-                    <SafeImage src={heroStory.image_url} className="h-full w-full object-cover" />
-                  </div>
-                </Link>
-              </div>
-              {/* Left (RTL): 3 text stories sidebar */}
-              <div className="lg:col-span-3 flex flex-col justify-between lg:border-r border-slate-200 dark:border-slate-800 lg:pr-6">
-                {sideStories.map((s, j) => (
-                  <Link key={s.id} href={`/${locale}/stories/${s.id}`}
-                    className={`group block ${j > 0 ? "pt-4 mt-4 border-t border-slate-200 dark:border-slate-800" : ""}`}>
-                    <h3 className="text-[14px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 overflow-hidden text-ellipsis whitespace-nowrap">
-                      {s.title_fa}
-                    </h3>
-                    <p className="mt-1 text-[12px] text-slate-400">{s.source_count} رسانه · {s.article_count} مقاله</p>
-                    {allSummaries[s.id] && (
-                      <p className="mt-1.5 text-[13px] leading-5 text-slate-400 dark:text-slate-500 line-clamp-2">{allSummaries[s.id]}</p>
+            <div className="px-4 pb-4 pt-2 flex-1">
+              {[mostDisputed, secondDisputed].filter(Boolean).map((story, i) => {
+                const s = story!;
+                const analysis = allAnalyses[s.id];
+                const biasPoints = analysis?.bias_explanation_fa
+                  ?.split(/[.؛]/).map((p: string) => p.trim()).filter((p: string) => p.length > 10).slice(0, 2) || [];
+                return (
+                  <div key={s.id} className={`py-4 ${i > 0 ? "border-t border-slate-100 dark:border-slate-800/60" : ""}`}>
+                    <Link href={`/${locale}/stories/${s.id}`} className="group block">
+                      <h4 className="text-[15px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
+                        {s.title_fa}
+                      </h4>
+                      <div className="mt-2 flex h-1.5 w-full overflow-hidden">
+                        <div className="bg-[#1e3a5f]" style={{ width: `${s.state_pct}%` }} />
+                        <div className="bg-[#ea580c]" style={{ width: `${s.diaspora_pct}%` }} />
+                      </div>
+                      <div className="mt-1 flex items-center justify-between text-[11px]">
+                        <span className="text-[#1e3a5f] dark:text-blue-300 font-medium">محافظه‌کار {s.state_pct}٪</span>
+                        <span className="text-[#ea580c] dark:text-orange-400 font-medium">اپوزیسیون {s.diaspora_pct}٪</span>
+                      </div>
+                    </Link>
+                    {biasPoints.length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        {biasPoints.map((point, pi) => (
+                          <div key={pi} className="flex gap-2 text-[12px] leading-5">
+                            <span className="text-slate-400 mt-0.5 shrink-0">•</span>
+                            <span className="text-slate-500 dark:text-slate-400 line-clamp-1">{point}</span>
+                          </div>
+                        ))}
+                      </div>
                     )}
-                  </Link>
-                ))}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* Battle of numbers */}
+        <div>
+          <div className="border border-slate-300 dark:border-slate-600 h-full flex flex-col">
+            <div className="flex items-center -mt-3 mx-4">
+              <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
+              <span className="text-[13px] font-black text-slate-900 dark:text-white px-3 bg-white dark:bg-[#0a0e1a]">مقایسه ارقام</span>
+              <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
+            </div>
+
+          <div className="space-y-5 px-4 pb-4 pt-2 flex-1 flex flex-col justify-between">
+            {/* Item 1 */}
+            <div>
+              <p className="text-[13px] font-bold text-slate-900 dark:text-white mb-3">تلفات حملات هوایی</p>
+              <div className="flex gap-0 text-center">
+                <div className="flex-1 py-3 bg-[#1e3a5f]/10 dark:bg-blue-900/20 border-t-[3px] border-[#1e3a5f]">
+                  <p className="text-[22px] font-black text-[#1e3a5f] dark:text-blue-300">«شهدای مدافع»</p>
+                  <p className="text-[11px] text-slate-500 mt-1">تلفات محدود نظامی</p>
+                  <p className="text-[11px] text-[#1e3a5f] dark:text-blue-300 font-medium mt-0.5">فارس · پرس‌تی‌وی</p>
+                </div>
+                <div className="flex-1 py-3 bg-[#ea580c]/10 dark:bg-orange-900/20 border-t-[3px] border-[#ea580c]">
+                  <p className="text-[22px] font-black text-[#ea580c] dark:text-orange-400">«صدها غیرنظامی»</p>
+                  <p className="text-[11px] text-slate-500 mt-1">کشتار گسترده مردم</p>
+                  <p className="text-[11px] text-[#ea580c] dark:text-orange-400 font-medium mt-0.5">ایران‌اینترنشنال · بی‌بی‌سی</p>
+                </div>
               </div>
             </div>
-          );
-        }
-        return null;
-      })}
+
+            {/* Item 2 */}
+            <div>
+              <p className="text-[13px] font-bold text-slate-900 dark:text-white mb-3">قطع اینترنت</p>
+              <div className="flex gap-0 text-center">
+                <div className="flex-1 py-3 bg-[#1e3a5f]/10 dark:bg-blue-900/20 border-t-[3px] border-[#1e3a5f]">
+                  <p className="text-[20px] font-black text-[#1e3a5f] dark:text-blue-300">«اختلال موقت»</p>
+                  <p className="text-[11px] text-slate-500 mt-1">محدودیت امنیتی</p>
+                  <p className="text-[11px] text-[#1e3a5f] dark:text-blue-300 font-medium mt-0.5">صداوسیما · تابناک</p>
+                </div>
+                <div className="flex-1 py-3 bg-[#ea580c]/10 dark:bg-orange-900/20 border-t-[3px] border-[#ea580c]">
+                  <p className="text-[20px] font-black text-[#ea580c] dark:text-orange-400">«۴۰ روز قطع کامل»</p>
+                  <p className="text-[11px] text-slate-500 mt-1">قطع عمدی و سراسری</p>
+                  <p className="text-[11px] text-[#ea580c] dark:text-orange-400 font-medium mt-0.5">رادیو فردا · نت‌بلاکس</p>
+                </div>
+              </div>
+            </div>
+          </div>
+          </div>
+        </div>
+
+      </div>
+
+      {/* ═══ NARRATIVE MAP ═══ */}
+      <div className="py-10 border-b-2 border-slate-300 dark:border-slate-700">
+        <div className="flex items-center gap-3 mb-2">
+          <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
+          <span className="text-[15px] font-black text-slate-900 dark:text-white shrink-0">نقشه روایت‌ها</span>
+          <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
+        </div>
+        <p className="text-center text-[12px] text-slate-400 dark:text-slate-500 mb-4">هر نقطه یک خبر است. اندازه = تعداد مقالات. روی موضوعات کلیک کنید.</p>
+        <NarrativeMap stories={sorted} />
+      </div>
+
+
+
       </div>
     </div>
   );

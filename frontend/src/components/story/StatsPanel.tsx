@@ -26,7 +26,7 @@ export default function StatsPanel({ analysis }: { analysis: StoryAnalysis | nul
           <div className="space-y-2">
             <div className="h-3 w-3/4 bg-slate-100 dark:bg-slate-800 animate-pulse" />
             <div className="h-3 w-1/2 bg-slate-100 dark:bg-slate-800 animate-pulse" />
-            <p className="text-[10px] text-slate-400 mt-2">تحلیل عمیق پس از اجرای بعدی در دسترس خواهد بود</p>
+            <p className="text-[11px] text-slate-400 mt-2">تحلیل عمیق پس از اجرای بعدی در دسترس خواهد بود</p>
           </div>
         )}
       </div>
@@ -40,7 +40,7 @@ export default function StatsPanel({ analysis }: { analysis: StoryAnalysis | nul
         <div className="space-y-2 text-[11px]">
           {stateFraming && (
             <div className="flex items-center justify-between">
-              <span className="text-slate-500">چارچوب محافظه‌کار</span>
+              <span className="text-slate-500">روایت محافظه‌کار</span>
               <span className="text-slate-700 dark:text-slate-300 font-medium">
                 {(Array.isArray(stateFraming) ? stateFraming : [stateFraming]).join("، ")}
               </span>
@@ -48,7 +48,7 @@ export default function StatsPanel({ analysis }: { analysis: StoryAnalysis | nul
           )}
           {diasporaFraming && (
             <div className="flex items-center justify-between">
-              <span className="text-slate-500">چارچوب اپوزیسیون</span>
+              <span className="text-slate-500">روایت اپوزیسیون</span>
               <span className="text-slate-700 dark:text-slate-300 font-medium">
                 {(Array.isArray(diasporaFraming) ? diasporaFraming : [diasporaFraming]).join("، ")}
               </span>
@@ -67,7 +67,7 @@ export default function StatsPanel({ analysis }: { analysis: StoryAnalysis | nul
               {Object.entries(neutralityData)
                 .sort(([, a], [, b]) => b - a)
                 .map(([slug, score]) => (
-                  <div key={slug} className="flex items-center justify-between text-[10px]">
+                  <div key={slug} className="flex items-center justify-between text-[11px]">
                     <span className="text-slate-400 truncate max-w-[60%]">{slug}</span>
                     <span className={`font-mono ${score > 0 ? "text-emerald-500" : score < -0.3 ? "text-red-400" : "text-slate-500"}`}>
                       {score > 0 ? "+" : ""}{score.toFixed(1)}
@@ -77,7 +77,7 @@ export default function StatsPanel({ analysis }: { analysis: StoryAnalysis | nul
             </div>
           )}
           {!stateFraming && !diasporaFraming && avgNeutrality === null && (
-            <p className="text-[10px] text-slate-400">آمار پس از اجرای تحلیل در دسترس خواهد بود</p>
+            <p className="text-[11px] text-slate-400">آمار پس از اجرای تحلیل در دسترس خواهد بود</p>
           )}
         </div>
       </div>

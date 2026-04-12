@@ -4,6 +4,15 @@
 @tailwind components;
 @tailwind utilities;
 
+.animate-pulse-subtle {
+  animation: pulse-glow 2.5s ease-in-out infinite;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { filter: brightness(1); box-shadow: inherit; }
+  50% { filter: brightness(1.15); box-shadow: inherit, 0 0 24px currentColor; }
+}
+
 @layer base {
   :root {
     --color-state: #dc2626;
