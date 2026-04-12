@@ -54,7 +54,7 @@ function Meta({ story }: { story: StoryBrief }) {
       <p className="text-[11px] text-slate-400 dark:text-slate-500 leading-5">
         {story.source_count} رسانه · {story.article_count} مقاله
         {published && <span>{" · "}نشر {published}</span>}
-        {showUpdated && <span>{" · "}به‌روز: {updated}</span>}
+        {showUpdated && <span>{" · "}به‌روز {updated}</span>}
       </p>
       {hasSides && (
         <p className="text-[11px] leading-5 mt-0.5">

@@ -107,7 +107,7 @@ export default async function StoryDetailPage({
           )}
           {story.updated_at && (
             <span className="text-sm text-slate-500">
-              به‌روز: {formatRelativeTime(story.updated_at, "fa")}
+              به‌روز {formatRelativeTime(story.updated_at, "fa")}
             </span>
           )}
         </div>
