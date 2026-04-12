@@ -390,6 +390,12 @@ async def step_summarize():
                 # Store source neutrality scores for 2D spectrum chart
                 if analysis.get("source_neutrality"):
                     extras["source_neutrality"] = analysis["source_neutrality"]
+                # Store dispute score for homepage "most disputed" section
+                if analysis.get("dispute_score") is not None:
+                    extras["dispute_score"] = analysis["dispute_score"]
+                # Store loaded words for homepage "words of the week" section
+                if analysis.get("loaded_words"):
+                    extras["loaded_words"] = analysis["loaded_words"]
                 # Store analyst factors for premium stories
                 if is_premium and analysis.get("analyst"):
                     extras["analyst"] = analysis["analyst"]

@@ -128,6 +128,8 @@ export interface StoryAnalysis {
     independent: SideBiasScores | null;
   } | null;
   source_neutrality: Record<string, number> | null;
+  dispute_score: number | null;
+  loaded_words: { conservative: string[]; opposition: string[] } | null;
 }
 
 // ─── Lab / Topics ──────────────────────────────

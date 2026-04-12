@@ -164,6 +164,8 @@ async def get_story_analysis(request: Request, story_id: uuid.UUID, db: AsyncSes
         bias_explanation_fa=extra.get("bias_explanation_fa"),
         scores=extra.get("scores"),
         source_neutrality=extra.get("source_neutrality"),
+        dispute_score=extra.get("dispute_score"),
+        loaded_words=extra.get("loaded_words"),
         analyst=extra.get("analyst"),
     )
 

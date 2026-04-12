@@ -69,5 +69,9 @@ class StoryAnalysisResponse(BaseModel):
     scores: dict[str, BiasScores | None] | None = None
     # Per-source neutrality scores for 2D spectrum (-1.0 to +1.0)
     source_neutrality: dict[str, float] | None = None
+    # Dispute score (0-1) for "most disputed" homepage section
+    dispute_score: float | None = None
+    # Loaded words per side for "words of the week"
+    loaded_words: dict | None = None
     # Deep analyst factors — populated only for premium-tier stories
     analyst: dict | None = None
