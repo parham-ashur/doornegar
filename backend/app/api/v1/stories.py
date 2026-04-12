@@ -81,15 +81,39 @@ async def trending_stories(
     if cached and _time.time() < cached["expires"]:
         return cached["data"]
 
+    # Fetch more than needed so diversity reranking has room to work
+    fetch_limit = min(limit * 3, 100)
     result = await db.execute(
         select(Story)
         .options(selectinload(Story.articles).selectinload(Article.source))
         .where(Story.article_count >= min_articles)
         .order_by(Story.priority.desc(), Story.trending_score.desc())
-        .limit(limit)
+        .limit(fetch_limit)
     )
-    stories = result.scalars().all()
-    data = [_story_brief_with_extras(s) for s in stories]
+    stories = list(result.scalars().all())
+
+    # ── Diversity reranking ──
+    # Penalize stories whose titles overlap heavily with higher-ranked ones.
+    # This prevents 6 ceasefire stories from dominating the top — the first
+    # one ranks normally, the 2nd gets a small penalty, the 3rd a bigger one.
+    seen_words: set[str] = set()
+    scored: list[tuple[float, int, Story]] = []
+    for i, s in enumerate(stories):
+        words = {w for w in (s.title_fa or "").split() if len(w) >= 3}
+        if words:
+            overlap = len(words & seen_words) / len(words)
+        else:
+            overlap = 0.0
+        # First story of a topic: penalty=1.0 (none). 50% overlap → 0.65x. 80% overlap → 0.44x.
+        penalty = max(0.3, 1.0 - overlap * 0.7)
+        effective = (s.priority or 0) * 1000 + (s.trending_score or 0) * penalty
+        scored.append((effective, -i, s))  # -i for stable sort
+        seen_words.update(words)
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    ranked = [s for _, _, s in scored[:limit]]
+
+    data = [_story_brief_with_extras(s) for s in ranked]
     _stories_cache[cache_key] = {"data": data, "expires": _time.time() + _STORIES_CACHE_TTL}
     return data
 

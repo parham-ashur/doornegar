@@ -358,6 +358,11 @@ async def step_summarize():
                     include_analyst_factors=is_premium,
                 )
                 story.summary_fa = analysis.get("summary_fa")
+                # Update title if LLM returned a better one
+                if analysis.get("title_fa") and analysis["title_fa"].strip():
+                    story.title_fa = analysis["title_fa"].strip()
+                if analysis.get("title_en") and analysis["title_en"].strip():
+                    story.title_en = analysis["title_en"].strip()
                 extras = {
                     "state_summary_fa": analysis.get("state_summary_fa"),
                     "diaspora_summary_fa": analysis.get("diaspora_summary_fa"),

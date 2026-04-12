@@ -78,11 +78,20 @@ STORY_ANALYSIS_PROMPT = """\
 
 {articles_block}
 
+# عنوان به‌روز
+
+با توجه به مجموعه مقالات، یک عنوان خبری دقیق و روزآمد ارائه بده.
+- title_fa: عنوان فارسی مختصر و دقیق (حداکثر ۱۵ کلمه). باید دقیقاً بگوید چه اتفاقی افتاده.
+- title_en: ترجمه انگلیسی عنوان.
+- اگر عنوان فعلی خبر هنوز دقیق و مناسب است، همان را بنویس.
+
 # خروجی
 
 فقط JSON. بدون توضیح اضافی، بدون بلوک کد markdown.
 
 {{
+  "title_fa": "<عنوان فارسی دقیق و روزآمد>",
+  "title_en": "<English translation of title>",
   "summary_fa": "<خلاصه کلی ۳-۴ جمله، فقط حقایق>",
   "state_summary_fa": "<دیدگاه حکومتی ۲-۳ جمله، یا null>",
   "diaspora_summary_fa": "<دیدگاه برون‌مرزی ۲-۳ جمله، یا null>",
@@ -192,6 +201,10 @@ async def generate_story_analysis(
         if content:
             lines.append(f"متن: {content}")
         lines.append("")
+
+    # Include current title so LLM can keep it if still accurate
+    current_title = story.title_fa or ""
+    lines.insert(0, f"عنوان فعلی خبر: {current_title}\n")
 
     articles_block = "\n".join(lines)
 
