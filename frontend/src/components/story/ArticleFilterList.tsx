@@ -95,15 +95,13 @@ export default function ArticleFilterList({ articles, storyId, sidebarSync }: Ar
       ) : (
         <div
           className={
-            filtered.length > 6
+            filtered.length > 5
               ? "overflow-y-auto scrollbar-thin pr-1"
               : ""
           }
           style={
-            filtered.length > 6 && sidebarHeight
-              ? { maxHeight: `${sidebarHeight}px` }
-              : filtered.length > 6
-              ? { maxHeight: "600px" }
+            filtered.length > 5
+              ? { maxHeight: "700px" }
               : undefined
           }
         >
@@ -152,7 +150,7 @@ export default function ArticleFilterList({ articles, storyId, sidebarSync }: Ar
               );
             })}
           </div>
-          {filtered.length > 6 && (
+          {filtered.length > 5 && (
             <div className="sticky bottom-0 h-8 bg-gradient-to-t from-white dark:from-[#0a0e1a] to-transparent pointer-events-none" />
           )}
         </div>

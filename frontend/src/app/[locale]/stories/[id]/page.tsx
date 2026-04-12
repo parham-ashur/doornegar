@@ -139,31 +139,28 @@ export default async function StoryDetailPage({
         </div>
       </div>
 
-      {/* Analysis with tabs */}
-      <div className="mb-8">
-        <StoryAnalysisPanel analysis={analysis} />
-        <SummaryRating storyId={id} />
-      </div>
-
-      {/* Main layout */}
-      <div className="grid gap-8 lg:grid-cols-3 lg:items-start">
-        {/* Articles (2/3) */}
-        <div className="lg:col-span-2">
+      {/* Main layout: articles left, analysis+spectrum right */}
+      <div className="grid gap-8 lg:grid-cols-2 lg:items-start">
+        {/* Articles (left half) */}
+        <div>
           <h2 className="mb-4 text-base font-black text-slate-900 dark:text-white border-b border-slate-200 dark:border-slate-800 pb-3">
             مقالات مرتبط
           </h2>
-          <ArticleFilterList articles={story.articles} storyId={id} sidebarSync />
+          <ArticleFilterList articles={story.articles} storyId={id} />
 
           {/* Telegram reactions */}
           <TelegramPanel storyId={id} />
         </div>
 
-        {/* Sidebar (1/3) */}
+        {/* Analysis + spectrum (right half) */}
         <div className="space-y-6 lg:border-r border-slate-200 dark:border-slate-800 lg:pr-6 lg:sticky lg:top-4" id="story-sidebar">
+          <StoryAnalysisPanel analysis={analysis} />
+          <SummaryRating storyId={id} />
+
           {coveringSources.length > 0 && (
-            <div>
+            <div className="pt-4 border-t border-slate-200 dark:border-slate-800">
               <h3 className="text-sm font-black text-slate-900 dark:text-white mb-4 pb-2 border-b border-slate-200 dark:border-slate-800">
-                محافظه‌کار و اپوزیسیون
+                جایگاه رسانه‌ها
               </h3>
               <PoliticalSpectrum sources={coveringSources} />
             </div>
