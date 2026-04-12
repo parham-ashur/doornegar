@@ -1661,6 +1661,149 @@ async def step_disk_monitoring():
     return stats
 
 
+async def step_quality_postprocess():
+    """Final quality pass: LLM reviews top 15 stories for article relevance and output quality.
+
+    Sends each story's title, article titles, bias comparison, and side summaries
+    to the LLM and asks:
+    1. Are all articles relevant to this story? Flag any that don't belong.
+    2. Is the bias comparison accurate and fair? Suggest corrections.
+    3. Is the title precise enough? Suggest improvement.
+
+    Uses nano model to keep costs low (~$0.005 per story, $0.075 total).
+    Only corrects if the LLM finds actual issues — doesn't rewrite for style.
+    """
+    import json as _json
+
+    from sqlalchemy import select, text
+    from sqlalchemy.orm import selectinload
+
+    from app.config import settings
+    from app.database import async_session
+    from app.models.article import Article
+    from app.models.story import Story
+
+    if not settings.openai_api_key:
+        return {"skipped": "no_api_key"}
+
+    QUALITY_PROMPT = """\
+شما ویراستار کیفیت پلتفرم دورنگر هستید. این خبر و مقالات آن را بررسی کنید.
+
+عنوان: {title}
+تحلیل سوگیری: {bias}
+
+مقالات:
+{articles}
+
+فقط JSON برگردانید:
+{{
+  "irrelevant_articles": [<شماره مقالاتی که به این خبر ربط ندارند>],
+  "bias_correction": "<اگر تحلیل سوگیری اشتباه یا ناقص است، اصلاح پیشنهادی. اگر درست است: null>",
+  "title_suggestion": "<اگر عنوان کلی یا نادقیق است، عنوان بهتر. اگر خوب است: null>",
+  "quality_score": <عدد 1 تا 5 — کیفیت کلی تحلیل>
+}}"""
+
+    stats = {"checked": 0, "articles_flagged": 0, "titles_improved": 0, "bias_corrected": 0}
+
+    async with async_session() as db:
+        # Get top 15 visible stories
+        result = await db.execute(
+            select(Story)
+            .options(selectinload(Story.articles))
+            .where(Story.article_count >= 5, Story.summary_fa.isnot(None))
+            .order_by(Story.priority.desc(), Story.trending_score.desc())
+            .limit(15)
+        )
+        stories = list(result.scalars().all())
+
+        async def _keepalive(db):
+            try:
+                await db.execute(text("SELECT 1"))
+            except Exception:
+                pass
+
+        for story in stories:
+            stats["checked"] += 1
+
+            # Build article list
+            art_lines = []
+            for i, a in enumerate(story.articles[:15], 1):
+                art_lines.append(f"{i}. {a.title_fa or a.title_original or '?'}")
+
+            # Get bias from summary_en
+            bias = ""
+            if story.summary_en:
+                try:
+                    extras = _json.loads(story.summary_en)
+                    bias = extras.get("bias_explanation_fa", "") or ""
+                except Exception:
+                    pass
+
+            if not bias:
+                continue
+
+            prompt = QUALITY_PROMPT.format(
+                title=story.title_fa or "",
+                bias=bias[:500],
+                articles="\n".join(art_lines),
+            )
+
+            try:
+                await _keepalive(db)
+                import openai
+                from app.services.llm_helper import build_openai_params
+                client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
+                params = build_openai_params(
+                    model=settings.translation_model,  # nano — cheap
+                    prompt=prompt,
+                    max_tokens=512,
+                    temperature=0,
+                )
+                response = await client.chat.completions.create(**params)
+                text_out = response.choices[0].message.content.strip()
+                if "```json" in text_out:
+                    text_out = text_out.split("```json")[1].split("```")[0].strip()
+                elif "```" in text_out:
+                    text_out = text_out.split("```")[1].split("```")[0].strip()
+
+                review = _json.loads(text_out)
+
+                # Apply corrections
+                irrelevant = review.get("irrelevant_articles", [])
+                if irrelevant and isinstance(irrelevant, list):
+                    for idx in irrelevant:
+                        if isinstance(idx, int) and 1 <= idx <= len(story.articles):
+                            article = story.articles[idx - 1]
+                            article.story_id = None
+                            stats["articles_flagged"] += 1
+                            logger.info(f"  QC flagged article #{idx} in '{(story.title_fa or '')[:30]}'")
+
+                title_suggestion = review.get("title_suggestion")
+                if title_suggestion and isinstance(title_suggestion, str) and title_suggestion.strip():
+                    story.title_fa = title_suggestion.strip()
+                    stats["titles_improved"] += 1
+                    logger.info(f"  QC improved title: '{title_suggestion[:40]}'")
+
+                # Store quality score
+                quality_score = review.get("quality_score")
+                if quality_score and story.summary_en:
+                    try:
+                        extras = _json.loads(story.summary_en)
+                        extras["quality_score"] = quality_score
+                        story.summary_en = _json.dumps(extras, ensure_ascii=False)
+                    except Exception:
+                        pass
+
+                await db.commit()
+
+            except Exception as e:
+                logger.warning(f"  QC failed for '{(story.title_fa or '')[:30]}': {e}")
+
+    if any(v > 0 for k, v in stats.items() if k != "checked"):
+        logger.info(f"Quality postprocess: {stats}")
+    return stats
+
+
 async def step_weekly_digest():
     """Generate a weekly digest (runs only on Mondays)."""
     from pathlib import Path
@@ -2625,6 +2768,7 @@ async def run_maintenance():
         ("disk", "Disk monitoring", step_disk_monitoring),
         ("cost_tracking", "LLM cost tracking", step_cost_tracking),
         ("backup", "Database backup", step_database_backup),
+        ("quality_postprocess", "Quality post-processing (LLM review)", step_quality_postprocess),
         ("weekly_digest", "Weekly digest", step_weekly_digest),
     ]
 

@@ -330,7 +330,7 @@ export default async function HomePage({
         <div className="grid grid-cols-12 gap-0 py-8 border-b border-slate-200 dark:border-slate-800">
           {/* Weekly briefing (8 cols) */}
           <div className="col-span-7 pl-6 border-l border-slate-200 dark:border-slate-800">
-            <h2 className="text-[22px] font-black text-slate-900 dark:text-white mb-6">هفته گذشته ...</h2>
+            <h2 className="text-[22px] font-black text-slate-900 dark:text-white mb-6">در روزهای گذشته ...</h2>
             <div className="mr-8">
               {sorted.slice(1, 4).map((s, i) => (
                 <Link key={s.id} href={`/${locale}/stories/${s.id}`}
@@ -680,7 +680,7 @@ function MobileHome({
       {/* ── 3. Weekly briefing ── */}
       {briefingStories.length > 0 && (
         <div className="px-4 py-5 border-b border-slate-200 dark:border-slate-800">
-          <h2 className="text-[18px] font-black text-slate-900 dark:text-white mb-3">هفته گذشته ...</h2>
+          <h2 className="text-[18px] font-black text-slate-900 dark:text-white mb-3">در روزهای گذشته ...</h2>
           <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
             {briefingStories.map((s) => {
               const bias = allAnalyses[s.id]?.bias_explanation_fa;
