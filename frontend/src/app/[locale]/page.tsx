@@ -29,7 +29,7 @@ async function fetchSummary(storyId: string): Promise<string | null> {
   }
 }
 
-async function fetchAnalysis(storyId: string): Promise<{ summary_fa?: string; bias_explanation_fa?: string } | null> {
+async function fetchAnalysis(storyId: string): Promise<{ summary_fa?: string; bias_explanation_fa?: string; state_summary_fa?: string; diaspora_summary_fa?: string; dispute_score?: number; loaded_words?: { conservative: string[]; opposition: string[] } } | null> {
   try {
     const res = await fetch(`${API}/api/v1/stories/${storyId}/analysis`, { next: { revalidate: 120 } });
     if (!res.ok) return null;
@@ -178,7 +178,7 @@ export default async function HomePage({
     if (!analysisFetchIds.includes(s.id)) analysisFetchIds.push(s.id);
   }
   const analysisResults = await Promise.all(analysisFetchIds.map((id) => fetchAnalysis(id)));
-  const allAnalyses: Record<string, { bias_explanation_fa?: string; state_summary_fa?: string; diaspora_summary_fa?: string; dispute_score?: number } | null> = {};
+  const allAnalyses: Record<string, { bias_explanation_fa?: string; state_summary_fa?: string; diaspora_summary_fa?: string; dispute_score?: number; loaded_words?: { conservative: string[]; opposition: string[] } } | null> = {};
   analysisFetchIds.forEach((id, i) => { allAnalyses[id] = analysisResults[i]; });
 
   // Re-sort disputed candidates by dispute_score (higher = more disputed), falling back to pct gap
@@ -443,39 +443,100 @@ export default async function HomePage({
             </div>
 
           <div className="space-y-5 px-4 pb-4 pt-2 flex-1 flex flex-col justify-between">
-            {/* Item 1 */}
-            <div>
-              <p className="text-[13px] font-bold text-slate-900 dark:text-white mb-3">تلفات حملات هوایی</p>
-              <div className="flex gap-0 text-center">
-                <div className="flex-1 py-3 bg-[#1e3a5f]/10 dark:bg-blue-900/20 border-t-[3px] border-[#1e3a5f]">
-                  <p className="text-[22px] font-black text-[#1e3a5f] dark:text-blue-300">«شهدای مدافع»</p>
-                  <p className="text-[11px] text-slate-500 mt-1">تلفات محدود نظامی</p>
-                  <p className="text-[11px] text-[#1e3a5f] dark:text-blue-300 font-medium mt-0.5">فارس · پرس‌تی‌وی</p>
-                </div>
-                <div className="flex-1 py-3 bg-[#ea580c]/10 dark:bg-orange-900/20 border-t-[3px] border-[#ea580c]">
-                  <p className="text-[22px] font-black text-[#ea580c] dark:text-orange-400">«صدها غیرنظامی»</p>
-                  <p className="text-[11px] text-slate-500 mt-1">کشتار گسترده مردم</p>
-                  <p className="text-[11px] text-[#ea580c] dark:text-orange-400 font-medium mt-0.5">ایران‌اینترنشنال · بی‌بی‌سی</p>
-                </div>
-              </div>
-            </div>
+            {(() => {
+              // Build battle items from the top 2 most disputed stories
+              type BattleItem = { title: string; conservative: string; opposition: string; conservativeLabel: string; oppositionLabel: string };
+              const battleItems: BattleItem[] = [];
 
-            {/* Item 2 */}
-            <div>
-              <p className="text-[13px] font-bold text-slate-900 dark:text-white mb-3">قطع اینترنت</p>
-              <div className="flex gap-0 text-center">
-                <div className="flex-1 py-3 bg-[#1e3a5f]/10 dark:bg-blue-900/20 border-t-[3px] border-[#1e3a5f]">
-                  <p className="text-[20px] font-black text-[#1e3a5f] dark:text-blue-300">«اختلال موقت»</p>
-                  <p className="text-[11px] text-slate-500 mt-1">محدودیت امنیتی</p>
-                  <p className="text-[11px] text-[#1e3a5f] dark:text-blue-300 font-medium mt-0.5">صداوسیما · تابناک</p>
+              for (const story of [mostDisputed, secondDisputed]) {
+                if (!story) continue;
+                const analysis = allAnalyses[story.id];
+                if (!analysis) continue;
+
+                const words = analysis.loaded_words;
+                const stateSummary = analysis.state_summary_fa;
+                const diasporaSummary = analysis.diaspora_summary_fa;
+                const biasText = analysis.bias_explanation_fa;
+
+                // Strategy 1: Use loaded_words if both sides have terms
+                if (words?.conservative?.length && words?.opposition?.length) {
+                  battleItems.push({
+                    title: story.title_fa || "",
+                    conservative: `«${words.conservative[0]}»`,
+                    opposition: `«${words.opposition[0]}»`,
+                    conservativeLabel: words.conservative.length > 1 ? words.conservative.slice(1, 3).join("، ") : "روایت محافظه‌کار",
+                    oppositionLabel: words.opposition.length > 1 ? words.opposition.slice(1, 3).join("، ") : "روایت اپوزیسیون",
+                  });
+                  continue;
+                }
+
+                // Strategy 2: Extract «quoted» pairs from bias_explanation_fa
+                if (biasText) {
+                  const quotes = biasText.match(/«[^»]+»/g);
+                  if (quotes && quotes.length >= 2) {
+                    battleItems.push({
+                      title: story.title_fa || "",
+                      conservative: quotes[0],
+                      opposition: quotes[1],
+                      conservativeLabel: stateSummary ? stateSummary.slice(0, 40) + (stateSummary.length > 40 ? "..." : "") : "روایت محافظه‌کار",
+                      oppositionLabel: diasporaSummary ? diasporaSummary.slice(0, 40) + (diasporaSummary.length > 40 ? "..." : "") : "روایت اپوزیسیون",
+                    });
+                    continue;
+                  }
+                }
+
+                // Strategy 3: Use state_summary_fa vs diaspora_summary_fa as contrasting framings
+                if (stateSummary && diasporaSummary) {
+                  const stateShort = stateSummary.length > 25 ? stateSummary.slice(0, 25) + "..." : stateSummary;
+                  const diasporaShort = diasporaSummary.length > 25 ? diasporaSummary.slice(0, 25) + "..." : diasporaSummary;
+                  battleItems.push({
+                    title: story.title_fa || "",
+                    conservative: `«${stateShort}»`,
+                    opposition: `«${diasporaShort}»`,
+                    conservativeLabel: "خلاصه رسانه‌های محافظه‌کار",
+                    oppositionLabel: "خلاصه رسانه‌های اپوزیسیون",
+                  });
+                }
+              }
+
+              // Fallback: hardcoded content if no real data available
+              if (battleItems.length === 0) {
+                battleItems.push(
+                  {
+                    title: "تلفات حملات هوایی",
+                    conservative: "«شهدای مدافع»",
+                    opposition: "«صدها غیرنظامی»",
+                    conservativeLabel: "تلفات محدود نظامی",
+                    oppositionLabel: "کشتار گسترده مردم",
+                  },
+                  {
+                    title: "قطع اینترنت",
+                    conservative: "«اختلال موقت»",
+                    opposition: "«۴۰ روز قطع کامل»",
+                    conservativeLabel: "محدودیت امنیتی",
+                    oppositionLabel: "قطع عمدی و سراسری",
+                  },
+                );
+              }
+
+              return battleItems.slice(0, 2).map((item, idx) => (
+                <div key={idx}>
+                  <p className="text-[13px] font-bold text-slate-900 dark:text-white mb-3 line-clamp-1">{item.title}</p>
+                  <div className="flex gap-0 text-center">
+                    <div className="flex-1 py-3 bg-[#1e3a5f]/10 dark:bg-blue-900/20 border-t-[3px] border-[#1e3a5f]">
+                      <p className={`${item.conservative.length > 20 ? "text-[18px]" : "text-[22px]"} font-black text-[#1e3a5f] dark:text-blue-300 line-clamp-1 px-2`}>{item.conservative}</p>
+                      <p className="text-[11px] text-slate-500 mt-1 line-clamp-1 px-2">{item.conservativeLabel}</p>
+                      <p className="text-[11px] text-[#1e3a5f] dark:text-blue-300 font-medium mt-0.5">محافظه‌کار</p>
+                    </div>
+                    <div className="flex-1 py-3 bg-[#ea580c]/10 dark:bg-orange-900/20 border-t-[3px] border-[#ea580c]">
+                      <p className={`${item.opposition.length > 20 ? "text-[18px]" : "text-[22px]"} font-black text-[#ea580c] dark:text-orange-400 line-clamp-1 px-2`}>{item.opposition}</p>
+                      <p className="text-[11px] text-slate-500 mt-1 line-clamp-1 px-2">{item.oppositionLabel}</p>
+                      <p className="text-[11px] text-[#ea580c] dark:text-orange-400 font-medium mt-0.5">اپوزیسیون</p>
+                    </div>
+                  </div>
                 </div>
-                <div className="flex-1 py-3 bg-[#ea580c]/10 dark:bg-orange-900/20 border-t-[3px] border-[#ea580c]">
-                  <p className="text-[20px] font-black text-[#ea580c] dark:text-orange-400">«۴۰ روز قطع کامل»</p>
-                  <p className="text-[11px] text-slate-500 mt-1">قطع عمدی و سراسری</p>
-                  <p className="text-[11px] text-[#ea580c] dark:text-orange-400 font-medium mt-0.5">رادیو فردا · نت‌بلاکس</p>
-                </div>
-              </div>
-            </div>
+              ));
+            })()}
           </div>
           </div>
         </div>
