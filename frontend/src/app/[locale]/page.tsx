@@ -37,7 +37,7 @@ function Meta({ story }: { story: StoryBrief }) {
     : null;
   const showUpdated = updated && story.updated_at && story.first_published_at
     && Math.abs(new Date(story.updated_at).getTime() - new Date(story.first_published_at).getTime()) > 3600000;
-  const hasSides = story.state_pct > 0 || story.independent_pct > 0 || story.diaspora_pct > 0;
+  const hasSides = story.state_pct > 0 || story.diaspora_pct > 0;
   return (
     <div className="mt-1.5" dir="rtl">
       <p className="text-[11px] text-slate-400 dark:text-slate-500 leading-5">
@@ -47,11 +47,9 @@ function Meta({ story }: { story: StoryBrief }) {
       </p>
       {hasSides && (
         <p className="text-[11px] leading-5 mt-0.5">
-          {story.state_pct > 0 && <span className="text-red-500">محافظه‌کار {story.state_pct}٪</span>}
-          {story.state_pct > 0 && (story.independent_pct > 0 || story.diaspora_pct > 0) && <span className="text-slate-300 dark:text-slate-600"> · </span>}
-          {story.independent_pct > 0 && <span className="text-emerald-600">مستقل {story.independent_pct}٪</span>}
-          {story.independent_pct > 0 && story.diaspora_pct > 0 && <span className="text-slate-300 dark:text-slate-600"> · </span>}
-          {story.diaspora_pct > 0 && <span className="text-blue-600">اپوزیسیون {story.diaspora_pct}٪</span>}
+          {story.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300">محافظه‌کار {story.state_pct}٪</span>}
+          {story.state_pct > 0 && story.diaspora_pct > 0 && <span className="text-slate-300 dark:text-slate-600"> · </span>}
+          {story.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400">اپوزیسیون {story.diaspora_pct}٪</span>}
         </p>
       )}
     </div>
@@ -554,7 +552,6 @@ function MobileHome({
           <p className="mt-2 text-[11px] text-white/80">
             {hero.source_count} رسانه · {hero.article_count} مقاله
             {hero.state_pct > 0 && <span className="mr-2 text-red-300"> · محافظه‌کار {hero.state_pct}٪</span>}
-            {hero.independent_pct > 0 && <span className="mr-2 text-emerald-300"> · مستقل {hero.independent_pct}٪</span>}
             {hero.diaspora_pct > 0 && <span className="mr-2 text-blue-300"> · اپوزیسیون {hero.diaspora_pct}٪</span>}
           </p>
         </div>

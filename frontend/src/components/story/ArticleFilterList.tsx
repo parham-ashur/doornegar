@@ -12,21 +12,20 @@ interface ArticleFilterListProps {
   sidebarSync?: boolean;
 }
 
-type FilterKey = "all" | "state" | "independent" | "diaspora";
+type FilterKey = "all" | "state" | "diaspora";
 
 const filters: { key: FilterKey; label: string }[] = [
   { key: "all", label: "همه" },
   { key: "state", label: "محافظه‌کار" },
-  { key: "independent", label: "مستقل" },
   { key: "diaspora", label: "اپوزیسیون" },
 ];
 
 function getAlignmentBadge(alignment: string | null) {
   const map: Record<string, { label: string; color: string }> = {
-    state: { label: "محافظه‌کار", color: "text-red-600 dark:text-red-400" },
-    semi_state: { label: "نیمه‌دولتی", color: "text-orange-600 dark:text-orange-400" },
-    independent: { label: "مستقل", color: "text-emerald-600 dark:text-emerald-400" },
-    diaspora: { label: "اپوزیسیون", color: "text-blue-600 dark:text-blue-400" },
+    state: { label: "محافظه‌کار", color: "text-[#1e3a5f] dark:text-blue-300" },
+    semi_state: { label: "محافظه‌کار", color: "text-[#2563eb] dark:text-blue-300" },
+    independent: { label: "محافظه‌کار", color: "text-slate-500 dark:text-slate-400" },
+    diaspora: { label: "اپوزیسیون", color: "text-[#ea580c] dark:text-orange-400" },
   };
   if (!alignment || !map[alignment]) return null;
   return map[alignment];

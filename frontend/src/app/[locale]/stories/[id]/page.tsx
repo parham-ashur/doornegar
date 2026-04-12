@@ -77,7 +77,6 @@ export default async function StoryDetailPage({
   const total = story.articles.length || 1;
   const statePct = Math.round(((alignmentCounts["state"] || 0) + (alignmentCounts["semi_state"] || 0)) * 100 / total);
   const diasporaPct = Math.round((alignmentCounts["diaspora"] || 0) * 100 / total);
-  const independentPct = Math.round((alignmentCounts["independent"] || 0) * 100 / total);
 
   // Sources covering this story
   const coveringSlugs = new Set(story.articles.map((a) => a.source_slug).filter(Boolean));
@@ -115,24 +114,18 @@ export default async function StoryDetailPage({
         {/* Coverage bar */}
         <div className="mt-4 max-w-md space-y-1.5">
           <div className="flex h-1.5 w-full overflow-hidden bg-slate-200 dark:bg-slate-800">
-            {statePct > 0 && <div className="bg-red-500" style={{ width: `${statePct}%` }} />}
-            {independentPct > 0 && <div className="bg-emerald-500" style={{ width: `${independentPct}%` }} />}
-            {diasporaPct > 0 && <div className="bg-blue-500" style={{ width: `${diasporaPct}%` }} />}
+            {statePct > 0 && <div className="bg-[#1e3a5f]" style={{ width: `${statePct}%` }} />}
+            {diasporaPct > 0 && <div className="bg-[#ea580c]" style={{ width: `${diasporaPct}%` }} />}
           </div>
           <div className="flex items-center gap-3 text-[10px]">
             {statePct > 0 && (
-              <span className="flex items-center gap-1 text-red-600 dark:text-red-400">
-                <span className="inline-block h-1.5 w-1.5 bg-red-500" /> محافظه‌کار {statePct}٪
-              </span>
-            )}
-            {independentPct > 0 && (
-              <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
-                <span className="inline-block h-1.5 w-1.5 bg-emerald-500" /> مستقل {independentPct}٪
+              <span className="flex items-center gap-1 text-[#1e3a5f] dark:text-blue-300">
+                <span className="inline-block h-1.5 w-1.5 bg-[#1e3a5f]" /> محافظه‌کار {statePct}٪
               </span>
             )}
             {diasporaPct > 0 && (
-              <span className="flex items-center gap-1 text-blue-600 dark:text-blue-400">
-                <span className="inline-block h-1.5 w-1.5 bg-blue-500" /> اپوزیسیون {diasporaPct}٪
+              <span className="flex items-center gap-1 text-[#ea580c] dark:text-orange-400">
+                <span className="inline-block h-1.5 w-1.5 bg-[#ea580c]" /> اپوزیسیون {diasporaPct}٪
               </span>
             )}
           </div>
