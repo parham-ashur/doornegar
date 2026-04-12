@@ -2,8 +2,8 @@
 
 import { useEffect, useState, useCallback } from "react";
 import {
-  Activity, AlertTriangle, CheckCircle, Circle, CreditCard,
-  Database, ListChecks, MessageSquare, Newspaper, RefreshCw,
+  Activity, AlertTriangle, ArrowRight, CheckCircle, Circle, Clock, CreditCard,
+  Database, Inbox, ListChecks, MessageSquare, Newspaper, RefreshCw,
   Settings, Wrench, XCircle, BarChart3,
 } from "lucide-react";
 
@@ -43,6 +43,20 @@ interface DashboardData {
   issues: { severity: string; message: string }[];
   actions_needed: string[];
   freshness_hours: number | null;
+}
+
+interface FeedbackItem {
+  id: string;
+  target_type: string;
+  target_id: string;
+  issue_type: string;
+  current_value?: string;
+  suggested_value?: string;
+  reason?: string;
+  status: string;
+  created_at: string;
+  device_info?: any;
+  context_label?: string;
 }
 
 function freshnessColor(h: number | null) {
@@ -335,6 +349,32 @@ export default function DashboardPage() {
     const interval = setInterval(poll, 10000); // 10s not 3s — saves Neon transfer
     return () => clearInterval(interval);
   }, [running, authHeaders, fetchDashboard]);
+
+  // Feedback & Suggestions
+  const [feedback, setFeedback] = useState<FeedbackItem[]>([]);
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
+  const [feedbackCounts, setFeedbackCounts] = useState<{ total: number; open: number; in_progress: number; done: number }>({ total: 0, open: 0, in_progress: 0, done: 0 });
+
+  const fetchFeedback = useCallback(async () => {
+    if (!authed) return;
+    setFeedbackLoading(true);
+    try {
+      const res = await fetch(`${API}/api/v1/improvements/admin`, { headers: authHeaders() });
+      if (res.ok) {
+        const data = await res.json();
+        const items: FeedbackItem[] = Array.isArray(data) ? data : (data.items || []);
+        setFeedback(items);
+        const total = items.length;
+        const open = items.filter((i: FeedbackItem) => i.status === "open").length;
+        const in_progress = items.filter((i: FeedbackItem) => i.status === "in_progress").length;
+        const done = items.filter((i: FeedbackItem) => i.status === "done").length;
+        setFeedbackCounts({ total, open, in_progress, done });
+      }
+    } catch {}
+    setFeedbackLoading(false);
+  }, [authed, authHeaders]);
+
+  useEffect(() => { fetchFeedback(); }, [fetchFeedback]);
 
   if (!authed) {
     return (
@@ -944,6 +984,137 @@ export default function DashboardPage() {
             })}
           </div>
         )}
+      </div>
+
+      {/* Feedback & Suggestions Overview */}
+      <div className="mb-6 border border-slate-200 dark:border-slate-800 p-5">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+            <Inbox className="h-4 w-4 text-purple-500" /> Feedback & Suggestions
+          </h2>
+          <button
+            onClick={fetchFeedback}
+            disabled={feedbackLoading}
+            className="flex items-center gap-2 border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-xs text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50"
+          >
+            <RefreshCw className={`h-3 w-3 ${feedbackLoading ? "animate-spin" : ""}`} />
+            Refresh
+          </button>
+        </div>
+
+        {/* Summary counts */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+          <div className="border border-slate-200 dark:border-slate-800 p-3">
+            <p className="text-[10px] text-slate-400 uppercase">Total</p>
+            <p className="text-lg font-bold text-slate-900 dark:text-white">{feedbackCounts.total}</p>
+          </div>
+          <div className="border border-amber-200 dark:border-amber-900/50 bg-amber-50/30 dark:bg-amber-950/10 p-3">
+            <p className="text-[10px] text-amber-600 dark:text-amber-400 uppercase">Open</p>
+            <p className="text-lg font-bold text-amber-600 dark:text-amber-400">{feedbackCounts.open}</p>
+          </div>
+          <div className="border border-blue-200 dark:border-blue-900/50 bg-blue-50/30 dark:bg-blue-950/10 p-3">
+            <p className="text-[10px] text-blue-600 dark:text-blue-400 uppercase">In Progress</p>
+            <p className="text-lg font-bold text-blue-600 dark:text-blue-400">{feedbackCounts.in_progress}</p>
+          </div>
+          <div className="border border-emerald-200 dark:border-emerald-900/50 bg-emerald-50/30 dark:bg-emerald-950/10 p-3">
+            <p className="text-[10px] text-emerald-600 dark:text-emerald-400 uppercase">Done</p>
+            <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400">{feedbackCounts.done}</p>
+          </div>
+        </div>
+
+        {/* Recent open/in_progress items */}
+        {(() => {
+          const activeItems = feedback
+            .filter((item) => item.status === "open" || item.status === "in_progress")
+            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+            .slice(0, 5);
+
+          if (activeItems.length === 0) {
+            return (
+              <p className="text-xs text-slate-500">
+                {feedbackCounts.total === 0 ? "No feedback submitted yet." : "All feedback items are resolved."}
+              </p>
+            );
+          }
+
+          const issueTypeBadge = (type: string) => {
+            const map: Record<string, { label: string; color: string }> = {
+              wrong_title: { label: "Wrong title", color: "border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/10" },
+              bad_image: { label: "Bad image", color: "border-amber-300 dark:border-amber-700 text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/10" },
+              merge_stories: { label: "Merge stories", color: "border-blue-300 dark:border-blue-700 text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/10" },
+              priority_higher: { label: "Priority higher", color: "border-purple-300 dark:border-purple-700 text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/10" },
+              priority_lower: { label: "Priority lower", color: "border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-slate-900/10" },
+              wrong_summary: { label: "Wrong summary", color: "border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/10" },
+              wrong_bias: { label: "Wrong bias", color: "border-amber-300 dark:border-amber-700 text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/10" },
+              other: { label: "Other", color: "border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-slate-900/10" },
+            };
+            const info = map[type] || { label: type.replace(/_/g, " "), color: "border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-slate-900/10" };
+            return (
+              <span className={`px-1.5 py-0.5 text-[10px] border ${info.color} whitespace-nowrap`}>
+                {info.label}
+              </span>
+            );
+          };
+
+          const targetBadge = (type: string) => {
+            return (
+              <span className="px-1.5 py-0.5 text-[10px] border border-slate-200 dark:border-slate-700 text-slate-500 whitespace-nowrap">
+                {type.replace(/_/g, " ")}
+              </span>
+            );
+          };
+
+          const relativeTime = (iso: string) => {
+            try {
+              const diff = Date.now() - new Date(iso).getTime();
+              const mins = Math.floor(diff / 60000);
+              if (mins < 60) return `${mins}m ago`;
+              const hours = Math.floor(mins / 60);
+              if (hours < 24) return `${hours}h ago`;
+              const days = Math.floor(hours / 24);
+              return `${days}d ago`;
+            } catch {
+              return "";
+            }
+          };
+
+          return (
+            <div className="space-y-0 border border-slate-200 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800/50">
+              {activeItems.map((item) => (
+                <div key={item.id} className="flex items-center gap-3 px-3 py-2.5">
+                  <div className="flex items-center gap-2 shrink-0">
+                    {issueTypeBadge(item.issue_type)}
+                    {targetBadge(item.target_type)}
+                  </div>
+                  <p className="flex-1 text-xs text-slate-700 dark:text-slate-300 truncate min-w-0">
+                    {item.context_label || item.reason || item.suggested_value || "—"}
+                  </p>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {item.status === "in_progress" && (
+                      <span className="px-1.5 py-0.5 text-[10px] border border-blue-300 dark:border-blue-700 text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/10">
+                        in progress
+                      </span>
+                    )}
+                    <span className="text-[10px] text-slate-400 flex items-center gap-1">
+                      <Clock className="h-3 w-3" />
+                      {relativeTime(item.created_at)}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
+
+        {/* Link to full improvements page */}
+        <div className="mt-3 flex justify-end">
+          <a
+            href="./dashboard/improvements"
+            className="flex items-center gap-1 text-xs text-purple-600 dark:text-purple-400 hover:underline"
+          >
+            View all feedback <ArrowRight className="h-3 w-3" />
+          </a>
+        </div>
       </div>
 
       {/* Data Repair — destructive one-shot actions */}
