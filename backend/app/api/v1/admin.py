@@ -1015,6 +1015,36 @@ async def unclaim_story_articles(
     }
 
 
+@router.patch("/stories/{story_id}")
+async def patch_story(
+    story_id: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """Update editable fields on a story (title_fa, title_en, topics)."""
+    import uuid
+    from app.models.story import Story
+
+    story_uuid = uuid.UUID(story_id)
+    result = await db.execute(select(Story).where(Story.id == story_uuid))
+    story = result.scalar_one_or_none()
+    if not story:
+        raise HTTPException(status_code=404, detail="Story not found")
+
+    allowed = {"title_fa", "title_en", "topics"}
+    changed = []
+    for key in allowed:
+        if key in body:
+            setattr(story, key, body[key])
+            changed.append(key)
+
+    if not changed:
+        raise HTTPException(status_code=400, detail=f"No valid fields. Allowed: {allowed}")
+
+    await db.commit()
+    return {"status": "ok", "story_id": story_id, "updated": changed}
+
+
 @router.post("/cluster-llm/trigger")
 async def trigger_llm_clustering(db: AsyncSession = Depends(get_db)):
     """Cluster articles using LLM topic extraction (more accurate, costs ~$0.001/article)."""
