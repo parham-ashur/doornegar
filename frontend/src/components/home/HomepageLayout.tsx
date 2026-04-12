@@ -468,44 +468,146 @@ export default function HomepageLayout({ stories, summaries, locale, feedbackMod
           </div>
         )}
 
-        {/* ═══ OVERFLOW: remaining stories ═══ */}
-        {overflow.length > 0 && (
-          <div className="border-b border-slate-200 dark:border-slate-800">
-            {/* Text rows of 3 */}
-            {(() => {
-              const rows: StoryBrief[][] = [];
-              for (let i = 0; i < overflow.length; i += 3) {
-                rows.push(overflow.slice(i, i + 3));
-              }
-              return rows.map((row, ri) => (
-                <div key={`ov${ri}`} className={`grid grid-cols-1 ${row.length >= 3 ? "sm:grid-cols-3" : row.length === 2 ? "sm:grid-cols-2" : ""} ${ri > 0 ? "border-t border-slate-200 dark:border-slate-800" : ""}`}>
-                  {row.map((s, i) => (
-                    <div key={s.id} className={`relative group py-7 ${i > 0 ? "sm:pr-6 sm:border-r border-slate-200 dark:border-slate-800" : ""} ${i < row.length - 1 ? "sm:pl-6" : ""}`}>
-                      <Link href={storyHref(locale, s.id, feedbackMode)} className="group block">
-                        <h3 className="text-[17px] font-extrabold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-1">
-                          {s.title_fa}
-                        </h3>
-                        <Meta story={s} />
-                        <p className="mt-1.5 text-[13px] leading-5 text-slate-400 dark:text-slate-500 line-clamp-3">{summaries[s.id] || s.title_fa}</p>
-                      </Link>
-                      {feedbackMode && (
-                        <>
-                          <FeedbackBtn icon={Type} label="عنوان" position="tl"
-                            onClick={() => openFeedback({ targetType: "story_title", targetId: s.id, currentValue: s.title_fa, defaultIssueType: "wrong_title", contextLabel: s.title_fa })} />
-                          {summaries[s.id] && (
-                            <FeedbackBtn icon={FileText} label="خلاصه" position="tr"
-                              onClick={() => openFeedback({ targetType: "story_summary", targetId: s.id, currentValue: summaries[s.id] || "", defaultIssueType: "bad_summary", contextLabel: s.title_fa })} />
-                          )}
-                          <StoryActions storyId={s.id} storyTitle={s.title_fa} openFeedback={openFeedback} />
-                        </>
+        {/* ═══ OVERFLOW: match homepage layout (hero-thumb → hero-repeat → text) ═══ */}
+        {(() => {
+          const ovSections: { type: "hero-thumb" | "hero-repeat" | "text"; items: StoryBrief[] }[] = [];
+          const pattern = [
+            { type: "hero-thumb" as const, size: 2 },
+            { type: "hero-repeat" as const, size: 4 },
+            { type: "text" as const, size: 3 },
+          ];
+          let cur = 0;
+          for (const step of pattern) {
+            if (cur >= overflow.length) break;
+            const chunk = overflow.slice(cur, cur + step.size);
+            if (chunk.length === 0) break;
+            ovSections.push({ type: step.type, items: chunk });
+            cur += chunk.length;
+          }
+          return ovSections.map((sec, si) => {
+            if (sec.type === "hero-thumb" && sec.items.length >= 2) {
+              const main = sec.items[0], thumb = sec.items[1];
+              return (
+                <div key={`ov${si}`} className="grid grid-cols-1 lg:grid-cols-12 border-b border-slate-200 dark:border-slate-800 py-8 gap-8">
+                  <div className="lg:col-span-3 lg:border-l border-slate-200 dark:border-slate-800 lg:pl-6 flex flex-col justify-center relative group">
+                    <Link href={storyHref(locale, thumb.id, feedbackMode)} className="group block">
+                      <div className="aspect-[3/2] overflow-hidden bg-slate-100 dark:bg-slate-800">
+                        <SafeImage src={thumb.image_url} className="h-full w-full object-cover" />
+                      </div>
+                      <h3 className="mt-2 text-[14px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">{thumb.title_fa}</h3>
+                      <Meta story={thumb} />
+                      <p className="mt-1.5 text-[12px] leading-[20px] text-slate-400 dark:text-slate-500 line-clamp-3">{summaries[thumb.id] || thumb.title_fa}</p>
+                    </Link>
+                    {feedbackMode && (
+                      <>
+                        <FeedbackBtn icon={ImageIcon} label="تصویر" position="tl" onClick={() => openFeedback({ targetType: "story_image", targetId: thumb.id, defaultIssueType: "bad_image", contextLabel: thumb.title_fa, imageUrl: thumb.image_url })} />
+                        <FeedbackBtn icon={Type} label="عنوان" position="tr" onClick={() => openFeedback({ targetType: "story_title", targetId: thumb.id, currentValue: thumb.title_fa, defaultIssueType: "wrong_title", contextLabel: thumb.title_fa })} />
+                        <StoryActions storyId={thumb.id} storyTitle={thumb.title_fa} openFeedback={openFeedback} />
+                      </>
+                    )}
+                  </div>
+                  <div className="lg:col-span-4 flex flex-col justify-center relative group">
+                    <Link href={storyHref(locale, main.id, feedbackMode)} className="group block">
+                      <h2 className="text-[24px] font-black leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400">{main.title_fa}</h2>
+                      <Meta story={main} />
+                      {summaries[main.id] && (
+                        <div className="mt-4">
+                          <p className="text-[13px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-4">{summaries[main.id]}</p>
+                          <span className="text-[13px] text-blue-600 dark:text-blue-400 mt-1 inline-block">ادامه ←</span>
+                        </div>
                       )}
-                    </div>
-                  ))}
+                    </Link>
+                    {feedbackMode && (
+                      <>
+                        <FeedbackBtn icon={Type} label="عنوان" position="tl" onClick={() => openFeedback({ targetType: "story_title", targetId: main.id, currentValue: main.title_fa, defaultIssueType: "wrong_title", contextLabel: main.title_fa })} />
+                        <StoryActions storyId={main.id} storyTitle={main.title_fa} openFeedback={openFeedback} />
+                      </>
+                    )}
+                  </div>
+                  <div className="lg:col-span-5 relative group">
+                    <Link href={storyHref(locale, main.id, feedbackMode)} className="block">
+                      <div className="aspect-[16/10] w-full overflow-hidden bg-slate-100 dark:bg-slate-800">
+                        <SafeImage src={main.image_url} className="h-full w-full object-cover" />
+                      </div>
+                    </Link>
+                    {feedbackMode && (
+                      <FeedbackBtn icon={ImageIcon} label="تصویر" position="tl" onClick={() => openFeedback({ targetType: "story_image", targetId: main.id, defaultIssueType: "bad_image", contextLabel: main.title_fa, imageUrl: main.image_url })} />
+                    )}
+                  </div>
                 </div>
-              ));
-            })()}
-          </div>
-        )}
+              );
+            }
+            if (sec.type === "hero-repeat" && sec.items.length >= 1) {
+              const heroS = sec.items[0], sideS = sec.items.slice(1);
+              return (
+                <div key={`ov${si}`} className="grid grid-cols-1 lg:grid-cols-12 border-b border-slate-200 dark:border-slate-800 py-8 gap-8">
+                  <div className="lg:col-span-4 flex flex-col justify-center relative group">
+                    <Link href={storyHref(locale, heroS.id, feedbackMode)} className="group block">
+                      <h1 className="text-[26px] font-black leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400">{heroS.title_fa}</h1>
+                      <Meta story={heroS} />
+                      <div className="mt-4">
+                        <p className="text-[13px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-4">{summaries[heroS.id] || heroS.title_fa}</p>
+                        <span className="text-[13px] text-blue-600 dark:text-blue-400 mt-1 inline-block">ادامه ←</span>
+                      </div>
+                    </Link>
+                    {feedbackMode && (
+                      <>
+                        <FeedbackBtn icon={Type} label="عنوان" position="tl" onClick={() => openFeedback({ targetType: "story_title", targetId: heroS.id, currentValue: heroS.title_fa, defaultIssueType: "wrong_title", contextLabel: heroS.title_fa })} />
+                        <StoryActions storyId={heroS.id} storyTitle={heroS.title_fa} openFeedback={openFeedback} />
+                      </>
+                    )}
+                  </div>
+                  <div className="lg:col-span-5 relative group">
+                    <Link href={storyHref(locale, heroS.id, feedbackMode)} className="block">
+                      <div className="aspect-[16/10] w-full overflow-hidden bg-slate-100 dark:bg-slate-800">
+                        <SafeImage src={heroS.image_url} className="h-full w-full object-cover" />
+                      </div>
+                    </Link>
+                    {feedbackMode && (
+                      <FeedbackBtn icon={ImageIcon} label="تصویر" position="tl" onClick={() => openFeedback({ targetType: "story_image", targetId: heroS.id, defaultIssueType: "bad_image", contextLabel: heroS.title_fa, imageUrl: heroS.image_url })} />
+                    )}
+                  </div>
+                  <div className="lg:col-span-3 flex flex-col justify-between lg:border-r border-slate-200 dark:border-slate-800 lg:pr-6">
+                    {sideS.map((s, j) => (
+                      <div key={s.id} className={`relative group ${j > 0 ? "pt-4 mt-4 border-t border-slate-200 dark:border-slate-800" : ""}`}>
+                        <Link href={storyHref(locale, s.id, feedbackMode)} className="group block">
+                          <h3 className="text-[14px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">{s.title_fa}</h3>
+                          <Meta story={s} />
+                        </Link>
+                        {feedbackMode && (
+                          <>
+                            <FeedbackBtn icon={Type} label="عنوان" position="tl" onClick={() => openFeedback({ targetType: "story_title", targetId: s.id, currentValue: s.title_fa, defaultIssueType: "wrong_title", contextLabel: s.title_fa })} />
+                            <StoryActions storyId={s.id} storyTitle={s.title_fa} openFeedback={openFeedback} />
+                          </>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            }
+            // text row
+            return (
+              <div key={`ov${si}`} className={`grid grid-cols-1 ${sec.items.length >= 3 ? "sm:grid-cols-3" : sec.items.length === 2 ? "sm:grid-cols-2" : ""} border-b border-slate-200 dark:border-slate-800`}>
+                {sec.items.map((s, i) => (
+                  <div key={s.id} className={`relative group py-7 ${i > 0 ? "sm:pr-6 sm:border-r border-slate-200 dark:border-slate-800" : ""} ${i < sec.items.length - 1 ? "sm:pl-6" : ""}`}>
+                    <Link href={storyHref(locale, s.id, feedbackMode)} className="group block">
+                      <h3 className="text-[17px] font-extrabold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-1">{s.title_fa}</h3>
+                      <Meta story={s} />
+                      <p className="mt-1.5 text-[13px] leading-5 text-slate-400 dark:text-slate-500 line-clamp-3">{summaries[s.id] || s.title_fa}</p>
+                    </Link>
+                    {feedbackMode && (
+                      <>
+                        <FeedbackBtn icon={Type} label="عنوان" position="tl" onClick={() => openFeedback({ targetType: "story_title", targetId: s.id, currentValue: s.title_fa, defaultIssueType: "wrong_title", contextLabel: s.title_fa })} />
+                        <StoryActions storyId={s.id} storyTitle={s.title_fa} openFeedback={openFeedback} />
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+            );
+          });
+        })()}
 
         </div>
       </div>
