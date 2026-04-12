@@ -52,8 +52,7 @@ export default function ArticleFilterList({ articles, storyId, sidebarSync }: Ar
     ? articles
     : articles.filter((a) => {
         const alignment = a.source_state_alignment;
-        if (activeFilter === "state") return alignment === "state" || alignment === "semi_state";
-        if (activeFilter === "independent") return alignment === "independent";
+        if (activeFilter === "state") return alignment === "state" || alignment === "semi_state" || alignment === "independent";
         if (activeFilter === "diaspora") return alignment === "diaspora";
         return true;
       });
