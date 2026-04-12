@@ -16,30 +16,43 @@ export default function ArticleRelevanceButton({ storyId, articleId }: ArticleRe
   const [selected, setSelected] = useState<boolean | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  if (!isRater) return null;
-
   async function handleClick(isRelevant: boolean) {
     if (submitting || selected !== null) return;
     setSubmitting(true);
     try {
-      const res = await fetch(`${API}/api/v1/feedback/article-relevance`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          story_id: storyId,
-          article_id: articleId,
-          is_relevant: isRelevant,
-        }),
-      });
-      if (res.ok) {
-        setSelected(isRelevant);
+      if (isRater && token) {
+        // Authenticated rater path
+        const res = await fetch(`${API}/api/v1/feedback/article-relevance`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            story_id: storyId,
+            article_id: articleId,
+            is_relevant: isRelevant,
+          }),
+        });
+        if (res.ok) setSelected(isRelevant);
+      } else {
+        // Public feedback path (improvement system)
+        const res = await fetch(`${API}/api/v1/improvements`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            target_type: "article",
+            target_id: articleId,
+            issue_type: "wrong_clustering",
+            reason: isRelevant ? "مقاله مرتبط است" : "مقاله نامرتبط است",
+            device_info: typeof window !== "undefined"
+              ? `${window.innerWidth <= 768 ? "mobile" : "desktop"} ${window.innerWidth}×${window.innerHeight}`
+              : null,
+          }),
+        });
+        if (res.ok) setSelected(isRelevant);
       }
-    } catch {
-      // silently fail
-    }
+    } catch {}
     setSubmitting(false);
   }
 
