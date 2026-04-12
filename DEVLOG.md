@@ -1,5 +1,82 @@
 # Doornegar Development Log
 
+## 2026-04-12 — Major homepage & story detail redesign session
+
+### Key outcomes
+
+1. **Homepage redesign (BBC-style)**:
+   - BBC-style top section with featured story prominence
+   - Weekly briefing card (خلاصه هفتگی)
+   - Most disputed stories section (بیشترین اختلاف)
+   - Battle of numbers section (نبرد اعداد) — contrasting statistics across outlets
+   - Narrative map (نقشه روایت‌ها) — visual display of competing narratives
+   - Words of the week (واژه‌های هفته) — trending terminology across media
+
+2. **Story detail page redesign**:
+   - Tabbed analysis interface for organized content exploration
+   - Political spectrum visualization
+   - Stats panel with key metrics
+
+3. **Label changes (Persian terminology)**:
+   - حکومتی → محافظه‌کار (Government → Conservative)
+   - برون‌مرزی → اپوزیسیون (Diaspora → Opposition)
+   - نقاط کور → نگاه یک‌طرفه (Blind spots → One-sided view)
+
+4. **Quality audit system**:
+   - Daily 5-check audit cycle
+   - Neon query optimization for audit performance
+
+5. **Auto-merge similar stories**: Automatic detection and merging of duplicate/highly-similar story clusters
+
+6. **Title auto-update from LLM**: Story titles refreshed by LLM when new articles change the story's scope
+
+7. **Trending diversity reranking**: Exponential decay function ensures source diversity in trending results — prevents single-outlet domination
+
+8. **Source logos**: Added logos for all 18 tracked outlets
+
+9. **Source neutrality scoring**: Per-source neutrality metric derived from bias scoring history
+
+10. **Telegram embed image fallback**: Graceful fallback when Telegram embed images are unavailable
+
+11. **New admin endpoints**:
+    - `PATCH /admin/stories/{id}` — edit story metadata
+    - `PATCH /admin/articles/{id}` — edit article metadata
+    - `PATCH /admin/sources/{id}` — edit source metadata
+
+### Key decisions
+- D026: BBC-style homepage layout replacing hero card design
+- D027: Persian label renaming for political neutrality (محافظه‌کار/اپوزیسیون/نگاه یک‌طرفه)
+- D028: Daily quality audit system (5 checks/day)
+- D029: Auto-merge similar stories
+- D030: Exponential decay for trending diversity reranking
+- D031: Source neutrality scoring from bias history
+
+### Lessons learned
+- **Label choices matter politically.** "حکومتی" (governmental) and "برون‌مرزی" (diaspora) carry loaded connotations. "محافظه‌کار" (conservative) and "اپوزیسیون" (opposition) are more neutral descriptors.
+- **"Blind spots" framing was too dramatic.** "نگاه یک‌طرفه" (one-sided view) is factual without implying conspiracy.
+- **Trending lists dominated by high-volume outlets.** Exponential decay reranking ensures diversity without completely ignoring article volume.
+
+### Files changed (summary)
+```
+frontend/src/app/[locale]/page.tsx              # BBC-style homepage with new sections
+frontend/src/app/[locale]/stories/[id]/page.tsx # Tabbed analysis, political spectrum, stats panel
+frontend/src/components/WeeklyBriefing.tsx      # Weekly briefing card
+frontend/src/components/MostDisputed.tsx        # Most disputed stories
+frontend/src/components/BattleOfNumbers.tsx     # Contrasting statistics
+frontend/src/components/NarrativeMap.tsx        # Narrative map visualization
+frontend/src/components/WordsOfWeek.tsx         # Trending terminology
+frontend/src/lib/types.ts                       # Updated labels/types
+backend/app/api/v1/admin.py                     # PATCH endpoints for stories, articles, sources
+backend/app/services/clustering.py              # Auto-merge similar stories
+backend/app/services/story_analysis.py          # Title auto-update from LLM
+backend/app/services/trending.py                # Exponential decay diversity reranking
+backend/app/services/source_scoring.py          # Source neutrality scoring
+backend/auto_maintenance.py                     # Quality audit system (5 daily checks)
+frontend/public/logos/                          # Source logos for 18 outlets
+```
+
+---
+
 ## 2026-04-12 — Pipeline audit + analyst factors + embedding pre-filter session
 
 ### Key outcomes

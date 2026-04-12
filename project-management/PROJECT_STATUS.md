@@ -1,6 +1,6 @@
 # Doornegar - Project Status
 
-**Last updated**: 2026-04-12 21:24 (auto-maintenance)
+**Last updated**: 2026-04-12 (post major redesign session)
 
 ## What is Doornegar?
 
@@ -34,8 +34,15 @@ Doornegar (دورنگر) is a free, bilingual (Persian/English) media transparen
 - **Cloudflare R2 image storage** + title-overlap image picker computed at response time in `_story_brief_with_extras()` (not stored on Story model); `image_checked_at` column for 24h skip optimization
 - **Auto-maintenance** runs daily via Railway cron; fire-and-forget endpoint with per-step live progress tracking via shared `maintenance_state` module
 - Bilingual Next.js frontend with RTL support, Jalali dates
-- Homepage redesign with hero layout, DoornegarAnimation, welcome modal
-- Story detail page with interactive DimensionPlot, scrollable article list, and dual date display (خبر / تحلیل)
+- **Homepage redesign (BBC-style)**: featured story prominence, weekly briefing (خلاصه هفتگی), most disputed (بیشترین اختلاف), battle of numbers (نبرد اعداد), narrative map (نقشه روایت‌ها), words of the week (واژه‌های هفته)
+- **Story detail page redesign**: tabbed analysis interface, political spectrum visualization, stats panel
+- **Updated Persian labels**: محافظه‌کار (was حکومتی), اپوزیسیون (was برون‌مرزی), نگاه یک‌طرفه (was نقاط کور)
+- **Quality audit system**: daily 5-check cycle with Neon optimization
+- **Auto-merge similar stories** and **title auto-update from LLM**
+- **Trending diversity reranking** with exponential decay
+- **Source logos** for all 18 outlets + **source neutrality scoring**
+- **Telegram embed image fallback**
+- **PATCH admin endpoints** for stories, articles, and sources
 - Lab feature (topic-based analysis, news/debate modes, analyst perspectives)
 - Error/loading/404 pages with themed SVG animations
 - Admin token auth on all mutation endpoints
@@ -46,7 +53,7 @@ Doornegar (دورنگر) is a free, bilingual (Persian/English) media transparen
 - **OpenAI embeddings** (`text-embedding-3-small`, 384-dim) — replaced sentence-transformers/TF-IDF, no PyTorch needed (~2GB saved), ~$0.05/month
 - **Neon keepalive**: `_keepalive(db)` pings before each LLM call; `pool_recycle` lowered to 240s
 - **LLM retry with backoff**: `llm_failed_at` column on Article + Story, 24h retry window
-- **Admin dashboard** at `/fa/dashboard` (LTR) with live maintenance progress modal, diagnostics panel, recently re-summarized stories browser, force-resummarize buttons (test 5 / refresh 16), data repair section (null localhost images / unclaim story articles), re-embed-all button, priority vote + merge suggestion buttons, device context badges, and pipeline controls
+- **Admin dashboard** at `/fa/dashboard` (LTR) with live maintenance progress modal, diagnostics panel, recently re-summarized stories browser, force-resummarize buttons (test 5 / refresh 16), data repair section (null localhost images / unclaim story articles), re-embed-all button, priority vote + merge suggestion buttons, device context badges, pipeline controls, and PATCH editing for stories/articles/sources
 
 ### What needs work
 

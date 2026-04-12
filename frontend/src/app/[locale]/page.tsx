@@ -280,6 +280,9 @@ export default async function HomePage({
         stories={sorted}
         summaries={allSummaries}
         locale={locale}
+        conservativeBlind={conservativeBlind}
+        oppositionBlind={oppositionBlind}
+        allAnalyses={allAnalyses}
       />
 
       {/* ════════════════════════════════════════════ */}
@@ -580,102 +583,165 @@ function MobileHome({
   stories,
   summaries,
   locale,
+  conservativeBlind,
+  oppositionBlind,
+  allAnalyses,
 }: {
   hero: StoryBrief | undefined;
   stories: StoryBrief[];
   summaries: Record<string, string | null>;
   locale: string;
+  conservativeBlind: StoryBrief | undefined;
+  oppositionBlind: StoryBrief | undefined;
+  allAnalyses: Record<string, { bias_explanation_fa?: string; state_summary_fa?: string; diaspora_summary_fa?: string } | null>;
 }) {
   if (!hero) return null;
 
-  // Data slicing for mobile: hero + alternating blocks of (4 thumbnails, 3 text)
-  const after = stories.slice(1);
-  const blocks: { type: "thumbs" | "text"; items: StoryBrief[] }[] = [];
-  let cursor = 0;
-  const pattern: { type: "thumbs" | "text"; size: number }[] = [
-    { type: "thumbs", size: 4 },
-    { type: "text", size: 3 },
-    { type: "thumbs", size: 4 },
-    { type: "text", size: 3 },
-    { type: "thumbs", size: 4 },
-  ];
-  for (const step of pattern) {
-    const chunk = after.slice(cursor, cursor + step.size);
-    if (chunk.length === 0) break;
-    blocks.push({ type: step.type, items: chunk });
-    cursor += chunk.length;
-  }
+  // Extract first bias point for hero
+  const heroBias = allAnalyses[hero.id]?.bias_explanation_fa;
+  const heroPoint = heroBias?.split(/[.؛]/).map((p: string) => p.trim()).find((p: string) => p.length > 10);
+
+  // Weekly briefing: stories 1-3
+  const briefingStories = stories.slice(1, 4);
+
+  // Remaining stories after hero + briefing + blind spots
+  const usedIds = new Set([hero.id, ...briefingStories.map(s => s.id)]);
+  if (conservativeBlind) usedIds.add(conservativeBlind.id);
+  if (oppositionBlind) usedIds.add(oppositionBlind.id);
+  const remaining = stories.filter(s => !usedIds.has(s.id)).slice(0, 8);
 
   return (
     <div className="md:hidden">
-      {/* Pattern 1: Hero with text on top of image */}
+
+      {/* ── 1. Hero story ── */}
       <Link
         href={`/${locale}/stories/${hero.id}`}
-        className="relative block border-b border-slate-200 dark:border-slate-800"
+        className="block border-b border-slate-200 dark:border-slate-800"
       >
-        <div className="aspect-[4/3] overflow-hidden bg-slate-100 dark:bg-slate-800">
+        <div className="aspect-[16/9] overflow-hidden bg-slate-100 dark:bg-slate-800">
           <SafeImage src={hero.image_url} className="h-full w-full object-cover" />
         </div>
-        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-4 pt-16">
-          <h1 className="text-[22px] font-black leading-snug text-white line-clamp-3">
+        <div className="px-4 py-4">
+          <h1 className="text-[22px] font-black leading-snug text-slate-900 dark:text-white line-clamp-3">
             {hero.title_fa}
           </h1>
-          <p className="mt-2 text-[11px] text-white/80">
-            {hero.source_count} رسانه · {hero.article_count} مقاله
-            {hero.state_pct > 0 && <span className="mr-2 text-red-300"> · محافظه‌کار {hero.state_pct}٪</span>}
-            {hero.diaspora_pct > 0 && <span className="mr-2 text-blue-300"> · اپوزیسیون {hero.diaspora_pct}٪</span>}
-          </p>
+          <div className="mt-2">
+            <p className="text-[11px] text-slate-400 dark:text-slate-500">
+              {hero.source_count} رسانه · {hero.article_count} مقاله
+            </p>
+            {(hero.state_pct > 0 || hero.diaspora_pct > 0) && (
+              <p className="text-[11px] mt-0.5">
+                {hero.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300">محافظه‌کار {hero.state_pct}٪</span>}
+                {hero.state_pct > 0 && hero.diaspora_pct > 0 && <span className="text-slate-300 dark:text-slate-600"> · </span>}
+                {hero.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400">اپوزیسیون {hero.diaspora_pct}٪</span>}
+              </p>
+            )}
+          </div>
+          {heroPoint && (
+            <p className="mt-2 text-[12px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">• {heroPoint}</p>
+          )}
         </div>
       </Link>
 
-      {/* Alternating pattern blocks */}
-      {blocks.map((block, bi) => {
-        if (block.type === "thumbs") {
-          return (
-            <div
-              key={`m${bi}`}
-              className="grid grid-cols-2 gap-4 p-4 border-b border-slate-200 dark:border-slate-800"
-            >
-              {block.items.map((s) => (
-                <Link key={s.id} href={`/${locale}/stories/${s.id}`} className="group block">
-                  <div className="aspect-[4/3] overflow-hidden bg-slate-100 dark:bg-slate-800 mb-2">
-                    <SafeImage src={s.image_url} className="h-full w-full object-cover" />
+      {/* ── 2. Blind spots ── */}
+      {(conservativeBlind || oppositionBlind) && (
+        <div className="px-4 py-5 border-b border-slate-200 dark:border-slate-800">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
+            <span className="text-[13px] font-black text-slate-900 dark:text-white shrink-0">نگاه یک‌طرفه</span>
+            <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
+          </div>
+          <div className="space-y-4">
+            {conservativeBlind && (
+              <Link href={`/${locale}/stories/${conservativeBlind.id}`}
+                className="group block border-2 border-[#3b82f6] shadow-[0_0_14px_rgba(59,130,246,0.5)] animate-pulse-subtle">
+                <div className="flex gap-3 p-3">
+                  <div className="w-20 h-20 shrink-0 overflow-hidden bg-slate-100 dark:bg-slate-800">
+                    <SafeImage src={conservativeBlind.image_url} className="h-full w-full object-cover" />
                   </div>
-                  <h3 className="text-[13px] font-bold leading-snug line-clamp-2 text-slate-900 dark:text-white">
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-[14px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
+                      {conservativeBlind.title_fa}
+                    </h3>
+                    <p className="mt-1 text-[11px] text-slate-400">
+                      فقط روایت محافظه‌کار · {conservativeBlind.article_count} مقاله
+                    </p>
+                  </div>
+                </div>
+              </Link>
+            )}
+            {oppositionBlind && (
+              <Link href={`/${locale}/stories/${oppositionBlind.id}`}
+                className="group block border-2 border-[#ea580c] shadow-[0_0_10px_rgba(234,88,12,0.3)] animate-pulse-subtle">
+                <div className="flex gap-3 p-3">
+                  <div className="w-20 h-20 shrink-0 overflow-hidden bg-slate-100 dark:bg-slate-800">
+                    <SafeImage src={oppositionBlind.image_url} className="h-full w-full object-cover" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-[14px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
+                      {oppositionBlind.title_fa}
+                    </h3>
+                    <p className="mt-1 text-[11px] text-orange-500">
+                      فقط روایت اپوزیسیون · {oppositionBlind.article_count} مقاله
+                    </p>
+                  </div>
+                </div>
+              </Link>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── 3. Weekly briefing ── */}
+      {briefingStories.length > 0 && (
+        <div className="px-4 py-5 border-b border-slate-200 dark:border-slate-800">
+          <h2 className="text-[18px] font-black text-slate-900 dark:text-white mb-3">هفته گذشته ...</h2>
+          <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
+            {briefingStories.map((s) => {
+              const bias = allAnalyses[s.id]?.bias_explanation_fa;
+              const firstPoint = bias?.split(/[.؛]/).map((p: string) => p.trim()).find((p: string) => p.length > 10);
+              return (
+                <Link key={s.id} href={`/${locale}/stories/${s.id}`} className="group block py-4">
+                  <h3 className="text-[16px] font-black leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
                     {s.title_fa}
                   </h3>
-                  <p className="mt-1 text-[10px] text-slate-400">
+                  <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
                     {s.source_count} رسانه · {s.article_count} مقاله
+                    {s.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300"> · محافظه‌کار {s.state_pct}٪</span>}
+                    {s.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400"> · اپوزیسیون {s.diaspora_pct}٪</span>}
                   </p>
+                  {firstPoint && (
+                    <p className="mt-1.5 text-[12px] leading-5 text-slate-400 dark:text-slate-500 line-clamp-1">• {firstPoint}</p>
+                  )}
                 </Link>
-              ))}
-            </div>
-          );
-        }
-        // text pattern
-        return (
-          <div
-            key={`m${bi}`}
-            className="divide-y divide-slate-200 dark:divide-slate-800 border-b border-slate-200 dark:border-slate-800"
-          >
-            {block.items.map((s) => (
-              <Link key={s.id} href={`/${locale}/stories/${s.id}`} className="block py-4 px-4">
-                <h3 className="text-[15px] font-extrabold leading-snug text-slate-900 dark:text-white">
-                  {s.title_fa}
-                </h3>
-                <p className="mt-1 text-[11px] text-slate-400">
-                  {s.source_count} رسانه · {s.article_count} مقاله
-                </p>
-                {summaries[s.id] && (
-                  <p className="mt-2 text-[12px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">
-                    {summaries[s.id]}
-                  </p>
-                )}
-              </Link>
-            ))}
+              );
+            })}
           </div>
-        );
-      })}
+        </div>
+      )}
+
+      {/* ── 4. Remaining stories ── */}
+      {remaining.length > 0 && (
+        <div className="divide-y divide-slate-200 dark:divide-slate-800">
+          {remaining.map((s) => (
+            <Link key={s.id} href={`/${locale}/stories/${s.id}`} className="group block px-4 py-4">
+              <h3 className="text-[15px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
+                {s.title_fa}
+              </h3>
+              <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
+                {s.source_count} رسانه · {s.article_count} مقاله
+                {s.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300"> · محافظه‌کار {s.state_pct}٪</span>}
+                {s.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400"> · اپوزیسیون {s.diaspora_pct}٪</span>}
+              </p>
+              {summaries[s.id] && (
+                <p className="mt-1.5 text-[12px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">
+                  {summaries[s.id]}
+                </p>
+              )}
+            </Link>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

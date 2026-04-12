@@ -1,6 +1,6 @@
 # Doornegar - Backlog
 
-**Last updated**: 2026-04-12 (post pipeline-audit + analyst-factors + embedding-prefilter session)
+**Last updated**: 2026-04-12 (post major redesign session)
 
 ## Must Have (before public launch)
 
@@ -37,6 +37,10 @@
 - [ ] Pagination or infinite scroll on story lists
 - [ ] Story detail: timeline of when each outlet published
 - [x] ~~Improve LLM clustering precision~~ — embedding pre-filter + double-match guard + keepalive (2026-04-12)
+- [x] ~~Homepage redesign~~ — BBC-style top section, weekly briefing, most disputed, battle of numbers, narrative map, words of week (2026-04-12)
+- [x] ~~Story detail page redesign~~ — tabbed analysis, political spectrum, stats panel (2026-04-12)
+- [x] ~~Label neutrality~~ — حکومتی→محافظه‌کار, برون‌مرزی→اپوزیسیون, نقاط کور→نگاه یک‌طرفه (2026-04-12)
+- [x] ~~Source logos~~ — added for all 18 outlets (2026-04-12)
 
 ### Phase 4 Prep (Rating System)
 - [ ] Create first admin rater account
@@ -58,6 +62,8 @@
 - [ ] Community voting on bias scores (public)
 - [ ] Export stories as PDF
 - [ ] Dark mode toggle (currently system-based only)
+- [ ] Tune quality audit thresholds after initial data collection
+- [ ] Auto-merge confidence threshold tuning (monitor false merges)
 
 ## Phase 5: Cloudflare + Monitoring (Next Up)
 
@@ -133,3 +139,14 @@ See `MIGRATION_PLAN.md` for the full step-by-step plan.
 - [x] Priority vote + merge suggestion buttons on story cards
 - [x] Device context on improvement feedback
 - [x] New issue types: priority_higher, priority_lower, merge_stories
+- [x] Homepage redesign — BBC-style top section with weekly briefing, most disputed, battle of numbers, narrative map, words of week
+- [x] Story detail page redesign — tabbed analysis, political spectrum, stats panel
+- [x] Label renaming for neutrality: حکومتی→محافظه‌کار, برون‌مرزی→اپوزیسیون, نقاط کور→نگاه یک‌طرفه
+- [x] Quality audit system — daily 5 checks with Neon optimization
+- [x] Auto-merge similar stories
+- [x] Title auto-update from LLM
+- [x] Trending diversity reranking with exponential decay
+- [x] Source logos for all 18 outlets
+- [x] Source neutrality scoring
+- [x] Telegram embed image fallback
+- [x] PATCH admin endpoints for stories, articles, sources
