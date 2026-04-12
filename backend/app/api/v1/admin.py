@@ -1015,6 +1015,25 @@ async def unclaim_story_articles(
     }
 
 
+@router.patch("/articles/{article_id}")
+async def patch_article(
+    article_id: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """Update image_url on an article (for fixing missing images)."""
+    import uuid
+    article_uuid = uuid.UUID(article_id)
+    result = await db.execute(select(Article).where(Article.id == article_uuid))
+    article = result.scalar_one_or_none()
+    if not article:
+        raise HTTPException(status_code=404, detail="Article not found")
+    if "image_url" in body:
+        article.image_url = body["image_url"]
+    await db.commit()
+    return {"status": "ok", "article_id": article_id, "image_url": article.image_url}
+
+
 @router.patch("/stories/{story_id}")
 async def patch_story(
     story_id: str,

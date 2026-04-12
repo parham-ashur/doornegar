@@ -488,7 +488,7 @@ async def step_fix_images():
             has_image = any(a.image_url for a in story.articles)
             if has_image:
                 continue
-            # Last-ditch: fetch an og:image from the first non-telegram article URL
+            # Try 1: og:image from non-Telegram article URLs
             fetched = False
             for a in story.articles:
                 if a.url and "t.me/" not in a.url:
@@ -500,6 +500,27 @@ async def step_fix_images():
                         stats["replaced"] += 1
                         fetched = True
                         break
+            # Try 2: Telegram embed image (for Telegram-only stories)
+            if not fetched:
+                for a in story.articles:
+                    if a.url and "t.me/" in a.url:
+                        try:
+                            embed_url = a.url.rstrip("/") + "?embed=1"
+                            r = await client.get(embed_url)
+                            if r.status_code == 200:
+                                import re
+                                # Look for background-image or og:image in embed HTML
+                                match = re.search(r"background-image:\s*url\('([^']+)'\)", r.text)
+                                if not match:
+                                    match = re.search(r'<img[^>]+src="(https://cdn[^"]+)"', r.text)
+                                if match:
+                                    a.image_url = match.group(1)
+                                    a.image_checked_at = now_ts
+                                    stats["replaced"] += 1
+                                    fetched = True
+                                    break
+                        except Exception:
+                            continue
             if not fetched:
                 stats["stories_without_image"] += 1
 
