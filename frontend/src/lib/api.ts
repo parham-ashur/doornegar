@@ -1,13 +1,17 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-async function fetchAPI<T>(path: string, options?: RequestInit): Promise<T> {
+async function fetchAPI<T>(
+  path: string,
+  options?: RequestInit & { revalidate?: number },
+): Promise<T> {
+  const { revalidate = 120, ...fetchOpts } = options || {};
   const res = await fetch(`${API_BASE}${path}`, {
-    ...options,
+    ...fetchOpts,
     headers: {
       "Content-Type": "application/json",
-      ...options?.headers,
+      ...fetchOpts?.headers,
     },
-    next: { revalidate: 30 }, // Cache for 30 seconds — short so summary updates appear quickly
+    next: { revalidate },
   });
 
   if (!res.ok) {
@@ -17,18 +21,21 @@ async function fetchAPI<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json();
 }
 
-// Sources
+// Sources — rarely change, cache 10 min
 export async function getSources() {
   return fetchAPI<{ sources: import("./types").Source[]; total: number }>(
-    "/api/v1/sources"
+    "/api/v1/sources",
+    { revalidate: 600 },
   );
 }
 
 export async function getSource(slug: string) {
-  return fetchAPI<import("./types").Source>(`/api/v1/sources/${slug}`);
+  return fetchAPI<import("./types").Source>(`/api/v1/sources/${slug}`, {
+    revalidate: 600,
+  });
 }
 
-// Stories
+// Stories — update on maintenance runs (~daily), cache 2 min
 export async function getStories(page = 1, pageSize = 20) {
   return fetchAPI<{
     stories: import("./types").StoryBrief[];
@@ -40,11 +47,14 @@ export async function getStories(page = 1, pageSize = 20) {
 
 export async function getBlindspotStories(limit = 20) {
   return fetchAPI<import("./types").StoryBrief[]>(
-    `/api/v1/stories/blindspots?limit=${limit}`
+    `/api/v1/stories/blindspots?limit=${limit}`,
   );
 }
 
+// Story detail — cache 5 min (rarely changes between maintenance runs)
 export async function getStory(id: string) {
-  return fetchAPI<import("./types").StoryDetail>(`/api/v1/stories/${id}`);
+  return fetchAPI<import("./types").StoryDetail>(`/api/v1/stories/${id}`, {
+    revalidate: 300,
+  });
 }
 

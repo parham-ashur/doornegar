@@ -122,7 +122,7 @@ async def _get_maintenance_info(db: AsyncSession) -> dict:
 # with 10+ aggregate queries on every poll (was 3-5s, now 30s, but still
 # wasteful if multiple browser tabs are open).
 _dashboard_cache: dict = {"data": None, "expires": 0}
-_DASHBOARD_CACHE_TTL = 60  # seconds
+_DASHBOARD_CACHE_TTL = 300  # seconds (5 min — saves ~80% of dashboard DB queries)
 
 
 @router.get("/dashboard")
@@ -1004,7 +1004,7 @@ async def unclaim_story_articles(
     await db.execute(
         _update(Story)
         .where(Story.id == story_uuid)
-        .values(article_count=0, source_count=0, priority=-100)
+        .values(article_count=0, source_count=0, priority=-100, trending_score=0)
     )
     await db.commit()
     return {

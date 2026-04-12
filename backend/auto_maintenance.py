@@ -480,6 +480,7 @@ async def step_fix_images():
         result = await db.execute(
             select(Story).options(selectinload(Story.articles))
             .where(Story.article_count >= 5)
+            .limit(200)  # cap to avoid loading all stories into memory
         )
         for story in result.scalars().all():
             # Any article with a live image_url is enough for the

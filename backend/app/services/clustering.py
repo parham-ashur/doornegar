@@ -526,10 +526,13 @@ async def _refresh_story_metadata(db: AsyncSession, story_id: uuid.UUID) -> None
         story.article_count, story.first_published_at
     )
 
-    # Recompute centroid embedding (mean of article embeddings)
-    story.centroid_embedding = _compute_centroid(
-        [a.embedding for a in story.articles if a.embedding]
+    # Recompute centroid embedding from DB (avoid stale lazy-loaded relationship)
+    emb_result = await db.execute(
+        select(Article.embedding)
+        .where(Article.story_id == story_id, Article.embedding.isnot(None))
     )
+    embeddings = [row[0] for row in emb_result.all() if row[0]]
+    story.centroid_embedding = _compute_centroid(embeddings)
 
     # Clear summary so it gets regenerated
     story.summary_fa = None

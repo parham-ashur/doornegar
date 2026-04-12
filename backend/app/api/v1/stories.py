@@ -1,7 +1,9 @@
 import logging
+import time as _time
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -28,6 +30,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# ── In-memory response cache for trending/blindspot (saves Neon transfer) ──
+_stories_cache: dict[str, dict] = {}
+_STORIES_CACHE_TTL = 120  # 2 minutes
+
 
 @router.get("", response_model=StoryListResponse)
 async def list_stories(
@@ -37,7 +43,9 @@ async def list_stories(
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
-    query = select(Story)
+    query = select(Story).options(
+        selectinload(Story.articles).selectinload(Article.source),
+    )
     count_query = select(func.count(Story.id))
 
     if blindspots_only:
@@ -53,7 +61,7 @@ async def list_stories(
     stories = result.scalars().all()
 
     return StoryListResponse(
-        stories=[StoryBrief.model_validate(s) for s in stories],
+        stories=[_story_brief_with_extras(s) for s in stories],
         total=total,
         page=page,
         page_size=page_size,
@@ -68,6 +76,11 @@ async def trending_stories(
     min_articles: int = Query(4, ge=1),
     db: AsyncSession = Depends(get_db),
 ):
+    cache_key = f"trending:{limit}:{min_articles}"
+    cached = _stories_cache.get(cache_key)
+    if cached and _time.time() < cached["expires"]:
+        return cached["data"]
+
     result = await db.execute(
         select(Story)
         .options(selectinload(Story.articles).selectinload(Article.source))
@@ -76,7 +89,9 @@ async def trending_stories(
         .limit(limit)
     )
     stories = result.scalars().all()
-    return [_story_brief_with_extras(s) for s in stories]
+    data = [_story_brief_with_extras(s) for s in stories]
+    _stories_cache[cache_key] = {"data": data, "expires": _time.time() + _STORIES_CACHE_TTL}
+    return data
 
 
 @router.get("/blindspots", response_model=list[StoryBrief])
