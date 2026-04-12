@@ -170,6 +170,53 @@ async def get_story_analysis(request: Request, story_id: uuid.UUID, db: AsyncSes
     )
 
 
+@router.get("/insights/loaded-words")
+@_limiter.limit("60/minute")
+async def loaded_words_insights(request: Request, db: AsyncSession = Depends(get_db)):
+    """Aggregate loaded_words across top trending stories."""
+    import json as _json
+    from collections import Counter
+
+    result = await db.execute(
+        select(Story)
+        .where(Story.article_count >= 5)
+        .order_by(Story.trending_score.desc())
+        .limit(20)
+    )
+    stories = result.scalars().all()
+
+    conservative_counter: Counter = Counter()
+    opposition_counter: Counter = Counter()
+
+    for story in stories:
+        if not story.summary_en:
+            continue
+        try:
+            data = _json.loads(story.summary_en)
+        except Exception:
+            continue
+        loaded = data.get("loaded_words")
+        if not loaded or not isinstance(loaded, dict):
+            continue
+        for word in loaded.get("conservative", []):
+            if isinstance(word, str) and word.strip():
+                conservative_counter[word.strip()] += 1
+        for word in loaded.get("opposition", []):
+            if isinstance(word, str) and word.strip():
+                opposition_counter[word.strip()] += 1
+
+    return {
+        "conservative": [
+            {"word": w, "count": c}
+            for w, c in conservative_counter.most_common(10)
+        ],
+        "opposition": [
+            {"word": w, "count": c}
+            for w, c in opposition_counter.most_common(10)
+        ],
+    }
+
+
 @router.post(
     "/{story_id}/summarize",
     response_model=StoryAnalysisResponse,
@@ -224,6 +271,90 @@ async def summarize_story(request: Request, story_id: uuid.UUID, db: AsyncSessio
         scores=analysis.get("scores"),
         analyst=analysis.get("analyst"),
     )
+
+
+@router.get("/{story_id}/article-positions")
+@_limiter.limit("60/minute")
+async def article_positions(
+    request: Request,
+    story_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return 2D-projected article embeddings for the narrative map visualization."""
+    result = await db.execute(
+        select(Story)
+        .options(selectinload(Story.articles).selectinload(Article.source))
+        .where(Story.id == story_id)
+    )
+    story = result.scalar_one_or_none()
+    if not story:
+        raise HTTPException(status_code=404, detail="Story not found")
+
+    # Collect articles that have embeddings
+    articles_with_emb = [
+        a for a in story.articles
+        if a.embedding and isinstance(a.embedding, list) and len(a.embedding) > 0
+    ]
+
+    if not articles_with_emb:
+        return JSONResponse(content=[])
+
+    # Alignment position fallback: spread articles by source alignment
+    ALIGNMENT_X = {
+        "state": 15, "semi_state": 35, "independent": 50, "diaspora": 80,
+    }
+
+    if len(articles_with_emb) < 3:
+        # Not enough for PCA — position by source alignment with slight jitter
+        positions = []
+        align_counts: dict[str, int] = {}
+        for a in articles_with_emb:
+            align = a.source.state_alignment if a.source else "independent"
+            idx = align_counts.get(align, 0)
+            align_counts[align] = idx + 1
+            positions.append({
+                "article_id": str(a.id),
+                "title_fa": a.title_fa or a.title_original or "",
+                "source_slug": a.source.slug if a.source else None,
+                "source_alignment": align,
+                "x": ALIGNMENT_X.get(align, 50) + idx * 5,
+                "y": 50 + idx * 10,
+            })
+        return JSONResponse(content=positions)
+
+    # PCA reduction using numpy
+    import numpy as np
+
+    embeddings = [a.embedding for a in articles_with_emb]
+    matrix = np.array(embeddings, dtype=np.float64)
+    mean = matrix.mean(axis=0)
+    centered = matrix - mean
+    cov = np.cov(centered.T)
+    eigenvalues, eigenvectors = np.linalg.eigh(cov)
+    # Take top 2 eigenvectors (eigh returns ascending order)
+    top2 = eigenvectors[:, -2:]
+    projected = centered @ top2
+
+    # Normalize each dimension to 0-100
+    for dim in range(2):
+        mn, mx = projected[:, dim].min(), projected[:, dim].max()
+        if mx > mn:
+            projected[:, dim] = (projected[:, dim] - mn) / (mx - mn) * 100
+        else:
+            projected[:, dim] = 50.0
+
+    positions = []
+    for i, a in enumerate(articles_with_emb):
+        positions.append({
+            "article_id": str(a.id),
+            "title_fa": a.title_fa or a.title_original or "",
+            "source_slug": a.source.slug if a.source else None,
+            "source_alignment": a.source.state_alignment if a.source else "independent",
+            "x": round(float(projected[i, 0]), 2),
+            "y": round(float(projected[i, 1]), 2),
+        })
+
+    return JSONResponse(content=positions)
 
 
 @router.get("/{story_id}", response_model=StoryDetail)

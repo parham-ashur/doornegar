@@ -94,11 +94,12 @@ export default async function HomePage({
   const oppositionBlind = blindspots.find(s => s.blindspot_type === "diaspora_only");
 
   // Most disputed: stories with biggest gap between conservative and opposition coverage
+  // Initial sort by pct gap; will be re-sorted by dispute_score after analyses are fetched
   const disputedCandidates = [...stories]
     .filter(s => s.state_pct > 0 && s.diaspora_pct > 0 && !s.is_blindspot)
     .sort((a, b) => Math.abs(b.state_pct - b.diaspora_pct) - Math.abs(a.state_pct - a.diaspora_pct));
-  const mostDisputed = disputedCandidates[0] || null;
-  const secondDisputed = disputedCandidates[1] || null;
+  let mostDisputed = disputedCandidates[0] || null;
+  let secondDisputed = disputedCandidates[1] || null;
 
   // Common ground: stories where both sides have similar coverage (smallest gap)
   const commonGround = [...stories]
@@ -169,14 +170,28 @@ export default async function HomePage({
   const briefingStories = sorted.slice(1, 4);
   const mostRead = [...sorted].sort((a, b) => b.article_count - a.article_count).slice(0, 5);
   const analysisFetchIds = [hero.id, ...briefingStories.map(s => s.id)];
-  if (mostDisputed && !analysisFetchIds.includes(mostDisputed.id)) analysisFetchIds.push(mostDisputed.id);
-  if (secondDisputed && !analysisFetchIds.includes(secondDisputed.id)) analysisFetchIds.push(secondDisputed.id);
+  // Include all disputed candidates so we can re-sort by dispute_score
+  for (const s of disputedCandidates) {
+    if (!analysisFetchIds.includes(s.id)) analysisFetchIds.push(s.id);
+  }
   for (const s of mostRead) {
     if (!analysisFetchIds.includes(s.id)) analysisFetchIds.push(s.id);
   }
   const analysisResults = await Promise.all(analysisFetchIds.map((id) => fetchAnalysis(id)));
-  const allAnalyses: Record<string, { bias_explanation_fa?: string; state_summary_fa?: string; diaspora_summary_fa?: string } | null> = {};
+  const allAnalyses: Record<string, { bias_explanation_fa?: string; state_summary_fa?: string; diaspora_summary_fa?: string; dispute_score?: number } | null> = {};
   analysisFetchIds.forEach((id, i) => { allAnalyses[id] = analysisResults[i]; });
+
+  // Re-sort disputed candidates by dispute_score (higher = more disputed), falling back to pct gap
+  const disputedResorted = [...disputedCandidates].sort((a, b) => {
+    const scoreA = allAnalyses[a.id]?.dispute_score ?? null;
+    const scoreB = allAnalyses[b.id]?.dispute_score ?? null;
+    if (scoreA !== null && scoreB !== null) return scoreB - scoreA;
+    if (scoreA !== null) return -1;
+    if (scoreB !== null) return 1;
+    return Math.abs(b.state_pct - b.diaspora_pct) - Math.abs(a.state_pct - a.diaspora_pct);
+  });
+  mostDisputed = disputedResorted[0] || null;
+  secondDisputed = disputedResorted[1] || null;
 
   return (
     <div dir="rtl" className="mx-auto max-w-7xl px-0 md:px-6 lg:px-8">
