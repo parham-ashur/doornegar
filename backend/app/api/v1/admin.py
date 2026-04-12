@@ -118,9 +118,23 @@ async def _get_maintenance_info(db: AsyncSession) -> dict:
     return info
 
 
+# Simple in-memory cache for the dashboard response. Avoids hitting Neon
+# with 10+ aggregate queries on every poll (was 3-5s, now 30s, but still
+# wasteful if multiple browser tabs are open).
+_dashboard_cache: dict = {"data": None, "expires": 0}
+_DASHBOARD_CACHE_TTL = 60  # seconds
+
+
 @router.get("/dashboard")
 async def get_dashboard(db: AsyncSession = Depends(get_db)):
-    """Comprehensive dashboard data: counts, maintenance status, costs, issues."""
+    """Comprehensive dashboard data: counts, maintenance status, costs, issues.
+
+    Cached for 60 seconds to reduce Neon network transfer. The dashboard
+    frontend polls every 30s, so most requests hit the cache.
+    """
+    import time as _time
+    if _dashboard_cache["data"] and _time.time() < _dashboard_cache["expires"]:
+        return _dashboard_cache["data"]
 
     # --- Data counts ---
     now = datetime.now(timezone.utc)
@@ -229,7 +243,7 @@ async def get_dashboard(db: AsyncSession = Depends(get_db)):
         })
         actions_needed.append("Run: python manage.py score (score more articles)")
 
-    return {
+    response = {
         "data": {
             "articles": {
                 "total": total_articles,
@@ -264,7 +278,7 @@ async def get_dashboard(db: AsyncSession = Depends(get_db)):
         "maintenance": maintenance,
         "api_costs": {
             "note": "برای هزینه دقیق داشبورد OpenAI را بررسی کنید",
-            "estimated_monthly": "$15-25",
+            "estimated_monthly": "$8-10",
             "clustering_per_run": "~$0.02",
             "summary_per_story": "~$0.01",
         },
@@ -272,6 +286,11 @@ async def get_dashboard(db: AsyncSession = Depends(get_db)):
         "actions_needed": actions_needed,
         "freshness_hours": freshness_hours,
     }
+
+    # Cache for 60s to reduce Neon transfer on repeated dashboard polls
+    _dashboard_cache["data"] = response
+    _dashboard_cache["expires"] = _time.time() + _DASHBOARD_CACHE_TTL
+    return response
 
 
 @router.post("/force-resummarize")

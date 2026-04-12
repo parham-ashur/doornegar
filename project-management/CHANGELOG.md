@@ -4,6 +4,82 @@ All notable changes to the Doornegar project are documented here, organized by w
 
 ---
 
+## April 12, 2026
+
+### Maintenance Pipeline Audit — 8 fixes
+- **Keepalive pings** added to `step_summarize` and `step_bias_score` (prevents Neon connection timeout during long LLM calls)
+- **`llm_failed_at` column** on Article + Story models with 24h retry backoff (Alembic migration `b5e9f3a1c2d8`)
+- **Batched `_refresh_stories_metadata`** in `clustering.py` (N×4 queries → 3 aggregate queries)
+- **`step_summarize` loads only 10 most-recent articles per story** (memory-safe on 512MB Railway)
+- **`image_checked_at` column** on Article + 24h skip in `step_fix_images` (migration `b5e9f3a1c2d8`)
+- **`step_deduplicate_articles`**: NULL/whitespace title guard (length >= 10)
+- **`step_fix_issues`** uses `settings.translation_model` instead of hardcoded `gpt-4o-mini`
+- **Double-match guard** in clustering `_match_to_existing_stories`
+
+### Story.image_url bug fix
+- `step_fix_images` was crashing with `"'Story' object has no attribute 'image_url'"` — Story model has no `image_url` column
+- Moved the title-overlap image picker to `_story_brief_with_extras()` (response-time computation)
+- Removed `image_url` from `_EditStoryRequest`
+
+### Deep Analyst Factors (15 categories)
+- `ANALYST_FACTORS_ADDENDUM` prompt block appended for premium-tier stories
+- 15 analytical factors in Persian: `risk_assessment`, `potential_outcomes`, `key_stakeholders`, `missing_information`, `credibility_signals`, `timeline`, `framing_gap`, `what_is_hidden`, `historical_parallel`, `economic_impact`, `international_implications`, `factional_dynamics`, `human_rights_dimension`, `public_sentiment`, `propaganda_watch`
+- Tagged as "doornegar-ai" LLM analyst (future human analysts from Telegram sit alongside)
+- `generate_story_analysis` accepts `include_analyst_factors` param
+- Stored in `summary_en` extras JSON under `"analyst"` key
+- Exposed via `StoryAnalysisResponse.analyst` field
+- Only for premium-tier (top-16) stories
+
+### Premium tier: 30 → 16
+- `premium_story_top_n` changed from 30 to 16 (only 16 stories visible on homepage)
+- Dashboard button "Refresh 30" → "Refresh 16"
+
+### Homepage enhancements
+- Story dates in Meta component: `first_published_at` + `updated_at` (shows "به‌روز: X پیش" if >1h different)
+- Priority up/down vote buttons (ArrowUp/ArrowDown) on ALL story cards in feedback mode
+- Merge suggestion button (GitMerge icon) on all story cards
+- `StoryActions` reusable component
+- `StoryFeedbackOverlay` moved from `right-4` to `left-4` (was covering RTL title)
+
+### New issue types
+- `priority_higher`, `priority_lower`, `merge_stories` added to `IssueType`
+- Backend schema + frontend `ImprovementModal` + admin dashboard labels updated
+
+### Device context on feedback
+- `device_info` field added to `ImprovementFeedback` model (migration `c7d4e2f8a1b3`)
+- Frontend auto-captures: `"mobile 375×812 Mozilla/5.0..."` or `"desktop 1440×900..."`
+- Admin dashboard shows purple "mobile" badge on mobile-submitted items
+
+### OpenAI Embeddings
+- Switched from sentence-transformers/TF-IDF to **OpenAI `text-embedding-3-small`**
+- 384 dimensions (compatible with existing stored embeddings)
+- Cost: ~$0.02/M tokens (~$0.05/month)
+- No PyTorch dependency needed (~2GB saved)
+
+### Embedding Pre-filter for Clustering
+- **Two-phase clustering**: embedding cosine similarity pre-filter → LLM confirmation
+- `Story.centroid_embedding` column added (JSONB, migration `d8e5f1a2b3c4`)
+- `_compute_centroid()` helper: mean of article embeddings, L2-normalized
+- `step_recompute_centroids` added to maintenance pipeline after clustering
+- Threshold 0.30 (loose — lets LLM reject false positives)
+- `POST /admin/re-embed-all` endpoint + dashboard "Re-embed all articles" button
+
+### Framing + article dates in LLM prompts
+- Framing labels capped at max 3 per side in story analysis
+- Article publish dates included in the LLM prompt
+- Full article content (6000 chars) for premium-tier stories (was 1500)
+
+### Last Maintenance card fix
+- `_get_maintenance_info` now derives from DB (`max Article.ingested_at`) as primary fallback
+- Survives Railway deploys (in-memory state + log file are ephemeral)
+
+### Neon connection keepalive fix
+- Root cause: asyncpg connection closed during long clustering (340s of LLM calls)
+- `_keepalive(db)` helper does `SELECT 1` before each LLM call
+- `pool_recycle` lowered 3600 → 240 in `database.py`
+
+---
+
 ## April 11, 2026
 
 ### LLM Model Strategy — 3-tier system

@@ -152,6 +152,57 @@ Tracks key decisions, their reasoning, and any alternatives considered.
 - Hidden automatic migration during maintenance: rejected because `step_fix_images` already handles broken URLs — just need to trigger the initial null-out
 **Status**: Implemented ✓, awaiting one-shot execution from dashboard
 
+## 2026-04-12
+
+### D019: OpenAI embeddings replacing sentence-transformers
+**Decision**: Switch from self-hosted `paraphrase-multilingual-MiniLM-L12-v2` / TF-IDF to OpenAI `text-embedding-3-small` (384 dimensions).
+**Why**: Eliminates the ~2GB PyTorch dependency from the Docker image. Cost is negligible (~$0.02/M tokens, ~$0.05/month). 384 dims keeps compatibility with all existing stored embeddings.
+**Alternatives considered**:
+- Keep sentence-transformers: rejected because PyTorch bloats the Railway image and causes OOM on 512MB
+- Use higher-dim OpenAI model (1536 or 3072): rejected because 384 is sufficient for clustering pre-filter and keeps DB size small
+**Status**: Implemented ✓
+
+### D020: Two-phase clustering with embedding pre-filter
+**Decision**: Before sending articles to the LLM for matching, pre-filter using cosine similarity between article embedding and story centroid embedding. Threshold: 0.30 (intentionally loose).
+**Why**: Reduces LLM token usage by eliminating obviously-unrelated story candidates. The loose threshold ensures the LLM still makes the final call — false negatives (missing a match) are worse than false positives (showing extra candidates to the LLM).
+**Implementation**: `Story.centroid_embedding` column (JSONB), `_compute_centroid()` helper (mean of article embeddings, L2-normalized), `step_recompute_centroids` in maintenance pipeline.
+**Alternatives considered**:
+- Tighter threshold (0.50+): rejected because cross-language similarity can be low even for related content
+- Pure LLM without pre-filter: rejected because clustering was spending too many tokens on obviously unrelated stories
+**Status**: Implemented ✓
+
+### D021: Deep analyst factors for premium-tier stories
+**Decision**: Append an `ANALYST_FACTORS_ADDENDUM` prompt block to story analysis for top-16 trending stories. Produces 15 analytical categories (risk assessment, hidden information, propaganda watch, etc.) in Persian.
+**Why**: Differentiates Doornegar from simple aggregators. The factors provide the kind of analysis that an expert media analyst would offer. Tagged as "doornegar-ai" to distinguish from future human analysts.
+**Implementation**: Stored in `summary_en` extras JSON under `"analyst"` key, exposed via `StoryAnalysisResponse.analyst` field. Only generated for premium-tier stories to control cost.
+**Alternatives considered**:
+- Generate for all stories: rejected because the extra prompt adds ~500 tokens per call, not worth it for non-visible stories
+- Separate API call: rejected because it's more efficient to generate alongside the story analysis in a single LLM call
+**Status**: Implemented ✓
+
+### D022: Premium tier reduced from 30 to 16
+**Decision**: Change `premium_story_top_n` from 30 to 16.
+**Why**: Only 16 stories are visible on the homepage. Paying premium model rates for stories 17-30 that nobody sees is waste.
+**Status**: Implemented ✓
+
+### D023: Neon keepalive pings during long LLM operations
+**Decision**: Add `_keepalive(db)` helper that does `SELECT 1` before each LLM call in `step_summarize` and `step_bias_score`. Lower `pool_recycle` from 3600 to 240 seconds.
+**Why**: Neon closes idle connections after ~300s. During long clustering/summarization runs (up to 340s of sequential LLM calls), the DB connection goes stale and the next query crashes with "connection closed".
+**Alternatives considered**:
+- PgBouncer keepalive: not available on Neon free tier
+- Shorter LLM batch sizes: would work but makes runs much longer
+**Status**: Implemented ✓
+
+### D024: Story.image_url computed at response time, not stored
+**Decision**: Move the title-overlap image picker from `step_fix_images` (stored on `story.image_url`) to `_story_brief_with_extras()` (computed per request). Story model has no `image_url` column.
+**Why**: `step_fix_images` was crashing because Story has no `image_url` attribute. Computing at response time is simpler, avoids a migration, and always picks from current article data.
+**Status**: Implemented ✓
+
+### D025: Device context on improvement feedback
+**Decision**: Auto-capture `device_info` (viewport size + user agent) on all feedback submissions. Show mobile badge on dashboard.
+**Why**: Helps identify mobile UX issues. If a bug report comes from mobile, it might be a responsive layout problem. No privacy concern — it's the same info any web server logs.
+**Status**: Implemented ✓
+
 ## Pending Decisions
 
 ### P001: Cloud provider for production (partially resolved)

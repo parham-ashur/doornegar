@@ -289,7 +289,7 @@ export default function DashboardPage() {
   // Refresh dashboard every 5 seconds while maintenance is running
   useEffect(() => {
     if (running !== "maintenance") return;
-    const interval = setInterval(() => { fetchDashboard(); }, 5000);
+    const interval = setInterval(() => { fetchDashboard(); }, 30000); // 30s not 5s — saves Neon transfer
     return () => clearInterval(interval);
   }, [running, fetchDashboard]);
 
@@ -332,7 +332,7 @@ export default function DashboardPage() {
       } catch {}
     };
     poll();
-    const interval = setInterval(poll, 3000);
+    const interval = setInterval(poll, 10000); // 10s not 3s — saves Neon transfer
     return () => clearInterval(interval);
   }, [running, authHeaders, fetchDashboard]);
 

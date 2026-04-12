@@ -89,16 +89,23 @@ Step 2b: BACKFILL FARSI TITLES (new)
     ──> Fixes the "stuck translation" trap where a previous run
         marked processed_at but translation actually failed
 
-Step 3: CLUSTER (LLM-based, not embedding-based)
+Step 3: CLUSTER (two-phase: embedding pre-filter → LLM confirmation)
   New unclustered articles (last 30 days)
     │
-    ├──> Build articles block: title + source + first 400 chars of content
+    ├──> Build articles block: title + source + article content
+    │    (6000 chars for premium-tier stories, 400 for baseline)
     │
-    ├──> For each batch of 50 existing OPEN stories:
+    ├──> PHASE 1 — Embedding pre-filter:
+    │    Compute cosine similarity between article embedding and
+    │    story centroid embedding. Only stories with similarity ≥ 0.30
+    │    are sent to the LLM (loose threshold — LLM makes final call)
+    │
+    ├──> PHASE 2 — LLM confirmation:
+    │    For each batch of 50 existing OPEN stories (passing pre-filter):
     │      (open = article_count < 30 AND last_updated_at within 7 days)
     │
     │    Send to gpt-5-mini with strict MATCHING_PROMPT
-    │    ("REJECTION IS THE DEFAULT")
+    │    ("REJECTION IS THE DEFAULT") + double-match guard
     │    └──> article_idx → story_idx or null
     │
     ├──> Remaining unmatched articles → _cluster_new_articles
@@ -106,24 +113,39 @@ Step 3: CLUSTER (LLM-based, not embedding-based)
     │
     ├──> Merge very-similar hidden stories (MERGE_PROMPT)
     │
+    ├──> _keepalive(db) pings before each LLM call (prevents Neon timeout)
+    │
     └──> Update trending_score = article_count × recency_factor
          (recency decays linearly 1.0 → 0.1 over 30 days)
+
+Step 3b: RECOMPUTE CENTROIDS
+  For each story: centroid = mean(article embeddings), L2-normalized
+  Stored in Story.centroid_embedding (JSONB)
 
 Step 4: SUMMARIZE (tiered)
   Stories with summary_fa IS NULL AND article_count ≥ 5
     │
-    ├──> Pre-compute top-N trending story IDs (N=30)
+    ├──> Pre-compute top-N trending story IDs (N=16)
+    │
+    ├──> Load only 10 most-recent articles per story (memory-safe on 512MB)
     │
     ├──> For each story:
     │      if story.id in top_N:
     │        model = gpt-5-mini (premium — homepage visible)
+    │        include_analyst_factors = true (15 analytical categories)
+    │        article content = 6000 chars
     │      else:
     │        model = gpt-4o-mini (baseline — long tail)
+    │        include_analyst_factors = false
+    │        article content = 1500 chars
+    │
+    ├──> _keepalive(db) pings before each LLM call
     │
     └──> generate_story_analysis → JSON:
          summary_fa, state_summary_fa, diaspora_summary_fa,
          independent_summary_fa, bias_explanation_fa, scores,
-         llm_model_used (audit trail)
+         llm_model_used (audit trail),
+         analyst: {15 factor categories} (premium only)
 
 Step 5: BIAS SCORE
   Articles with story_id IS NOT NULL AND no existing BiasScore
@@ -136,9 +158,9 @@ Step 5: BIAS SCORE
 
 Step 6: FIX IMAGES
   Pass 1: HEAD-check 300 articles/run; null out any localhost or broken URLs
-  Pass 2: For each visible story, pick story.image_url explicitly via
-          title-word-overlap heuristic (most relevant article wins,
-          falls back to most recent with a valid image)
+          Skip articles with image_checked_at within 24h
+  (Note: story image selection now happens at response time in
+   _story_brief_with_extras via title-word-overlap heuristic)
 
 Step 7..22: maintenance housekeeping
   story_quality, source_health, archive_stale, recalc_trending,
@@ -158,14 +180,15 @@ Step 23: SERVE
 | Headline translation | `gpt-4.1-nano` | Economy | ~$0.40 |
 | Bias scoring (all articles) | `gpt-4o-mini` | Baseline | ~$4-5 |
 | Story analysis (long-tail) | `gpt-4o-mini` | Baseline | ~$1-2 |
-| Story analysis (top-30 trending) | `gpt-5-mini` | Premium | ~$2-4 |
-| Clustering (article matching) | `gpt-5-mini` | Premium* | ~$0.50 |
+| Story analysis (top-16 trending + analyst factors) | `gpt-5-mini` | Premium | ~$2-4 |
+| Clustering (embedding pre-filter → LLM confirm) | `gpt-5-mini` | Premium* | ~$0.50 |
+| Embeddings (articles + centroids) | `text-embedding-3-small` | — | ~$0.05 |
 
 *Clustering uses the premium model because it's a reasoning task (deciding whether two events are the same) and the cost is tiny.
 
 All configured via `app/config.py` fields and overridable via env vars:
 `BIAS_SCORING_MODEL`, `STORY_ANALYSIS_MODEL`, `STORY_ANALYSIS_PREMIUM_MODEL`,
-`TRANSLATION_MODEL`, `CLUSTERING_MODEL`, `PREMIUM_STORY_TOP_N`.
+`TRANSLATION_MODEL`, `CLUSTERING_MODEL`, `PREMIUM_STORY_TOP_N` (default 16).
 
 ## Directory Structure
 
@@ -246,7 +269,7 @@ doornegar/
 | Charts | Recharts | 2.12 | Bias visualization |
 | Icons | Lucide React | 0.380 | Icon library |
 | Dates | date-fns-jalali | 3.6 | Persian (Jalali) calendar |
-| Embeddings | sentence-transformers | latest | paraphrase-multilingual-MiniLM-L12-v2 |
+| Embeddings | OpenAI text-embedding-3-small | — | 384-dim article + centroid embeddings |
 | LLM | Claude Haiku | claude-haiku-4-5 | Bias scoring + summarization |
 | Telegram | Telethon | latest | Channel monitoring |
 

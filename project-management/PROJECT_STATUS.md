@@ -1,6 +1,6 @@
 # Doornegar - Project Status
 
-**Last updated**: 2026-04-12 09:19 (auto-maintenance)
+**Last updated**: 2026-04-12 (post pipeline-audit + analyst-factors + embedding-prefilter session)
 
 ## What is Doornegar?
 
@@ -21,16 +21,17 @@ Doornegar (دورنگر) is a free, bilingual (Persian/English) media transparen
 - RSS feed ingestion from 28 news sources
 - Telegram ingestion from 16 channels (covers state media that geo-block RSS)
 - NLP pipeline (text normalization, embedding generation, keyword extraction)
-- **Story clustering via LLM** with article-content-aware matching (includes first 400 chars of content, not just titles), size ceiling (30), time window (7 days), strict rejection-first prompt, model: `gpt-5-mini`
+- **Story clustering via LLM** with **two-phase matching**: embedding cosine pre-filter (threshold 0.30) → LLM confirmation. Article-content-aware (6000 chars for premium, 400 for baseline), size ceiling (30), time window (7 days), strict rejection-first prompt, double-match guard, model: `gpt-5-mini`
+- **Story centroid embeddings**: each story stores a centroid (mean of article embeddings, L2-normalized) in JSONB; recomputed after clustering via `step_recompute_centroids`
 - **3-tier LLM strategy**:
-  - Premium (`gpt-5-mini`): story analysis for top-30 trending (homepage)
+  - Premium (`gpt-5-mini`): story analysis + **deep analyst factors** for top-16 trending (homepage)
   - Baseline (`gpt-4o-mini`): bias scoring + long-tail story analysis
   - Economy (`gpt-4.1-nano`): headline translation
   - Full per-task overrides via env vars
 - **LLM-powered bias scoring** (new ~2200-token rich prompt with Persian media glossary, 3 few-shot examples, prompt-cache-eligible)
 - AI-generated per-perspective summaries (state vs diaspora vs independent) with refined narrator rules and length ceilings
 - 8-dimension media scoring system per source
-- **Cloudflare R2 image storage** + title-overlap image picker in `step_fix_images` (each visible story gets an explicit `story.image_url` chosen by title-word similarity)
+- **Cloudflare R2 image storage** + title-overlap image picker computed at response time in `_story_brief_with_extras()` (not stored on Story model); `image_checked_at` column for 24h skip optimization
 - **Auto-maintenance** runs daily via Railway cron; fire-and-forget endpoint with per-step live progress tracking via shared `maintenance_state` module
 - Bilingual Next.js frontend with RTL support, Jalali dates
 - Homepage redesign with hero layout, DoornegarAnimation, welcome modal
@@ -41,7 +42,11 @@ Doornegar (دورنگر) is a free, bilingual (Persian/English) media transparen
 - Rate limiting (slowapi): 200/min default, 10/hour on LLM endpoints
 - Request size limits (1 MB), security headers, CORS restrictions
 - Rater feedback system (`/fa/rate`, `/fa/suggest`, `/fa/dashboard/improvements`) with undo, history, onboarding, dedup hint
-- **Admin dashboard** at `/fa/dashboard` (LTR) with live maintenance progress modal, diagnostics panel, recently re-summarized stories browser, force-resummarize buttons (test 5 / refresh 30), data repair section (null localhost images / unclaim story articles), and pipeline controls
+- **Deep analyst factors** on premium-tier stories: 15 analytical categories (risk, outcomes, stakeholders, hidden info, propaganda watch, etc.) stored in `summary_en` extras JSON, exposed via `StoryAnalysisResponse.analyst`
+- **OpenAI embeddings** (`text-embedding-3-small`, 384-dim) — replaced sentence-transformers/TF-IDF, no PyTorch needed (~2GB saved), ~$0.05/month
+- **Neon keepalive**: `_keepalive(db)` pings before each LLM call; `pool_recycle` lowered to 240s
+- **LLM retry with backoff**: `llm_failed_at` column on Article + Story, 24h retry window
+- **Admin dashboard** at `/fa/dashboard` (LTR) with live maintenance progress modal, diagnostics panel, recently re-summarized stories browser, force-resummarize buttons (test 5 / refresh 16), data repair section (null localhost images / unclaim story articles), re-embed-all button, priority vote + merge suggestion buttons, device context badges, and pipeline controls
 
 ### What needs work
 
@@ -79,7 +84,8 @@ From local development DB, April 10, 2026:
 | Frontend | Vercel | Next.js web app | Deployed |
 | Image storage | **Cloudflare R2** | S3-compatible object storage for article images | **Live — 765 images uploaded** |
 | LLM bias scoring | OpenAI (gpt-4o-mini) | Article bias analysis | Working (baseline tier) |
-| LLM story analysis (top-30) | OpenAI (gpt-5-mini) | Homepage story summaries | Working (premium tier) |
+| LLM story analysis (top-16) | OpenAI (gpt-5-mini) | Homepage story summaries + analyst factors | Working (premium tier) |
+| Embeddings | OpenAI (text-embedding-3-small) | Article + story centroid embeddings | Working (~$0.05/month) |
 | LLM story analysis (long-tail) | OpenAI (gpt-4o-mini) | Non-trending story summaries | Working (baseline tier) |
 | LLM title translation | OpenAI (gpt-4.1-nano) | English headline → Persian | Working (economy tier) |
 | LLM clustering | OpenAI (gpt-5-mini) | Match articles to stories | Working (reasoning task, content-aware) |
@@ -101,7 +107,7 @@ From local development DB, April 10, 2026:
 - **Database**: PostgreSQL 16 with pgvector extension
 - **Cache/Queue**: Redis 7
 - **Frontend**: Next.js 14, React 18, Tailwind CSS, next-intl
-- **NLP**: sentence-transformers (paraphrase-multilingual-MiniLM-L12-v2), 384-dim embeddings
+- **Embeddings**: OpenAI `text-embedding-3-small` (384-dim, ~$0.05/month)
 - **AI**: OpenAI 3-tier (gpt-5-mini / gpt-4o-mini / gpt-4.1-nano); Anthropic available as fallback but not actively used
 - **Object storage**: Cloudflare R2 (S3-compatible)
 - **Dates**: date-fns-jalali
