@@ -130,6 +130,25 @@ function PriorityVoteBtn({ storyId, direction, storyTitle }: {
   );
 }
 
+// ─── Reusable story action cluster (priority + merge, feedback mode only) ─
+function StoryActions({ storyId, storyTitle, openFeedback }: {
+  storyId: string;
+  storyTitle: string;
+  openFeedback: (ctx: FeedbackContext) => void;
+}) {
+  return (
+    <div className="absolute bottom-1 left-1 z-20 flex gap-1 md:opacity-0 md:group-hover:opacity-100 opacity-100 transition-opacity" dir="ltr">
+      <PriorityVoteBtn storyId={storyId} direction="higher" storyTitle={storyTitle} />
+      <PriorityVoteBtn storyId={storyId} direction="lower" storyTitle={storyTitle} />
+      <button type="button" title="ادغام با موضوع دیگر"
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); openFeedback({ targetType: "story", targetId: storyId, defaultIssueType: "merge_stories", contextLabel: storyTitle }); }}
+        className="p-1 bg-slate-900/80 dark:bg-white/80 text-white dark:text-slate-900 shadow-sm hover:scale-110">
+        <GitMerge className="h-3 w-3" />
+      </button>
+    </div>
+  );
+}
+
 // ─── Main Component ───────────────────────────────────────────
 interface Props {
   stories: StoryBrief[];
@@ -213,16 +232,7 @@ export default function HomepageLayout({ stories, summaries, locale, feedbackMod
                     <FeedbackBtn icon={FileText} label="خلاصه" position="bl"
                       onClick={() => openFeedback({ targetType: "story_summary", targetId: hero.id, currentValue: summaries[hero.id] || "", defaultIssueType: "bad_summary", contextLabel: hero.title_fa })} />
                   )}
-                  {/* Priority + merge buttons */}
-                  <div className="absolute bottom-1 left-1 z-20 flex gap-1 md:opacity-0 md:group-hover:opacity-100 opacity-100 transition-opacity">
-                    <PriorityVoteBtn storyId={hero.id} direction="higher" storyTitle={hero.title_fa} />
-                    <PriorityVoteBtn storyId={hero.id} direction="lower" storyTitle={hero.title_fa} />
-                    <button type="button" title="ادغام با موضوع دیگر"
-                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); openFeedback({ targetType: "story", targetId: hero.id, defaultIssueType: "merge_stories", contextLabel: hero.title_fa }); }}
-                      className="p-1 bg-slate-900/80 dark:bg-white/80 text-white dark:text-slate-900 shadow-sm hover:scale-110">
-                      <GitMerge className="h-3 w-3" />
-                    </button>
-                  </div>
+                  <StoryActions storyId={hero.id} storyTitle={hero.title_fa} openFeedback={openFeedback} />
                 </>
               )}
               <AnalystTicker />
@@ -266,6 +276,7 @@ export default function HomepageLayout({ stories, summaries, locale, feedbackMod
                         onClick={() => openFeedback({ targetType: "story_image", targetId: s.id, defaultIssueType: "bad_image", contextLabel: s.title_fa, imageUrl: s.image_url })} />
                       <FeedbackBtn icon={Type} label="عنوان" position="bl"
                         onClick={() => openFeedback({ targetType: "story_title", targetId: s.id, currentValue: s.title_fa, defaultIssueType: "wrong_title", contextLabel: s.title_fa })} />
+                      <StoryActions storyId={s.id} storyTitle={s.title_fa} openFeedback={openFeedback} />
                     </>
                   )}
                 </div>
@@ -316,6 +327,7 @@ export default function HomepageLayout({ stories, summaries, locale, feedbackMod
                     <FeedbackBtn icon={FileText} label="خلاصه" position="bl"
                       onClick={() => openFeedback({ targetType: "story_summary", targetId: row2Stories[0].id, currentValue: summaries[row2Stories[0].id] || "", defaultIssueType: "bad_summary", contextLabel: row2Stories[0].title_fa })} />
                   )}
+                  <StoryActions storyId={row2Stories[0].id} storyTitle={row2Stories[0].title_fa} openFeedback={openFeedback} />
                 </>
               )}
             </div>
@@ -346,8 +358,11 @@ export default function HomepageLayout({ stories, summaries, locale, feedbackMod
                   <p className="mt-1.5 text-[13px] leading-5 text-slate-400 dark:text-slate-500 line-clamp-3">{summaries[s.id] || s.title_fa}</p>
                 </Link>
                 {feedbackMode && (
-                  <FeedbackBtn icon={Type} label="عنوان" position="tl"
-                    onClick={() => openFeedback({ targetType: "story_title", targetId: s.id, currentValue: s.title_fa, defaultIssueType: "wrong_title", contextLabel: s.title_fa })} />
+                  <>
+                    <FeedbackBtn icon={Type} label="عنوان" position="tl"
+                      onClick={() => openFeedback({ targetType: "story_title", targetId: s.id, currentValue: s.title_fa, defaultIssueType: "wrong_title", contextLabel: s.title_fa })} />
+                    <StoryActions storyId={s.id} storyTitle={s.title_fa} openFeedback={openFeedback} />
+                  </>
                 )}
               </div>
             ))}
@@ -383,6 +398,7 @@ export default function HomepageLayout({ stories, summaries, locale, feedbackMod
                         onClick={() => openFeedback({ targetType: "story_title", targetId: s.id, currentValue: s.title_fa, defaultIssueType: "wrong_title", contextLabel: s.title_fa })} />
                       <FeedbackBtn icon={ImageIcon} label="تصویر" position="tl"
                         onClick={() => openFeedback({ targetType: "story_image", targetId: s.id, defaultIssueType: "bad_image", contextLabel: s.title_fa, imageUrl: s.image_url })} />
+                      <StoryActions storyId={s.id} storyTitle={s.title_fa} openFeedback={openFeedback} />
                     </>
                   )}
                 </div>
@@ -409,8 +425,11 @@ export default function HomepageLayout({ stories, summaries, locale, feedbackMod
                       )}
                     </Link>
                     {feedbackMode && (
-                      <FeedbackBtn icon={ImageIcon} label="تصویر" position="tl"
-                        onClick={() => openFeedback({ targetType: "story_image", targetId: s.id, defaultIssueType: "bad_image", contextLabel: s.title_fa, imageUrl: s.image_url })} />
+                      <>
+                        <FeedbackBtn icon={ImageIcon} label="تصویر" position="tl"
+                          onClick={() => openFeedback({ targetType: "story_image", targetId: s.id, defaultIssueType: "bad_image", contextLabel: s.title_fa, imageUrl: s.image_url })} />
+                        <StoryActions storyId={s.id} storyTitle={s.title_fa} openFeedback={openFeedback} />
+                      </>
                     )}
                   </div>
                 ))}
@@ -427,8 +446,11 @@ export default function HomepageLayout({ stories, summaries, locale, feedbackMod
                     )}
                   </Link>
                   {feedbackMode && (
-                    <FeedbackBtn icon={Type} label="عنوان" position="tl"
-                      onClick={() => openFeedback({ targetType: "story_title", targetId: s.id, currentValue: s.title_fa, defaultIssueType: "wrong_title", contextLabel: s.title_fa })} />
+                    <>
+                      <FeedbackBtn icon={Type} label="عنوان" position="tl"
+                        onClick={() => openFeedback({ targetType: "story_title", targetId: s.id, currentValue: s.title_fa, defaultIssueType: "wrong_title", contextLabel: s.title_fa })} />
+                      <StoryActions storyId={s.id} storyTitle={s.title_fa} openFeedback={openFeedback} />
+                    </>
                   )}
                 </div>
               ))}

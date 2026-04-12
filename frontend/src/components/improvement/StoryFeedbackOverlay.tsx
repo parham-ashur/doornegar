@@ -150,7 +150,7 @@ export default function StoryFeedbackOverlay({ storyId, storyTitle }: Props) {
       {/* Fixed sidebar on desktop, bottom sheet on mobile */}
       <div
         dir="rtl"
-        className="fixed top-20 right-4 left-4 md:left-auto md:right-4 md:top-24 md:w-72 z-40 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-xl"
+        className="fixed top-20 right-4 left-4 md:right-auto md:left-4 md:top-24 md:w-72 z-40 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-xl"
       >
         <button
           onClick={() => setExpanded(!expanded)}
