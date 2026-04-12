@@ -133,37 +133,28 @@ export default async function StoryDetailPage({
         </div>
       </div>
 
-      {/* Analysis + Stats side by side (50/50) */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 mb-6">
-        {/* Bias comparison tabs (right half in RTL) */}
+      {/* Two-column layout for everything below header */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 lg:items-start">
+        {/* RIGHT column (RTL): bias tabs → articles */}
         <div className="lg:pl-6 lg:border-l border-slate-200 dark:border-slate-800">
+          {/* Bias comparison */}
           <StoryAnalysisPanel analysis={analysis} />
           <SummaryRating storyId={id} />
-        </div>
 
-        {/* Stats + Analyst (left half in RTL) */}
-        <div className="lg:pr-6 pt-4 lg:pt-0">
-          <StatsPanel analysis={analysis} />
-        </div>
-      </div>
-
-      {/* Articles + Spectrum side by side */}
-      <div className="grid gap-8 lg:grid-cols-2 lg:items-start">
-        {/* Articles (right half in RTL) */}
-        <div>
-          <h2 className="mb-4 text-base font-black text-slate-900 dark:text-white border-b border-slate-200 dark:border-slate-800 pb-3">
+          {/* Articles */}
+          <h2 className="mt-6 mb-4 text-base font-black text-slate-900 dark:text-white border-b border-slate-200 dark:border-slate-800 pb-3">
             مقالات مرتبط
           </h2>
           <ArticleFilterList articles={story.articles} storyId={id} />
-
-          {/* Telegram reactions */}
           <TelegramPanel storyId={id} />
         </div>
 
-        {/* Spectrum (left half in RTL) */}
-        <div className="space-y-6 lg:border-r border-slate-200 dark:border-slate-800 lg:pr-6 lg:sticky lg:top-4" id="story-sidebar">
+        {/* LEFT column (RTL): stats → analyst → spectrum */}
+        <div className="lg:pr-6 lg:sticky lg:top-4 space-y-6 pt-4 lg:pt-0" id="story-sidebar">
+          <StatsPanel analysis={analysis} />
+
           {coveringSources.length > 0 && (
-            <div>
+            <div className="border-t border-slate-200 dark:border-slate-800 pt-4">
               <h3 className="text-sm font-black text-slate-900 dark:text-white mb-4 pb-2 border-b border-slate-200 dark:border-slate-800">
                 جایگاه رسانه‌ها
               </h3>
