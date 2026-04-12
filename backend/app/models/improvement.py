@@ -58,6 +58,8 @@ class ImprovementFeedback(Base):
     # Rater info
     rater_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     rater_contact: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Auto-captured device context: "mobile 375×812" or "desktop 1440×900" + user agent
+    device_info: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     # Admin tracking
     status: Mapped[str] = mapped_column(

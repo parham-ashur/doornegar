@@ -111,6 +111,9 @@ function PriorityVoteBtn({ storyId, direction, storyTitle }: {
           target_id: storyId,
           issue_type: `priority_${direction}`,
           reason: label,
+          device_info: typeof window !== "undefined"
+            ? `${window.innerWidth <= 768 ? "mobile" : "desktop"} ${window.innerWidth}×${window.innerHeight}`
+            : null,
         }),
       });
     } catch {}

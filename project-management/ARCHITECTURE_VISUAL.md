@@ -550,12 +550,17 @@ flowchart TD
 
 
 
+
 ---
 
-## Auto-detected changes (2026-04-11 22:46)
+## Auto-detected changes (2026-04-12 09:19)
 
-**New service files**: image_downloader.py, llm_helper.py, llm_utils.py, maintenance_state.py, rating_aggregation.py, scraper.py, seed_telegram.py, social_posting.py
+**New service files**: topic_service.py
 
-**New model files**: bias_score.py, ingestion_log.py
+**New API files**: improvements.py, suggestions.py
+
+**New model files**: improvement.py, suggestion.py
+
+**New frontend pages**: improve
 
 > These files were detected but not yet documented in the diagrams above. Update the diagrams to include them.

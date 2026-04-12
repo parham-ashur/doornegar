@@ -64,6 +64,7 @@ async def submit_feedback(
         rater_name=body.rater_name,
         rater_contact=body.rater_contact,
         priority=body.priority,
+        device_info=body.device_info,
         status="open",
     )
     db.add(item)

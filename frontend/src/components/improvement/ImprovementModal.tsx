@@ -300,6 +300,10 @@ export default function ImprovementModal({
           current_value: currentValue || null,
           suggested_value: suggestedValue || null,
           reason: reason || null,
+          // Auto-capture device context so admins can reproduce mobile-specific bugs
+          device_info: typeof window !== "undefined"
+            ? `${window.innerWidth <= 768 ? "mobile" : "desktop"} ${window.innerWidth}×${window.innerHeight} ${navigator.userAgent.slice(0, 150)}`
+            : null,
         }),
       });
       if (res.ok) {

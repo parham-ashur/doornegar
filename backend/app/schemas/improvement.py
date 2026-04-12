@@ -33,6 +33,8 @@ class ImprovementSubmit(BaseModel):
     rater_name: str | None = Field(None, max_length=100)
     rater_contact: str | None = Field(None, max_length=200)
     priority: Priority | None = None
+    # Auto-populated by the frontend: screen width, device type, user agent
+    device_info: str | None = Field(None, max_length=500)
 
 
 class ImprovementResponse(BaseModel):
@@ -55,6 +57,7 @@ class ImprovementDetail(BaseModel):
     reason: str | None
     rater_name: str | None
     rater_contact: str | None
+    device_info: str | None = None
     status: str
     priority: str | None
     admin_notes: str | None

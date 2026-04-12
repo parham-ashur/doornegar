@@ -20,6 +20,7 @@ interface FeedbackItem {
   reason: string | null;
   rater_name: string | null;
   rater_contact: string | null;
+  device_info: string | null;
   status: string;
   priority: string | null;
   admin_notes: string | null;
@@ -410,6 +411,16 @@ export default function ImprovementsAdminPage() {
                   </span>
                 )}
                 <span className="text-slate-400">{formatDate(item.created_at)}</span>
+                {item.device_info && (
+                  <span className={`px-1.5 py-0.5 text-[10px] border ${
+                    item.device_info.startsWith("mobile")
+                      ? "border-purple-400 text-purple-600 bg-purple-50 dark:bg-purple-900/10"
+                      : "border-slate-300 text-slate-500"
+                  }`}>
+                    {item.device_info.startsWith("mobile") ? "📱 " : "🖥 "}
+                    {item.device_info.split(" ").slice(0, 2).join(" ")}
+                  </span>
+                )}
               </div>
 
               {(item.suggested_value || item.reason) && (
