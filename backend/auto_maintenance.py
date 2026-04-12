@@ -277,18 +277,24 @@ async def step_summarize():
             )
             top_articles = list(art_result.scalars().all())
 
+            # Tier selection — decide BEFORE building articles_info so
+            # we can send more content to premium-tier stories
+            is_premium = story.id in top_ids
+            # Premium: 6000 chars (~1500 tokens) per article — deep analysis
+            # Baseline: 1500 chars (~375 tokens) — just enough for a summary
+            content_cap = 6000 if is_premium else 1500
+
             articles_info = [
                 {
                     "title": a.title_original or a.title_fa or a.title_en or "",
-                    "content": (a.content_text or a.summary or "")[:1500],
+                    "content": (a.content_text or a.summary or "")[:content_cap],
                     "source_name_fa": a.source.name_fa if a.source else "نامشخص",
                     "state_alignment": a.source.state_alignment if a.source else "",
                     "published_at": a.published_at.isoformat() if a.published_at else "",
                 }
                 for a in top_articles
             ]
-            # Tier selection
-            if story.id in top_ids:
+            if is_premium:
                 chosen_model = settings.story_analysis_premium_model
                 tier_label = "premium"
             else:
