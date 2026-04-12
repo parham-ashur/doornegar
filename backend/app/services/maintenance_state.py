@@ -27,7 +27,7 @@ STATE: dict = {
 }
 
 
-def start_run() -> None:
+def start_run(total_steps: int = 14) -> None:
     """Reset state and mark a new run as started."""
     STATE.update({
         "status": "running",
@@ -39,6 +39,7 @@ def start_run() -> None:
         "steps": [],
         "results": None,
         "error": None,
+        "total_steps": total_steps,
     })
 
 

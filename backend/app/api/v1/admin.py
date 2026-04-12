@@ -611,6 +611,8 @@ async def maintenance_status():
     # Add current step elapsed for a live ticker
     if state.get("current_step") and state.get("current_step_started"):
         state["current_step_elapsed_s"] = round(time.time() - state["current_step_started"], 1)
+    # Total steps so frontend can show accurate progress bar
+    state["total_steps"] = _ms.STATE.get("total_steps", 14)
     return state
 
 

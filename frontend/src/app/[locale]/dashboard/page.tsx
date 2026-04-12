@@ -346,7 +346,7 @@ export default function DashboardPage() {
       } catch {}
     };
     poll();
-    const interval = setInterval(poll, 10000); // 10s not 3s — saves Neon transfer
+    const interval = setInterval(poll, 4000); // 4s for responsive progress display
     return () => clearInterval(interval);
   }, [running, authHeaders, fetchDashboard]);
 
@@ -527,18 +527,24 @@ export default function DashboardPage() {
             <>
               {/* Progress bar based on # completed steps */}
               {(() => {
-                const TOTAL = 23; // matches pipeline length in auto_maintenance.run_maintenance
+                const total = maintLive.total_steps || 14;
                 const done = (maintLive.steps || []).length;
-                const pct = Math.min(100, Math.round((done / TOTAL) * 100));
+                const pct = Math.min(100, Math.round((done / total) * 100));
+                const currentStepTime = maintLive.current_step_elapsed_s || 0;
                 return (
                   <div className="space-y-2">
                     <div className="flex items-center justify-between text-[10px] text-slate-500">
-                      <span>Step {done + 1} of {TOTAL}</span>
+                      <span>Step {done + 1} of {total}</span>
                       <span>{pct}%</span>
                     </div>
-                    <div className="h-1.5 w-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
+                    <div className="h-2 w-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
                       <div className="h-full bg-blue-500 transition-all duration-500" style={{ width: `${pct}%` }} />
                     </div>
+                    {currentStepTime > 60 && (
+                      <p className="text-[10px] text-amber-600 dark:text-amber-400">
+                        Current step running for {Math.floor(currentStepTime / 60)}min — long steps (ingest, cluster, summarize) can take 10-30 min each
+                      </p>
+                    )}
                   </div>
                 );
               })()}

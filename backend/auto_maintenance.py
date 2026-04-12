@@ -1604,12 +1604,9 @@ async def run_maintenance():
     logger.info(f"Maintenance started at {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     logger.info("=" * 50)
 
-    maintenance_state.start_run()
-    results = {}
-
     # Ordered pipeline of (result_key, display_name, async_callable)
     pipeline = [
-        ("ingest", "Ingest RSS + Telegram", step_ingest),
+        ("ingest", "Ingest RSS + Telegram (may take 10-20 min)", step_ingest),
         ("process", "NLP process (embed, translate, extract)", step_process),
         ("backfill_farsi_titles", "Backfill Farsi titles", step_backfill_farsi_titles),
         ("cluster", "Cluster articles into stories", step_cluster),
@@ -1634,6 +1631,9 @@ async def run_maintenance():
         ("backup", "Database backup", step_database_backup),
         ("weekly_digest", "Weekly digest", step_weekly_digest),
     ]
+
+    maintenance_state.start_run(total_steps=len(pipeline))
+    results = {}
 
     try:
         for key, display, func in pipeline:

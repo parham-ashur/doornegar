@@ -12,7 +12,7 @@ import SummaryRating from "@/components/feedback/SummaryRating";
 import EditableTitle from "@/components/feedback/EditableTitle";
 import PriorityControl from "@/components/feedback/PriorityControl";
 import StoryFeedbackOverlay from "@/components/improvement/StoryFeedbackOverlay";
-import { getStory, getSources } from "@/lib/api";
+import { getStory, getSources, getStoryAnalysis } from "@/lib/api";
 import { formatRelativeTime } from "@/lib/utils";
 
 export async function generateMetadata({
@@ -47,11 +47,20 @@ export default async function StoryDetailPage({
   const { locale, id } = await params;
   setRequestLocale(locale);
 
+  // Fetch story, analysis, and sources in parallel (no waterfall)
   let story;
+  let analysis = null;
   let allSources: any[] = [];
 
   try {
-    story = await getStory(id);
+    const [storyResult, analysisResult, sourcesResult] = await Promise.all([
+      getStory(id),
+      getStoryAnalysis(id).catch(() => null),
+      getSources().then(d => d.sources).catch(() => []),
+    ]);
+    story = storyResult;
+    analysis = analysisResult;
+    allSources = sourcesResult;
   } catch {
     return (
       <div dir="rtl" className="mx-auto max-w-7xl px-4 py-16 text-center">
@@ -62,11 +71,6 @@ export default async function StoryDetailPage({
       </div>
     );
   }
-
-  try {
-    const data = await getSources();
-    allSources = data.sources;
-  } catch {}
 
   const title = story.title_fa || story.title_en;
 
@@ -144,7 +148,7 @@ export default async function StoryDetailPage({
 
       {/* Analysis (OpenAI summary + bias) */}
       <div className="mb-8">
-        <StoryAnalysisPanel storyId={id} />
+        <StoryAnalysisPanel analysis={analysis} />
         <SummaryRating storyId={id} />
       </div>
 

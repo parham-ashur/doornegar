@@ -58,3 +58,11 @@ export async function getStory(id: string) {
   });
 }
 
+// Story analysis — fetched server-side in parallel with story detail
+export async function getStoryAnalysis(id: string) {
+  return fetchAPI<import("./types").StoryAnalysis>(
+    `/api/v1/stories/${id}/analysis`,
+    { revalidate: 300 },
+  );
+}
+
