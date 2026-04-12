@@ -152,20 +152,18 @@ export default async function StoryDetailPage({
           <TelegramPanel storyId={id} />
         </div>
 
-        {/* Sidebar: spectrum + stats + analyst (right half) */}
+        {/* Sidebar: stats + analyst + spectrum (right half) */}
         <div className="space-y-6 lg:border-r border-slate-200 dark:border-slate-800 lg:pr-6 lg:sticky lg:top-4" id="story-sidebar">
+          <StatsPanel analysis={analysis} />
+
           {coveringSources.length > 0 && (
-            <div>
+            <div className="border-t border-slate-200 dark:border-slate-800 pt-4">
               <h3 className="text-sm font-black text-slate-900 dark:text-white mb-4 pb-2 border-b border-slate-200 dark:border-slate-800">
                 جایگاه رسانه‌ها
               </h3>
               <PoliticalSpectrum sources={coveringSources} sourceNeutrality={analysis?.source_neutrality || null} />
             </div>
           )}
-
-          <div className="border-t border-slate-200 dark:border-slate-800 pt-4">
-            <StatsPanel analysis={analysis} />
-          </div>
         </div>
       </div>
     </div>
