@@ -2,7 +2,9 @@
 
 import { useState, useEffect } from "react";
 
-const CONSERVATIVE_WORDS = [
+const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+const FALLBACK_CONSERVATIVE = [
   { word: "پیروزی بزرگ", count: 12 },
   { word: "محور مقاومت", count: 9 },
   { word: "تسلیم دشمن", count: 7 },
@@ -10,7 +12,7 @@ const CONSERVATIVE_WORDS = [
   { word: "شهدای مدافع", count: 5 },
 ];
 
-const OPPOSITION_WORDS = [
+const FALLBACK_OPPOSITION = [
   { word: "آتش‌بس شکننده", count: 14 },
   { word: "قطع اینترنت", count: 11 },
   { word: "تلفات غیرنظامی", count: 8 },
@@ -20,13 +22,36 @@ const OPPOSITION_WORDS = [
 
 export default function WordsOfWeek() {
   const [showConservative, setShowConservative] = useState(true);
+  const [conservativeWords, setConservativeWords] = useState(FALLBACK_CONSERVATIVE);
+  const [oppositionWords, setOppositionWords] = useState(FALLBACK_OPPOSITION);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchWords() {
+      try {
+        const res = await fetch(`${API}/api/v1/stories/insights/loaded-words`);
+        if (!res.ok) throw new Error("API error");
+        const data = await res.json();
+        if (cancelled) return;
+        if (data.conservative?.length) setConservativeWords(data.conservative);
+        if (data.opposition?.length) setOppositionWords(data.opposition);
+      } catch {
+        // keep fallback data
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    fetchWords();
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     const interval = setInterval(() => setShowConservative(prev => !prev), 5000);
     return () => clearInterval(interval);
   }, []);
 
-  const words = showConservative ? CONSERVATIVE_WORDS : OPPOSITION_WORDS;
+  const words = showConservative ? conservativeWords : oppositionWords;
   const color = showConservative ? "#3b82f6" : "#ea580c";
   const darkColor = showConservative ? "text-blue-300" : "text-orange-400";
   const label = showConservative ? "محافظه‌کار" : "اپوزیسیون";
@@ -53,7 +78,7 @@ export default function WordsOfWeek() {
         {label}
       </p>
 
-      <div className="space-y-1.5 transition-all duration-300">
+      <div className={`space-y-1.5 transition-all duration-300 ${loading ? "opacity-50 animate-pulse" : "opacity-100"}`}>
         {words.map(w => (
           <div key={w.word} className="flex items-center gap-2">
             <span className="text-[12px] font-medium text-slate-700 dark:text-slate-300 shrink-0">«{w.word}»</span>
