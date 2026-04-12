@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Newspaper } from "lucide-react";
 import PoliticalSpectrum from "@/components/source/PoliticalSpectrum";
+import StatsPanel from "@/components/story/StatsPanel";
 import StoryAnalysisPanel from "@/components/story/StoryAnalysisPanel";
 import ArticleFilterList from "@/components/story/ArticleFilterList";
 import TelegramPanel from "@/components/story/TelegramPanel";
@@ -151,7 +152,7 @@ export default async function StoryDetailPage({
           <TelegramPanel storyId={id} />
         </div>
 
-        {/* Spectrum (right half) */}
+        {/* Sidebar: spectrum + stats + analyst (right half) */}
         <div className="space-y-6 lg:border-r border-slate-200 dark:border-slate-800 lg:pr-6 lg:sticky lg:top-4" id="story-sidebar">
           {coveringSources.length > 0 && (
             <div>
@@ -161,6 +162,10 @@ export default async function StoryDetailPage({
               <PoliticalSpectrum sources={coveringSources} sourceNeutrality={analysis?.source_neutrality || null} />
             </div>
           )}
+
+          <div className="border-t border-slate-200 dark:border-slate-800 pt-4">
+            <StatsPanel analysis={analysis} />
+          </div>
         </div>
       </div>
     </div>
