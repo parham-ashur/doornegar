@@ -159,38 +159,138 @@ ANALYST_FACTORS_ADDENDUM = """
 """
 
 
+# ── Pass 1 prompt: fact extraction (cheap, nano model) ──────────
+FACT_EXTRACTION_PROMPT = """\
+از هر مقاله زیر حقایق کلیدی را استخراج کن. فقط JSON برگردان.
+
+{articles_block}
+
+برای هر مقاله برگردان:
+{{
+  "facts": [
+    {{
+      "source": "<نام رسانه>",
+      "alignment": "<محافظه‌کار یا اپوزیسیون>",
+      "claims": ["<ادعای مشخص ۱>", "<ادعای ۲>"],
+      "numbers": ["<عدد یا آمار ذکر شده>"],
+      "evidence_type": "<رسمی | ناشناس | شاهد عینی | بدون منبع>",
+      "key_quote": "<مهم‌ترین نقل‌قول با «»>"
+    }}
+  ]
+}}"""
+
+
+async def _pass1_extract_facts(
+    articles_with_sources: list[dict],
+) -> list[dict] | None:
+    """Pass 1: Use nano model to extract structured facts from articles.
+
+    Returns a list of fact dicts, or None if extraction fails.
+    Cost: ~$0.001 per story (gpt-4.1-nano).
+    """
+    lines = []
+    for i, art in enumerate(articles_with_sources, 1):
+        lines.append(f"--- مقاله {i} ---")
+        lines.append(f"منبع: {art.get('source_name_fa', '?')} ({art.get('state_alignment', '?')})")
+        lines.append(f"عنوان: {art.get('title', '')}")
+        # Shorter content for nano — just first 800 chars
+        content = (art.get("content", "") or "")[:800]
+        if content:
+            lines.append(f"متن: {content}")
+        lines.append("")
+
+    prompt = FACT_EXTRACTION_PROMPT.format(articles_block="\n".join(lines))
+
+    try:
+        from app.services.llm_helper import build_openai_params
+        client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
+        params = build_openai_params(
+            model=settings.translation_model,  # gpt-4.1-nano — cheapest
+            prompt=prompt,
+            max_tokens=2048,
+            temperature=0,
+        )
+        response = await client.chat.completions.create(**params)
+        text = response.choices[0].message.content.strip()
+        if "```json" in text:
+            text = text.split("```json")[1].split("```")[0].strip()
+        elif "```" in text:
+            text = text.split("```")[1].split("```")[0].strip()
+        result = json.loads(text)
+        return result.get("facts", []) if isinstance(result, dict) else result
+    except Exception as e:
+        logger.warning(f"Pass 1 fact extraction failed: {e}")
+        return None
+
+
 async def generate_story_analysis(
     story,
     articles_with_sources: list[dict],
     model: str | None = None,
     include_analyst_factors: bool = False,
+    related_stories: list[dict] | None = None,
+    source_track_records: dict | None = None,
 ) -> dict:
-    """Generate rich analysis for a story using article content.
+    """Two-pass story analysis for maximum quality.
 
-    Args:
-        story: The Story ORM object.
-        articles_with_sources: List of dicts with keys:
-            title, content, source_name_fa, state_alignment
-        model: Optional model override (premium vs baseline).
-        include_analyst_factors: If True, appends the deep-analyst
-            factors addendum to the prompt. Used only for premium-tier
-            top-N trending stories. Adds ~1000 output tokens.
-        model: Optional explicit model name. If None, uses
-            settings.story_analysis_model (the baseline model).
-            Callers that want the premium model for top-N trending
-            stories should pass settings.story_analysis_premium_model.
+    Pass 1 (nano, ~$0.001): Extract structured facts from each article
+    Pass 2 (premium/baseline): Analyze framing with facts + context
+
+    Context injected into Pass 2 (no extra LLM cost):
+    - related_stories: summaries of similar stories for cross-story memory
+    - source_track_records: historical reliability per source
 
     Returns:
-        dict with keys: summary_fa, state_summary_fa, diaspora_summary_fa,
-        independent_summary_fa, bias_explanation_fa, scores
+        dict with all analysis fields
     """
     if not settings.openai_api_key:
         raise RuntimeError(
             "OPENAI_API_KEY is not configured. Set it in .env to use story analysis."
         )
 
-    # Build articles block with content, source, alignment, AND publish date
+    # ── Pass 1: Fact extraction (cheap) ──
+    facts = await _pass1_extract_facts(articles_with_sources)
+
+    # ── Build Pass 2 prompt with enriched context ──
     lines = []
+    current_title = story.title_fa or ""
+    lines.append(f"عنوان فعلی خبر: {current_title}\n")
+
+    # Inject extracted facts if Pass 1 succeeded
+    if facts:
+        lines.append("# حقایق استخراج‌شده (از تحلیل اولیه)")
+        for i, fact in enumerate(facts, 1):
+            src = fact.get("source", "?")
+            align = fact.get("alignment", "?")
+            claims = fact.get("claims", [])
+            numbers = fact.get("numbers", [])
+            evidence = fact.get("evidence_type", "?")
+            quote = fact.get("key_quote", "")
+            lines.append(f"  {i}. {src} ({align}): {'; '.join(claims[:3])}")
+            if numbers:
+                lines.append(f"     ارقام: {', '.join(numbers[:3])}")
+            if evidence != "?":
+                lines.append(f"     نوع شواهد: {evidence}")
+            if quote:
+                lines.append(f"     نقل‌قول: {quote}")
+        lines.append("")
+        lines.append("از این حقایق برای مقایسه ادعاها و شناسایی تناقض‌ها استفاده کن.\n")
+
+    # Inject cross-story memory
+    if related_stories:
+        lines.append("# زمینه: موضوعات مرتبط اخیر")
+        for rs in related_stories[:3]:
+            lines.append(f"  - {rs.get('title', '?')}: {rs.get('summary', '?')[:100]}")
+        lines.append("  اگر این خبر ادامه یکی از موضوعات بالاست، به تحول روایت اشاره کن.\n")
+
+    # Inject source track records
+    if source_track_records:
+        lines.append("# سابقه رسانه‌ها (بر اساس تحلیل‌های قبلی)")
+        for slug, record in list(source_track_records.items())[:6]:
+            lines.append(f"  - {slug}: {record}")
+        lines.append("  از این سابقه برای ارزیابی اعتبار ادعاها استفاده کن.\n")
+
+    # Add raw articles (shorter since facts are already extracted)
     for i, art in enumerate(articles_with_sources, 1):
         alignment_fa = ALIGNMENT_LABELS_FA.get(
             art.get("state_alignment", ""), "نامشخص"
@@ -206,19 +306,16 @@ async def generate_story_analysis(
         if published:
             lines.append(f"تاریخ انتشار: {published}")
         if content:
-            lines.append(f"متن: {content}")
+            # If we have facts, send less raw content (facts cover the key points)
+            cap = len(content) if not facts else min(len(content), 1000)
+            lines.append(f"متن: {content[:cap]}")
         lines.append("")
-
-    # Include current title so LLM can keep it if still accurate
-    current_title = story.title_fa or ""
-    lines.insert(0, f"عنوان فعلی خبر: {current_title}\n")
 
     articles_block = "\n".join(lines)
 
     prompt = STORY_ANALYSIS_PROMPT.format(articles_block=articles_block)
     if include_analyst_factors:
         prompt += ANALYST_FACTORS_ADDENDUM
-    # Increase max_tokens when analyst factors are included (~1000 extra output)
     max_tokens = 6144 if include_analyst_factors else 4096
 
     try:

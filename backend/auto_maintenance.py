@@ -415,10 +415,51 @@ async def step_summarize():
             try:
                 await _keepalive(db)
                 is_premium = (tier_label == "premium")
+
+                # Cross-story memory: find related stories with existing summaries
+                related = []
+                if story.centroid_embedding:
+                    from app.nlp.embeddings import cosine_similarity as _cs
+                    rel_result = await db.execute(
+                        select(Story.id, Story.title_fa, Story.summary_fa, Story.centroid_embedding)
+                        .where(
+                            Story.id != story.id,
+                            Story.summary_fa.isnot(None),
+                            Story.centroid_embedding.isnot(None),
+                            Story.article_count >= 5,
+                        )
+                        .order_by(Story.trending_score.desc())
+                        .limit(20)
+                    )
+                    for rid, rtitle, rsummary, rcentroid in rel_result.all():
+                        if rcentroid:
+                            sim = _cs(story.centroid_embedding, rcentroid)
+                            if sim > 0.5:
+                                related.append({"title": rtitle, "summary": rsummary})
+                                if len(related) >= 3:
+                                    break
+
+                # Source track records: average neutrality from past analyses
+                source_records = {}
+                source_slugs = {a.source.slug for a in top_articles if a.source}
+                for slug in list(source_slugs)[:6]:
+                    # Simple track record from source alignment
+                    src = next((a.source for a in top_articles if a.source and a.source.slug == slug), None)
+                    if src:
+                        align = src.state_alignment
+                        if align in ("state",):
+                            source_records[slug] = "محافظه‌کار — تمایل به بزرگ‌نمایی دستاوردها و کوچک‌نمایی تلفات"
+                        elif align == "semi_state":
+                            source_records[slug] = "نیمه‌محافظه‌کار — نسبتاً محتاط، گاهی انتقادی"
+                        elif align == "diaspora":
+                            source_records[slug] = "اپوزیسیون — تمایل به تأکید بر سرکوب و نقض حقوق بشر"
+
                 analysis = await generate_story_analysis(
                     story, articles_info,
                     model=chosen_model,
                     include_analyst_factors=is_premium,
+                    related_stories=related if related else None,
+                    source_track_records=source_records if source_records else None,
                 )
                 story.summary_fa = analysis.get("summary_fa")
                 # Update title if LLM returned a better one
