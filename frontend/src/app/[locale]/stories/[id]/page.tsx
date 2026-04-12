@@ -133,15 +133,23 @@ export default async function StoryDetailPage({
         </div>
       </div>
 
-      {/* Analysis tabs — full width, above articles */}
-      <div className="mb-6">
-        <StoryAnalysisPanel analysis={analysis} />
-        <SummaryRating storyId={id} />
+      {/* Analysis + Stats side by side (50/50) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 mb-6">
+        {/* Bias comparison tabs (right half in RTL) */}
+        <div className="lg:pl-6 lg:border-l border-slate-200 dark:border-slate-800">
+          <StoryAnalysisPanel analysis={analysis} />
+          <SummaryRating storyId={id} />
+        </div>
+
+        {/* Stats + Analyst (left half in RTL) */}
+        <div className="lg:pr-6 pt-4 lg:pt-0">
+          <StatsPanel analysis={analysis} />
+        </div>
       </div>
 
-      {/* Main layout: articles left, spectrum right */}
+      {/* Articles + Spectrum side by side */}
       <div className="grid gap-8 lg:grid-cols-2 lg:items-start">
-        {/* Articles (left half) */}
+        {/* Articles (right half in RTL) */}
         <div>
           <h2 className="mb-4 text-base font-black text-slate-900 dark:text-white border-b border-slate-200 dark:border-slate-800 pb-3">
             مقالات مرتبط
@@ -152,12 +160,10 @@ export default async function StoryDetailPage({
           <TelegramPanel storyId={id} />
         </div>
 
-        {/* Sidebar: stats + analyst + spectrum (right half) */}
+        {/* Spectrum (left half in RTL) */}
         <div className="space-y-6 lg:border-r border-slate-200 dark:border-slate-800 lg:pr-6 lg:sticky lg:top-4" id="story-sidebar">
-          <StatsPanel analysis={analysis} />
-
           {coveringSources.length > 0 && (
-            <div className="border-t border-slate-200 dark:border-slate-800 pt-4">
+            <div>
               <h3 className="text-sm font-black text-slate-900 dark:text-white mb-4 pb-2 border-b border-slate-200 dark:border-slate-800">
                 جایگاه رسانه‌ها
               </h3>
