@@ -1040,6 +1040,17 @@ async def patch_source(
     return {"status": "ok", "slug": slug, "updated": changed}
 
 
+@router.post("/create-tables")
+async def create_tables():
+    """Create any missing database tables from SQLAlchemy models. Safe to run multiple times."""
+    from app.database import engine, Base
+    # Import all models so they're registered
+    import app.models  # noqa
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    return {"status": "ok", "message": "All tables created/verified"}
+
+
 @router.post("/migrate-and-seed")
 async def migrate_and_seed(db: AsyncSession = Depends(get_db)):
     """Run alembic migration + seed new sources and analysts. One-time setup."""
