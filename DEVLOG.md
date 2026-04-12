@@ -1,5 +1,111 @@
 # Doornegar Development Log
 
+## 2026-04-13 — Intelligence layer, two-pass analysis, cost optimization mega-session
+
+### Key outcomes
+
+1. **Two-pass analysis (nano fact extraction → premium framing analysis)**:
+   - Pass 1: `gpt-4.1-nano` extracts structured facts from each article (~$0.001/story) via `FACT_EXTRACTION_PROMPT`
+   - Pass 2: premium model (`gpt-5-mini`) receives pre-extracted facts + context for deep framing/bias analysis
+   - Result: better quality at lower cost — nano handles the grunt work, premium focuses on interpretation
+
+2. **Cross-story memory**:
+   - When summarizing a story, finds up to 3 related stories (centroid cosine > 0.5) and injects their summaries as context
+   - LLM can reference broader narrative trends and avoid repeating what's already been analyzed
+
+3. **Source track records**:
+   - Historical reliability/bias patterns per source injected into analysis prompt
+   - Conservative sources flagged for tendency to exaggerate achievements, opposition sources for emphasis on repression
+   - Stored per-source alignment labels in Persian for prompt injection
+
+4. **Five intelligence features**:
+   - **Silence detection** (`step_detect_silences`): finds stories covered by 3+ sources on one side with 0 on the other; generates LLM hypothesis for top 5 silences explaining why one side is silent
+   - **Coordinated messaging** (`step_detect_coordination`): detects 3+ articles from different sources in same alignment group with cosine > 0.85 published within 6 hours — flags as coordinated; stored in `summary_en` JSON under `"coordinated_messaging"`
+   - **Narrative arc tracking**: LLM generates `narrative_arc` field showing how a story evolved over time, stored in story extras
+   - **What-changed delta**: old summary saved before re-analysis; `delta` field captures only new information since last analysis (avoids repetition in re-summarized stories)
+   - **Prediction verification** (`step_verify_predictions`): checks past analyst predictions against current events, marks as verified/falsified with notes
+
+5. **Cost optimizations**:
+   - **Embedding dedup** (cosine > 0.92): 3rd layer of dedup catches paraphrased reposts within 48h window
+   - **3-layer dedup** (`step_deduplicate_articles`): title match → URL match → embedding similarity
+   - **Priority scoring**: `_analysis_priority()` ranks stories by diversity/coverage/recency; only top 15 get deep analysis per run (`MAX_STORIES_PER_RUN = 15`)
+   - **Smart article selection**: one per source, balanced across alignments, longest content preferred — instead of just "most recent"
+   - **Visible-only bias scoring**: reduced `MAX_PER_RUN` from 150 to 100 with priority scoring to save cost
+   - **Summary throttle**: 15 stories/run cap, skips low-priority candidates
+
+6. **Quality post-processing** (`step_quality_postprocess`):
+   - Final LLM review of top 15 stories after all other steps complete
+   - Catches inconsistencies, missing data, and quality issues in generated summaries
+
+7. **Analyst model + AnalystTake model + extraction pipeline**:
+   - `Analyst` model: name (en/fa), slug, platform presence (Telegram, Twitter, website), political leaning, location (inside/outside Iran), affiliation, focus areas, bio, imprisonment status
+   - `AnalystTake` model: extracted insights from analyst Telegram posts — linked to analyst, story, and telegram_post; classified by type (prediction, reasoning, insider_signal, fact_check, historical_parallel, commentary) and confidence direction (bullish/bearish/neutral); verification fields filled later
+   - `step_extract_analyst_takes`: LLM pipeline extracts structured takes from Telegram posts
+
+8. **Aggregator link extraction from Telegram**:
+   - `extract_articles_from_aggregators()` in telegram_service.py — pulls URLs from aggregator channels and creates article records from linked pages
+
+9. **New API endpoints**:
+   - `GET /stories/insights/loaded-words` — aggregate loaded/charged words across top trending stories for "Words of the Week" section
+   - `GET /stories/{id}/article-positions` — PCA-reduced 2D coordinates for each article in a story (for scatter plot visualization)
+   - `POST /admin/create-tables` — create new DB tables without running full Alembic migration
+   - `POST /admin/cleanup-unrelated` — remove unrelated articles from stories
+
+10. **Frontend updates**:
+    - **NarrativeMap** (`components/home/NarrativeMap.tsx`): PCA scatter plot visualization — fetches article positions from API, plots dots colored by alignment (conservative/opposition/independent) with hover tooltips
+    - **WordsOfWeek** (`components/home/WordsOfWeek.tsx`): now API-driven — fetches from `/insights/loaded-words`, falls back to hardcoded data if API unavailable; toggle between conservative and opposition vocabulary
+    - **Battle of Numbers**: dynamic data from story analysis instead of hardcoded
+
+11. **Pipeline now 31 steps** (was ~26):
+    ```
+    ingest → process → backfill_farsi_titles → cluster → centroids → merge_similar →
+    summarize → bias_score → fix_images → story_quality → detect_silences →
+    detect_coordination → source_health → archive_stale → recalc_trending →
+    dedup_articles → fixes → flag_unrelated → image_relevance → analyst_takes →
+    verify_predictions → rater_feedback → feedback_health → telegram_health →
+    visual → uptime → disk → cost_tracking → backup → quality_postprocess →
+    weekly_digest → update_docs
+    ```
+
+### Key decisions
+- D032: Two-pass analysis — nano for fact extraction, premium for framing
+- D033: Cross-story memory via centroid similarity (threshold 0.5)
+- D034: Source track records injected into analysis prompt
+- D035: Silence detection with LLM-generated hypotheses (top 5 only)
+- D036: Coordinated messaging detection (cosine > 0.85 within 6h window)
+- D037: 3-layer dedup (title + URL + embedding cosine > 0.92)
+- D038: Priority scoring caps deep analysis at 15 stories/run
+- D039: Analyst model for tracking Iranian political commentators
+- D040: AnalystTake extraction pipeline from Telegram
+
+### Lessons learned
+- **Two-pass analysis is both cheaper and better.** Nano extracts facts for ~$0.001; premium model gets clean structured input instead of raw messy articles. Quality goes up, cost goes down.
+- **Cross-story memory prevents analytical amnesia.** Without context from related stories, the LLM analyzes each story in isolation and misses how narratives connect.
+- **Silence detection is more revealing than bias scoring.** What media chooses NOT to cover tells you more about their agenda than how they cover it.
+- **Coordinated messaging detection needs tight time windows.** 6 hours is enough to catch synchronized coverage campaigns without false-flagging stories that naturally get covered by multiple outlets.
+- **3-layer dedup catches different duplication patterns.** Title match catches exact reposts, URL match catches cross-posted articles, embedding similarity catches paraphrased content.
+- **Priority scoring over brute-force is the right cost strategy.** Spending premium on 15 high-value stories beats spending baseline on 150 low-value ones.
+
+### New models
+- `analysts` table: Iranian political analysts/commentators with classification metadata
+- `analyst_takes` table: LLM-extracted structured insights from analyst Telegram posts
+
+### Files changed (summary)
+```
+backend/app/models/analyst.py              # NEW: Analyst model (name, leaning, location, bio)
+backend/app/models/analyst_take.py         # NEW: AnalystTake model (extracted insights)
+backend/app/services/story_analysis.py     # Two-pass analysis, FACT_EXTRACTION_PROMPT, cross-story memory, source track records, delta
+backend/app/services/telegram_service.py   # extract_articles_from_aggregators()
+backend/app/api/v1/stories.py             # /insights/loaded-words, /{id}/article-positions endpoints
+backend/app/api/v1/admin.py               # /create-tables, /cleanup-unrelated endpoints
+backend/auto_maintenance.py               # step_detect_silences, step_detect_coordination, step_quality_postprocess, step_verify_predictions, step_extract_analyst_takes, 3-layer dedup, priority scoring, smart article selection, cross-story memory, source track records
+frontend/src/components/home/NarrativeMap.tsx  # PCA scatter plot (API-driven article positions)
+frontend/src/components/home/WordsOfWeek.tsx   # API-driven loaded words (was hardcoded)
+frontend/src/app/[locale]/page.tsx         # Battle of numbers now dynamic
+```
+
+---
+
 ## 2026-04-12 — Major homepage & story detail redesign session
 
 ### Key outcomes

@@ -1,6 +1,6 @@
 # Doornegar - Backlog
 
-**Last updated**: 2026-04-12 (post major redesign session)
+**Last updated**: 2026-04-13 (post intelligence layer + cost optimization mega-session)
 
 ## Must Have (before public launch)
 
@@ -23,11 +23,12 @@
 - [ ] Sentry error tracking (free tier)
 
 ### Content
-- [ ] Bias scoring full coverage — currently ~10% of eligible; ~9 maintenance runs at default 150/run will clear the backlog
-- [ ] Content review of LLM-generated summaries (spot-check for accuracy — use dashboard "Recently re-summarized" card)
+- [ ] Bias scoring full coverage — priority scoring now caps at 100/run; focus is on visible stories first
+- [ ] Content review of LLM-generated summaries (spot-check for accuracy — use dashboard "Recently re-summarized" card + quality post-processing now catches some issues automatically)
 - [ ] Add more Iranian media sources (geo-blocked ones via proxy)
 - [ ] Clean up pre-size-ceiling oversized clusters (use dashboard "Unclaim story articles" button as spotted)
 - [ ] One-shot: click "Null localhost image URLs" on dashboard + run maintenance 3-4 times to re-fetch og:images for ~2,000 articles
+- [ ] Seed initial analyst records (Telegram commentators, political analysts) for AnalystTake extraction pipeline
 
 ## Should Have
 
@@ -36,16 +37,31 @@
 - [ ] Search functionality (full-text search)
 - [ ] Pagination or infinite scroll on story lists
 - [ ] Story detail: timeline of when each outlet published
+- [ ] Display silence detection results on story detail page (data available in summary_en JSON)
+- [ ] Display coordinated messaging alerts on story detail page
+- [ ] Display narrative arc / what-changed delta on story detail page
+- [ ] Analyst takes section on story detail page (show extracted predictions, reasoning)
 - [x] ~~Improve LLM clustering precision~~ — embedding pre-filter + double-match guard + keepalive (2026-04-12)
 - [x] ~~Homepage redesign~~ — BBC-style top section, weekly briefing, most disputed, battle of numbers, narrative map, words of week (2026-04-12)
 - [x] ~~Story detail page redesign~~ — tabbed analysis, political spectrum, stats panel (2026-04-12)
 - [x] ~~Label neutrality~~ — حکومتی→محافظه‌کار, برون‌مرزی→اپوزیسیون, نقاط کور→نگاه یک‌طرفه (2026-04-12)
 - [x] ~~Source logos~~ — added for all 18 outlets (2026-04-12)
+- [x] ~~NarrativeMap PCA scatter plot~~ — API-driven article positions visualization (2026-04-13)
+- [x] ~~WordsOfWeek API integration~~ — fetches from /insights/loaded-words endpoint (2026-04-13)
+- [x] ~~Battle of Numbers dynamic data~~ — now uses story analysis data instead of hardcoded (2026-04-13)
 
 ### Phase 4 Prep (Rating System)
 - [ ] Create first admin rater account
 - [ ] Email-based invite system for new raters
 - [ ] Rating UI polish
+
+### Intelligence Layer (New — Future Enhancements)
+- [ ] Expand analyst database — seed 20+ Iranian political commentators with Telegram handles
+- [ ] Prediction scorecard — aggregate verified/falsified predictions per analyst, show reliability %
+- [ ] Silence detection dashboard — dedicated page showing all current silences with hypotheses
+- [ ] Coordinated messaging timeline — visual timeline of synchronized coverage events
+- [ ] Narrative arc visualization — show story evolution over days/weeks with key turning points
+- [ ] Cross-story intelligence briefing — weekly summary of how stories connect and influence each other
 
 ## Nice to Have
 
@@ -150,3 +166,23 @@ See `MIGRATION_PLAN.md` for the full step-by-step plan.
 - [x] Source neutrality scoring
 - [x] Telegram embed image fallback
 - [x] PATCH admin endpoints for stories, articles, sources
+- [x] Two-pass analysis (nano fact extraction → premium framing) (2026-04-13)
+- [x] Cross-story memory (related story summaries injected as context) (2026-04-13)
+- [x] Source track records (historical reliability per source in prompts) (2026-04-13)
+- [x] Silence detection with LLM-generated hypotheses (2026-04-13)
+- [x] Coordinated messaging detection (cosine > 0.85 within 6h) (2026-04-13)
+- [x] Narrative arc tracking + what-changed delta (2026-04-13)
+- [x] Prediction verification pipeline (2026-04-13)
+- [x] 3-layer dedup (title + URL + embedding cosine > 0.92) (2026-04-13)
+- [x] Priority scoring — top 15 stories per run for deep analysis (2026-04-13)
+- [x] Smart article selection (one per source, balanced alignments) (2026-04-13)
+- [x] Quality post-processing (final LLM review of top stories) (2026-04-13)
+- [x] Analyst model + AnalystTake model + extraction pipeline (2026-04-13)
+- [x] Aggregator link extraction from Telegram (2026-04-13)
+- [x] /insights/loaded-words API endpoint (2026-04-13)
+- [x] /stories/{id}/article-positions PCA endpoint (2026-04-13)
+- [x] /admin/create-tables + /admin/cleanup-unrelated endpoints (2026-04-13)
+- [x] NarrativeMap PCA scatter plot (API-driven) (2026-04-13)
+- [x] WordsOfWeek API integration (was hardcoded) (2026-04-13)
+- [x] Battle of Numbers dynamic data (2026-04-13)
+- [x] Pipeline expanded to 31 steps (was ~26) (2026-04-13)

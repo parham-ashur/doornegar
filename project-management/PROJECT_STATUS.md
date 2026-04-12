@@ -1,6 +1,6 @@
 # Doornegar - Project Status
 
-**Last updated**: 2026-04-12 (post major redesign session)
+**Last updated**: 2026-04-13 (post intelligence layer + cost optimization mega-session)
 
 ## What is Doornegar?
 
@@ -54,6 +54,24 @@ Doornegar (دورنگر) is a free, bilingual (Persian/English) media transparen
 - **Neon keepalive**: `_keepalive(db)` pings before each LLM call; `pool_recycle` lowered to 240s
 - **LLM retry with backoff**: `llm_failed_at` column on Article + Story, 24h retry window
 - **Admin dashboard** at `/fa/dashboard` (LTR) with live maintenance progress modal, diagnostics panel, recently re-summarized stories browser, force-resummarize buttons (test 5 / refresh 16), data repair section (null localhost images / unclaim story articles), re-embed-all button, priority vote + merge suggestion buttons, device context badges, pipeline controls, and PATCH editing for stories/articles/sources
+- **Two-pass analysis**: Pass 1 uses `gpt-4.1-nano` for structured fact extraction (~$0.001/story), Pass 2 uses premium model for deep framing analysis with pre-extracted facts as input
+- **Cross-story memory**: related stories (centroid cosine > 0.5) injected as context during analysis — prevents analytical amnesia across connected narratives
+- **Source track records**: historical reliability patterns per source injected into LLM analysis prompts
+- **Intelligence features** (5):
+  - **Silence detection** (`step_detect_silences`): finds one-sided coverage (3+ articles from one side, 0 from other); LLM-generated hypotheses for top 5
+  - **Coordinated messaging** (`step_detect_coordination`): flags 3+ articles from different sources in same group with cosine > 0.85 within 6h
+  - **Narrative arc tracking**: story evolution tracked in `narrative_arc` field
+  - **What-changed delta**: captures only new information since last analysis (avoids repetition)
+  - **Prediction verification** (`step_verify_predictions`): checks past analyst predictions against current events
+- **Cost optimizations**: 3-layer dedup (title + URL + embedding cosine > 0.92), priority scoring (top 15 only per run), smart article selection (one per source, balanced alignments), visible-only bias scoring (100/run cap), summary throttle
+- **Quality post-processing** (`step_quality_postprocess`): final LLM review of top 15 stories after all other pipeline steps
+- **Analyst model** + **AnalystTake model**: track Iranian political commentators and extract structured insights (predictions, reasoning, insider signals, fact checks) from their Telegram posts
+- **Aggregator link extraction**: `extract_articles_from_aggregators()` pulls URLs from aggregator Telegram channels
+- **New API endpoints**: `GET /insights/loaded-words` (aggregate loaded vocabulary), `GET /stories/{id}/article-positions` (PCA 2D coordinates), `POST /admin/create-tables`, `POST /admin/cleanup-unrelated`
+- **NarrativeMap** component: PCA scatter plot showing article positions colored by alignment — API-driven from `/article-positions`
+- **WordsOfWeek** component: now fetches from `/insights/loaded-words` API (was hardcoded); fallback to static data if API unavailable
+- **Battle of Numbers**: now uses dynamic data from story analysis
+- **Pipeline expanded to 31 steps** (was ~26): added silence detection, coordinated messaging, analyst take extraction, prediction verification, quality post-processing, 3-layer dedup
 
 ### What needs work
 
@@ -65,7 +83,10 @@ Doornegar (دورنگر) is a free, bilingual (Persian/English) media transparen
 - State media RSS feeds geo-blocked — relying on Telegram as workaround
 - Existing oversized clusters (pre-size-ceiling) may still exist — need manual cleanup via "Unclaim story articles" dashboard button when spotted
 - ~2,000 articles still have `localhost:8000` image URLs (dev-only leftovers). Fix: click "Null localhost image URLs" on dashboard then Run Maintenance a few times to let `step_fix_images` re-fetch from source URLs
-- Bias scoring catching up (~10% of eligible; need ~9 maintenance runs to reach 100% with default 150/run cap)
+- Bias scoring catching up — priority scoring now focuses on visible stories (100/run cap)
+- Analyst database not yet seeded — need to add Iranian political commentators for AnalystTake extraction
+- Intelligence features (silence, coordination, narrative arc, delta) generate data but no frontend display yet
+- Prediction verification needs analyst takes seeded first to have data to verify
 
 ## Data Metrics
 
@@ -95,7 +116,9 @@ From local development DB, April 10, 2026:
 | Embeddings | OpenAI (text-embedding-3-small) | Article + story centroid embeddings | Working (~$0.05/month) |
 | LLM story analysis (long-tail) | OpenAI (gpt-4o-mini) | Non-trending story summaries | Working (baseline tier) |
 | LLM title translation | OpenAI (gpt-4.1-nano) | English headline → Persian | Working (economy tier) |
+| LLM fact extraction | OpenAI (gpt-4.1-nano) | Pass 1: structured fact extraction | Working (economy tier, ~$0.001/story) |
 | LLM clustering | OpenAI (gpt-5-mini) | Match articles to stories | Working (reasoning task, content-aware) |
+| LLM intelligence | OpenAI (gpt-4.1-nano) | Silence hypotheses, coordination detection | Working (economy tier) |
 | Maintenance scheduler | Railway Cron | Daily `auto_maintenance.py` | Running |
 | Telegram API | Telethon | 16 channels monitored | Configured |
 
@@ -145,5 +168,6 @@ From local development DB, April 10, 2026:
 | Phase 3 | Frontend: Next.js bilingual UI | Done |
 | Phase 4 | Private rating system (invite-only) | Code deployed, no raters yet |
 | Phase 5 | R2 image storage + security hardening | **Done (2026-04-10)** |
+| Phase 5.5 | Intelligence layer: two-pass analysis, silence/coordination detection, analyst tracking, cost optimization | **Done (2026-04-13)** |
 | Phase 6 | Cloudflare CDN/WAF + UptimeRobot + OpenAI caps | **Next** |
 | Phase 7 | OVHcloud VPS migration | Not started |
