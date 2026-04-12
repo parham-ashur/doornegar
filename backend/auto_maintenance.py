@@ -283,6 +283,7 @@ async def step_summarize():
                     "content": (a.content_text or a.summary or "")[:1500],
                     "source_name_fa": a.source.name_fa if a.source else "نامشخص",
                     "state_alignment": a.source.state_alignment if a.source else "",
+                    "published_at": a.published_at.isoformat() if a.published_at else "",
                 }
                 for a in top_articles
             ]
@@ -501,6 +502,7 @@ async def step_story_quality():
                         "content": (a.content_text or a.summary or "")[:1500],
                         "source_name_fa": a.source.name_fa if a.source else "نامشخص",
                         "state_alignment": a.source.state_alignment if a.source else "",
+                        "published_at": a.published_at.isoformat() if a.published_at else "",
                     }
                     for a in story.articles
                 ]

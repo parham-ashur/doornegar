@@ -89,9 +89,9 @@ STORY_ANALYSIS_PROMPT = """\
   "independent_summary_fa": "<دیدگاه مستقل ۲-۳ جمله، یا null>",
   "bias_explanation_fa": "<مقایسه چارچوب‌بندی ۲-۳ جمله با نقل واژگان مشخص>",
   "scores": {{
-    "state": {{"tone": <عدد -2 تا 2>, "factuality": <عدد 1 تا 5>, "emotional_language": <عدد 1 تا 5>, "framing": ["از این لیست: مقاومت، پیروزی، قربانی، تهدید، بحران، امنیت، حقوق بشر، اقتصادی، دخالت خارجی، خنثی"]}},
-    "diaspora": {{"tone": <-2 تا 2>, "factuality": <1 تا 5>, "emotional_language": <1 تا 5>, "framing": [...]}},
-    "independent": {{"tone": <-2 تا 2>, "factuality": <1 تا 5>, "emotional_language": <1 تا 5>, "framing": [...]}}
+    "state": {{"tone": <عدد -2 تا 2>, "factuality": <عدد 1 تا 5>, "emotional_language": <عدد 1 تا 5>, "framing": ["حداکثر ۳ مورد از: مقاومت، پیروزی، قربانی، تهدید، بحران، امنیت، حقوق بشر، اقتصادی، دخالت خارجی، خنثی"]}},
+    "diaspora": {{"tone": <-2 تا 2>, "factuality": <1 تا 5>, "emotional_language": <1 تا 5>, "framing": ["حداکثر ۳"]}},
+    "independent": {{"tone": <-2 تا 2>, "factuality": <1 تا 5>, "emotional_language": <1 تا 5>, "framing": ["حداکثر ۳"]}}
   }}
 }}"""
 
@@ -173,7 +173,7 @@ async def generate_story_analysis(
             "OPENAI_API_KEY is not configured. Set it in .env to use story analysis."
         )
 
-    # Build articles block with content
+    # Build articles block with content, source, alignment, AND publish date
     lines = []
     for i, art in enumerate(articles_with_sources, 1):
         alignment_fa = ALIGNMENT_LABELS_FA.get(
@@ -182,10 +182,13 @@ async def generate_story_analysis(
         source_name = art.get("source_name_fa", "نامشخص")
         title = art.get("title", "بدون عنوان")
         content = art.get("content", "")
+        published = art.get("published_at") or ""
 
         lines.append(f"--- مقاله {i} ---")
         lines.append(f"عنوان: {title}")
         lines.append(f"منبع: {source_name} (جهت‌گیری: {alignment_fa})")
+        if published:
+            lines.append(f"تاریخ انتشار: {published}")
         if content:
             lines.append(f"متن: {content}")
         lines.append("")
