@@ -616,12 +616,19 @@ async def step_story_quality():
                 try:
                     analysis = await generate_story_analysis(story, articles_info)
                     story.summary_fa = analysis.get("summary_fa")
+                    if analysis.get("title_fa"):
+                        story.title_fa = analysis["title_fa"].strip()
+                    if analysis.get("title_en"):
+                        story.title_en = analysis["title_en"].strip()
                     story.summary_en = _json.dumps({
                         "state_summary_fa": analysis.get("state_summary_fa"),
                         "diaspora_summary_fa": analysis.get("diaspora_summary_fa"),
                         "independent_summary_fa": analysis.get("independent_summary_fa"),
                         "bias_explanation_fa": analysis.get("bias_explanation_fa"),
                         "scores": analysis.get("scores"),
+                        "source_neutrality": analysis.get("source_neutrality"),
+                        "dispute_score": analysis.get("dispute_score"),
+                        "loaded_words": analysis.get("loaded_words"),
                     }, ensure_ascii=False)
                     stats["summaries_regenerated"] += 1
                     logger.info(f"  Regenerated summary: {story.title_fa[:40]}")

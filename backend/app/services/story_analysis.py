@@ -259,12 +259,17 @@ def _parse_analysis_response(response_text: str) -> dict:
 
     # Ensure required fields
     defaults = {
+        "title_fa": None,
+        "title_en": None,
         "summary_fa": None,
         "state_summary_fa": None,
         "diaspora_summary_fa": None,
         "independent_summary_fa": None,
         "bias_explanation_fa": None,
         "scores": None,
+        "source_neutrality": None,
+        "dispute_score": None,
+        "loaded_words": None,
     }
     for key, default in defaults.items():
         if key not in result:
