@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { X, Send } from "lucide-react";
+import { X, Send, Search } from "lucide-react";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 type TargetType =
   | "story" | "story_title" | "story_image" | "story_summary"
-  | "article" | "source" | "source_dimension" | "layout" | "homepage" | "other";
+  | "article" | "source" | "source_dimension" | "layout" | "homepage"
+  | "merge_stories" | "other";
 
 type IssueType =
   | "wrong_title" | "bad_image" | "wrong_clustering" | "bad_summary"
@@ -113,20 +114,19 @@ const SCHEMAS: Record<TargetType, FormSchema> = {
   },
   story: {
     title: "بازخورد درباره این موضوع",
-    description: "مقاله‌ها نامرتبط هستند، یا این موضوع باید با موضوع دیگری ادغام شود؟",
+    description: "مقاله‌ها نامرتبط هستند، یا مشکل دیگری با این خبر وجود دارد؟",
     issueOptions: [
       { value: "wrong_clustering", label: "مقاله‌ها به هم مرتبط نیستند" },
-      { value: "merge_stories", label: "ادغام با موضوع دیگر" },
       { value: "priority_higher", label: "این موضوع مهم‌تر است (بالاتر نمایش بده)" },
       { value: "priority_lower", label: "این موضوع کم‌اهمیت‌تر است" },
       { value: "other", label: "سایر" },
     ],
     showCurrentValue: false,
-    showSuggestedValue: true,
-    suggestedLabel: "شناسه موضوع مقصد (برای ادغام)",
-    suggestedPlaceholder: "اگر ادغام پیشنهاد می‌دهید، عنوان یا شناسه موضوع دوم را بنویسید",
+    showSuggestedValue: false,
+    suggestedLabel: "",
+    suggestedPlaceholder: "",
     reasonLabel: "توضیح",
-    reasonPlaceholder: "توضیح بیشتر: چرا باید ادغام شود، یا چرا اولویت باید تغییر کند؟",
+    reasonPlaceholder: "توضیح بیشتر درباره مشکل",
   },
   article: {
     title: "بازخورد درباره یک مقاله",
@@ -199,6 +199,19 @@ const SCHEMAS: Record<TargetType, FormSchema> = {
     reasonLabel: "توضیح",
     reasonPlaceholder: "چه چیزی در صفحه اصلی می‌توانست بهتر باشد؟",
   },
+  merge_stories: {
+    title: "ادغام با موضوع دیگر",
+    description: "این خبر باید با کدام موضوع دیگر ادغام شود؟",
+    issueOptions: [
+      { value: "merge_stories", label: "ادغام با موضوع دیگر" },
+    ],
+    showCurrentValue: false,
+    showSuggestedValue: false,
+    suggestedLabel: "",
+    suggestedPlaceholder: "",
+    reasonLabel: "توضیح (اختیاری)",
+    reasonPlaceholder: "چرا این دو باید یکی باشند؟",
+  },
   other: {
     title: "پیشنهاد کلی",
     description: "هر نظر یا پیشنهاد دیگر",
@@ -237,6 +250,12 @@ export default function ImprovementModal({
   const [similarCount, setSimilarCount] = useState(0);
   const [undoCountdown, setUndoCountdown] = useState(0);
 
+  // Story picker state (for merge_stories)
+  const [storyList, setStoryList] = useState<{ id: string; title_fa: string; article_count: number; topics: string[] }[]>([]);
+  const [storySearch, setStorySearch] = useState("");
+  const [selectedMergeTarget, setSelectedMergeTarget] = useState<string | null>(null);
+  const [loadingStories, setLoadingStories] = useState(false);
+
   // Reset state when the modal opens with a new target
   useEffect(() => {
     if (open) {
@@ -247,8 +266,28 @@ export default function ImprovementModal({
       setLastSubmittedId(null);
       setSimilarCount(0);
       setUndoCountdown(0);
+      setSelectedMergeTarget(null);
+      setStorySearch("");
     }
   }, [open, defaultIssueType, targetType]);
+
+  // Fetch story list for merge picker
+  useEffect(() => {
+    if (open && targetType === "merge_stories" && storyList.length === 0) {
+      setLoadingStories(true);
+      fetch(`${API}/api/v1/stories/trending?limit=50&min_articles=4`)
+        .then((r) => r.ok ? r.json() : [])
+        .then((data: { id: string; title_fa: string; article_count: number; topics?: string[] }[]) => {
+          setStoryList(
+            (Array.isArray(data) ? data : [])
+              .filter((s) => s.id !== targetId)
+              .map((s) => ({ id: s.id, title_fa: s.title_fa, article_count: s.article_count, topics: s.topics || [] }))
+          );
+        })
+        .catch(() => {})
+        .finally(() => setLoadingStories(false));
+    }
+  }, [open, targetType, targetId, storyList.length]);
 
   // Undo countdown tick
   useEffect(() => {
@@ -283,7 +322,11 @@ export default function ImprovementModal({
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!reason.trim() && !suggestedValue.trim()) {
+    if (targetType === "merge_stories" && !selectedMergeTarget) {
+      alert("لطفاً یک موضوع مقصد برای ادغام انتخاب کنید");
+      return;
+    }
+    if (targetType !== "merge_stories" && !reason.trim() && !suggestedValue.trim()) {
       alert("لطفاً حداقل توضیح یا پیشنهاد خود را بنویسید");
       return;
     }
@@ -293,12 +336,12 @@ export default function ImprovementModal({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          target_type: targetType,
+          target_type: targetType === "merge_stories" ? "story" : targetType,
           target_id: targetId || null,
           target_url: targetUrl || (typeof window !== "undefined" ? window.location.href : null),
-          issue_type: issueType,
+          issue_type: targetType === "merge_stories" ? "merge_stories" : issueType,
           current_value: currentValue || null,
-          suggested_value: suggestedValue || null,
+          suggested_value: selectedMergeTarget || suggestedValue || null,
           reason: reason || null,
           // Auto-capture device context so admins can reproduce mobile-specific bugs
           device_info: typeof window !== "undefined"
@@ -457,6 +500,55 @@ export default function ImprovementModal({
                     rows={3}
                     className="w-full px-3 py-2 text-xs border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none focus:border-slate-900 dark:focus:border-white"
                   />
+                </div>
+              )}
+
+              {/* Story picker for merge */}
+              {targetType === "merge_stories" && (
+                <div>
+                  <label className="block text-xs font-bold text-slate-900 dark:text-white mb-1.5">
+                    موضوع مقصد
+                  </label>
+                  <div className="relative mb-2">
+                    <Search className="absolute right-2 top-2 h-3.5 w-3.5 text-slate-400" />
+                    <input
+                      type="text"
+                      value={storySearch}
+                      onChange={(e) => setStorySearch(e.target.value)}
+                      placeholder="جستجوی عنوان موضوع..."
+                      className="w-full pr-8 pl-3 py-2 text-xs border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none focus:border-slate-900 dark:focus:border-white"
+                    />
+                  </div>
+                  {loadingStories ? (
+                    <p className="text-[11px] text-slate-400 py-2">در حال بارگذاری...</p>
+                  ) : (
+                    <div className="max-h-48 overflow-y-auto border border-slate-200 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800">
+                      {storyList
+                        .filter((s) => !storySearch || s.title_fa?.includes(storySearch) || s.topics.some((t) => t.includes(storySearch)))
+                        .slice(0, 20)
+                        .map((s) => (
+                          <button
+                            key={s.id}
+                            type="button"
+                            onClick={() => setSelectedMergeTarget(s.id)}
+                            className={`w-full text-right px-3 py-2 text-xs hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors ${
+                              selectedMergeTarget === s.id
+                                ? "bg-blue-50 dark:bg-blue-950/30 border-r-2 border-blue-500"
+                                : ""
+                            }`}
+                          >
+                            <span className="font-medium text-slate-900 dark:text-white line-clamp-1">{s.title_fa}</span>
+                            <span className="text-[10px] text-slate-400 block mt-0.5">
+                              {s.article_count} مقاله
+                              {s.topics.length > 0 && <> · {s.topics.join("، ")}</>}
+                            </span>
+                          </button>
+                        ))}
+                      {storyList.filter((s) => !storySearch || s.title_fa?.includes(storySearch)).length === 0 && (
+                        <p className="text-[11px] text-slate-400 py-3 text-center">موضوعی یافت نشد</p>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 

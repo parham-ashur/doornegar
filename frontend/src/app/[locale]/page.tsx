@@ -283,9 +283,7 @@ export default async function HomePage({
                 <h3 className="mt-2 text-[14px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
                   {s.title_fa}
                 </h3>
-                <p className="mt-1 text-[11px] text-slate-400">
-                  {s.source_count} رسانه · {s.article_count} مقاله
-                </p>
+                <Meta story={s} />
                 {allSummaries[s.id] && (
                   <p className="mt-1.5 text-[12px] leading-[20px] text-slate-400 dark:text-slate-500 line-clamp-3">{allSummaries[s.id]}</p>
                 )}
@@ -375,13 +373,9 @@ export default async function HomePage({
                   <h3 className="mt-2 text-[14px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
                     {s.title_fa}
                   </h3>
-                  <p className="mt-1 text-[12px] text-slate-400">{s.source_count} رسانه · {s.article_count} مقاله</p>
-                  {(s.state_pct > 0 || s.independent_pct > 0 || s.diaspora_pct > 0) && (
-                    <div className="mt-1 flex items-center gap-2">
-                      {s.state_pct > 0 && <span className="text-[11px] font-medium text-red-500">حکومتی {s.state_pct}٪</span>}
-                      {s.independent_pct > 0 && <span className="text-[11px] font-medium text-emerald-600">مستقل {s.independent_pct}٪</span>}
-                      {s.diaspora_pct > 0 && <span className="text-[11px] font-medium text-blue-600">برون‌مرزی {s.diaspora_pct}٪</span>}
-                    </div>
+                  <Meta story={s} />
+                  {allSummaries[s.id] && (
+                    <p className="mt-1 text-[11px] leading-4 text-slate-400 dark:text-slate-500 line-clamp-2">{allSummaries[s.id]}</p>
                   )}
                 </Link>
               ))}
@@ -392,7 +386,7 @@ export default async function HomePage({
                 <h3 className="text-[14px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400">
                   {s.title_fa}
                 </h3>
-                <p className="mt-1 text-[12px] text-slate-400">{s.source_count} رسانه · {s.article_count} مقاله</p>
+                <Meta story={s} />
                 {allSummaries[s.id] && (
                   <p className="mt-1.5 text-[12px] leading-5 text-slate-400 dark:text-slate-500 line-clamp-2">{allSummaries[s.id]}</p>
                 )}

@@ -12,7 +12,8 @@ import { formatRelativeTime } from "@/lib/utils";
 // ─── Feedback types ───────────────────────────────────────────
 type TargetType =
   | "story" | "story_title" | "story_image" | "story_summary"
-  | "article" | "source" | "source_dimension" | "layout" | "homepage" | "other";
+  | "article" | "source" | "source_dimension" | "layout" | "homepage"
+  | "merge_stories" | "other";
 
 type IssueType =
   | "wrong_title" | "bad_image" | "wrong_clustering" | "bad_summary"
@@ -145,11 +146,11 @@ function StoryActions({ storyId, storyTitle, openFeedback }: {
   openFeedback: (ctx: FeedbackContext) => void;
 }) {
   return (
-    <div className="absolute bottom-1 left-1 z-20 flex gap-1 md:opacity-0 md:group-hover:opacity-100 opacity-100 transition-opacity" dir="ltr">
+    <div className="absolute bottom-1 right-1 z-20 flex gap-1 md:opacity-0 md:group-hover:opacity-100 opacity-100 transition-opacity" dir="ltr">
       <PriorityVoteBtn storyId={storyId} direction="higher" storyTitle={storyTitle} />
       <PriorityVoteBtn storyId={storyId} direction="lower" storyTitle={storyTitle} />
       <button type="button" title="ادغام با موضوع دیگر"
-        onClick={(e) => { e.preventDefault(); e.stopPropagation(); openFeedback({ targetType: "story", targetId: storyId, defaultIssueType: "merge_stories", contextLabel: storyTitle }); }}
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); openFeedback({ targetType: "merge_stories", targetId: storyId, defaultIssueType: "merge_stories", contextLabel: storyTitle }); }}
         className="p-1 bg-slate-900/80 dark:bg-white/80 text-white dark:text-slate-900 shadow-sm hover:scale-110">
         <GitMerge className="h-3 w-3" />
       </button>
@@ -268,12 +269,10 @@ export default function HomepageLayout({ stories, summaries, locale, feedbackMod
                     <div className="aspect-[3/2] overflow-hidden bg-slate-100 dark:bg-slate-800 relative">
                       <SafeImage src={s.image_url} className="h-full w-full object-cover" />
                     </div>
-                    <h3 className="mt-2 text-[14px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2 pl-6">
+                    <h3 className="mt-2 text-[14px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
                       {s.title_fa}
                     </h3>
-                    <p className="mt-1 text-[11px] text-slate-400">
-                      {s.source_count} رسانه · {s.article_count} مقاله
-                    </p>
+                    <Meta story={s} />
                     {summaries[s.id] && (
                       <p className="mt-1.5 text-[12px] leading-[20px] text-slate-400 dark:text-slate-500 line-clamp-3">{summaries[s.id]}</p>
                     )}
@@ -282,7 +281,7 @@ export default function HomepageLayout({ stories, summaries, locale, feedbackMod
                     <>
                       <FeedbackBtn icon={ImageIcon} label="تصویر" position="tl"
                         onClick={() => openFeedback({ targetType: "story_image", targetId: s.id, defaultIssueType: "bad_image", contextLabel: s.title_fa, imageUrl: s.image_url })} />
-                      <FeedbackBtn icon={Type} label="عنوان" position="bl"
+                      <FeedbackBtn icon={Type} label="عنوان" position="tr"
                         onClick={() => openFeedback({ targetType: "story_title", targetId: s.id, currentValue: s.title_fa, defaultIssueType: "wrong_title", contextLabel: s.title_fa })} />
                       <StoryActions storyId={s.id} storyTitle={s.title_fa} openFeedback={openFeedback} />
                     </>
@@ -423,13 +422,9 @@ export default function HomepageLayout({ stories, summaries, locale, feedbackMod
                       <h3 className="mt-2 text-[14px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
                         {s.title_fa}
                       </h3>
-                      <p className="mt-1 text-[12px] text-slate-400">{s.source_count} رسانه · {s.article_count} مقاله</p>
-                      {(s.state_pct > 0 || s.independent_pct > 0 || s.diaspora_pct > 0) && (
-                        <div className="mt-1 flex items-center gap-2">
-                          {s.state_pct > 0 && <span className="text-[11px] font-medium text-red-500">حکومتی {s.state_pct}٪</span>}
-                          {s.independent_pct > 0 && <span className="text-[11px] font-medium text-emerald-600">مستقل {s.independent_pct}٪</span>}
-                          {s.diaspora_pct > 0 && <span className="text-[11px] font-medium text-blue-600">برون‌مرزی {s.diaspora_pct}٪</span>}
-                        </div>
+                      <Meta story={s} />
+                      {summaries[s.id] && (
+                        <p className="mt-1 text-[11px] leading-4 text-slate-400 dark:text-slate-500 line-clamp-2">{summaries[s.id]}</p>
                       )}
                     </Link>
                     {feedbackMode && (
