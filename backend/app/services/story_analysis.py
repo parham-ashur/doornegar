@@ -96,10 +96,58 @@ STORY_ANALYSIS_PROMPT = """\
 }}"""
 
 
+# ── Deep analyst factors (premium tier only) ──────────────────────
+# Appended to the prompt for top-N trending stories to generate
+# structured analytical factors alongside the summary/bias comparison.
+# This is the "Doornegar AI Analyst" — tagged so future human analysts
+# from Telegram can sit alongside it.
+
+ANALYST_FACTORS_ADDENDUM = """
+
+# تحلیل عمیق (فقط برای موضوعات مهم)
+
+علاوه بر خلاصه بالا، یک تحلیل عمیق به‌عنوان «تحلیلگر هوش مصنوعی دورنگر» ارائه بده.
+برای هر مورد زیر که مرتبط است، یک پاسخ فارسی مختصر (۱-۳ جمله) بنویس.
+اگر موردی به این رویداد مرتبط نیست، null بگذار.
+
+فیلد "analyst" را به JSON خروجی اضافه کن:
+
+"analyst": {{
+  "id": "doornegar-ai",
+  "name_fa": "تحلیلگر هوش مصنوعی دورنگر",
+  "type": "llm",
+
+  "risk_assessment": "<چه خطراتی وجود دارد؟ برای چه کسانی؟ یا null>",
+  "potential_outcomes": ["<سناریو محتمل ۱>", "<سناریو ۲>", "<سناریو ۳>"],
+  "key_stakeholders": ["<بازیگر ۱: نقش/منافع>", "<بازیگر ۲: نقش/منافع>"],
+  "missing_information": "<چه اطلاعاتی هنوز نداریم؟ چه سؤالاتی بی‌پاسخ مانده؟ یا null>",
+  "credibility_signals": "<کدام ادعاها تأیید شده، کدام تأیید نشده، کدام احتمالاً تبلیغاتی هستند؟ یا null>",
+  "timeline": {{"short_term": "<روزها>", "medium_term": "<هفته‌ها>", "long_term": "<ماه‌ها>"}},
+  "framing_gap": "<بزرگ‌ترین تفاوت بین روایت حکومتی و برون‌مرزی در یک جمله>",
+  "what_is_hidden": {{"state_omits": "<حکومتی چه چیزی را نمی‌گوید؟>", "diaspora_omits": "<برون‌مرزی چه چیزی را نمی‌گوید؟>"}},
+  "historical_parallel": "<آیا رویداد مشابهی در گذشته رخ داده؟ نتیجه‌اش چه بود؟ یا null>",
+  "economic_impact": "<تأثیر بر اقتصاد، تحریم‌ها، نرخ ارز، نفت؟ یا null>",
+  "international_implications": "<واکنش بین‌المللی، سازمان ملل، اتحادیه اروپا؟ یا null>",
+  "factional_dynamics": "<کدام جناح سیاسی (اصولگرا، اصلاح‌طلب، سپاه) از این بهره می‌برد؟ یا null>",
+  "human_rights_dimension": "<آیا حقوق بشر، آزادی بیان، حقوق زنان، اقلیت‌ها مطرح است؟ یا null>",
+  "public_sentiment": "<واکنش مردم در شبکه‌های اجتماعی و تلگرام چگونه بوده؟ یا null>",
+  "propaganda_watch": "<کدام ادعاهای مشخص از هر طرف نشانه‌های تبلیغاتی دارند؟ یا null>"
+}}
+
+قوانین تحلیل:
+- بی‌طرف باش. تحلیلگر هیچ طرفی نمی‌گیرد.
+- اگر مورد مرتبط نیست، null بگذار. مجبور نیستی همه را پر کنی.
+- از واژگان بارگذاری‌شده استفاده نکن — همه را در گیومه «» بگذار.
+- potential_outcomes باید حداقل ۲ سناریو داشته باشد.
+- key_stakeholders باید نام مشخص ببرد (شخص، سازمان، کشور).
+"""
+
+
 async def generate_story_analysis(
     story,
     articles_with_sources: list[dict],
     model: str | None = None,
+    include_analyst_factors: bool = False,
 ) -> dict:
     """Generate rich analysis for a story using article content.
 
@@ -107,6 +155,10 @@ async def generate_story_analysis(
         story: The Story ORM object.
         articles_with_sources: List of dicts with keys:
             title, content, source_name_fa, state_alignment
+        model: Optional model override (premium vs baseline).
+        include_analyst_factors: If True, appends the deep-analyst
+            factors addendum to the prompt. Used only for premium-tier
+            top-N trending stories. Adds ~1000 output tokens.
         model: Optional explicit model name. If None, uses
             settings.story_analysis_model (the baseline model).
             Callers that want the premium model for top-N trending
@@ -141,6 +193,10 @@ async def generate_story_analysis(
     articles_block = "\n".join(lines)
 
     prompt = STORY_ANALYSIS_PROMPT.format(articles_block=articles_block)
+    if include_analyst_factors:
+        prompt += ANALYST_FACTORS_ADDENDUM
+    # Increase max_tokens when analyst factors are included (~1000 extra output)
+    max_tokens = 6144 if include_analyst_factors else 4096
 
     try:
         from app.services.llm_helper import build_openai_params
@@ -149,7 +205,7 @@ async def generate_story_analysis(
         params = build_openai_params(
             model=model or settings.story_analysis_model,
             prompt=prompt,
-            max_tokens=4096,
+            max_tokens=max_tokens,
             temperature=0.3,
         )
         response = await client.chat.completions.create(**params)

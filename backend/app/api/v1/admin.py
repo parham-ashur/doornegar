@@ -369,16 +369,24 @@ async def force_resummarize(
             for a in story.articles
         ]
         try:
-            analysis = await generate_story_analysis(story, articles_info, model=chosen_model)
+            # Force-resummarize always uses premium model + analyst factors
+            analysis = await generate_story_analysis(
+                story, articles_info,
+                model=chosen_model,
+                include_analyst_factors=True,
+            )
             story.summary_fa = analysis.get("summary_fa")
-            story.summary_en = _json.dumps({
+            extras = {
                 "state_summary_fa": analysis.get("state_summary_fa"),
                 "diaspora_summary_fa": analysis.get("diaspora_summary_fa"),
                 "independent_summary_fa": analysis.get("independent_summary_fa"),
                 "bias_explanation_fa": analysis.get("bias_explanation_fa"),
                 "scores": analysis.get("scores"),
                 "llm_model_used": chosen_model,
-            }, ensure_ascii=False)
+            }
+            if analysis.get("analyst"):
+                extras["analyst"] = analysis["analyst"]
+            story.summary_en = _json.dumps(extras, ensure_ascii=False)
             await db.commit()
             regenerated += 1
         except Exception as e:
@@ -429,6 +437,7 @@ async def recently_summarized(
                 extras = _json.loads(s.summary_en)
             except Exception:
                 extras = {}
+        analyst = extras.get("analyst")
         items.append({
             "id": str(s.id),
             "title_fa": s.title_fa,
@@ -438,6 +447,10 @@ async def recently_summarized(
             "bias_explanation_fa": extras.get("bias_explanation_fa"),
             "has_state_summary": bool(extras.get("state_summary_fa")),
             "has_diaspora_summary": bool(extras.get("diaspora_summary_fa")),
+            "has_analyst": bool(analyst),
+            "analyst_risk": analyst.get("risk_assessment") if analyst else None,
+            "analyst_framing_gap": analyst.get("framing_gap") if analyst else None,
+            "analyst_hidden": analyst.get("what_is_hidden") if analyst else None,
         })
     return {"items": items}
 

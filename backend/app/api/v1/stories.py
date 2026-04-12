@@ -124,6 +124,7 @@ async def get_story_analysis(request: Request, story_id: uuid.UUID, db: AsyncSes
         independent_summary_fa=extra.get("independent_summary_fa"),
         bias_explanation_fa=extra.get("bias_explanation_fa"),
         scores=extra.get("scores"),
+        analyst=extra.get("analyst"),
     )
 
 
@@ -179,6 +180,7 @@ async def summarize_story(request: Request, story_id: uuid.UUID, db: AsyncSessio
         independent_summary_fa=analysis.get("independent_summary_fa"),
         bias_explanation_fa=analysis.get("bias_explanation_fa"),
         scores=analysis.get("scores"),
+        analyst=analysis.get("analyst"),
     )
 
 

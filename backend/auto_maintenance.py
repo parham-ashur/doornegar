@@ -295,16 +295,25 @@ async def step_summarize():
                 tier_label = "baseline"
             try:
                 await _keepalive(db)
-                analysis = await generate_story_analysis(story, articles_info, model=chosen_model)
+                is_premium = (tier_label == "premium")
+                analysis = await generate_story_analysis(
+                    story, articles_info,
+                    model=chosen_model,
+                    include_analyst_factors=is_premium,
+                )
                 story.summary_fa = analysis.get("summary_fa")
-                story.summary_en = _json.dumps({
+                extras = {
                     "state_summary_fa": analysis.get("state_summary_fa"),
                     "diaspora_summary_fa": analysis.get("diaspora_summary_fa"),
                     "independent_summary_fa": analysis.get("independent_summary_fa"),
                     "bias_explanation_fa": analysis.get("bias_explanation_fa"),
                     "scores": analysis.get("scores"),
                     "llm_model_used": chosen_model,
-                }, ensure_ascii=False)
+                }
+                # Store analyst factors for premium stories
+                if is_premium and analysis.get("analyst"):
+                    extras["analyst"] = analysis["analyst"]
+                story.summary_en = _json.dumps(extras, ensure_ascii=False)
                 story.llm_failed_at = None  # clear any previous failure
                 await db.commit()
                 success += 1
