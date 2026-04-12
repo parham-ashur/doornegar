@@ -55,6 +55,9 @@ const ISSUE_LABELS: Record<string, string> = {
   layout_issue: "Layout issue",
   bug: "Bug",
   feature_request: "Feature request",
+  priority_higher: "Priority ↑ (rater thinks this is important)",
+  priority_lower: "Priority ↓ (rater thinks this is less important)",
+  merge_stories: "Merge with another story",
   other: "Other",
 };
 

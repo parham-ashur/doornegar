@@ -14,7 +14,8 @@ TargetType = Literal[
 
 IssueType = Literal[
     "wrong_title", "bad_image", "wrong_clustering", "bad_summary",
-    "wrong_source_class", "layout_issue", "bug", "feature_request", "other",
+    "wrong_source_class", "layout_issue", "bug", "feature_request",
+    "priority_higher", "priority_lower", "merge_stories", "other",
 ]
 
 Status = Literal["open", "in_progress", "done", "wont_do", "duplicate"]

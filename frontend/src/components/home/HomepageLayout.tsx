@@ -2,11 +2,12 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Image as ImageIcon, Type, FileText, LayoutGrid, MessageSquare } from "lucide-react";
+import { Image as ImageIcon, Type, FileText, LayoutGrid, MessageSquare, ArrowUp, ArrowDown, GitMerge } from "lucide-react";
 import SafeImage from "@/components/common/SafeImage";
 import AnalystTicker from "@/components/common/AnalystTicker";
 import ImprovementModal from "@/components/improvement/ImprovementModal";
 import type { StoryBrief } from "@/lib/types";
+import { formatRelativeTime } from "@/lib/utils";
 
 // ─── Feedback types ───────────────────────────────────────────
 type TargetType =
@@ -15,7 +16,8 @@ type TargetType =
 
 type IssueType =
   | "wrong_title" | "bad_image" | "wrong_clustering" | "bad_summary"
-  | "wrong_source_class" | "layout_issue" | "bug" | "feature_request" | "other";
+  | "wrong_source_class" | "layout_issue" | "bug" | "feature_request"
+  | "priority_higher" | "priority_lower" | "merge_stories" | "other";
 
 interface FeedbackContext {
   targetType: TargetType;
@@ -58,14 +60,23 @@ function FeedbackBtn({
 }
 
 function Meta({ story }: { story: StoryBrief }) {
+  const published = story.first_published_at
+    ? formatRelativeTime(story.first_published_at, "fa")
+    : null;
+  const updated = story.updated_at
+    ? formatRelativeTime(story.updated_at, "fa")
+    : null;
+  // Only show "updated" if it differs meaningfully from "published" (>1h apart)
+  const showUpdated = updated && story.updated_at && story.first_published_at
+    && Math.abs(new Date(story.updated_at).getTime() - new Date(story.first_published_at).getTime()) > 3600000;
   return (
-    <p className="mt-1.5 text-[12px] text-slate-400 dark:text-slate-500" dir="rtl">
-      <span>{story.source_count} رسانه</span>
-      <span>{" · "}</span>
-      <span>{story.article_count} مقاله</span>
-      {story.state_pct > 0 && <span className="text-red-500 mr-2">{" · "}حکومتی {story.state_pct}٪</span>}
-      {story.independent_pct > 0 && <span className="text-emerald-600 mr-2">{" · "}مستقل {story.independent_pct}٪</span>}
-      {story.diaspora_pct > 0 && <span className="text-blue-600 mr-2">{" · "}برون‌مرزی {story.diaspora_pct}٪</span>}
+    <p className="mt-1.5 text-[11px] text-slate-400 dark:text-slate-500 leading-5" dir="rtl">
+      <span>{story.source_count} رسانه · {story.article_count} مقاله</span>
+      {published && <span>{" · "}{published}</span>}
+      {showUpdated && <span className="text-slate-400/70">{" · "}به‌روز: {updated}</span>}
+      {story.state_pct > 0 && <span className="text-red-500 mr-1">{" · "}حکومتی {story.state_pct}٪</span>}
+      {story.independent_pct > 0 && <span className="text-emerald-600 mr-1">{" · "}مستقل {story.independent_pct}٪</span>}
+      {story.diaspora_pct > 0 && <span className="text-blue-600 mr-1">{" · "}برون‌مرزی {story.diaspora_pct}٪</span>}
     </p>
   );
 }
@@ -76,6 +87,44 @@ function storyHref(locale: string, id: string, feedbackMode: boolean) {
   return feedbackMode
     ? `/${locale}/stories/${id}?feedback=1`
     : `/${locale}/stories/${id}`;
+}
+
+// ─── Quick priority vote (submits directly, no modal) ─────────
+const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+function PriorityVoteBtn({ storyId, direction, storyTitle }: {
+  storyId: string;
+  direction: "higher" | "lower";
+  storyTitle: string;
+}) {
+  const Icon = direction === "higher" ? ArrowUp : ArrowDown;
+  const label = direction === "higher" ? "مهم‌تر" : "کم‌اهمیت‌تر";
+  const submit = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      await fetch(`${API}/api/v1/improvements`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          target_type: "story",
+          target_id: storyId,
+          issue_type: `priority_${direction}`,
+          reason: label,
+        }),
+      });
+    } catch {}
+  };
+  return (
+    <button
+      type="button"
+      onClick={submit}
+      title={label}
+      className="p-1 bg-slate-900/80 dark:bg-white/80 text-white dark:text-slate-900 shadow-sm md:opacity-0 md:group-hover:opacity-100 opacity-100 transition-opacity hover:scale-110"
+    >
+      <Icon className="h-3 w-3" />
+    </button>
+  );
 }
 
 // ─── Main Component ───────────────────────────────────────────
@@ -161,6 +210,16 @@ export default function HomepageLayout({ stories, summaries, locale, feedbackMod
                     <FeedbackBtn icon={FileText} label="خلاصه" position="bl"
                       onClick={() => openFeedback({ targetType: "story_summary", targetId: hero.id, currentValue: summaries[hero.id] || "", defaultIssueType: "bad_summary", contextLabel: hero.title_fa })} />
                   )}
+                  {/* Priority + merge buttons */}
+                  <div className="absolute bottom-1 left-1 z-20 flex gap-1 md:opacity-0 md:group-hover:opacity-100 opacity-100 transition-opacity">
+                    <PriorityVoteBtn storyId={hero.id} direction="higher" storyTitle={hero.title_fa} />
+                    <PriorityVoteBtn storyId={hero.id} direction="lower" storyTitle={hero.title_fa} />
+                    <button type="button" title="ادغام با موضوع دیگر"
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); openFeedback({ targetType: "story", targetId: hero.id, defaultIssueType: "merge_stories", contextLabel: hero.title_fa }); }}
+                      className="p-1 bg-slate-900/80 dark:bg-white/80 text-white dark:text-slate-900 shadow-sm hover:scale-110">
+                      <GitMerge className="h-3 w-3" />
+                    </button>
+                  </div>
                 </>
               )}
               <AnalystTicker />

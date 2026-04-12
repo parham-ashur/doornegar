@@ -11,7 +11,8 @@ type TargetType =
 
 type IssueType =
   | "wrong_title" | "bad_image" | "wrong_clustering" | "bad_summary"
-  | "wrong_source_class" | "layout_issue" | "bug" | "feature_request" | "other";
+  | "wrong_source_class" | "layout_issue" | "bug" | "feature_request"
+  | "priority_higher" | "priority_lower" | "merge_stories" | "other";
 
 interface Props {
   open: boolean;
@@ -111,18 +112,21 @@ const SCHEMAS: Record<TargetType, FormSchema> = {
     reasonPlaceholder: "چه چیزی اشتباه یا ناقص است؟",
   },
   story: {
-    title: "بازخورد درباره دسته‌بندی خبر",
-    description: "مقاله‌های این خبر به هم مرتبط نیستند، یا مقاله‌ای جا مانده است؟",
+    title: "بازخورد درباره این موضوع",
+    description: "مقاله‌ها نامرتبط هستند، یا این موضوع باید با موضوع دیگری ادغام شود؟",
     issueOptions: [
       { value: "wrong_clustering", label: "مقاله‌ها به هم مرتبط نیستند" },
+      { value: "merge_stories", label: "ادغام با موضوع دیگر" },
+      { value: "priority_higher", label: "این موضوع مهم‌تر است (بالاتر نمایش بده)" },
+      { value: "priority_lower", label: "این موضوع کم‌اهمیت‌تر است" },
       { value: "other", label: "سایر" },
     ],
     showCurrentValue: false,
-    showSuggestedValue: false,
-    suggestedLabel: "",
-    suggestedPlaceholder: "",
+    showSuggestedValue: true,
+    suggestedLabel: "شناسه موضوع مقصد (برای ادغام)",
+    suggestedPlaceholder: "اگر ادغام پیشنهاد می‌دهید، عنوان یا شناسه موضوع دوم را بنویسید",
     reasonLabel: "توضیح",
-    reasonPlaceholder: "کدام مقاله‌ها نباید در این خبر باشند، یا کدام مقاله‌ها باید اضافه شوند؟",
+    reasonPlaceholder: "توضیح بیشتر: چرا باید ادغام شود، یا چرا اولویت باید تغییر کند؟",
   },
   article: {
     title: "بازخورد درباره یک مقاله",
