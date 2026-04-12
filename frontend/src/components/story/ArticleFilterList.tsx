@@ -64,8 +64,7 @@ export default function ArticleFilterList({ articles, storyId, sidebarSync }: Ar
         {filters.map((f) => {
           const count = f.key === "all" ? articles.length : articles.filter((a) => {
             const al = a.source_state_alignment;
-            if (f.key === "state") return al === "state" || al === "semi_state";
-            if (f.key === "independent") return al === "independent";
+            if (f.key === "state") return al === "state" || al === "semi_state" || al === "independent";
             if (f.key === "diaspora") return al === "diaspora";
             return false;
           }).length;
