@@ -42,16 +42,14 @@ export default function PoliticalSpectrum({ sources, sourceNeutrality }: Props) 
 
   return (
     <div dir="rtl">
-      {/* Y-axis top label */}
-      <div className="text-center text-[9px] text-slate-400 dark:text-slate-500 mb-1">بی‌طرف</div>
+      {/* X-axis labels: conservative (right in RTL) — opposition (left in RTL) */}
+      <div className="flex items-center justify-between mb-1 text-[9px] text-slate-400 dark:text-slate-500">
+        <span>محافظه‌کار</span>
+        <span>اپوزیسیون</span>
+      </div>
 
-      {/* Chart: labels + columns */}
+      {/* Chart: columns + Y-axis on left */}
       <div className="flex items-stretch gap-0">
-        {/* Y-axis label left */}
-        <div className="flex items-end pb-1 shrink-0">
-          <span className="text-[9px] text-slate-400 dark:text-slate-500" style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}>محافظه‌کار</span>
-        </div>
-
         {/* 5 columns */}
         <div className="flex-1 relative">
           {/* X-axis: horizontal gradient line in center — reversed: dark blue (right/conservative) → orange (left/opposition) */}
@@ -61,8 +59,8 @@ export default function PoliticalSpectrum({ sources, sourceNeutrality }: Props) 
             background: "linear-gradient(to left, #1e3a5f, #2563eb, #94a3b8, #f97316, #c2410c)",
           }} />
 
-          {/* Vertical center line (neutrality axis) */}
-          <div className="absolute top-0 bottom-0 w-px bg-slate-300 dark:bg-slate-600 z-0" style={{ left: "50%" }} />
+          {/* Vertical neutrality axis line (left side) */}
+          <div className="absolute top-0 bottom-0 w-px bg-slate-300 dark:bg-slate-600 z-0" style={{ right: 0 }} />
 
           {/* 4 vertical separator lines */}
           {[1, 2, 3, 4].map((i) => (
@@ -101,14 +99,12 @@ export default function PoliticalSpectrum({ sources, sourceNeutrality }: Props) 
           </div>
         </div>
 
-        {/* Y-axis label right */}
-        <div className="flex items-start pt-1 shrink-0">
-          <span className="text-[9px] text-slate-400 dark:text-slate-500" style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}>اپوزیسیون</span>
+        {/* Y-axis on left side */}
+        <div className="flex flex-col justify-between py-1 pr-2 shrink-0 text-[9px] text-slate-400 dark:text-slate-500">
+          <span>بی‌طرف</span>
+          <span>یک‌طرفه</span>
         </div>
       </div>
-
-      {/* Y-axis bottom label */}
-      <div className="text-center text-[9px] text-slate-400 dark:text-slate-500 mt-1">یک‌طرفه</div>
     </div>
   );
 }
