@@ -23,8 +23,8 @@ const filters: { key: FilterKey; label: string }[] = [
 function getAlignmentBadge(alignment: string | null) {
   const map: Record<string, { label: string; color: string }> = {
     state: { label: "محافظه‌کار", color: "text-[#1e3a5f] dark:text-blue-300" },
-    semi_state: { label: "محافظه‌کار", color: "text-[#2563eb] dark:text-blue-300" },
-    independent: { label: "محافظه‌کار", color: "text-slate-500 dark:text-slate-400" },
+    semi_state: { label: "نیمه‌محافظه‌کار", color: "text-[#2563eb] dark:text-blue-300" },
+    independent: { label: "مستقل", color: "text-slate-500 dark:text-slate-400" },
     diaspora: { label: "اپوزیسیون", color: "text-[#ea580c] dark:text-orange-400" },
   };
   if (!alignment || !map[alignment]) return null;

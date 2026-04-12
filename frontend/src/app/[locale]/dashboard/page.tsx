@@ -1196,8 +1196,8 @@ export default function DashboardPage() {
         <h2 className="mb-4 text-sm font-semibold text-slate-900 dark:text-white">Source Distribution</h2>
         <div className="flex flex-wrap gap-4 text-sm">
           {[
-            { label: "State", count: d.sources.state, color: "bg-red-500" },
-            { label: "Diaspora", count: d.sources.diaspora, color: "bg-blue-500" },
+            { label: "Conservative", count: d.sources.state, color: "bg-red-500" },
+            { label: "Opposition", count: d.sources.diaspora, color: "bg-blue-500" },
             { label: "Independent", count: d.sources.independent, color: "bg-emerald-500" },
             { label: "Other", count: d.sources.other, color: "bg-slate-400" },
           ].map(({ label, count, color }) => (
