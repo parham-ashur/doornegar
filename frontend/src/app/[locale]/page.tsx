@@ -1,7 +1,6 @@
 import { setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import SafeImage from "@/components/common/SafeImage";
-import AnalystTicker from "@/components/common/AnalystTicker";
 import type { StoryBrief } from "@/lib/types";
 import NarrativeMap from "@/components/home/NarrativeMap";
 import WordsOfWeek from "@/components/home/WordsOfWeek";
@@ -64,96 +63,6 @@ function Meta({ story }: { story: StoryBrief }) {
           {story.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400">اپوزیسیون {story.diaspora_pct}٪</span>}
         </p>
       )}
-    </div>
-  );
-}
-
-// ─── Reusable section components ───────────────────────────────
-
-function TextRow({ stories, summaries, locale }: { stories: StoryBrief[]; summaries: Record<string, string | null>; locale: string }) {
-  if (stories.length === 0) return null;
-  return (
-    <div className={`grid grid-cols-1 ${stories.length === 1 ? "" : stories.length === 2 ? "sm:grid-cols-2" : "sm:grid-cols-3"} border-b border-slate-200 dark:border-slate-800`}>
-      {stories.map((s, i) => (
-        <Link key={s.id} href={`/${locale}/stories/${s.id}`}
-          className={`group block py-7 ${i > 0 ? "sm:pr-6 sm:border-r border-slate-200 dark:border-slate-800" : ""} ${i < stories.length - 1 ? "sm:pl-6" : ""}`}>
-          <h3 className="text-[17px] font-extrabold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-1">
-            {s.title_fa}
-          </h3>
-          <Meta story={s} />
-          <p className="mt-1.5 text-[13px] leading-5 text-slate-400 dark:text-slate-500 line-clamp-3">{summaries[s.id] || s.title_fa}</p>
-        </Link>
-      ))}
-    </div>
-  );
-}
-
-function ImageGrid({ stories, summaries, locale }: { stories: StoryBrief[]; summaries: Record<string, string | null>; locale: string }) {
-  if (stories.length === 0) return null;
-  return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 border-b border-slate-200 dark:border-slate-800 py-6">
-      {stories.map((s) => (
-        <Link key={s.id} href={`/${locale}/stories/${s.id}`} className="group block">
-          <div className="aspect-[4/3] w-full overflow-hidden bg-slate-100 dark:bg-slate-800 mb-3">
-            <SafeImage src={s.image_url} className="h-full w-full object-cover" />
-          </div>
-          <h3 className="text-[15px] font-extrabold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 overflow-hidden text-ellipsis whitespace-nowrap">
-            {s.title_fa}
-          </h3>
-          <Meta story={s} />
-          <p className="mt-2 text-[13px] leading-5 text-slate-400 dark:text-slate-500 line-clamp-2">{summaries[s.id] || s.title_fa}</p>
-        </Link>
-      ))}
-    </div>
-  );
-}
-
-function FeatureRow({ stories, summaries, locale, mirror }: { stories: StoryBrief[]; summaries: Record<string, string | null>; locale: string; mirror?: boolean }) {
-  if (stories.length === 0) return null;
-  return (
-    <div className="border-b border-slate-200 dark:border-slate-800">
-      {stories.map((s, i) => (
-        <Link key={s.id} href={`/${locale}/stories/${s.id}`}
-          className={`group grid grid-cols-1 sm:grid-cols-5 gap-5 py-7 ${i > 0 ? "border-t border-slate-200 dark:border-slate-800" : ""}`}>
-          {mirror ? (
-            <>
-              <div className="sm:col-span-3 aspect-[16/10] overflow-hidden bg-slate-100 dark:bg-slate-800">
-                <SafeImage src={s.image_url} className="h-full w-full object-cover" />
-              </div>
-              <div className="sm:col-span-2">
-                <h3 className="text-[20px] font-extrabold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400">
-                  {s.title_fa}
-                </h3>
-                <Meta story={s} />
-                {summaries[s.id] && (
-                  <div className="mt-2">
-                    <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 line-clamp-6">{summaries[s.id]}</p>
-                    <span className="text-[12px] text-blue-600 dark:text-blue-400 mt-0.5 inline-block">ادامه ←</span>
-                  </div>
-                )}
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="sm:col-span-2">
-                <h3 className="text-[20px] font-extrabold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400">
-                  {s.title_fa}
-                </h3>
-                <Meta story={s} />
-                {summaries[s.id] && (
-                  <div className="mt-2">
-                    <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 line-clamp-6">{summaries[s.id]}</p>
-                    <span className="text-[12px] text-blue-600 dark:text-blue-400 mt-0.5 inline-block">ادامه ←</span>
-                  </div>
-                )}
-              </div>
-              <div className="sm:col-span-3 aspect-[16/10] overflow-hidden bg-slate-100 dark:bg-slate-800">
-                <SafeImage src={s.image_url} className="h-full w-full object-cover" />
-              </div>
-            </>
-          )}
-        </Link>
-      ))}
     </div>
   );
 }
