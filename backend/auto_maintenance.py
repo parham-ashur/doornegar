@@ -245,6 +245,22 @@ async def step_recompute_centroids():
     return stats
 
 
+async def step_merge_similar():
+    """Step 3c: Merge visible stories with high title overlap.
+
+    Finds story pairs with >50% title word overlap, asks LLM to confirm,
+    then merges confirmed pairs. Runs after clustering + centroids so
+    newly created stories are included. Runs before summarize so merged
+    stories get a fresh summary with the correct title.
+    """
+    from app.database import async_session
+    from app.services.clustering import merge_similar_visible_stories
+
+    async with async_session() as db:
+        merged = await merge_similar_visible_stories(db)
+    return {"merged": merged}
+
+
 async def step_summarize():
     """Step 4: Generate summaries for stories without one.
 
@@ -1598,6 +1614,7 @@ async def run_maintenance():
         ("backfill_farsi_titles", "Backfill Farsi titles", step_backfill_farsi_titles),
         ("cluster", "Cluster articles into stories", step_cluster),
         ("centroids", "Recompute story centroid embeddings", step_recompute_centroids),
+        ("merge_similar", "Merge similar visible stories", step_merge_similar),
         ("summarize", "Summarize new stories", step_summarize),
         ("bias_score", "Bias scoring", step_bias_score),
         ("fix_images", "Fix broken images", step_fix_images),

@@ -129,6 +129,34 @@ Rules:
 - Return ONLY the JSON object, no extra text
 """
 
+VISIBLE_MERGE_PROMPT = """\
+You are a strict news editor. These are titles of VISIBLE news stories on the homepage. \
+Some may be about the same event and should be merged to avoid repetition.
+
+Stories:
+{stories_block}
+
+Return valid JSON:
+{{
+  "merge_groups": [
+    {{
+      "story_idxs": [1, 3],
+      "reason": "both about the same ceasefire deal"
+    }}
+  ]
+}}
+
+Rules:
+- Merge stories that are clearly about the SAME specific event or topic
+- "Ceasefire agreement" and "Reactions to ceasefire" ARE the same story — merge them
+- "Ceasefire agreement" and "Islamabad talks failure" are DIFFERENT events — do NOT merge
+- Merge follow-up stories into the main story (e.g., "X happened" + "reactions to X" = merge)
+- If unsure, do NOT merge
+- Each story index can appear in at most one group
+- Minimum 2 stories per group
+- Return ONLY the JSON object
+"""
+
 MERGE_PROMPT = """\
 You are a news editor. These are titles of small news stories. \
 Which of them are about the EXACT SAME specific event and should be merged?
@@ -811,6 +839,113 @@ async def _merge_hidden_stories(db: AsyncSession) -> int:
         await _refresh_story_metadata(db, keeper.id)
 
     logger.info(f"Merged {total_merged} duplicate hidden stories")
+    return total_merged
+
+
+async def merge_similar_visible_stories(db: AsyncSession) -> int:
+    """Find and merge visible stories with high title overlap.
+
+    Unlike _merge_hidden_stories (which only looks at small stories),
+    this checks ALL visible stories (article_count >= 5) for duplicates.
+
+    1. Pre-filter: find pairs with >50% title word overlap
+    2. If any candidates found, ask LLM to confirm which should merge
+    3. Merge confirmed pairs (articles move to the story with more articles)
+    """
+    result = await db.execute(
+        select(Story)
+        .where(Story.article_count >= 5)
+        .order_by(Story.trending_score.desc())
+        .limit(50)
+    )
+    stories = list(result.scalars().all())
+
+    if len(stories) < 2:
+        return 0
+
+    # Pre-filter: find stories with high title word overlap
+    def _words(s: str | None) -> set[str]:
+        return {w for w in (s or "").split() if len(w) >= 3}
+
+    candidates: list[Story] = []
+    candidate_ids: set = set()
+    for i, a in enumerate(stories):
+        a_words = _words(a.title_fa)
+        if not a_words:
+            continue
+        for b in stories[i + 1:]:
+            b_words = _words(b.title_fa)
+            if not b_words:
+                continue
+            overlap = len(a_words & b_words) / min(len(a_words), len(b_words))
+            if overlap >= 0.5:
+                if a.id not in candidate_ids:
+                    candidates.append(a)
+                    candidate_ids.add(a.id)
+                if b.id not in candidate_ids:
+                    candidates.append(b)
+                    candidate_ids.add(b.id)
+
+    if len(candidates) < 2:
+        logger.info("No visible story pairs with >50%% title overlap")
+        return 0
+
+    logger.info(f"Found {len(candidates)} visible stories with title overlap — asking LLM to confirm merges")
+
+    # Build stories block for LLM
+    stories_lines = []
+    for i, s in enumerate(candidates, 1):
+        display = s.title_fa or s.title_en or "(no title)"
+        stories_lines.append(f"S{i}. {display} ({s.article_count} articles)")
+    stories_block = "\n".join(stories_lines)
+
+    prompt = VISIBLE_MERGE_PROMPT.format(stories_block=stories_block)
+    await _keepalive(db)
+    result_json = await _call_openai(prompt, max_tokens=2048)
+    merge_groups = result_json.get("merge_groups", [])
+
+    if not merge_groups:
+        logger.info("LLM confirmed no visible stories should merge")
+        return 0
+
+    total_merged = 0
+    for mgroup in merge_groups:
+        idxs = mgroup.get("story_idxs", [])
+        valid_stories = []
+        for idx in idxs:
+            if 1 <= idx <= len(candidates):
+                valid_stories.append(candidates[idx - 1])
+
+        if len(valid_stories) < 2:
+            continue
+
+        # Keep the story with the most articles
+        valid_stories.sort(key=lambda s: s.article_count, reverse=True)
+        keeper = valid_stories[0]
+        to_absorb = valid_stories[1:]
+
+        for victim in to_absorb:
+            # Move articles
+            await db.execute(
+                update(Article)
+                .where(Article.story_id == victim.id)
+                .values(story_id=keeper.id)
+            )
+            # Delete victim
+            await db.delete(victim)
+            total_merged += 1
+            logger.info(
+                f"Merged visible '{(victim.title_fa or '')[:40]}' ({victim.article_count} articles) "
+                f"into '{(keeper.title_fa or '')[:40]}' — reason: {mgroup.get('reason', 'overlap')}"
+            )
+
+        # Refresh keeper
+        await db.flush()
+        await _refresh_story_metadata(db, keeper.id)
+
+    if total_merged:
+        await db.commit()
+    logger.info(f"Merged {total_merged} duplicate visible stories")
     return total_merged
 
 
