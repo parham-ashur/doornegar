@@ -1,6 +1,6 @@
 # Doornegar - Backlog
 
-**Last updated**: 2026-04-11 (post 3-tier LLM + clustering-fix session)
+**Last updated**: 2026-04-12 (post pipeline-audit + analyst-factors + embedding-prefilter session)
 
 ## Must Have (before public launch)
 
@@ -36,7 +36,7 @@
 - [ ] Search functionality (full-text search)
 - [ ] Pagination or infinite scroll on story lists
 - [ ] Story detail: timeline of when each outlet published
-- [ ] Improve LLM clustering precision (avoid merging unrelated events)
+- [x] ~~Improve LLM clustering precision~~ — embedding pre-filter + double-match guard + keepalive (2026-04-12)
 
 ### Phase 4 Prep (Rating System)
 - [ ] Create first admin rater account
@@ -121,3 +121,15 @@ See `MIGRATION_PLAN.md` for the full step-by-step plan.
 - [x] Story detail page: interactive DimensionPlot, scrollable article list
 - [x] Navigation hidden from menu (kept in code)
 - [x] Pushed to GitHub and deployed (commits b1541a6, 0e5a272)
+- [x] OpenAI embeddings (text-embedding-3-small, replaced sentence-transformers/TF-IDF)
+- [x] Embedding pre-filter for clustering (cosine pre-filter → LLM confirmation)
+- [x] Story centroid embeddings with step_recompute_centroids
+- [x] Deep analyst factors (15 categories) for premium-tier stories
+- [x] Neon connection keepalive fix (pool_recycle 240s + _keepalive pings)
+- [x] LLM retry backoff (llm_failed_at column, 24h window)
+- [x] Maintenance pipeline audit — 8 fixes (batched metadata refresh, memory-safe summarize, image_checked_at, dedup guard, translation model fix, double-match guard)
+- [x] Story.image_url bug fix (moved to response-time computation)
+- [x] Premium tier 30 → 16
+- [x] Priority vote + merge suggestion buttons on story cards
+- [x] Device context on improvement feedback
+- [x] New issue types: priority_higher, priority_lower, merge_stories

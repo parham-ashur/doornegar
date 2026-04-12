@@ -2,13 +2,18 @@
 
 Last updated: 2026-04-12
 
-## 🔴 URGENT — Action items from this session
+## URGENT — Action items
 
+### From April 12 session
+- [ ] **Click "Re-embed all articles"** on `/fa/dashboard` — generates OpenAI embeddings for all articles + recomputes story centroids (one-shot, ~$0.05)
+- [ ] **Click "Refresh 16"** on the dashboard to regenerate the top-16 trending stories with analyst factors (~$0.80-1.50 one-shot)
+- [ ] **Click "Run Maintenance"** — lets the new embedding pre-filter + keepalive + analyst factors run through
+- [ ] **Verify analyst factors** appear on story detail pages for top-16 stories after refresh
+
+### From April 11 session (carry-forward)
 - [ ] **Click "Null localhost image URLs"** on `/fa/dashboard` → Data Repair section (one-shot, ~2,000 rows affected)
-- [ ] **Click "Unclaim story articles…"** on `/fa/dashboard` → paste story ID `53f091c9-52b4-467f-8f55-3a71e9b8ae2c` (the Hormuz 209-article cluster)
-- [ ] **Click "Run Maintenance"** — lets the clustering + image fixes catch up with the new rules
+- [ ] **Click "Unclaim story articles..."** on `/fa/dashboard` → paste story ID `53f091c9-52b4-467f-8f55-3a71e9b8ae2c` (the Hormuz 209-article cluster)
 - [ ] **Mark improvement feedback item `4ea8d828` as done** at `/fa/dashboard/improvements`
-- [ ] **Click "Refresh 30"** on the dashboard to regenerate the top-30 trending stories with the new gpt-5-mini + improved prompt (~$1-2 one-shot)
 - [ ] **Set OpenAI hard spending cap** ($30/month) at https://platform.openai.com/usage → Limits
 - [ ] **Rotate credentials** that were shared in chat: R2 token, Neon DB password, Upstash Redis password, Anthropic API key
 
@@ -34,8 +39,10 @@ Last updated: 2026-04-12
 
 ## Upcoming Milestones
 
-### By April 17, 2026 (1 week)
+### By April 19, 2026 (1 week)
 - [x] Railway backend back online
+- [ ] All articles re-embedded with OpenAI text-embedding-3-small
+- [ ] Analyst factors verified on top-16 story detail pages
 - [ ] Cloudflare proxy in front of Railway + custom domain
 - [ ] UptimeRobot monitoring active
 - [ ] OpenAI hard cap set

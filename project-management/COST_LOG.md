@@ -2,23 +2,26 @@
 
 Tracks estimated OpenAI API costs per maintenance run.
 
-## Current cost model (2026-04-11, post 3-tier refactor)
+## Current cost model (2026-04-12, post embedding-prefilter + analyst-factors)
 
 ### Per-task breakdown (monthly, 1 maintenance run/day)
 
 | Task | Model | Tokens/run (approx) | Cost/run | Cost/month |
 |---|---|---|---|---|
-| Clustering (matching + new cluster creation) | gpt-5-mini | ~50K in + ~2K out | $0.016 | ~$0.48 |
+| Clustering (embedding pre-filter → LLM confirm) | gpt-5-mini | ~40K in + ~2K out | $0.014 | ~$0.42 |
+| Embeddings (articles + centroids) | text-embedding-3-small | ~20K tokens | $0.0004 | ~$0.05 |
 | Title translation backfill (up to 300/run) | gpt-4.1-nano | ~15K in + ~15K out | $0.008 | ~$0.24 |
 | Bias scoring (up to 150 articles/run, cache-eligible prompt) | gpt-4o-mini | ~400K in + ~75K out | $0.105 | ~$3.15 |
 | Story analysis — long tail (~5-10 new/run) | gpt-4o-mini | ~60K in + ~15K out | $0.018 | ~$0.54 |
-| Story analysis — top-30 premium (~1-3 new/run) | gpt-5-mini | ~18K in + ~6K out | $0.017 | ~$0.50 |
+| Story analysis — top-16 premium + analyst factors (~1-3 new/run) | gpt-5-mini | ~22K in + ~8K out | $0.022 | ~$0.66 |
 | Maintenance housekeeping (no LLM) | — | — | $0 | $0 |
-| **Total** | | | **~$0.16** | **~$5/month** |
+| **Total** | | | **~$0.17** | **~$5/month** |
 
 **Notes**:
+- Embedding pre-filter reduces clustering LLM calls (only stories with cosine ≥ 0.30 sent to LLM).
+- Analyst factors add ~500 extra tokens per premium story but only run for top-16 (not top-30).
 - Prompt caching on `gpt-4o-mini` gives 50% discount on cached input; on `gpt-5-mini` / `gpt-4.1-nano` it's 90%. The bias scoring prompt has a 2,200-token static prefix so subsequent calls within a run benefit.
-- Force re-summarize via dashboard ("Refresh 30" button) always uses the premium model: ~$1-2 per one-shot refresh.
+- Force re-summarize via dashboard ("Refresh 16" button) always uses the premium model: ~$0.80-1.50 per one-shot refresh.
 - Expected monthly total with normal usage + occasional manual refreshes: **~$8-10/month**.
 - Cost can spike during backlog clearing (multiple Run Maintenance clicks in a day).
 

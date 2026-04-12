@@ -1,5 +1,68 @@
 # Doornegar Development Log
 
+## 2026-04-12 — Pipeline audit + analyst factors + embedding pre-filter session
+
+### Key outcomes
+
+1. **Maintenance pipeline audit — 8 fixes**: keepalive pings (Neon timeout), `llm_failed_at` retry column, batched metadata refresh (N*4 → 3 queries), memory-safe summarize (10 articles/story), `image_checked_at` 24h skip, NULL title dedup guard, translation model from settings, double-match guard in clustering.
+2. **Story.image_url bug fix**: Story model has no `image_url` column. Moved title-overlap picker to `_story_brief_with_extras()` (response-time). Removed from `_EditStoryRequest`.
+3. **Deep analyst factors (15 categories)**: `ANALYST_FACTORS_ADDENDUM` prompt for premium-tier (top-16) stories. Factors: risk assessment, potential outcomes, key stakeholders, missing information, credibility signals, timeline, framing gap, what is hidden, historical parallel, economic impact, international implications, factional dynamics, human rights dimension, public sentiment, propaganda watch. Stored in `summary_en` extras JSON under `"analyst"` key, tagged "doornegar-ai".
+4. **Premium tier 30 → 16**: only 16 stories visible on homepage, no need to pay premium rates for stories 17-30.
+5. **OpenAI embeddings**: switched from sentence-transformers/TF-IDF to `text-embedding-3-small` (384-dim, ~$0.05/month, no PyTorch ~2GB saved).
+6. **Two-phase clustering**: embedding cosine pre-filter (threshold 0.30) before LLM confirmation. `Story.centroid_embedding` column (JSONB), `_compute_centroid()`, `step_recompute_centroids`. `POST /admin/re-embed-all` endpoint.
+7. **Neon keepalive fix**: `_keepalive(db)` does `SELECT 1` before each LLM call; `pool_recycle` lowered 3600 → 240.
+8. **Homepage enhancements**: story dates (first_published + updated_at), priority up/down vote buttons, merge suggestion button, `StoryActions` component, feedback overlay repositioned left.
+9. **New issue types**: `priority_higher`, `priority_lower`, `merge_stories` in backend + frontend.
+10. **Device context on feedback**: `device_info` field auto-captured, mobile badge on dashboard.
+11. **Framing + article dates**: max 3 framing labels per side, publish dates in LLM prompt, 6000-char content for premium.
+12. **Last Maintenance card**: derives from DB (`max Article.ingested_at`) to survive Railway deploys.
+
+### Key decisions (see DECISION_LOG for details)
+- D019: OpenAI embeddings replacing sentence-transformers
+- D020: Two-phase clustering with embedding pre-filter
+- D021: Deep analyst factors for premium-tier stories
+- D022: Premium tier reduced from 30 to 16
+- D023: Neon keepalive pings during long LLM operations
+- D024: Story.image_url computed at response time, not stored
+- D025: Device context on improvement feedback
+
+### Lessons learned
+- **Neon closes idle connections after ~300s.** Long sequential LLM call chains (clustering = 340s) will crash the next DB query. Keepalive pings fix this.
+- **Story model had no `image_url` column.** The step_fix_images code was writing to a nonexistent attribute. Always check the model before assuming a column exists.
+- **Premium tier was wasteful at 30.** Only 16 stories show on the homepage. Paying premium for invisible stories is waste.
+- **Embedding pre-filter threshold must be loose (0.30).** Cross-language cosine similarity is low even for genuinely related content. The LLM makes the final call.
+- **Batching metadata refresh matters.** N stories * 4 queries each was O(N*4) round trips. 3 aggregate queries covers all stories.
+
+### Migrations
+- `b5e9f3a1c2d8`: `llm_failed_at` on Article + Story, `image_checked_at` on Article
+- `c7d4e2f8a1b3`: `device_info` on ImprovementFeedback
+- `d8e5f1a2b3c4`: `centroid_embedding` (JSONB) on Story
+
+### Files changed (summary)
+```
+backend/app/models/article.py              # llm_failed_at, image_checked_at columns
+backend/app/models/story.py                # llm_failed_at, centroid_embedding columns
+backend/app/models/feedback.py             # device_info column
+backend/app/database.py                    # pool_recycle 3600 → 240
+backend/app/config.py                      # premium_story_top_n 30 → 16
+backend/app/services/clustering.py         # embedding pre-filter, keepalive, double-match guard, batched refresh
+backend/app/services/story_analysis.py     # analyst factors, include_analyst_factors param, framing cap, article dates
+backend/app/services/bias_scoring.py       # keepalive pings
+backend/app/services/nlp_pipeline.py       # OpenAI text-embedding-3-small
+backend/app/api/v1/admin.py                # re-embed-all endpoint
+backend/app/api/v1/stories.py              # image_url from _story_brief_with_extras
+backend/app/schemas/story.py               # analyst field, removed image_url from _EditStoryRequest
+backend/app/schemas/feedback.py            # device_info, new issue types
+backend/auto_maintenance.py                # step_recompute_centroids, keepalive, memory-safe summarize, image_checked_at skip, dedup guard, translation model fix
+frontend/src/app/[locale]/page.tsx         # story dates, StoryActions component
+frontend/src/app/[locale]/dashboard/page.tsx  # Refresh 16, re-embed button, device badge, new issue labels
+frontend/src/components/StoryActions.tsx   # NEW: priority vote + merge buttons
+frontend/src/components/StoryFeedbackOverlay.tsx  # left-4 positioning
+frontend/src/components/ImprovementModal.tsx  # new issue types, device_info capture
+```
+
+---
+
 ## 2026-04-11 — LLM strategy + clustering + dashboard session
 
 ### Key outcomes
