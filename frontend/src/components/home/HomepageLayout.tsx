@@ -196,6 +196,10 @@ export default function HomepageLayout({ stories, summaries, locale, feedbackMod
   const bottomRight = afterMid.slice(2, 6);
   const bottomTextRow = afterMid.slice(6, 7);
 
+  // Overflow stories beyond section 1
+  const section1Count = 1 + leftTextStories.length + row2Stories.length + midRow.length + bottomLeft.length + bottomRight.length + bottomTextRow.length;
+  const overflow = sorted.slice(section1Count);
+
   return (
     <>
       <div dir="rtl" className="mx-auto max-w-7xl px-0 md:px-6 lg:px-8">
@@ -238,7 +242,7 @@ export default function HomepageLayout({ stories, summaries, locale, feedbackMod
                   <FeedbackBtn icon={Type} label="عنوان" position="tl"
                     onClick={() => openFeedback({ targetType: "story_title", targetId: hero.id, currentValue: hero.title_fa, defaultIssueType: "wrong_title", contextLabel: hero.title_fa })} />
                   {summaries[hero.id] && (
-                    <FeedbackBtn icon={FileText} label="خلاصه" position="bl"
+                    <FeedbackBtn icon={FileText} label="خلاصه" position="tr"
                       onClick={() => openFeedback({ targetType: "story_summary", targetId: hero.id, currentValue: summaries[hero.id] || "", defaultIssueType: "bad_summary", contextLabel: hero.title_fa })} />
                   )}
                   <StoryActions storyId={hero.id} storyTitle={hero.title_fa} openFeedback={openFeedback} />
@@ -310,6 +314,9 @@ export default function HomepageLayout({ stories, summaries, locale, feedbackMod
                 <>
                   <FeedbackBtn icon={ImageIcon} label="تصویر" position="tl"
                     onClick={() => openFeedback({ targetType: "story_image", targetId: row2Stories[1].id, defaultIssueType: "bad_image", contextLabel: row2Stories[1].title_fa, imageUrl: row2Stories[1].image_url })} />
+                  <FeedbackBtn icon={Type} label="عنوان" position="tr"
+                    onClick={() => openFeedback({ targetType: "story_title", targetId: row2Stories[1].id, currentValue: row2Stories[1].title_fa, defaultIssueType: "wrong_title", contextLabel: row2Stories[1].title_fa })} />
+                  <StoryActions storyId={row2Stories[1].id} storyTitle={row2Stories[1].title_fa} openFeedback={openFeedback} />
                 </>
               )}
             </div>
@@ -331,7 +338,7 @@ export default function HomepageLayout({ stories, summaries, locale, feedbackMod
                   <FeedbackBtn icon={Type} label="عنوان" position="tl"
                     onClick={() => openFeedback({ targetType: "story_title", targetId: row2Stories[0].id, currentValue: row2Stories[0].title_fa, defaultIssueType: "wrong_title", contextLabel: row2Stories[0].title_fa })} />
                   {summaries[row2Stories[0].id] && (
-                    <FeedbackBtn icon={FileText} label="خلاصه" position="bl"
+                    <FeedbackBtn icon={FileText} label="خلاصه" position="tr"
                       onClick={() => openFeedback({ targetType: "story_summary", targetId: row2Stories[0].id, currentValue: summaries[row2Stories[0].id] || "", defaultIssueType: "bad_summary", contextLabel: row2Stories[0].title_fa })} />
                   )}
                   <StoryActions storyId={row2Stories[0].id} storyTitle={row2Stories[0].title_fa} openFeedback={openFeedback} />
@@ -403,7 +410,7 @@ export default function HomepageLayout({ stories, summaries, locale, feedbackMod
                     <>
                       <FeedbackBtn icon={Type} label="عنوان" position="tl"
                         onClick={() => openFeedback({ targetType: "story_title", targetId: s.id, currentValue: s.title_fa, defaultIssueType: "wrong_title", contextLabel: s.title_fa })} />
-                      <FeedbackBtn icon={ImageIcon} label="تصویر" position="tl"
+                      <FeedbackBtn icon={ImageIcon} label="تصویر" position="tr"
                         onClick={() => openFeedback({ targetType: "story_image", targetId: s.id, defaultIssueType: "bad_image", contextLabel: s.title_fa, imageUrl: s.image_url })} />
                       <StoryActions storyId={s.id} storyTitle={s.title_fa} openFeedback={openFeedback} />
                     </>
@@ -458,6 +465,45 @@ export default function HomepageLayout({ stories, summaries, locale, feedbackMod
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* ═══ OVERFLOW: remaining stories ═══ */}
+        {overflow.length > 0 && (
+          <div className="border-b border-slate-200 dark:border-slate-800">
+            {/* Text rows of 3 */}
+            {(() => {
+              const rows: StoryBrief[][] = [];
+              for (let i = 0; i < overflow.length; i += 3) {
+                rows.push(overflow.slice(i, i + 3));
+              }
+              return rows.map((row, ri) => (
+                <div key={`ov${ri}`} className={`grid grid-cols-1 ${row.length >= 3 ? "sm:grid-cols-3" : row.length === 2 ? "sm:grid-cols-2" : ""} ${ri > 0 ? "border-t border-slate-200 dark:border-slate-800" : ""}`}>
+                  {row.map((s, i) => (
+                    <div key={s.id} className={`relative group py-7 ${i > 0 ? "sm:pr-6 sm:border-r border-slate-200 dark:border-slate-800" : ""} ${i < row.length - 1 ? "sm:pl-6" : ""}`}>
+                      <Link href={storyHref(locale, s.id, feedbackMode)} className="group block">
+                        <h3 className="text-[17px] font-extrabold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-1">
+                          {s.title_fa}
+                        </h3>
+                        <Meta story={s} />
+                        <p className="mt-1.5 text-[13px] leading-5 text-slate-400 dark:text-slate-500 line-clamp-3">{summaries[s.id] || s.title_fa}</p>
+                      </Link>
+                      {feedbackMode && (
+                        <>
+                          <FeedbackBtn icon={Type} label="عنوان" position="tl"
+                            onClick={() => openFeedback({ targetType: "story_title", targetId: s.id, currentValue: s.title_fa, defaultIssueType: "wrong_title", contextLabel: s.title_fa })} />
+                          {summaries[s.id] && (
+                            <FeedbackBtn icon={FileText} label="خلاصه" position="tr"
+                              onClick={() => openFeedback({ targetType: "story_summary", targetId: s.id, currentValue: summaries[s.id] || "", defaultIssueType: "bad_summary", contextLabel: s.title_fa })} />
+                          )}
+                          <StoryActions storyId={s.id} storyTitle={s.title_fa} openFeedback={openFeedback} />
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ));
+            })()}
           </div>
         )}
 
