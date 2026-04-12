@@ -54,7 +54,14 @@ export default function PoliticalSpectrum({ sources, sourceNeutrality }: Props) 
       {/* Chart area */}
       <div className="relative w-full" style={{ height: chartHeight }}>
 
-        {/* Y-axis line (dark gray, left side in LTR = right side in RTL) */}
+        {/* X-axis gradient bar in the middle */}
+        <div className="absolute left-0 right-0 h-[3px]" style={{
+          top: "50%",
+          transform: "translateY(-50%)",
+          background: "linear-gradient(to left, #c2410c, #ea580c, #f97316, #94a3b8, #60a5fa, #2563eb, #1e3a5f)",
+        }} />
+
+        {/* Y-axis line (dark gray) */}
         <div className="absolute right-0 top-0 bottom-0 w-px bg-slate-400 dark:bg-slate-500" />
 
         {/* Y-axis labels */}
@@ -118,10 +125,6 @@ export default function PoliticalSpectrum({ sources, sourceNeutrality }: Props) 
         })}
       </div>
 
-      {/* X-axis gradient bar */}
-      <div className="h-1.5 w-full" style={{
-        background: "linear-gradient(to left, #c2410c, #ea580c, #f97316, #94a3b8, #60a5fa, #2563eb, #1e3a5f)"
-      }} />
     </div>
   );
 }
