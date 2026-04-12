@@ -316,6 +316,7 @@ async def step_summarize():
         top_ids = {row[0] for row in top_result.all()}
 
         # 2. Find stories that need a summary (skip recently-failed)
+        MAX_STORIES_PER_RUN = 15  # quality over quantity — deep analysis on top 15 only
         retry_cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
         result = await db.execute(
             select(Story)
@@ -326,11 +327,24 @@ async def step_summarize():
             )
             .order_by(Story.article_count.desc())
         )
-        stories = list(result.scalars().all())
+        all_candidates = list(result.scalars().all())
+
+        # 3. Rank by analysis priority (bias-richness, not just article count)
+        def _analysis_priority(s: Story) -> float:
+            diversity = s.coverage_diversity_score or 0
+            has_both = 1.0 if (s.covered_by_state and s.covered_by_diaspora) else 0.3
+            source_factor = min((s.source_count or 0) / 6.0, 1.0)
+            recency = min((s.trending_score or 0) / 20.0, 1.0)
+            return diversity * 0.3 + has_both * 0.3 + source_factor * 0.2 + recency * 0.2
+
+        all_candidates.sort(key=_analysis_priority, reverse=True)
+        stories = all_candidates[:MAX_STORIES_PER_RUN]
 
         if not stories:
             logger.info("Summarize: all visible stories have summaries")
-            return {"generated": 0, "premium": 0, "baseline": 0, "failed": 0}
+            return {"generated": 0, "premium": 0, "baseline": 0, "failed": 0, "skipped_low_priority": 0}
+
+        skipped_low = len(all_candidates) - len(stories)
 
         logger.info(
             f"Generating summaries for {len(stories)} stories "
@@ -342,16 +356,38 @@ async def step_summarize():
         premium_used = 0
         baseline_used = 0
         for story in stories:
-            # Lazy-load only the N most recent articles with their sources —
-            # avoids eager-loading hundreds of rows per story.
+            # Smart article selection: pick diverse articles (one per source,
+            # balanced across alignments) instead of just most recent.
             art_result = await db.execute(
                 select(Article)
                 .options(selectinload(Article.source))
                 .where(Article.story_id == story.id)
                 .order_by(Article.published_at.desc().nullslast())
-                .limit(MAX_ARTICLES_PER_STORY)
+                .limit(30)  # candidate pool
             )
-            top_articles = list(art_result.scalars().all())
+            candidates = list(art_result.scalars().all())
+
+            # Select one per source, prefer longest content
+            by_source: dict = {}
+            for a in candidates:
+                sid = a.source_id
+                if sid not in by_source or len(a.content_text or "") > len(by_source[sid].content_text or ""):
+                    by_source[sid] = a
+
+            # Balance across alignments (ensure both sides represented)
+            by_align: dict = {}
+            for a in by_source.values():
+                align = a.source.state_alignment if a.source else "unknown"
+                by_align.setdefault(align, []).append(a)
+
+            top_articles = []
+            slots_per_align = max(2, MAX_ARTICLES_PER_STORY // max(len(by_align), 1))
+            for align_articles in by_align.values():
+                top_articles.extend(align_articles[:slots_per_align])
+            top_articles = top_articles[:MAX_ARTICLES_PER_STORY]
+
+            if not top_articles:
+                top_articles = candidates[:MAX_ARTICLES_PER_STORY]
 
             # Tier selection — decide BEFORE building articles_info so
             # we can send more content to premium-tier stories

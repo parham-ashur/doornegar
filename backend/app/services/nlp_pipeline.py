@@ -184,6 +184,43 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
     except Exception as e:
         logger.warning(f"OpenAI translation failed (non-critical): {e}")
 
+    # Step 4c: Embedding-based dedup — kill near-duplicates before clustering
+    # If a new article's embedding is > 0.92 similar to a recent article,
+    # it's a repost/paraphrase. Detach it so it doesn't pollute clustering or bias.
+    dedup_count = 0
+    if embeddable_articles:
+        from app.nlp.embeddings import cosine_similarity
+        from datetime import timedelta
+        cutoff_48h = datetime.now(timezone.utc) - timedelta(hours=48)
+
+        # Get recent articles with embeddings (potential duplicates of)
+        recent_result = await db.execute(
+            select(Article.id, Article.embedding)
+            .where(
+                Article.processed_at.isnot(None),
+                Article.ingested_at >= cutoff_48h,
+                Article.embedding.isnot(None),
+            )
+            .limit(500)
+        )
+        recent_pool = [(r[0], r[1]) for r in recent_result.all()]
+
+        for article in embeddable_articles:
+            if not article.embedding:
+                continue
+            for recent_id, recent_emb in recent_pool:
+                if recent_id == article.id:
+                    continue
+                sim = cosine_similarity(article.embedding, recent_emb)
+                if sim > 0.92:
+                    # Near-duplicate — don't cluster this one
+                    article.story_id = None  # ensure it stays unclustered
+                    dedup_count += 1
+                    logger.debug(f"  Embedding dedup: {(article.title_fa or article.title_original or '')[:40]} (sim={sim:.3f})")
+                    break  # one match is enough
+
+    stats["embedding_deduped"] = dedup_count
+
     # Step 5: Mark all as processed
     now = datetime.now(timezone.utc)
     for article in articles:
