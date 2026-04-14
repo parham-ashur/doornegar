@@ -3,6 +3,8 @@
 import { toFa } from "@/lib/utils";
 import type { StoryCore, TelegramSlotData } from "./types";
 
+const BRAND_ORANGE = "#E8913A";
+
 type TelegramLayoutProps = {
   data: TelegramSlotData;
   active: boolean;
@@ -10,107 +12,84 @@ type TelegramLayoutProps = {
   onOpenClaimStory?: (story: StoryCore) => void;
 };
 
-const BRAND_ORANGE = "#E8913A";
-
-const LABELS = {
-  rtl: {
-    eyebrow: "تحلیل روایت‌های تلگرام",
-    predictions: "پیش‌بینی‌ها",
-    claims: "ادعاهای کلیدی",
-    analysts: "از تحلیلگران",
-    verified: "تأیید شده",
-    unverified: "تأیید نشده",
-  },
-  ltr: {
-    eyebrow: "Telegram analysis",
-    predictions: "Predictions",
-    claims: "Key claims",
-    analysts: "of analysts",
-    verified: "Verified",
-    unverified: "Unverified",
-  },
+const L = {
+  eyebrow: "تحلیل تلگرام",
+  predictions: "پیش‌بینی‌ها",
+  claims: "ادعاهای کلیدی",
+  analysts: "از تحلیلگران",
+  verified: "تأیید شده",
+  unverified: "تأیید نشده",
 };
 
-export default function TelegramLayout({ data, active, dir, onOpenClaimStory }: TelegramLayoutProps) {
-  // Always RTL per spec — but we still accept dir prop for consistency; ignore for Telegram UI layout.
-  const L = LABELS.rtl;
+export default function TelegramLayout({ data, onOpenClaimStory }: TelegramLayoutProps) {
+  const predictions = data.predictions.slice(0, 2);
+  const claims = data.claims.slice(0, 2);
 
   return (
     <div
-      className="relative h-full w-full overflow-y-auto overflow-x-hidden bg-[#0a0e1a]"
+      className="relative h-full w-full overflow-hidden"
       dir="rtl"
+      style={{
+        background: "linear-gradient(180deg, #0a0e1a 0%, #131218 40%, #1a1620 100%)",
+      }}
     >
-      {/* Dark CSS pattern — subtle dot grid */}
+      {/* Dot pattern */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-0 opacity-[0.15]"
+        className="pointer-events-none absolute inset-0 opacity-[0.10]"
         style={{
           backgroundImage:
             "radial-gradient(circle at 1px 1px, rgba(255,255,255,0.3) 1px, transparent 0)",
-          backgroundSize: "16px 16px",
+          backgroundSize: "18px 18px",
         }}
       />
-      {/* Warm ambient glow at top */}
+      {/* Warm ambient glow */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-x-0 top-0 h-48 opacity-30"
+        className="pointer-events-none absolute inset-x-0 top-0 h-56 opacity-25"
         style={{
-          background: `radial-gradient(ellipse at top, ${BRAND_ORANGE}40, transparent 60%)`,
+          background: `radial-gradient(ellipse at top, ${BRAND_ORANGE}55, transparent 70%)`,
         }}
       />
 
-      <div className="relative z-10 px-6 pt-[calc(env(safe-area-inset-top,0px)+5rem)] pb-16">
-        <div className="mb-10 text-center text-[10px] uppercase tracking-[0.35em] text-white/60">
+      {/* Full-height flex column that distributes content to fill the viewport
+          without overflow. */}
+      <div
+        className="relative z-10 flex h-full flex-col px-5 pb-5"
+        style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 4.5rem)" }}
+      >
+        {/* Heading — right-aligned (دورنگر stays top-left in the carousel bar) */}
+        <h2 className="mb-5 shrink-0 text-right text-[22px] font-black text-white">
           {L.eyebrow}
-        </div>
+        </h2>
 
-        {/* Predictions section */}
-        {data.predictions.length > 0 && (
-          <section className="mb-10">
+        {/* Predictions — flex-grow so predictions + claims share remaining space */}
+        {predictions.length > 0 && (
+          <section className="mb-4 flex flex-1 flex-col">
             <SectionHeader label={L.predictions} />
-            <div className="mt-5 space-y-5">
-              {data.predictions.map((p, i) => (
-                <div key={i}>
-                  <p className="text-[15px] leading-[1.85] text-white/90">{p.text}</p>
-                  {p.percent !== undefined && (
-                    <p className="mt-1 text-[12px] tracking-wide text-white/50">
-                      {toFa(p.percent)}٪ {L.analysts}
-                    </p>
-                  )}
-                  {i < data.predictions.length - 1 && (
-                    <div className="mt-5 h-px w-full bg-white/10" />
-                  )}
-                </div>
+            <ul className="mt-3 flex flex-1 flex-col justify-around">
+              {predictions.map((p, i) => (
+                <PredictionItem key={i} text={p.text} analystPercent={p.analystPercent} />
               ))}
-            </div>
+            </ul>
           </section>
         )}
 
-        {/* Claims section */}
-        {data.claims.length > 0 && (
-          <section>
+        {/* Claims — also flex-grow, sharing space equally with predictions */}
+        {claims.length > 0 && (
+          <section className="flex flex-1 flex-col">
             <SectionHeader label={L.claims} />
-            <div className="mt-5 space-y-5">
-              {data.claims.map((c, i) => (
-                <button
+            <ul className="mt-3 flex flex-1 flex-col justify-around">
+              {claims.map((c, i) => (
+                <ClaimItem
                   key={i}
-                  type="button"
-                  onClick={c.story ? () => onOpenClaimStory?.(c.story!) : undefined}
-                  className="block w-full text-right"
-                >
-                  <p className="text-[13px] font-bold text-white/70">{c.source}</p>
-                  <p className="mt-1 text-[15px] leading-[1.85] text-white/90">
-                    <span className="line-clamp-3">{c.text}</span>
-                  </p>
-                  <div className="mt-2">
-                    <VerificationBadge verified={c.verified} dir="rtl" />
-                  </div>
-                  {i < data.claims.length - 1 && (
-                    <div className="mt-5 h-px w-full bg-white/10" />
-                  )}
-                </button>
+                  source={c.source}
+                  text={c.text}
+                  verified={c.verified}
+                  onOpen={c.story ? () => onOpenClaimStory?.(c.story!) : undefined}
+                />
               ))}
-            </div>
+            </ul>
           </section>
         )}
       </div>
@@ -118,38 +97,73 @@ export default function TelegramLayout({ data, active, dir, onOpenClaimStory }: 
   );
 }
 
+function PredictionItem({ text, analystPercent }: { text: string; analystPercent?: number }) {
+  return (
+    <li>
+      <p className="text-[14px] leading-[1.75] text-white/90 line-clamp-3">{text}</p>
+      {analystPercent !== undefined && (
+        // dir=ltr on the wrapper + justify-start pushes the label to the physical LEFT
+        <div className="mt-1 flex" dir="ltr" style={{ justifyContent: "flex-start" }}>
+          <span className="text-[11px] font-bold text-white/50" dir="ltr">
+            {toFa(analystPercent)}٪ {L.analysts}
+          </span>
+        </div>
+      )}
+    </li>
+  );
+}
+
+function ClaimItem({
+  source,
+  text,
+  verified,
+  onOpen,
+}: {
+  source: string;
+  text: string;
+  verified?: boolean;
+  onOpen?: () => void;
+}) {
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={onOpen}
+        className="block w-full text-right disabled:cursor-default"
+        disabled={!onOpen}
+      >
+        <p className="mb-0.5 text-[11px] font-bold text-white/60">{source}</p>
+        <p className="text-[14px] leading-[1.75] text-white/90 line-clamp-3">{text}</p>
+        {verified !== undefined && (
+          // Badge anchored physically LEFT via dir=ltr + flex-start
+          <div className="mt-1 flex" dir="ltr" style={{ justifyContent: "flex-start" }}>
+            <span
+              className="text-[10px] font-bold uppercase tracking-[0.22em]"
+              style={{ color: verified ? "#34d399" : "#f87171" }}
+            >
+              {verified ? L.verified : L.unverified}
+            </span>
+          </div>
+        )}
+      </button>
+    </li>
+  );
+}
+
 function SectionHeader({ label }: { label: string }) {
   return (
-    <div className="flex items-center gap-3" dir="rtl">
-      <div
-        className="h-2 w-2 rounded-full"
-        style={{ background: BRAND_ORANGE }}
-      />
+    <div className="flex shrink-0 items-center gap-2" dir="rtl">
+      <span className="h-1.5 w-1.5 rounded-full" style={{ background: BRAND_ORANGE }} />
       <span
-        className="text-[11px] font-bold uppercase tracking-[0.35em]"
+        className="text-[12px] font-black uppercase tracking-[0.28em]"
         style={{ color: BRAND_ORANGE }}
       >
         {label}
       </span>
-      <div
+      <span
         className="h-px flex-1"
-        style={{ background: `linear-gradient(90deg, ${BRAND_ORANGE}80, transparent)` }}
+        style={{ background: `linear-gradient(90deg, ${BRAND_ORANGE}55, transparent)` }}
       />
     </div>
-  );
-}
-
-function VerificationBadge({ verified, dir }: { verified?: boolean; dir: "rtl" | "ltr" }) {
-  const L = LABELS.rtl;
-  if (verified === undefined) return null;
-  const label = verified ? L.verified : L.unverified;
-  const color = verified ? "#34d399" : "#f87171";
-  return (
-    <span
-      className="inline-block text-[10px] font-bold uppercase tracking-[0.25em]"
-      style={{ color }}
-    >
-      {label}
-    </span>
   );
 }

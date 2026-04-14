@@ -44,6 +44,9 @@ export default function StoryBackground({ media, active, className = "" }: Story
           alt=""
           className="h-full w-full object-cover"
           draggable={false}
+          loading="eager"
+          decoding="async"
+          fetchPriority="high"
         />
       ) : (
         <video
@@ -58,7 +61,8 @@ export default function StoryBackground({ media, active, className = "" }: Story
           onError={() => setVideoFailed(true)}
         />
       )}
-      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent pointer-events-none" />
+      {/* No gradient overlay — the title uses mix-blend-difference and needs
+          the raw image as its backdrop for correct auto-inverted color. */}
     </div>
   );
 }

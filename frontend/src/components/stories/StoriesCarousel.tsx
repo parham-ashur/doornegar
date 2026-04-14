@@ -5,6 +5,7 @@ import StoryLayout from "./StoryLayout";
 import BlindspotLayout from "./BlindspotLayout";
 import MaxDisagreementLayout from "./MaxDisagreementLayout";
 import TelegramLayout from "./TelegramLayout";
+import DesktopPreviewLayout from "./DesktopPreviewLayout";
 import StoryDetailOverlay from "./StoryDetailOverlay";
 import OnboardingHints from "./OnboardingHints";
 import type { StoryCore, StorySlot } from "./types";
@@ -34,7 +35,7 @@ function slotStoryIds(slot: StorySlot): string[] {
     case "blindspot":
       return [slot.data.top.story.id, slot.data.bottom.story.id];
     case "maxDisagreement":
-      return [slot.data.story.id];
+      return [slot.data.top.story.id, slot.data.bottom.story.id];
     case "telegram":
       return slot.data.claims.flatMap((c) => (c.story ? [c.story.id] : []));
     default:
@@ -52,6 +53,12 @@ export default function StoriesCarousel({ slots, dir = "rtl" }: StoriesCarouselP
   const [activeIndex, setActiveIndex] = useState(0);
   const [drilldown, setDrilldown] = useState<StoryCore | null>(null);
   const [seenIds, setSeenIds] = useState<Set<string>>(new Set());
+  // Mouse-drag state (only used for pointerType=mouse; native touch handles phones)
+  const dragState = useRef<{ startX: number; startScroll: number; active: boolean }>({
+    startX: 0,
+    startScroll: 0,
+    active: false,
+  });
 
   const slotCount = slots.length;
   const virtualSlots: StorySlot[] = [slots[slotCount - 1], ...slots, slots[0]];
@@ -106,6 +113,103 @@ export default function StoriesCarousel({ slots, dir = "rtl" }: StoriesCarouselP
     el.scrollBy({ left: el.clientWidth, behavior: "smooth" });
   };
 
+  // Drag-to-scroll handlers — fire for ALL pointer types (mouse, touch, pen).
+  // The outer scroller has `touch-action: pan-y` which disables native horizontal
+  // panning, so our JS is the single source of horizontal scroll, working identically
+  // in Chrome devtools, a real phone, and desktop mouse.
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    dragState.current = {
+      startX: e.clientX,
+      startScroll: el.scrollLeft,
+      active: true,
+    };
+    try {
+      (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+    } catch {}
+  };
+
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragState.current.active) return;
+    const el = scrollerRef.current;
+    if (!el) return;
+    // Clamp the drag to ±0.9 slot width so users can only ever reveal at most
+    // one slot in either direction. This eliminates "skip a slot" on fast drags.
+    const width = el.clientWidth;
+    const maxDrag = width * 0.9;
+    const rawDx = e.clientX - dragState.current.startX;
+    const dx = Math.max(-maxDrag, Math.min(maxDrag, rawDx));
+    el.scrollLeft = dragState.current.startScroll - dx;
+  };
+
+  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragState.current.active) return;
+    const el = scrollerRef.current;
+    const dx = e.clientX - dragState.current.startX;
+    dragState.current.active = false;
+    if (!el) return;
+    const width = el.clientWidth;
+    // If the drag was substantial in one direction, advance/retreat one slot.
+    // Otherwise snap back to the starting slot.
+    const startIndex = Math.round(dragState.current.startScroll / width);
+    let target = startIndex;
+    if (Math.abs(dx) > 40) {
+      target = startIndex + (dx < 0 ? 1 : -1);
+    }
+    el.scrollTo({ left: target * width, behavior: "smooth" });
+    try {
+      (e.currentTarget as Element).releasePointerCapture?.(e.pointerId);
+    } catch {}
+  };
+
+  // Trackpad horizontal swipe — fires wheel events with deltaX.
+  // scroll-snap-type: x mandatory snaps programmatic scrollLeft back to the nearest
+  // snap point, so we can't just accumulate pixels. Instead, each dominant-horizontal
+  // wheel burst advances exactly one slot via scrollBy, with a cooldown to prevent
+  // runaway trackpad inertia from skipping multiple slots.
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    let locked = false;
+    let unlockTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const onWheel = (e: WheelEvent) => {
+      if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
+      e.preventDefault();
+      if (locked) return;
+      if (Math.abs(e.deltaX) < 8) return; // ignore tiny jitter
+      locked = true;
+      const direction = e.deltaX > 0 ? 1 : -1;
+      el.scrollBy({ left: direction * el.clientWidth, behavior: "smooth" });
+      if (unlockTimer) clearTimeout(unlockTimer);
+      unlockTimer = setTimeout(() => {
+        locked = false;
+      }, 450);
+    };
+
+    // Keyboard ←/→ for desktop accessibility (bonus)
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      if (locked) return;
+      locked = true;
+      const direction = e.key === "ArrowRight" ? 1 : -1;
+      el.scrollBy({ left: direction * el.clientWidth, behavior: "smooth" });
+      if (unlockTimer) clearTimeout(unlockTimer);
+      unlockTimer = setTimeout(() => {
+        locked = false;
+      }, 450);
+    };
+    window.addEventListener("keydown", onKey);
+
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      window.removeEventListener("keydown", onKey);
+      if (unlockTimer) clearTimeout(unlockTimer);
+    };
+  }, []);
+
   useEffect(() => {
     const el = scrollerRef.current;
     if (!el) return;
@@ -128,7 +232,13 @@ export default function StoriesCarousel({ slots, dir = "rtl" }: StoriesCarouselP
         const nearestVirtual = Math.round(raw);
         const drift = Math.abs(raw - nearestVirtual);
         if (drift > 0.02) return;
-
+        // Don't wrap mid-drag — the user is actively moving, let them finish
+        if (dragState.current.active) {
+          if (nearestVirtual >= 1 && nearestVirtual <= slotCount) {
+            setActiveIndex(nearestVirtual - 1);
+          }
+          return;
+        }
         if (nearestVirtual === 0) {
           el.scrollLeft = width * slotCount;
           setActiveIndex(slotCount - 1);
@@ -149,17 +259,24 @@ export default function StoriesCarousel({ slots, dir = "rtl" }: StoriesCarouselP
   }, [slotCount]);
 
   return (
-    <div className="fixed inset-0 z-10 bg-black text-white" dir="ltr">
+    <div className="fixed inset-0 z-10 text-white" dir="ltr">
       <div
         ref={scrollerRef}
         className="h-[100dvh] w-full overflow-x-auto overflow-y-hidden whitespace-nowrap stories-scroller"
         style={{
           scrollSnapType: "x mandatory",
           WebkitOverflowScrolling: "touch",
-          // Prevent iOS bounce back-swipe from navigating browser history
+          // pan-y: native browser only handles vertical scrolling on children (inner
+          // story panel). Horizontal intent is fully owned by our pointer handlers,
+          // which works in Chrome devtools mouse-drag, trackpad, and real touch.
+          touchAction: "pan-y",
           overscrollBehaviorX: "contain",
         }}
         dir="ltr"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
       >
         {virtualSlots.map((slot, i) => {
           const realIndex = (i - 1 + slotCount) % slotCount;
@@ -178,30 +295,40 @@ export default function StoriesCarousel({ slots, dir = "rtl" }: StoriesCarouselP
         })}
       </div>
 
-      <div className="pointer-events-none fixed top-[max(0.5rem,env(safe-area-inset-top))] left-0 right-0 z-20 px-3">
-        <div className="flex gap-1">
+      <div className="pointer-events-none fixed top-[max(0.75rem,env(safe-area-inset-top))] left-0 right-0 z-20 px-4">
+        <div className="flex gap-1" dir="ltr">
           {Array.from({ length: slotCount }).map((_, i) => {
-            const state =
+            const bg =
               i === activeIndex
-                ? "bg-white"
+                ? "rgba(255,255,255,1)"
                 : isSlotSeen(i)
-                  ? "bg-white/10"
-                  : "bg-white/25";
+                  ? "rgba(255,255,255,0.25)"
+                  : "rgba(255,255,255,0.55)";
             return (
               <div
                 key={i}
-                className={`h-[2px] flex-1 rounded-full transition-colors duration-200 ${state}`}
+                className="h-[2.5px] flex-1 rounded-full transition-colors duration-200"
+                style={{
+                  background: bg,
+                  boxShadow: "0 1px 3px rgba(0,0,0,0.6)",
+                }}
                 data-seen={isSlotSeen(i) ? "1" : "0"}
               />
             );
           })}
         </div>
-        <div className="mt-2 flex items-center justify-between text-[10px] tracking-[0.25em] text-white/70 uppercase">
-          <span className="font-bold" dir={dir}>
+        {/* Top bar: دورنگر pinned to physical top-left.
+            mix-blend-mode: difference auto-inverts against the image background. */}
+        <div className="mt-3 flex" dir="ltr">
+          <span
+            className="text-[17px] font-black tracking-[0.02em]"
+            dir={dir}
+            style={{
+              color: "#ffffff",
+              mixBlendMode: "difference",
+            }}
+          >
             {dir === "rtl" ? "دورنگر" : "Doornegar"}
-          </span>
-          <span>
-            {String(activeIndex + 1).padStart(2, "0")} / {String(slotCount).padStart(2, "0")}
           </span>
         </div>
       </div>
@@ -258,7 +385,10 @@ function SlotRenderer({
           data={slot.data}
           active={active}
           dir={dir}
-          onOpenStory={() => onOpenStory(slot.data.story)}
+          onOpenStory={(id) => {
+            const story = id === slot.data.top.story.id ? slot.data.top.story : slot.data.bottom.story;
+            onOpenStory(story);
+          }}
         />
       );
     case "telegram":
@@ -270,6 +400,8 @@ function SlotRenderer({
           onOpenClaimStory={(story) => onOpenStory(story)}
         />
       );
+    case "desktopPreview":
+      return <DesktopPreviewLayout url={slot.url} dir={dir} />;
     case "placeholder":
     default:
       return <PlaceholderSlot slot={slot} dir={dir} />;

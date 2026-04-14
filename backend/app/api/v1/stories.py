@@ -270,6 +270,13 @@ async def summarize_story(request: Request, story_id: uuid.UUID, db: AsyncSessio
         raise HTTPException(status_code=404, detail="Story not found")
     if not story.articles:
         raise HTTPException(status_code=400, detail="No articles")
+    # Respect hand-edits: if an admin has manually edited this story, don't
+    # overwrite their work with fresh LLM output.
+    if story.is_edited:
+        raise HTTPException(
+            status_code=409,
+            detail="Story is hand-edited (is_edited=true). Clear the flag first if you want to regenerate.",
+        )
 
     articles_info = [
         {

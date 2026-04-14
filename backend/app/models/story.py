@@ -55,6 +55,11 @@ class Story(Base):
     )
     # Reliability flag: set when summary generation fails; story is skipped for 24h before retry
     llm_failed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Set to True when an admin has hand-edited any of: title_fa, title_en,
+    # state_summary_fa, diaspora_summary_fa, bias_explanation_fa. When set,
+    # the maintenance pipeline skips regeneration for this story so manual
+    # edits are preserved.
+    is_edited: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     # Mean of all article embeddings in this story. Used by the clustering
     # pre-filter to quickly find candidate stories for new articles via
     # cosine similarity (avoids sending irrelevant stories to the LLM).

@@ -1,142 +1,149 @@
 "use client";
 
 import { toFa } from "@/lib/utils";
-import SplitScreen from "./SplitScreen";
-import type { MaxDisagreementSlotData } from "./types";
+import type { MaxDisagreementSlotData, StoryCore } from "./types";
+
+// Deepest violet — distinct from blindspot's blue/orange.
+const VIOLET = "#2E1065"; // violet-950
+const VIOLET_DEEP = "#1E1B4B"; // indigo-950
+const CONSERVATIVE_COLOR = "#60a5fa";
+const OPPOSITION_COLOR = "#E8913A";
 
 type MaxDisagreementLayoutProps = {
   data: MaxDisagreementSlotData;
   active: boolean;
   dir: "rtl" | "ltr";
-  onOpenStory?: () => void;
+  onOpenStory?: (storyId: string) => void;
 };
-
-const BRAND_ORANGE = "#E8913A";
 
 const LABELS = {
-  rtl: { eyebrow: "بیشترین اختلاف نگاه", divider: "در مقابل" },
-  ltr: { eyebrow: "Max disagreement", divider: "In contrast" },
+  rtl: {
+    eyebrow: "بیشترین اختلاف نگاه",
+    disagreement: "اختلاف",
+    conservativeLabel: "محافظه‌کار",
+    oppositionLabel: "اپوزیسیون",
+  },
+  ltr: {
+    eyebrow: "Max disagreement",
+    disagreement: "Disagreement",
+    conservativeLabel: "Conservative",
+    oppositionLabel: "Opposition",
+  },
 };
 
-export default function MaxDisagreementLayout({
-  data,
-  active,
-  dir,
-  onOpenStory,
-}: MaxDisagreementLayoutProps) {
+export default function MaxDisagreementLayout({ data, dir, onOpenStory }: MaxDisagreementLayoutProps) {
   const L = dir === "rtl" ? LABELS.rtl : LABELS.ltr;
-  const openStory = () => onOpenStory?.();
 
   return (
-    <div className="relative h-full w-full">
-      {/* Integrated eyebrow — label for this layout type */}
+    <div
+      className="relative h-full w-full overflow-hidden"
+      dir={dir}
+      style={{
+        background: "linear-gradient(180deg, #0a0e1a 0%, #140f20 60%, #0a0e1a 100%)",
+      }}
+    >
+      {/* Section heading — physical top-right */}
       <div
-        className="pointer-events-none absolute top-[max(3rem,calc(env(safe-area-inset-top,0px)+3rem))] inset-x-0 z-30 text-center text-[11px] uppercase tracking-[0.35em] text-white/75"
-        dir={dir}
+        className="pointer-events-none absolute top-[calc(env(safe-area-inset-top,0px)+4.25rem)] z-10 right-5"
+        dir="ltr"
       >
-        {L.eyebrow}
+        <h2
+          className="text-right text-[24px] font-black text-white"
+          style={{ textWrap: "balance", lineHeight: 1.2 }}
+          dir={dir}
+        >
+          {L.eyebrow}
+        </h2>
       </div>
 
-      <SplitScreen
-        top={{
-          media: data.story.media,
-          active,
-          dir,
-          onTap: openStory,
-          children: (
-            <HalfCard
-              title={data.story.title}
-              sideLabel={data.top.sideLabel}
-              percent={data.top.percent}
-              framing={data.top.framing}
-              showTitle
-              dir={dir}
-            />
-          ),
-        }}
-        bottom={{
-          media: data.story.media,
-          active,
-          dir,
-          onTap: openStory,
-          children: (
-            <HalfCard
-              sideLabel={data.bottom.sideLabel}
-              percent={data.bottom.percent}
-              framing={data.bottom.framing}
-              dir={dir}
-            />
-          ),
-        }}
-        divider={
-          <div
-            className="relative flex items-center justify-center bg-black py-2"
-            dir={dir}
-          >
-            <div
-              className="absolute inset-x-0 top-0 h-px"
-              style={{ background: `linear-gradient(90deg, transparent, ${BRAND_ORANGE}80, transparent)` }}
-            />
-            <span
-              className="px-3 text-[11px] font-bold uppercase tracking-[0.35em]"
-              style={{ color: BRAND_ORANGE }}
-            >
-              {L.divider}
-            </span>
-            <div
-              className="absolute inset-x-0 bottom-0 h-px"
-              style={{ background: `linear-gradient(90deg, transparent, ${BRAND_ORANGE}80, transparent)` }}
-            />
-          </div>
-        }
-      />
+      {/* Two stacked cards with violet borders */}
+      <div className="absolute inset-x-0 bottom-[5%] top-[calc(env(safe-area-inset-top,0px)+9.5rem)] flex flex-col gap-4 px-5">
+        <DisputeCard
+          story={data.top.story}
+          disputeScore={data.top.disputeScore}
+          labels={L}
+          dir={dir}
+          onOpen={onOpenStory ? () => onOpenStory(data.top.story.id) : undefined}
+        />
+        <DisputeCard
+          story={data.bottom.story}
+          disputeScore={data.bottom.disputeScore}
+          labels={L}
+          dir={dir}
+          onOpen={onOpenStory ? () => onOpenStory(data.bottom.story.id) : undefined}
+        />
+      </div>
     </div>
   );
 }
 
-function HalfCard({
-  title,
-  sideLabel,
-  percent,
-  framing,
-  showTitle = false,
+function DisputeCard({
+  story,
+  labels,
   dir,
+  onOpen,
 }: {
-  title?: string;
-  sideLabel: string;
-  percent: number;
-  framing: string;
-  showTitle?: boolean;
+  story: StoryCore;
+  disputeScore: number;
+  labels: typeof LABELS.rtl;
   dir: "rtl" | "ltr";
+  onOpen?: () => void;
 }) {
-  const pctDisplay = dir === "rtl" ? `${toFa(percent)}٪` : `${percent}%`;
+  const statePct = Math.round(story.statePct ?? 0);
+  const diasporaPct = Math.round(story.diasporaPct ?? 0);
+  const fmt = (n: number) => (dir === "rtl" ? `${toFa(n)}٪` : `${n}%`);
+
   return (
-    <div className="drop-shadow-[0_4px_20px_rgba(0,0,0,0.9)]">
-      {showTitle && title && (
-        <h3
-          className="mb-3 text-[20px] font-black leading-snug text-white"
-          style={{ textAlign: dir === "rtl" ? "right" : "left" }}
-        >
-          {title}
-        </h3>
-      )}
+    <button
+      type="button"
+      onClick={onOpen}
+      className="relative flex min-h-0 flex-1 w-full overflow-hidden text-left"
+      style={{
+        textAlign: dir === "rtl" ? "right" : "left",
+        border: `1.5px solid ${VIOLET}`,
+        boxShadow: `0 1px 0 rgba(255,255,255,0.05), 0 20px 60px -20px ${VIOLET_DEEP}66`,
+      }}
+      dir={dir}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={story.media.src}
+        alt=""
+        className="absolute inset-0 h-full w-full object-cover"
+        draggable={false}
+        loading="eager"
+        decoding="async"
+        fetchPriority="high"
+      />
       <div
-        className="mb-1 flex items-baseline gap-2"
-        style={{ flexDirection: dir === "rtl" ? "row-reverse" : "row" }}
-      >
-        <span className="text-[11px] uppercase tracking-[0.28em] text-white/75">
-          {sideLabel}
-        </span>
-        <span
-          className="text-[18px] font-black"
-          style={{ color: BRAND_ORANGE }}
+        className="absolute inset-0"
+        style={{
+          background:
+            "linear-gradient(180deg, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.55) 55%, rgba(0,0,0,0.88) 100%)",
+        }}
+      />
+
+      <div className="relative z-10 mt-auto w-full p-5">
+        <h3
+          className="text-[22px] font-black leading-[1.3] text-white line-clamp-3"
+          style={{ textShadow: "0 2px 12px rgba(0,0,0,0.9), 0 1px 3px rgba(0,0,0,0.9)" }}
         >
-          {pctDisplay}
-        </span>
+          {story.title}
+        </h3>
+        {/* Both percentages on the same line, matching font */}
+        <div
+          className="mt-2.5 flex items-baseline gap-3 text-[13px] font-bold"
+          style={{ flexDirection: dir === "rtl" ? "row-reverse" : "row" }}
+        >
+          <span style={{ color: CONSERVATIVE_COLOR }}>
+            {labels.conservativeLabel} {fmt(statePct)}
+          </span>
+          <span className="text-white/35">·</span>
+          <span style={{ color: OPPOSITION_COLOR }}>
+            {labels.oppositionLabel} {fmt(diasporaPct)}
+          </span>
+        </div>
       </div>
-      <p className="line-clamp-2 text-[13px] leading-[1.7] text-white/80">
-        {framing}
-      </p>
-    </div>
+    </button>
   );
 }

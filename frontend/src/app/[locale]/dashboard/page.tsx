@@ -1486,6 +1486,19 @@ export default function DashboardPage() {
           View Todo List →
         </a>
       </div>
+
+      {/* Edit stories link — hand-edit titles and narratives */}
+      <div className="mt-6 border border-slate-200 dark:border-slate-800 p-5 flex items-center justify-between">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Edit Stories</h2>
+          <p className="text-xs text-slate-500 mt-1">
+            Hand-edit titles, narratives, and bias comparison for the top 15 trending stories. Edits are preserved against nightly regeneration.
+          </p>
+        </div>
+        <a href="./dashboard/edit-stories" className="border border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/10 px-4 py-2 text-sm text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/20">
+          Open Editor →
+        </a>
+      </div>
     </div>
   );
 }

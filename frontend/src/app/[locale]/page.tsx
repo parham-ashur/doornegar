@@ -5,8 +5,6 @@ import type { StoryBrief } from "@/lib/types";
 import WordsOfWeek from "@/components/home/WordsOfWeek";
 import TelegramDiscussions from "@/components/home/TelegramDiscussions";
 import WeeklyDigest from "@/components/home/WeeklyDigest";
-import StoriesCarousel from "@/components/stories/StoriesCarousel";
-import { buildStoriesSlots } from "@/lib/stories-data";
 import { formatRelativeTime, toFa } from "@/lib/utils";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -93,16 +91,20 @@ function Meta({ story }: { story: StoryBrief }) {
 
 export default async function HomePage({
   params: { locale },
+  searchParams,
 }: {
   params: { locale: string };
+  searchParams?: Promise<{ desktop?: string }> | { desktop?: string };
 }) {
   setRequestLocale(locale);
-  const [stories, blindspots, mobileSlots] = await Promise.all([
+  // ?desktop=1 is still honored by the stories-beta carousel's 7th slot
+  // iframe; it hides the mobile layout so the desktop layout renders alone.
+  const sp = (await Promise.resolve(searchParams)) ?? {};
+  const forceDesktop = sp.desktop === "1";
+  const [stories, blindspots] = await Promise.all([
     fetchAPI<StoryBrief[]>("/api/v1/stories/trending?limit=50").then(d => d || []),
     fetchAPI<StoryBrief[]>("/api/v1/stories/blindspots?limit=10").then(d => d || []),
-    buildStoriesSlots(),
   ]);
-  const mobileDir = locale === "fa" ? "rtl" : "ltr";
 
   if (stories.length === 0) {
     return (
@@ -251,16 +253,26 @@ export default async function HomePage({
     <div dir="rtl" className="mx-auto max-w-7xl px-0 md:px-6 lg:px-8">
 
       {/* ════════════════════════════════════════════ */}
-      {/* MOBILE LAYOUT — stories carousel (phones only) */}
+      {/* MOBILE LAYOUT — original scrolling list (phones only) */}
+      {/* The new stories-carousel design is available at /stories-beta */}
+      {/* while we iterate on it. Swap back here when ready. */}
       {/* ════════════════════════════════════════════ */}
-      <div className="md:hidden">
-        <StoriesCarousel slots={mobileSlots} dir={mobileDir} />
-      </div>
+      {!forceDesktop && (
+        <MobileHome
+          hero={hero}
+          stories={sorted}
+          summaries={allSummaries}
+          locale={locale}
+          conservativeBlind={conservativeBlind}
+          oppositionBlind={oppositionBlind}
+          allAnalyses={allAnalyses}
+        />
+      )}
 
       {/* ════════════════════════════════════════════ */}
-      {/* DESKTOP LAYOUT (tablet and up)                */}
+      {/* DESKTOP LAYOUT (tablet and up, or force-enabled) */}
       {/* ════════════════════════════════════════════ */}
-      <div className="hidden md:block">
+      <div className={forceDesktop ? "block" : "hidden md:block"}>
 
       {/* ═══ TOP SECTION: Blind spots | Hero | Telegram ═══ */}
       <div className="grid grid-cols-12 gap-0 border-b-2 border-slate-300 dark:border-slate-700">

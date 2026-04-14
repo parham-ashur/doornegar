@@ -891,42 +891,79 @@ class _EditStoryRequest(_BaseModel):
     title_en: str | None = None
     summary_fa: str | None = None
     priority: int | None = None
+    # Narrative fields — live inside the JSON blob stored in story.summary_en
+    state_summary_fa: str | None = None
+    diaspora_summary_fa: str | None = None
+    bias_explanation_fa: str | None = None
+
 
 @router.patch("/stories/{story_id}")
 async def edit_story(story_id: str, request: _EditStoryRequest, db: AsyncSession = Depends(get_db)):
-    """Edit a story's title, summary, or priority. Admin-only.
+    """Edit a story's title, narratives, or priority. Admin-only.
 
-    Note: Story has no image_url column. Image selection happens at
-    response time in _story_brief_with_extras() using a title-overlap
-    heuristic. To change what image appears, either (a) fix the
-    underlying article's image_url, or (b) nullify the wrong article's
-    image via a manual DB update.
+    Narrative fields (state_summary_fa, diaspora_summary_fa, bias_explanation_fa)
+    are stored as JSON inside the story.summary_en column. This endpoint reads
+    the current blob, merges any provided fields, and writes it back.
 
-    To HIDE a story from the homepage, set priority = -100 (it falls
-    below trending_score-sorted stories).
+    Any edit to a narrative or title flips story.is_edited = True so the
+    nightly maintenance pipeline skips regeneration for this story.
+
+    To HIDE a story from the homepage, set priority = -100.
     """
-    from sqlalchemy import select
-    from app.models.story import Story
+    import json as _json
     import uuid
+
+    from sqlalchemy import select
+
+    from app.models.story import Story
 
     result = await db.execute(select(Story).where(Story.id == uuid.UUID(story_id)))
     story = result.scalar_one_or_none()
     if not story:
         return {"status": "error", "error": "Story not found"}
 
+    editorial_change = False
+
     if request.title_fa is not None:
         story.title_fa = request.title_fa
+        editorial_change = True
     if request.title_en is not None:
         story.title_en = request.title_en
+        editorial_change = True
     if request.summary_fa is not None:
         story.summary_fa = request.summary_fa
+        editorial_change = True
     if request.priority is not None:
         story.priority = request.priority
+
+    # Narrative fields live inside the JSON blob in summary_en.
+    if (
+        request.state_summary_fa is not None
+        or request.diaspora_summary_fa is not None
+        or request.bias_explanation_fa is not None
+    ):
+        try:
+            blob = _json.loads(story.summary_en) if story.summary_en else {}
+        except Exception:
+            blob = {}
+        if request.state_summary_fa is not None:
+            blob["state_summary_fa"] = request.state_summary_fa
+        if request.diaspora_summary_fa is not None:
+            blob["diaspora_summary_fa"] = request.diaspora_summary_fa
+        if request.bias_explanation_fa is not None:
+            blob["bias_explanation_fa"] = request.bias_explanation_fa
+        story.summary_en = _json.dumps(blob, ensure_ascii=False)
+        editorial_change = True
+
+    if editorial_change:
+        story.is_edited = True
+
     await db.commit()
 
     return {
         "status": "ok",
         "story_id": str(story.id),
+        "is_edited": story.is_edited,
         "title_fa": story.title_fa,
         "title_en": story.title_en,
         "priority": story.priority,
@@ -1350,35 +1387,9 @@ async def patch_article(
     return {"status": "ok", "article_id": article_id, "image_url": article.image_url}
 
 
-@router.patch("/stories/{story_id}")
-async def patch_story(
-    story_id: str,
-    body: dict,
-    db: AsyncSession = Depends(get_db),
-):
-    """Update editable fields on a story (title_fa, title_en, topics)."""
-    import uuid
-    from app.models.story import Story
-
-    story_uuid = uuid.UUID(story_id)
-    result = await db.execute(select(Story).where(Story.id == story_uuid))
-    story = result.scalar_one_or_none()
-    if not story:
-        raise HTTPException(status_code=404, detail="Story not found")
-
-    allowed = {"title_fa", "title_en", "topics"}
-    changed = []
-    for key in allowed:
-        if key in body:
-            setattr(story, key, body[key])
-            changed.append(key)
-
-    if not changed:
-        raise HTTPException(status_code=400, detail=f"No valid fields. Allowed: {allowed}")
-
-    await db.commit()
-    return {"status": "ok", "story_id": story_id, "updated": changed}
-
+# NOTE: a previous duplicate PATCH /stories/{story_id} handler was defined
+# here. Removed because the earlier `edit_story` handler (search for
+# _EditStoryRequest above) already owns this route and is authoritative.
 
 @router.post("/cluster-llm/trigger")
 async def trigger_llm_clustering(db: AsyncSession = Depends(get_db)):
