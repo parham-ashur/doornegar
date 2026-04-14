@@ -5,6 +5,7 @@ import type { Metadata } from "next";
 import { locales } from "@/i18n";
 import Header from "@/components/layout/Header";
 import Footer from "@/components/layout/Footer";
+import ChromeGate from "@/components/layout/ChromeGate";
 import PageAtmosphere from "@/components/common/PageAtmosphere";
 import WelcomeModal from "@/components/common/WelcomeModal";
 import "@/styles/globals.css";
@@ -67,10 +68,16 @@ export default async function LocaleLayout({
       <body className={`min-h-screen bg-white text-slate-900 dark:bg-[#0a0e1a] dark:text-slate-100 ${isRtl ? "font-persian" : "font-latin"}`}>
         <NextIntlClientProvider locale={locale} messages={messages}>
           <div className="flex min-h-screen flex-col">
-            <Header />
+            <ChromeGate>
+              <Header />
+            </ChromeGate>
             <main className="flex-1">{children}</main>
-            <Footer />
-            <PageAtmosphere />
+            <ChromeGate>
+              <Footer />
+            </ChromeGate>
+            <ChromeGate>
+              <PageAtmosphere />
+            </ChromeGate>
             <WelcomeModal />
           </div>
         </NextIntlClientProvider>

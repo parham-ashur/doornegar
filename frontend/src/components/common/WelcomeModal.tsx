@@ -1,30 +1,33 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { usePathname } from "next/navigation";
 import { X } from "lucide-react";
 
 const STORAGE_KEY = "doornegar_welcome_seen";
 
 export default function WelcomeModal() {
+  const pathname = usePathname();
   const [visible, setVisible] = useState(false);
   const [mounted, setMounted] = useState(false);
 
+  const isHomepage = pathname === "/" || pathname === "/fa" || pathname === "/en";
+
   useEffect(() => {
     setMounted(true);
+    if (!isHomepage) return;
     try {
-      // Force-show with ?welcome=1 (useful for testing)
       const params = new URLSearchParams(window.location.search);
       if (params.get("welcome") === "1") {
         setTimeout(() => setVisible(true), 400);
         return;
       }
-      // sessionStorage: resets when tab closes, persists across refreshes
       const seen = sessionStorage.getItem(STORAGE_KEY);
       if (!seen) {
         setTimeout(() => setVisible(true), 800);
       }
     } catch {}
-  }, []);
+  }, [isHomepage]);
 
   const close = () => {
     setVisible(false);
