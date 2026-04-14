@@ -28,17 +28,17 @@ export default async function BlindspotsPage({
         <div className="flex items-center gap-2">
           <EyeOff className="h-6 w-6 text-amber-400" />
           <h1 className="text-2xl font-bold text-white">
-            نگاه یک‌طرفه
+            نگاه یک‌جانبه
           </h1>
         </div>
         <p className="mt-2 max-w-xl text-sm text-slate-400">
-          خبرهایی که فقط توسط یک طرف پوشش داده شده‌اند. این نگاه یک‌طرفه نشان می‌دهند چه چیزی ممکن است از دید شما پنهان بماند.
+          خبرهایی که فقط توسط یک طرف پوشش داده شده‌اند. این نگاه یک‌جانبه نشان می‌دهند چه چیزی ممکن است از دید شما پنهان بماند.
         </p>
       </div>
 
       {stories.length === 0 ? (
         <div className="bg-slate-900/80 ring-1 ring-white/[0.06] rounded-2xl p-5 text-center text-slate-400">
-          هنوز نگاه یک‌طرفهی شناسایی نشده است
+          هنوز نگاه یک‌جانبهی شناسایی نشده است
         </div>
       ) : (
         <div className="space-y-10">

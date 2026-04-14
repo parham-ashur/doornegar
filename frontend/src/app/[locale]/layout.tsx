@@ -12,7 +12,7 @@ import "@/styles/globals.css";
 export const metadata: Metadata = {
   title: "دورنگر — شفافیت رسانه‌ای ایران | Doornegar",
   description:
-    "مقایسه پوشش خبری رسانه‌های داخل و خارج ایران. تحلیل سوگیری، نگاه یک‌طرفه، و چارچوب‌بندی رسانه‌ها. " +
+    "مقایسه پوشش خبری رسانه‌های داخل و خارج ایران. تحلیل سوگیری، نگاه یک‌جانبه، و چارچوب‌بندی رسانه‌ها. " +
     "Compare Iranian news coverage across state, diaspora, and independent media.",
   keywords: [
     "دورنگر", "شفافیت رسانه", "ایران", "خبر", "سوگیری رسانه",

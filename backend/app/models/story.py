@@ -20,6 +20,9 @@ class Story(Base):
     summary_en: Mapped[str | None] = mapped_column(Text, nullable=True)
     summary_fa: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # View tracking
+    view_count: Mapped[int] = mapped_column(Integer, default=0)
+
     # Aggregated metrics
     article_count: Mapped[int] = mapped_column(Integer, default=0)
     source_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -56,6 +59,8 @@ class Story(Base):
     # pre-filter to quickly find candidate stories for new articles via
     # cosine similarity (avoids sending irrelevant stories to the LLM).
     centroid_embedding: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    telegram_analysis: Mapped[dict | None] = mapped_column(JSONB, nullable=True, comment="Cached deep Telegram discourse analysis")
+    editorial_context_fa: Mapped[dict | None] = mapped_column(JSONB, nullable=True, comment="Niloofar editorial background context in Farsi")
 
     # Relationships
     articles: Mapped[list["Article"]] = relationship(back_populates="story")  # noqa: F821

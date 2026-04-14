@@ -150,7 +150,7 @@ export default function StoryFeedbackOverlay({ storyId, storyTitle }: Props) {
       {/* Fixed sidebar on desktop, bottom sheet on mobile */}
       <div
         dir="rtl"
-        className="fixed top-20 right-4 left-4 md:right-auto md:left-4 md:top-24 md:w-72 z-40 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-xl"
+        className="fixed bottom-4 right-4 left-4 md:bottom-auto md:right-auto md:left-4 md:top-24 md:w-72 z-40 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-xl max-h-[80vh] overflow-hidden"
       >
         <button
           onClick={() => setExpanded(!expanded)}
@@ -161,7 +161,7 @@ export default function StoryFeedbackOverlay({ storyId, storyTitle }: Props) {
         </button>
 
         {expanded && (
-          <div className="p-2 grid grid-cols-2 gap-1.5 max-h-[60vh] overflow-y-auto">
+          <div className="p-2 grid grid-cols-2 gap-1.5 max-h-[50vh] overflow-y-auto">
             {buttons.map((btn) => {
               const Icon = btn.icon;
               return (

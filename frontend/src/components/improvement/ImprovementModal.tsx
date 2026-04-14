@@ -384,14 +384,14 @@ export default function ImprovementModal({
 
   return (
     <div
-      className="fixed inset-0 z-[90] flex items-center justify-center p-4"
+      className="fixed inset-0 z-[90] flex items-end md:items-center justify-center p-0 md:p-4"
       onClick={onClose}
       dir="rtl"
     >
       <div className="absolute inset-0 bg-slate-900/70 backdrop-blur-sm" />
 
       <div
-        className="relative w-full max-w-xl bg-white dark:bg-[#0a0e1a] border border-slate-200 dark:border-slate-800 shadow-2xl max-h-[90vh] overflow-y-auto"
+        className="relative w-full max-w-xl bg-white dark:bg-[#0a0e1a] border border-slate-200 dark:border-slate-800 shadow-2xl max-h-[85vh] overflow-y-auto pb-safe"
         onClick={(e) => e.stopPropagation()}
       >
         <button

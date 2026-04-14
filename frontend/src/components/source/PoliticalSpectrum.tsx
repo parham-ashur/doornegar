@@ -6,7 +6,7 @@ function getSpectrumScore(source: Source): number {
   const align = source.state_alignment;
   const irgc = source.irgc_affiliated;
 
-  if (align === "state") return irgc ? 1 : 1;
+  if (align === "state") return irgc ? 1 : 2;
   if (align === "semi_state") return 2;
   if (align === "independent") return 3;
   if (align === "diaspora") {
@@ -36,75 +36,132 @@ export default function PoliticalSpectrum({ sources, sourceNeutrality }: Props) 
   }
 
   const colOrder = [1, 2, 3, 4, 5];
+  const hasNeutrality = sourceNeutrality && Object.values(sourceNeutrality).some(v => v !== 0);
+
+  // Score 1 = most conservative (right in RTL), score 5 = most opposition (left in RTL)
+  // We use a LTR container with explicit positioning:
+  // Left side = opposition, Right side = conservative (matching RTL reading)
+  // So we INVERT: score 1 → right (high %), score 5 → left (low %)
+  const getX = (score: number) => {
+    // score 1 → 82%, score 5 → 18% (conservative on right, opposition on left)
+    return 85 - ((score - 1) / 4) * 70;
+  };
 
   return (
-    <div dir="rtl" className="pl-16">
-      {/* Chart: columns + Y-axis on left */}
-      <div className="flex items-stretch gap-0">
-        {/* 5 columns area */}
-        <div className="flex-1 relative">
-          {/* X-axis: horizontal gradient line in center — starts at Y-axis */}
-          <div className="absolute right-0 z-0 flex items-center" style={{ left: "5%", top: "50%", transform: "translateY(-50%)" }}>
-            <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400 shrink-0 pl-2">محافظه‌کار</span>
-            <div className="flex-1 h-[3px]" style={{
-              background: "linear-gradient(to left, #1e3a5f, #2563eb, #94a3b8, #f97316, #c2410c)",
-            }} />
-          </div>
+    <div>
+      {/* Chart — NO dir=rtl, we position manually */}
+      <div className="relative mx-6" style={{ height: Math.max(280, sources.length * 40) }}>
 
-          {/* اپوزیسیون label — to the left of Y-axis, not overlapping */}
-          <div className="absolute z-0 text-[11px] font-medium text-slate-500 dark:text-slate-400" style={{ left: 0, top: "50%", transform: "translateY(-50%) translateX(-100%)", paddingLeft: 4 }}>اپوزیسیون</div>
-
-          {/* Y-axis vertical line */}
-          <div className="absolute top-0 bottom-0 w-px bg-slate-400 dark:bg-slate-500 z-0" style={{ left: "5%" }} />
-
-          {/* بی‌طرف / یک‌طرفه — to the right of Y-axis */}
-          <div className="absolute z-0 text-[11px] font-medium text-slate-400 dark:text-slate-500" style={{ left: "6%", top: 2 }}>بی‌طرف</div>
-          <div className="absolute z-0 text-[11px] font-medium text-slate-400 dark:text-slate-500" style={{ left: "6%", bottom: 2 }}>یک‌طرفه</div>
-
-          {/* 4 vertical separator lines */}
-          {[1, 2, 3, 4].map((i) => (
-            <div
-              key={i}
-              className="absolute bg-slate-200 dark:bg-slate-700/30 z-0"
-              style={{ left: `${(i / 5) * 100}%`, top: "15%", bottom: "15%", width: "1px" }}
-            />
-          ))}
-
-          {/* Columns with stacked logos */}
-          <div className="relative z-10 flex justify-center" style={{ minHeight: 320 }}>
-            <div className="grid grid-cols-5 w-[85%]">
-              {colOrder.map((score) => {
-                const items = columns[score] || [];
-                return (
-                  <div key={score} className="flex flex-col items-center justify-center gap-2 py-3">
-                    {items.map(({ source: s }) => (
-                      <div key={s.slug} className="group relative">
-                        {s.logo_url ? (
-                          <div className="w-10 h-10 rounded-full overflow-hidden bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm transition-transform group-hover:scale-125">
-                            <img src={s.logo_url} alt={s.name_fa || ""} className="w-full h-full object-cover" loading="lazy" />
-                          </div>
-                        ) : (
-                          <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-[11px] font-bold text-slate-500 dark:text-slate-300 border border-slate-200 dark:border-slate-600 shadow-sm transition-transform group-hover:scale-125">
-                            {(s.name_fa || s.name_en || "?").charAt(0)}
-                          </div>
-                        )}
-                        <div className="hidden md:block absolute -bottom-6 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-800 dark:bg-white text-white dark:text-slate-900 text-[11px] px-2.5 py-1 whitespace-nowrap pointer-events-none z-20 shadow-lg">
-                          {s.name_fa || s.name_en}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+        {/* X-axis gradient line */}
+        <div className="absolute z-0 flex items-center" style={{ top: "50%", transform: "translateY(-50%)", left: "8%", right: "8%" }}>
+          <div className="flex-1 h-[2px]" style={{
+            background: "linear-gradient(to right, #ea580c, #f97316, #94a3b8, #2563eb, #1e3a5f)",
+          }} />
         </div>
 
+        {/* X-axis labels — conservative on right, opposition on left */}
+        <div className="absolute text-[13px] font-medium text-[#1e3a5f] dark:text-blue-300 z-10" style={{ top: "50%", right: 0, transform: "translateY(8px)" }}>محافظه‌کار</div>
+        <div className="absolute text-[13px] font-medium text-[#ea580c] dark:text-orange-400 z-10" style={{ top: "50%", left: 0, transform: "translateY(8px)" }}>اپوزیسیون</div>
+
+        {/* Y-axis labels */}
+        <div className="absolute z-0 text-[13px] text-slate-400 dark:text-slate-500" style={{ right: 0, top: 2 }}>بی‌طرف</div>
+        <div className="absolute z-0 text-[13px] text-slate-400 dark:text-slate-500" style={{ right: 0, bottom: 2 }}>یک‌جانبه</div>
+
+        {/* Column separators */}
+        {[1, 2, 3, 4].map(i => (
+          <div
+            key={i}
+            className="absolute w-px bg-slate-200 dark:bg-slate-700/30 z-0"
+            style={{ left: `${10 + (i / 5) * 80}%`, top: "15%", bottom: "15%" }}
+          />
+        ))}
+
+        {/* Source logos — with collision avoidance */}
+        <div className="absolute inset-0 z-10">
+          {(() => {
+            // Collect all logos with positions
+            const allLogos: { source: Source; x: number; y: number; neutrality: number; borderColor: string }[] = [];
+
+            for (const score of colOrder) {
+              const items = columns[score] || [];
+              if (items.length === 0) continue;
+              const colCenter = getX(score);
+
+              items.forEach(({ source: s, neutrality: n }, idx) => {
+                let yPct: number;
+                if (hasNeutrality) {
+                  const clampedN = Math.max(-1, Math.min(1, n));
+                  yPct = 15 + (1 - (clampedN + 1) / 2) * 70;
+                } else {
+                  if (items.length === 1) {
+                    yPct = 50;
+                  } else {
+                    yPct = 20 + (idx / (items.length - 1)) * 60;
+                  }
+                }
+
+                const borderColor = hasNeutrality
+                  ? n > 0.2 ? "border-emerald-500 dark:border-emerald-400"
+                    : n < -0.3 ? "border-red-500 dark:border-red-400"
+                    : "border-orange-400 dark:border-orange-500"
+                  : "border-slate-200 dark:border-slate-700";
+
+                allLogos.push({ source: s, x: colCenter, y: yPct, neutrality: n, borderColor });
+              });
+            }
+
+            // Nudge overlapping logos (5 passes)
+            for (let pass = 0; pass < 5; pass++) {
+              for (let i = 0; i < allLogos.length; i++) {
+                for (let j = i + 1; j < allLogos.length; j++) {
+                  const dx = allLogos[i].x - allLogos[j].x;
+                  const dy = allLogos[i].y - allLogos[j].y;
+                  const dist = Math.sqrt(dx * dx + dy * dy);
+                  if (dist < 8) {
+                    const push = (8 - dist) / 2 + 1;
+                    allLogos[i].y = Math.max(5, allLogos[i].y - push);
+                    allLogos[j].y = Math.min(95, allLogos[j].y + push);
+                  }
+                }
+              }
+            }
+
+            return allLogos.map(({ source: s, x, y, neutrality: n, borderColor }) => (
+
+              <div
+                key={s.slug}
+                className="absolute group"
+                style={{
+                  left: `${x}%`,
+                  top: `${y}%`,
+                  transform: "translate(-50%, -50%)",
+                }}
+              >
+                {s.logo_url ? (
+                  <div className={`w-8 h-8 rounded-full overflow-hidden bg-white dark:bg-slate-800 border-2 ${borderColor} shadow-sm transition-transform group-hover:scale-125`}>
+                    <img src={s.logo_url} alt={s.name_fa || ""} className="w-full h-full object-cover" loading="lazy" />
+                  </div>
+                ) : (
+                  <div className={`w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-[13px] font-bold text-slate-500 dark:text-slate-300 border-2 ${borderColor} shadow-sm transition-transform group-hover:scale-125`}>
+                    {(s.name_fa || s.name_en || "?").charAt(0)}
+                  </div>
+                )}
+                <div className="hidden md:block absolute -bottom-5 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-800 dark:bg-white text-white dark:text-slate-900 text-[13px] px-2 py-0.5 whitespace-nowrap pointer-events-none z-20 shadow-lg">
+                  {s.name_fa || s.name_en}
+                  {hasNeutrality && n !== 0 && <span className="mr-1 font-mono text-[13px]">({n > 0 ? "+" : ""}{n.toFixed(1)})</span>}
+                </div>
+              </div>
+            ));
+          })()}
+        </div>
       </div>
 
       {/* Caption */}
-      <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-3 leading-5">
-        محور افقی: جایگاه سیاسی رسانه از محافظه‌کار تا اپوزیسیون. محور عمودی: میزان بی‌طرفی پوشش خبری در این موضوع.
+      <p dir="rtl" className="text-[13px] text-slate-400 dark:text-slate-500 mt-3 leading-5 mx-6">
+        محور افقی جایگاه سیاسی رسانه را نشان می‌دهد — از رسانه‌های محافظه‌کار (راست) تا رسانه‌های اپوزیسیون (چپ).
+        {hasNeutrality
+          ? <> محور عمودی میزان بی‌طرفی پوشش <strong className="text-slate-600 dark:text-slate-300">فقط در همین خبر</strong> را نشان می‌دهد — رسانه‌هایی که بالاتر قرار دارند پوشش متوازن‌تری داشته‌اند.</>
+          : <> محور عمودی پس از تحلیل بعدی، میزان بی‌طرفی هر رسانه <strong className="text-slate-600 dark:text-slate-300">فقط در همین خبر</strong> را نشان خواهد داد.</>}
       </p>
     </div>
   );

@@ -1,7 +1,7 @@
 import { setRequestLocale } from "next-intl/server";
 import Link from "next/link";
-import { Radio, Shield, MapPin } from "lucide-react";
-import SourceBadge from "@/components/source/SourceBadge";
+import { Radio, Shield } from "lucide-react";
+import SourcesListWithCompare from "@/components/source/SourcesListWithCompare";
 import { getSources } from "@/lib/api";
 import type { Source } from "@/lib/types";
 
@@ -87,42 +87,8 @@ export default async function SourcesPage({
         </div>
       </div>
 
-      {/* Source cards */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {sources.map((source) => (
-          <Link
-            key={source.slug}
-            href={`/${locale}/sources/${source.slug}`}
-            className="bg-slate-900/80 ring-1 ring-white/[0.06] rounded-2xl p-5 group transition-colors hover:ring-white/10"
-          >
-            <div className="flex items-start justify-between">
-              <h3 className="text-base font-semibold text-white group-hover:text-blue-400">
-                {source.name_fa}
-              </h3>
-              <SourceBadge
-                alignment={source.state_alignment}
-                irgcAffiliated={source.irgc_affiliated}
-              />
-            </div>
-
-            <p className="mt-2 line-clamp-2 text-xs text-slate-400">
-              {source.description_fa}
-            </p>
-
-            <div className="mt-3 flex items-center gap-3 text-[11px] text-slate-500">
-              <span className="flex items-center gap-1">
-                <MapPin className="h-3 w-3" />
-                {source.production_location === "inside_iran"
-                  ? "داخل ایران"
-                  : "خارج از ایران"}
-              </span>
-              {source.factional_alignment && (
-                <span>{source.factional_alignment}</span>
-              )}
-            </div>
-          </Link>
-        ))}
-      </div>
+      {/* Source cards with compare feature */}
+      <SourcesListWithCompare sources={sources} locale={locale} />
     </div>
   );
 }

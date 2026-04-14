@@ -5,15 +5,16 @@ import { Newspaper } from "lucide-react";
 import PoliticalSpectrum from "@/components/source/PoliticalSpectrum";
 import StatsPanel from "@/components/story/StatsPanel";
 import StoryAnalysisPanel from "@/components/story/StoryAnalysisPanel";
+import StoryTimeline from "@/components/story/StoryTimeline";
 import ArticleFilterList from "@/components/story/ArticleFilterList";
-import TelegramPanel from "@/components/story/TelegramPanel";
+
 import FeedbackProvider from "@/components/feedback/FeedbackProvider";
 import SummaryRating from "@/components/feedback/SummaryRating";
 import EditableTitle from "@/components/feedback/EditableTitle";
 import PriorityControl from "@/components/feedback/PriorityControl";
 import StoryFeedbackOverlay from "@/components/improvement/StoryFeedbackOverlay";
 import { getStory, getSources, getStoryAnalysis } from "@/lib/api";
-import { formatRelativeTime } from "@/lib/utils";
+import { formatRelativeTime, toFa } from "@/lib/utils";
 
 export async function generateMetadata({
   params,
@@ -98,7 +99,7 @@ export default async function StoryDetailPage({
         <div className="mt-3 flex flex-wrap items-center gap-4 text-sm text-slate-500">
           <span className="flex items-center gap-1">
             <Newspaper className="h-4 w-4" />
-            {story.source_count} رسانه · {story.article_count} مقاله
+            {toFa(story.source_count)} رسانه · {toFa(story.article_count)} مقاله
           </span>
           {story.first_published_at && (
             <span>
@@ -118,17 +119,19 @@ export default async function StoryDetailPage({
             {statePct > 0 && <div className="bg-[#1e3a5f]" style={{ width: `${statePct}%` }} />}
             {diasporaPct > 0 && <div className="bg-[#ea580c]" style={{ width: `${diasporaPct}%` }} />}
           </div>
-          <div className="flex items-center gap-3 text-[11px]">
-            {statePct > 0 && (
-              <span className="flex items-center gap-1 text-[#1e3a5f] dark:text-blue-300">
-                <span className="inline-block h-1.5 w-1.5 bg-[#1e3a5f]" /> محافظه‌کار {statePct}٪
-              </span>
-            )}
-            {diasporaPct > 0 && (
-              <span className="flex items-center gap-1 text-[#ea580c] dark:text-orange-400">
-                <span className="inline-block h-1.5 w-1.5 bg-[#ea580c]" /> اپوزیسیون {diasporaPct}٪
-              </span>
-            )}
+          <div className="flex items-center gap-4 text-[13px]">
+            <span className="flex items-center gap-1.5 text-[#1e3a5f] dark:text-blue-300">
+              <span className="inline-block h-2 w-2 bg-[#1e3a5f] dark:bg-blue-400" />
+              <span className="font-bold">محافظه‌کار</span> — رسانه‌های دولتی و نزدیک به حکومت
+              {statePct > 0 && <span className="font-medium"> ({toFa(statePct)}٪)</span>}
+            </span>
+          </div>
+          <div className="flex items-center gap-4 text-[13px] mt-0.5">
+            <span className="flex items-center gap-1.5 text-[#ea580c] dark:text-orange-400">
+              <span className="inline-block h-2 w-2 bg-[#ea580c] dark:bg-orange-400" />
+              <span className="font-bold">اپوزیسیون</span> — رسانه‌های برون‌مرزی و منتقد حکومت
+              {diasporaPct > 0 && <span className="font-medium"> ({toFa(diasporaPct)}٪)</span>}
+            </span>
           </div>
         </div>
       </div>
@@ -137,24 +140,36 @@ export default async function StoryDetailPage({
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 lg:items-start">
         {/* RIGHT column (RTL): bias tabs → articles */}
         <div className="lg:pl-6 lg:border-l border-slate-200 dark:border-slate-800">
+          {/* Editorial context */}
+          {story.editorial_context_fa?.context && (
+            <div className="mb-4 border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 px-4 py-3">
+              <p className="text-[13px] font-bold text-slate-500 dark:text-slate-400 mb-1">زمینه خبر</p>
+              <p className="text-[13px] leading-6 text-slate-700 dark:text-slate-300">{story.editorial_context_fa.context}</p>
+            </div>
+          )}
           {/* Bias comparison */}
           <StoryAnalysisPanel analysis={analysis} />
           <SummaryRating storyId={id} />
+
+          {/* Timeline — desktop only */}
+          <div className="hidden lg:block">
+            <StoryTimeline articles={story.articles} />
+          </div>
 
           {/* Articles */}
           <h2 className="mt-6 mb-4 text-base font-black text-slate-900 dark:text-white border-b border-slate-200 dark:border-slate-800 pb-3">
             مقالات مرتبط
           </h2>
           <ArticleFilterList articles={story.articles} storyId={id} />
-          <TelegramPanel storyId={id} />
         </div>
 
         {/* LEFT column (RTL): stats → analyst → spectrum */}
         <div className="lg:pr-6 lg:sticky lg:top-4 space-y-6 pt-4 lg:pt-0" id="story-sidebar">
-          <StatsPanel analysis={analysis} />
+          <StatsPanel analysis={analysis} storyId={id} articleCount={story.article_count} sourceCount={story.source_count} />
 
+          {/* Political spectrum — desktop only */}
           {coveringSources.length > 0 && (
-            <div className="border-t border-slate-200 dark:border-slate-800 pt-4">
+            <div className="hidden lg:block border-t border-slate-200 dark:border-slate-800 pt-4">
               <h3 className="text-sm font-black text-slate-900 dark:text-white mb-4 pb-2 border-b border-slate-200 dark:border-slate-800">
                 جایگاه رسانه‌ها
               </h3>

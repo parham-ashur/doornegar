@@ -16,9 +16,9 @@ function FramingTags({ framing }: { framing: string | string[] | null }) {
   const items = Array.isArray(framing) ? framing : [framing];
   return (
     <div className="flex items-center gap-1.5 flex-wrap mt-3">
-      <span className="text-[11px] text-slate-500">چارچوب‌بندی:</span>
+      <span className="text-[13px] text-slate-500">چارچوب‌بندی:</span>
       {items.map((f, i) => (
-        <span key={i} className="px-2 py-0.5 text-[11px] border border-slate-300 dark:border-slate-700 font-medium text-slate-700 dark:text-slate-300">
+        <span key={i} className="px-2 py-0.5 text-[13px] border border-slate-300 dark:border-slate-700 font-medium text-slate-700 dark:text-slate-300">
           {f}
         </span>
       ))}

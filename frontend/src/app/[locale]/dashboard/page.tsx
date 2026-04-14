@@ -350,6 +350,64 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, [running, authHeaders, fetchDashboard]);
 
+  // Niloofar audit
+  const [niloofarRunning, setNiloofarRunning] = useState(false);
+  const [niloofarResult, setNiloofarResult] = useState<any>(null);
+  const [niloofarOpen, setNiloofarOpen] = useState(false);
+
+  const [niloofarApplying, setNiloofarApplying] = useState<Record<number, string>>({});
+
+  const triggerNiloofarAudit = useCallback(async () => {
+    setNiloofarRunning(true);
+    setNiloofarResult(null);
+    setNiloofarApplying({});
+    setNiloofarOpen(true);
+    try {
+      const res = await fetch(`${API}/api/v1/admin/niloofar/audit`, {
+        method: "POST",
+        headers: authHeaders(),
+      });
+      const data = await res.json();
+      setNiloofarResult(data);
+    } catch (e: any) {
+      setNiloofarResult({ error: e.message || "Unknown error" });
+    }
+    setNiloofarRunning(false);
+  }, [authHeaders]);
+
+  const applyNiloofarFix = useCallback(async (findingIndex: number) => {
+    setNiloofarApplying(prev => ({ ...prev, [findingIndex]: "applying" }));
+    try {
+      const res = await fetch(`${API}/api/v1/admin/niloofar/apply-fix?fix_index=${findingIndex}`, {
+        method: "POST",
+        headers: authHeaders(),
+      });
+      const data = await res.json();
+      setNiloofarApplying(prev => ({ ...prev, [findingIndex]: data.status === "ok" ? "done" : "error" }));
+    } catch {
+      setNiloofarApplying(prev => ({ ...prev, [findingIndex]: "error" }));
+    }
+  }, [authHeaders]);
+
+  const applyAllNiloofarFixes = useCallback(async () => {
+    setNiloofarRunning(true);
+    try {
+      const res = await fetch(`${API}/api/v1/admin/niloofar/audit?apply=true`, {
+        method: "POST",
+        headers: authHeaders(),
+      });
+      const data = await res.json();
+      setNiloofarResult(data);
+      // Mark all as done
+      const allDone: Record<number, string> = {};
+      (data?.report?.findings || []).forEach((_: any, i: number) => { allDone[i] = "done"; });
+      setNiloofarApplying(allDone);
+    } catch (e: any) {
+      setNiloofarResult({ error: e.message });
+    }
+    setNiloofarRunning(false);
+  }, [authHeaders]);
+
   // Feedback & Suggestions
   const [feedback, setFeedback] = useState<FeedbackItem[]>([]);
   const [feedbackLoading, setFeedbackLoading] = useState(false);
@@ -375,6 +433,9 @@ export default function DashboardPage() {
   }, [authed, authHeaders]);
 
   useEffect(() => { fetchFeedback(); }, [fetchFeedback]);
+
+  // Persona info tooltip
+  const [activePersona, setActivePersona] = useState<string | null>(null);
 
   if (!authed) {
     return (
@@ -1165,6 +1226,189 @@ export default function DashboardPage() {
           {" "}<strong>Null localhost URLs</strong> — clears broken dev-only image paths.
           {" "}<strong>Unclaim story articles</strong> — detaches all articles from a story and hides it.
         </p>
+      </div>
+
+      {/* Niloofar Editor Audit */}
+      <div className="mb-6 border border-violet-200 dark:border-violet-900/50 bg-violet-50/30 dark:bg-violet-950/10 p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+            <Activity className="h-4 w-4 text-violet-500" /> Niloofar Editor Audit
+            <span className="text-xs font-normal text-slate-500" dir="rtl">نیلوفر — ویراستار</span>
+          </h2>
+          <button
+            onClick={triggerNiloofarAudit}
+            disabled={niloofarRunning}
+            className="flex items-center gap-2 border border-violet-300 dark:border-violet-700 bg-violet-100 dark:bg-violet-900/20 px-4 py-2 text-sm font-medium text-violet-700 dark:text-violet-300 hover:bg-violet-200 dark:hover:bg-violet-900/30 disabled:opacity-50"
+          >
+            {niloofarRunning && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
+            {niloofarRunning ? "در حال بررسی..." : "Run Audit"}
+          </button>
+        </div>
+
+        {niloofarOpen && (
+          <div className="mt-3">
+            {niloofarRunning && !niloofarResult && (
+              <div className="flex items-center gap-2 text-xs text-slate-500 py-4">
+                <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                <span dir="rtl">نیلوفر در حال بررسی محتوا...</span>
+              </div>
+            )}
+            {niloofarResult && niloofarResult.error && (
+              <div className="border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-900/10 p-3 text-xs text-red-700 dark:text-red-400">
+                Error: {niloofarResult.error}
+              </div>
+            )}
+            {niloofarResult?.report && (
+              <div dir="rtl">
+                {/* Grade + summary */}
+                <div className="flex items-center gap-3 mb-3">
+                  <span className={`text-2xl font-black ${
+                    niloofarResult.report.overall_grade === "A" ? "text-emerald-500" :
+                    niloofarResult.report.overall_grade === "B" ? "text-blue-500" :
+                    niloofarResult.report.overall_grade === "C" ? "text-amber-500" : "text-red-500"
+                  }`}>{niloofarResult.report.overall_grade}</span>
+                  <p className="text-[12px] text-slate-600 dark:text-slate-400 leading-5">{niloofarResult.report.summary}</p>
+                </div>
+
+                {/* Apply all button */}
+                <button
+                  onClick={applyAllNiloofarFixes}
+                  disabled={niloofarRunning}
+                  className="mb-4 flex items-center gap-2 border border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/20 px-4 py-2 text-sm font-medium text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 disabled:opacity-50"
+                >
+                  {niloofarRunning ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle className="h-3.5 w-3.5" />}
+                  اعمال همه اصلاحات
+                </button>
+
+                {/* Findings list */}
+                <div className="space-y-3">
+                  {(niloofarResult.report.findings || []).map((f: any, i: number) => {
+                    const sevColor = f.severity === "critical" ? "border-red-400 bg-red-50/50 dark:bg-red-900/10" :
+                      f.severity === "high" ? "border-orange-400 bg-orange-50/50 dark:bg-orange-900/10" :
+                      f.severity === "medium" ? "border-amber-300 bg-amber-50/50 dark:bg-amber-900/10" :
+                      "border-slate-200 bg-slate-50/50 dark:bg-slate-800/30";
+                    const applyState = niloofarApplying[i];
+                    return (
+                      <div key={i} className={`border-r-4 ${sevColor} p-3`}>
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[12px] font-bold text-slate-800 dark:text-slate-200 mb-1">
+                              {f.type === "bad_title" ? "عنوان نادرست" :
+                               f.type === "irrelevant_article" ? "مقاله نامرتبط" :
+                               f.type === "merge_stories" ? "ادغام موضوعات" :
+                               f.type === "bad_summary" ? "خلاصه ضعیف" :
+                               f.type === "stale_story" ? "موضوع کهنه" :
+                               f.type === "source_silence" ? "سکوت منابع" :
+                               f.type === "pipeline_suggestion" ? "پیشنهاد سیستمی" :
+                               f.type || "سایر"}
+                            </p>
+                            <p className="text-[11px] text-slate-500 mb-1 truncate">{f.story_title}</p>
+                            <p className="text-[12px] text-slate-700 dark:text-slate-300 leading-5">{f.description_fa}</p>
+                            <p className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-1">← {f.proposed_fix}</p>
+                          </div>
+                          <div className="shrink-0">
+                            {applyState === "done" ? (
+                              <span className="text-[11px] text-emerald-500 font-medium flex items-center gap-1">
+                                <CheckCircle className="h-3.5 w-3.5" /> اعمال شد
+                              </span>
+                            ) : applyState === "applying" ? (
+                              <RefreshCw className="h-3.5 w-3.5 text-blue-500 animate-spin" />
+                            ) : applyState === "error" ? (
+                              <span className="text-[11px] text-red-500">خطا</span>
+                            ) : f.fix_type !== "pipeline_change" ? (
+                              <button
+                                onClick={() => applyNiloofarFix(i)}
+                                className="text-[11px] border border-violet-300 dark:border-violet-700 px-3 py-1 text-violet-600 dark:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-900/20"
+                              >
+                                اعمال
+                              </button>
+                            ) : (
+                              <span className="text-[10px] text-slate-400">سیستمی</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Applied results */}
+                {niloofarResult.applied && (
+                  <div className="mt-3 border-t border-slate-200 dark:border-slate-800 pt-3">
+                    <p className="text-[11px] font-bold text-slate-500 mb-2">نتایج اعمال:</p>
+                    {niloofarResult.applied.map((r: string, i: number) => (
+                      <p key={i} className="text-[11px] text-slate-600 dark:text-slate-400">{r}</p>
+                    ))}
+                  </div>
+                )}
+
+                <button
+                  onClick={() => { setNiloofarOpen(false); setNiloofarResult(null); setNiloofarApplying({}); }}
+                  className="mt-3 text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+                >
+                  بستن
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Claude Persona Audits */}
+      <div className="mb-6 border border-slate-200 dark:border-slate-800 p-5">
+        <h2 className="mb-4 text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+          <ListChecks className="h-4 w-4 text-slate-400" /> Claude Persona Audits
+        </h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
+          {([
+            { key: "dariush", name: "Dariush", nameFa: "داریوش", role: "Data Health Check",
+              desc: "Checks pipeline data quality, missing fields, stale articles, and embedding coverage.",
+              border: "border-emerald-200 dark:border-emerald-900/50", bg: "bg-emerald-50/30 dark:bg-emerald-950/10",
+              accent: "text-emerald-600 dark:text-emerald-400",
+              btnClass: "border-emerald-300 dark:border-emerald-700 bg-emerald-100 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-200 dark:hover:bg-emerald-900/30" },
+            { key: "sara", name: "Sara", nameFa: "سارا", role: "UX Review",
+              desc: "Reviews frontend usability, layout issues, RTL bugs, and mobile responsiveness.",
+              border: "border-pink-200 dark:border-pink-900/50", bg: "bg-pink-50/30 dark:bg-pink-950/10",
+              accent: "text-pink-600 dark:text-pink-400",
+              btnClass: "border-pink-300 dark:border-pink-700 bg-pink-100 dark:bg-pink-900/20 text-pink-700 dark:text-pink-300 hover:bg-pink-200 dark:hover:bg-pink-900/30" },
+            { key: "kamran", name: "Kamran", nameFa: "کامران", role: "Geopolitical Analysis",
+              desc: "Validates geopolitical framing, factional labels, and source classification accuracy.",
+              border: "border-sky-200 dark:border-sky-900/50", bg: "bg-sky-50/30 dark:bg-sky-950/10",
+              accent: "text-sky-600 dark:text-sky-400",
+              btnClass: "border-sky-300 dark:border-sky-700 bg-sky-100 dark:bg-sky-900/20 text-sky-700 dark:text-sky-300 hover:bg-sky-200 dark:hover:bg-sky-900/30" },
+            { key: "mina", name: "Mina", nameFa: "مینا", role: "Translation Check",
+              desc: "Audits Persian-English translations, title quality, and bilingual consistency.",
+              border: "border-amber-200 dark:border-amber-900/50", bg: "bg-amber-50/30 dark:bg-amber-950/10",
+              accent: "text-amber-600 dark:text-amber-400",
+              btnClass: "border-amber-300 dark:border-amber-700 bg-amber-100 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-900/30" },
+            { key: "reza", name: "Reza", nameFa: "رضا", role: "Bias Self-Audit",
+              desc: "Reviews bias scores, LLM prompt fairness, and checks for systematic scoring drift.",
+              border: "border-red-200 dark:border-red-900/50", bg: "bg-red-50/30 dark:bg-red-950/10",
+              accent: "text-red-600 dark:text-red-400",
+              btnClass: "border-red-300 dark:border-red-700 bg-red-100 dark:bg-red-900/20 text-red-700 dark:text-red-300 hover:bg-red-200 dark:hover:bg-red-900/30" },
+          ] as const).map(p => (
+              <div key={p.key} className={`border ${p.border} ${p.bg} p-4 flex flex-col`}>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className={`text-sm font-bold ${p.accent}`}>{p.name}</span>
+                  <span className="text-xs text-slate-500" dir="rtl">{p.nameFa}</span>
+                </div>
+                <p className="text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">{p.role}</p>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-4 mb-3 flex-1">{p.desc}</p>
+                <button
+                  onClick={() => setActivePersona(activePersona === p.key ? null : p.key)}
+                  className={`flex items-center justify-center gap-1.5 border px-3 py-1.5 text-xs font-medium transition-colors ${p.btnClass}`}
+                >
+                  <MessageSquare className="h-3 w-3" />
+                  {activePersona === p.key ? "Got it" : "How to Run"}
+                </button>
+                {activePersona === p.key && (
+                  <p className="mt-2 text-[11px] text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800/50 p-2 leading-4">
+                    Run this persona in Claude chat by saying: <span className="font-mono font-bold">&quot;Run {p.name} audit&quot;</span>
+                  </p>
+                )}
+              </div>
+          ))}
+        </div>
       </div>
 
       {/* Pipeline Controls */}

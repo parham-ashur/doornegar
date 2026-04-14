@@ -1134,6 +1134,123 @@ async def migrate_and_seed(db: AsyncSession = Depends(get_db)):
     return {"status": "ok", "results": results}
 
 
+@router.post("/telegram/seed")
+async def seed_telegram_channels_endpoint(db: AsyncSession = Depends(get_db)):
+    """Seed Telegram channels into the database (no Telethon needed)."""
+    from app.services.seed_telegram import seed_telegram_channels
+    count = await seed_telegram_channels(db)
+    # Return current channel list
+    result = await db.execute(
+        select(TelegramChannel).order_by(TelegramChannel.username)
+    )
+    channels = result.scalars().all()
+    return {
+        "status": "ok",
+        "new_channels": count,
+        "total_channels": len(channels),
+        "channels": [{"username": c.username, "title": c.title, "type": c.channel_type} for c in channels],
+    }
+
+
+@router.post("/telegram/run")
+async def run_telegram_collection(db: AsyncSession = Depends(get_db)):
+    """Run just the Telegram ingestion step (fetch posts, convert to articles, link to stories).
+    Requires Telethon session to be authorized."""
+    from app.services.telegram_service import (
+        ingest_all_channels,
+        convert_telegram_posts_to_articles,
+        extract_articles_from_aggregators,
+    )
+    results = {}
+    try:
+        ingest_stats = await ingest_all_channels(db)
+        results["ingest"] = ingest_stats
+    except Exception as e:
+        results["ingest"] = {"error": str(e)}
+
+    try:
+        convert_stats = await convert_telegram_posts_to_articles(db)
+        results["convert"] = convert_stats
+    except Exception as e:
+        results["convert"] = {"error": str(e)}
+
+    try:
+        agg_stats = await extract_articles_from_aggregators(db)
+        results["aggregators"] = agg_stats
+    except Exception as e:
+        results["aggregators"] = {"error": str(e)}
+
+    return {"status": "ok", "results": results}
+
+
+@router.post("/niloofar/audit")
+async def niloofar_audit(
+    apply: bool = Query(False),
+    db: AsyncSession = Depends(get_db),
+):
+    """Run Niloofar journalist audit on homepage content.
+
+    If apply=true, applies ALL actionable fixes.
+    """
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+
+    from scripts.journalist_audit import fetch_stories, build_stories_block, call_niloofar, apply_fix
+
+    stories = await fetch_stories()
+    if not stories:
+        return {"status": "no_stories"}
+
+    stories_block = build_stories_block(stories)
+    report = await call_niloofar(stories_block)
+    if not report:
+        return {"status": "error", "message": "LLM analysis failed"}
+
+    applied_results = []
+    if apply:
+        for f in report.get("findings", []):
+            if f.get("fix_type") in ("rename_story", "update_summary", "remove_article", "merge_stories", "update_image"):
+                result = await apply_fix(f)
+                applied_results.append(result)
+            elif f.get("fix_type") == "pipeline_change":
+                applied_results.append(f"Pipeline: {f.get('fix_data', {}).get('pipeline_description', '?')[:80]}")
+            else:
+                applied_results.append("Skipped")
+
+    return {
+        "status": "ok",
+        "report": report,
+        "applied": applied_results if apply else None,
+    }
+
+
+@router.post("/niloofar/apply-fix")
+async def niloofar_apply_single_fix(
+    fix_index: int = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Apply a single Niloofar fix by index from the last audit report."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+
+    from scripts.journalist_audit import apply_fix
+    from pathlib import Path as _P
+    import json as _json
+
+    report_path = _P(__file__).parent.parent.parent.parent / "scripts" / "journalist_report.json"
+    if not report_path.exists():
+        return {"status": "error", "message": "No audit report found. Run audit first."}
+
+    report = _json.loads(report_path.read_text(encoding="utf-8"))
+    findings = report.get("findings", [])
+    if fix_index < 0 or fix_index >= len(findings):
+        return {"status": "error", "message": f"Invalid fix index {fix_index}"}
+
+    finding = findings[fix_index]
+    result = await apply_fix(finding)
+    return {"status": "ok", "result": result}
+
+
 @router.post("/cleanup-unrelated")
 async def cleanup_unrelated_articles(
     threshold: float = Query(0.20, ge=0.0, le=1.0),

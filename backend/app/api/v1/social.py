@@ -116,6 +116,73 @@ async def get_story_social_data(
     )
 
 
+@router.get("/recent", response_model=list[TelegramPostResponse])
+async def get_recent_posts(
+    limit: int = Query(10, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get most recent Telegram posts across all active channels (for homepage)."""
+    result = await db.execute(
+        select(TelegramPost)
+        .options(selectinload(TelegramPost.channel))
+        .join(TelegramPost.channel)
+        .where(TelegramChannel.is_active == True)  # noqa: E712
+        .where(TelegramPost.text.isnot(None))
+        .where(TelegramPost.text != "")
+        .order_by(TelegramPost.date.desc())
+        .limit(limit)
+    )
+    posts = result.scalars().all()
+    return [TelegramPostResponse.model_validate(p) for p in posts]
+
+
+@router.get("/stories/{story_id}/telegram-analysis")
+async def get_telegram_analysis(
+    story_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Deep LLM analysis of Telegram discourse around a story.
+
+    Returns cached analysis if available, otherwise runs LLM analysis and caches it.
+    """
+    from app.models.story import Story
+
+    # Channel stats — only non-media channels (analysts, commentators, aggregators)
+    NON_MEDIA_TYPES = ("commentary", "aggregator", "activist", "political_party", "citizen")
+    channel_stats = []
+    posts_result = await db.execute(
+        select(TelegramChannel.title, TelegramChannel.channel_type, func.count(TelegramPost.id).label("cnt"))
+        .join(TelegramPost, TelegramPost.channel_id == TelegramChannel.id)
+        .where(TelegramPost.story_id == story_id)
+        .where(TelegramPost.text.isnot(None))
+        .where(TelegramChannel.channel_type.in_(NON_MEDIA_TYPES))
+        .group_by(TelegramChannel.id, TelegramChannel.title, TelegramChannel.channel_type)
+        .order_by(func.count(TelegramPost.id).desc())
+    )
+    for title, ch_type, cnt in posts_result.all():
+        channel_stats.append({"name": title, "type": ch_type, "posts": cnt})
+    total_posts = sum(c["posts"] for c in channel_stats)
+
+    # Check for cached analysis first
+    story_result = await db.execute(select(Story).where(Story.id == story_id))
+    story = story_result.scalar_one_or_none()
+    if story and story.telegram_analysis:
+        return {"status": "ok", "analysis": story.telegram_analysis, "channels": channel_stats, "total_posts": total_posts}
+
+    # No cache — run analysis and store
+    from app.services.telegram_analysis import analyze_story_telegram
+    result = await analyze_story_telegram(db, str(story_id))
+    if result is None:
+        return {"status": "no_data", "message": "Not enough Telegram posts for analysis", "channels": channel_stats, "total_posts": total_posts}
+
+    # Cache in DB
+    if story:
+        story.telegram_analysis = result
+        await db.commit()
+
+    return {"status": "ok", "analysis": result, "channels": channel_stats, "total_posts": total_posts}
+
+
 @router.get("/stories/{story_id}/sentiment/history", response_model=list[SocialSentimentResponse])
 async def get_sentiment_history(
     story_id: uuid.UUID,

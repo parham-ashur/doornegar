@@ -72,6 +72,7 @@ export interface StoryBrief {
   first_published_at: string | null;
   updated_at: string | null;
   trending_score: number;
+  view_count: number;
   priority: number;
   image_url: string | null;
   state_pct: number;
@@ -87,9 +88,15 @@ export interface StoryArticleWithBias extends ArticleBrief {
   bias_scores: BiasScore[];
 }
 
+export interface EditorialContext {
+  context: string;
+  updated_at?: string;
+}
+
 export interface StoryDetail extends StoryBrief {
   summary_en: string | null;
   summary_fa: string | null;
+  editorial_context_fa: EditorialContext | null;
   articles: StoryArticleWithBias[];
 }
 

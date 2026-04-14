@@ -23,6 +23,7 @@ class StoryBrief(BaseModel):
     first_published_at: datetime | None = None
     updated_at: datetime | None = None
     trending_score: float
+    view_count: int = 0
     priority: int = 0
     image_url: str | None = None
     state_pct: int = 0
@@ -43,6 +44,7 @@ class StoryArticleWithBias(ArticleBrief):
 class StoryDetail(StoryBrief):
     summary_en: str | None = None
     summary_fa: str | None = None
+    editorial_context_fa: dict | None = None
     articles: list[StoryArticleWithBias] = []
 
 

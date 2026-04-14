@@ -1,9 +1,8 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { StoryBrief } from "@/lib/types";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+import { toFa } from "@/lib/utils";
 
 type SourceAlignment = "state" | "semi_state" | "independent" | "diaspora";
 
@@ -11,6 +10,9 @@ interface ArticlePosition {
   article_id: string;
   title_fa: string;
   source_slug: string;
+  source_name_fa?: string;
+  source_logo_url?: string;
+  article_url?: string;
   source_alignment: SourceAlignment;
   x: number;
   y: number;
@@ -20,6 +22,9 @@ interface DotData {
   article_id: string;
   title_fa: string;
   source_slug: string;
+  source_name_fa?: string;
+  source_logo_url?: string;
+  article_url?: string;
   x: number;
   y: number;
   color: "conservative" | "opposition" | "independent";
@@ -77,66 +82,40 @@ function mapPositionsToDots(positions: ArticlePosition[]): DotData[] {
     article_id: p.article_id,
     title_fa: p.title_fa,
     source_slug: p.source_slug,
+    source_name_fa: p.source_name_fa,
+    source_logo_url: p.source_logo_url,
+    article_url: p.article_url,
     x: p.x,
     y: p.y,
     color: alignmentToColor(p.source_alignment),
   }));
 }
 
-export default function NarrativeMap({ stories }: { stories: StoryBrief[] }) {
+export default function NarrativeMap({ stories, prefetchedPositions }: { stories: StoryBrief[]; prefetchedPositions?: Record<string, ArticlePosition[]> }) {
   const [selected, setSelected] = useState<string | null>(stories[0]?.id || null);
-  const [dots, setDots] = useState<DotData[]>([]);
-  const [loading, setLoading] = useState(false);
   const [hoveredDot, setHoveredDot] = useState<string | null>(null);
+  const [clickedDot, setClickedDot] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
-  const cacheRef = useRef<Map<string, DotData[]>>(new Map());
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const active = stories.find((s) => s.id === selected);
 
-  const fetchPositions = useCallback(
-    async (storyId: string) => {
-      // Return cached data if available
-      const cached = cacheRef.current.get(storyId);
-      if (cached) {
-        setDots(cached);
-        return;
-      }
-
-      const story = stories.find((s) => s.id === storyId);
-      setLoading(true);
-
-      try {
-        const res = await fetch(
-          `${API_BASE}/api/v1/stories/${storyId}/article-positions`
-        );
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const positions: ArticlePosition[] = await res.json();
-        const mapped = mapPositionsToDots(positions);
-        cacheRef.current.set(storyId, mapped);
-        setDots(mapped);
-      } catch {
-        // Fall back to alignment-based positioning
-        if (story) {
-          const fallback = generateFallbackDots(story);
-          cacheRef.current.set(storyId, fallback);
-          setDots(fallback);
-        } else {
-          setDots([]);
-        }
-      } finally {
-        setLoading(false);
-      }
-    },
-    [stories]
-  );
-
-  useEffect(() => {
-    if (selected) {
-      fetchPositions(selected);
-    } else {
-      setDots([]);
+  // Build cache from prefetched data (computed once, not in effect)
+  const cache = useRef<Record<string, DotData[]>>({});
+  if (prefetchedPositions && Object.keys(cache.current).length === 0) {
+    for (const [storyId, positions] of Object.entries(prefetchedPositions)) {
+      cache.current[storyId] = positions.length > 0
+        ? mapPositionsToDots(positions)
+        : generateFallbackDots(stories.find(s => s.id === storyId)!);
     }
-  }, [selected, fetchPositions]);
+  }
+
+  // Get dots for selected story (instant)
+  const dots = selected
+    ? (cache.current[selected] || generateFallbackDots(stories.find(s => s.id === selected)!))
+    : [];
+
+  const loading = false;
 
   const dotColorClasses: Record<DotData["color"], string> = {
     conservative: "bg-[#1e3a5f] dark:bg-blue-400",
@@ -145,7 +124,7 @@ export default function NarrativeMap({ stories }: { stories: StoryBrief[] }) {
   };
 
   return (
-    <div dir="rtl" className="grid grid-cols-12 gap-0" style={{ minHeight: 350 }}>
+    <div ref={containerRef} dir="rtl" className="grid grid-cols-12 gap-0" style={{ minHeight: 350 }}>
       {/* Right: Story list */}
       <div ref={listRef} className="col-span-4 border-l border-slate-200 dark:border-slate-800 pl-4 overflow-y-auto" style={{ maxHeight: 380 }}>
         {stories.slice(0, 15).map((s, i) => (
@@ -164,7 +143,7 @@ export default function NarrativeMap({ stories }: { stories: StoryBrief[] }) {
               {s.title_fa}
             </h4>
             <p className="text-[11px] text-slate-400 mt-0.5">
-              {s.article_count} مقاله
+              {toFa(s.article_count)} مقاله
               {s.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300"> · {s.state_pct}٪</span>}
               {s.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400"> · {s.diaspora_pct}٪</span>}
             </p>
@@ -174,12 +153,18 @@ export default function NarrativeMap({ stories }: { stories: StoryBrief[] }) {
 
       {/* Left: Scatter plot of articles */}
       <div className="col-span-8 pr-4 relative" style={{ height: 380 }}>
-        {/* Center line */}
-        <div className="absolute top-0 bottom-0 left-1/2 w-px bg-slate-100 dark:bg-slate-800/50" />
+        {/* X-axis: center line */}
+        <div className="absolute left-0 right-0 h-px bg-slate-200 dark:bg-slate-700/40" style={{ top: "50%" }} />
+        {/* Y-axis: center line */}
+        <div className="absolute top-0 bottom-0 left-1/2 w-px bg-slate-200 dark:bg-slate-700/40" />
 
-        {/* Side labels */}
-        <div className="absolute right-4 top-3 text-[11px] font-medium text-[#1e3a5f] dark:text-blue-300">محافظه‌کار</div>
-        <div className="absolute left-4 top-3 text-[11px] font-medium text-[#ea580c] dark:text-orange-400">اپوزیسیون</div>
+        {/* X-axis labels */}
+        <div className="absolute right-4 text-[10px] font-medium text-[#1e3a5f] dark:text-blue-300" style={{ top: "50%", transform: "translateY(4px)" }}>محافظه‌کار</div>
+        <div className="absolute left-4 text-[10px] font-medium text-[#ea580c] dark:text-orange-400" style={{ top: "50%", transform: "translateY(4px)" }}>اپوزیسیون</div>
+
+        {/* Y-axis labels */}
+        <div className="absolute text-[10px] font-medium text-slate-400 dark:text-slate-500" style={{ left: "50%", top: 4, transform: "translateX(-50%)" }}>بی‌طرف</div>
+        <div className="absolute text-[10px] font-medium text-slate-400 dark:text-slate-500" style={{ left: "50%", bottom: 4, transform: "translateX(-50%)" }}>یک‌جانبه</div>
 
         {/* Loading indicator */}
         {loading && (
@@ -194,47 +179,115 @@ export default function NarrativeMap({ stories }: { stories: StoryBrief[] }) {
           </div>
         )}
 
-        {/* Article dots */}
-        {!loading && dots.map((d) => (
-          <div
-            key={d.article_id}
-            className="absolute transition-all duration-500"
-            style={{
-              left: `${d.x}%`,
-              top: `${d.y}%`,
-              transform: "translate(-50%, -50%)",
-            }}
-            onMouseEnter={() => { if (d.title_fa) setHoveredDot(d.article_id); }}
-            onMouseLeave={() => setHoveredDot(null)}
-          >
-            <div
-              className={`rounded-full ${dotColorClasses[d.color]} opacity-50 hover:opacity-90 transition-opacity cursor-default`}
-              style={{ width: 8, height: 8 }}
-            />
-            {/* Tooltip */}
-            {hoveredDot === d.article_id && d.title_fa && (
-              <div
-                className="absolute z-20 bottom-full left-1/2 -translate-x-1/2 mb-2 pointer-events-none"
-                style={{ width: "max-content", maxWidth: 220 }}
-              >
-                <div className="bg-slate-900 dark:bg-slate-700 text-white text-[11px] leading-snug px-2.5 py-1.5 rounded shadow-lg">
-                  <p className="line-clamp-2">{d.title_fa}</p>
-                  {d.source_slug && (
-                    <p className="text-slate-400 text-[10px] mt-0.5">{d.source_slug}</p>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        ))}
+        {/* Connecting lines between same-source articles */}
+        {!loading && (() => {
+          const bySource: Record<string, DotData[]> = {};
+          dots.filter(d => d.source_slug).forEach(d => {
+            if (!bySource[d.source_slug]) bySource[d.source_slug] = [];
+            bySource[d.source_slug].push(d);
+          });
+          return Object.values(bySource).filter(g => g.length >= 2).map((group, gi) => (
+            <svg key={`line-${gi}`} className="absolute inset-0 w-full h-full pointer-events-none z-0" style={{ overflow: "visible" }}>
+              {group.slice(0, -1).map((d, i) => {
+                const next = group[i + 1];
+                const colorMap = { conservative: "#1e3a5f", opposition: "#ea580c", independent: "#94a3b8" };
+                return (
+                  <line
+                    key={`${d.article_id}-${next.article_id}`}
+                    x1={`${d.x}%`} y1={`${d.y}%`}
+                    x2={`${next.x}%`} y2={`${next.y}%`}
+                    stroke={colorMap[d.color] || "#94a3b8"}
+                    strokeWidth="1.5"
+                    opacity="0.45"
+                    strokeDasharray="4,3"
+                  />
+                );
+              })}
+            </svg>
+          ));
+        })()}
 
-        {/* Story info */}
+        {/* Article logos — nudge overlapping positions */}
+        {!loading && (() => {
+          // Nudge dots that overlap — run multiple passes for chain collisions
+          const SIZE_PCT = 6; // minimum distance between logos in %
+          const nudged = dots.map(d => ({ ...d }));
+          for (let pass = 0; pass < 5; pass++) {
+            let moved = false;
+            for (let i = 0; i < nudged.length; i++) {
+              for (let j = i + 1; j < nudged.length; j++) {
+                const dx = nudged[i].x - nudged[j].x;
+                const dy = nudged[i].y - nudged[j].y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < SIZE_PCT) {
+                  const push = (SIZE_PCT - dist) / 2 + 1;
+                  // Push apart on Y, and slightly on X if same column
+                  nudged[i].y = Math.max(5, nudged[i].y - push);
+                  nudged[j].y = Math.min(95, nudged[j].y + push);
+                  if (Math.abs(dx) < 2) {
+                    nudged[i].x = Math.max(5, nudged[i].x - 1.5);
+                    nudged[j].x = Math.min(95, nudged[j].x + 1.5);
+                  }
+                  moved = true;
+                }
+              }
+            }
+            if (!moved) break;
+          }
+
+          const borderColor: Record<string, string> = { conservative: "border-[#1e3a5f]", opposition: "border-[#ea580c]", independent: "border-slate-400" };
+          return nudged.map((d) => (
+            <div
+              key={d.article_id}
+              className="absolute transition-all duration-500 z-10"
+              style={{
+                left: `${d.x}%`,
+                top: `${d.y}%`,
+                transform: "translate(-50%, -50%)",
+              }}
+              onMouseEnter={() => { if (d.title_fa) setHoveredDot(d.article_id); }}
+              onMouseLeave={() => { if (clickedDot !== d.article_id) setHoveredDot(null); }}
+              onClick={(e) => { e.stopPropagation(); setClickedDot(clickedDot === d.article_id ? null : d.article_id); }}
+            >
+              {d.source_logo_url ? (
+                <div className={`w-6 h-6 rounded-full overflow-hidden bg-white dark:bg-slate-800 border ${borderColor[d.color]} shadow-sm hover:scale-150 transition-transform cursor-pointer`}>
+                  <img src={d.source_logo_url} alt={d.source_name_fa || ""} className="w-full h-full object-cover" loading="lazy" />
+                </div>
+              ) : (
+                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[7px] font-bold hover:scale-150 transition-transform cursor-pointer ${
+                  d.color === "conservative" ? "bg-[#1e3a5f]/20 text-[#1e3a5f] dark:bg-blue-900/40 dark:text-blue-300 border border-[#1e3a5f]/40" :
+                  d.color === "opposition" ? "bg-[#ea580c]/20 text-[#ea580c] dark:bg-orange-900/40 dark:text-orange-300 border border-[#ea580c]/40" :
+                  "bg-slate-200 text-slate-500 dark:bg-slate-700 dark:text-slate-300 border border-slate-300"
+                }`}>
+                  {(d.source_name_fa || d.source_slug || "").slice(0, 2)}
+                </div>
+              )}
+              {(hoveredDot === d.article_id || clickedDot === d.article_id) && (
+                <div
+                  className={`absolute z-20 bottom-full left-1/2 -translate-x-1/2 mb-2 ${clickedDot === d.article_id ? "" : "pointer-events-none"}`}
+                  style={{ width: "max-content", maxWidth: 260 }}
+                >
+                  <div className="bg-slate-900 dark:bg-slate-700 text-white text-[11px] leading-snug px-2.5 py-1.5 rounded shadow-lg">
+                    {d.source_name_fa && <p className="font-bold text-[10px] mb-0.5">{d.source_name_fa}</p>}
+                    {d.title_fa && <p className="line-clamp-2 mb-1">{d.title_fa}</p>}
+                    {d.article_url && (
+                      <a href={d.article_url} target="_blank" rel="noopener noreferrer"
+                        className="text-[10px] text-blue-300 hover:text-blue-200 underline">
+                        مشاهده مقاله ←
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          ));
+        })()}
+
+        {/* Article count — top left, not overlapping Y-axis label */}
         {active && !loading && (
-          <div className="absolute bottom-3 left-3 right-3">
-            <p className="text-[12px] text-slate-500 dark:text-slate-400 text-center">
-              <span className="text-[#1e3a5f] dark:text-blue-300 font-medium">{Math.round(active.article_count * (active.state_pct || 0) / 100)} مقاله محافظه‌کار</span>
-              {" · "}
-              <span className="text-[#ea580c] dark:text-orange-400 font-medium">{Math.round(active.article_count * (active.diaspora_pct || 0) / 100)} مقاله اپوزیسیون</span>
+          <div className="absolute top-3 left-4 z-20">
+            <p className="text-[10px] text-slate-400 dark:text-slate-500">
+              {toFa(active.article_count)} مقاله
             </p>
           </div>
         )}

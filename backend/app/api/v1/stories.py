@@ -176,6 +176,34 @@ async def get_story_analysis(request: Request, story_id: uuid.UUID, db: AsyncSes
     )
 
 
+@router.get("/weekly-digest")
+@_limiter.limit("30/minute")
+async def weekly_digest(request: Request, db: AsyncSession = Depends(get_db)):
+    """Return the latest weekly digest."""
+    from app.models.maintenance_log import MaintenanceLog
+
+    # Check DB first (stored by niloofar_weekly.py or maintenance)
+    result = await db.execute(
+        select(MaintenanceLog)
+        .where(MaintenanceLog.status == "weekly_digest")
+        .order_by(MaintenanceLog.run_at.desc())
+        .limit(1)
+    )
+    log = result.scalar_one_or_none()
+    if log and log.results:
+        return {"status": "ok", "content": log.results, "generated_at": log.run_at.isoformat() if log.run_at else None}
+
+    # Fallback: check local file
+    from pathlib import Path
+    data_dir = Path(__file__).parent.parent.parent.parent / "data" / "weekly_reports"
+    if data_dir.exists():
+        reports = sorted(data_dir.glob("weekly_*.md"), reverse=True)
+        if reports:
+            return {"status": "ok", "content": reports[0].read_text(encoding="utf-8")}
+
+    return {"status": "no_data", "content": None}
+
+
 @router.get("/insights/loaded-words")
 @_limiter.limit("60/minute")
 async def loaded_words_insights(request: Request, db: AsyncSession = Depends(get_db)):
@@ -194,6 +222,7 @@ async def loaded_words_insights(request: Request, db: AsyncSession = Depends(get
     conservative_counter: Counter = Counter()
     opposition_counter: Counter = Counter()
 
+    # Source 1: loaded_words from story analysis
     for story in stories:
         if not story.summary_en:
             continue
@@ -214,11 +243,11 @@ async def loaded_words_insights(request: Request, db: AsyncSession = Depends(get
     return {
         "conservative": [
             {"word": w, "count": c}
-            for w, c in conservative_counter.most_common(10)
+            for w, c in conservative_counter.most_common(5)
         ],
         "opposition": [
             {"word": w, "count": c}
-            for w, c in opposition_counter.most_common(10)
+            for w, c in opposition_counter.most_common(5)
         ],
     }
 
@@ -359,6 +388,9 @@ async def article_positions(
                 "article_id": str(a.id),
                 "title_fa": a.title_fa or a.title_original or "",
                 "source_slug": a.source.slug if a.source else None,
+                "source_name_fa": a.source.name_fa if a.source else None,
+                "source_logo_url": a.source.logo_url if a.source else None,
+                "article_url": a.url,
                 "source_alignment": align,
                 "x": ALIGNMENT_X.get(align, 50) + idx * 5,
                 "y": 50 + idx * 10,
@@ -407,6 +439,9 @@ async def article_positions(
             "article_id": str(a.id),
             "title_fa": a.title_fa or a.title_original or "",
             "source_slug": a.source.slug if a.source else None,
+            "source_name_fa": a.source.name_fa if a.source else None,
+            "source_logo_url": a.source.logo_url if a.source else None,
+            "article_url": a.url,
             "source_alignment": align,
             "x": round(max(5, min(95, x)), 2),
             "y": round(float(y_normalized[i]), 2),
@@ -430,6 +465,13 @@ async def get_story(story_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     story = result.scalar_one_or_none()
     if not story:
         raise HTTPException(status_code=404, detail="Story not found")
+
+    # Increment view count (fire-and-forget, don't block response)
+    try:
+        story.view_count = (story.view_count or 0) + 1
+        await db.commit()
+    except Exception:
+        pass
 
     articles_with_bias = []
     for article in story.articles:

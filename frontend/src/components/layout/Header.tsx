@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useLocale } from "next-intl";
 import { Menu, X } from "lucide-react";
 import { useState, useEffect } from "react";
+import HeaderAnimation from "./HeaderAnimation";
 
 function WorldClocks() {
   const [clocks, setClocks] = useState("");
@@ -42,7 +43,7 @@ export default function Header() {
     { href: `/${locale}`, label: "خانه" },
     { href: `/${locale}/stories`, label: "خبرها" },
     { href: `/${locale}/sources`, label: "رسانه‌ها" },
-    { href: `/${locale}/blindspots`, label: "نگاه یک‌طرفه" },
+    { href: `/${locale}/blindspots`, label: "نگاه یک‌جانبه" },
     { href: `/${locale}/lab`, label: "آزمایشگاه" },
   ];
 
@@ -71,15 +72,21 @@ export default function Header() {
       `}</style>
     <header className="sticky top-0 z-50 border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-[#0a0e1a] overflow-hidden">
       <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4" dir="rtl">
-        {/* Logo */}
-        <div className="flex items-center">
+        {/* Logo + tagline */}
+        <div className="flex items-center gap-3">
           <Link
             href={`/${locale}`}
             className="text-xl font-black text-slate-900 dark:text-white tracking-tight inline-block logo-animate"
           >
             دورنگر
           </Link>
+          <span className="text-[13px] text-slate-400 dark:text-slate-500 header-fade hidden sm:inline">
+            اخبار رسانه‌های ایرانی را گردآوری و تحلیل می‌کند
+          </span>
         </div>
+
+        {/* Worker animation — saved in HeaderAnimation.saved.tsx, re-enable later */}
+        {/* <HeaderAnimation /> */}
 
         {/* Desktop nav — hidden for now, re-enable by uncommenting */}
         {/* <nav className="hidden items-center gap-1 md:flex header-fade">

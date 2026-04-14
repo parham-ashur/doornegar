@@ -1,0 +1,118 @@
+{
+  "persona": "dariush",
+  "persona_fa": "داریوش",
+  "role": "Data Analyst",
+  "generated_at": "2026-04-13T17:19:10.616556+00:00",
+  "stale_feeds": [
+    {
+      "source": "IranWire",
+      "slug": "iranwire",
+      "severity": "high",
+      "issue": "No articles in 10 days",
+      "last_article": "2026-04-03T11:41:45+00:00"
+    },
+    {
+      "source": "VOA Farsi",
+      "slug": "voa-farsi",
+      "severity": "critical",
+      "issue": "No articles ever ingested",
+      "last_article": null
+    },
+    {
+      "source": "Mashregh News",
+      "slug": "mashregh-news",
+      "severity": "critical",
+      "issue": "No articles ever ingested",
+      "last_article": null
+    },
+    {
+      "source": "Nour News",
+      "slug": "nour-news",
+      "severity": "critical",
+      "issue": "No articles ever ingested",
+      "last_article": null
+    },
+    {
+      "source": "IRIB News",
+      "slug": "irib-news",
+      "severity": "critical",
+      "issue": "No articles ever ingested",
+      "last_article": null
+    },
+    {
+      "source": "ILNA",
+      "slug": "ilna",
+      "severity": "critical",
+      "issue": "No articles ever ingested",
+      "last_article": null
+    },
+    {
+      "source": "Entekhab",
+      "slug": "entekhab",
+      "severity": "critical",
+      "issue": "No articles ever ingested",
+      "last_article": null
+    },
+    {
+      "source": "Manoto",
+      "slug": "manoto",
+      "severity": "critical",
+      "issue": "No articles ever ingested",
+      "last_article": null
+    },
+    {
+      "source": "Mehr News Agency",
+      "slug": "mehr-news",
+      "severity": "critical",
+      "issue": "No articles ever ingested",
+      "last_article": null
+    }
+  ],
+  "ingestion_rate": {
+    "last_24h": 637,
+    "seven_day_total": 2778,
+    "seven_day_daily_avg": 396.9,
+    "ratio": 1.61,
+    "severity": "ok"
+  },
+  "article_count_mismatches": [],
+  "telegram_issues": [
+    {
+      "channel": "@iranwirefarsi",
+      "title": "IranWire فارسی",
+      "severity": "high",
+      "issue": "Never fetched",
+      "last_fetched": null
+    },
+    {
+      "channel": "@ali7adeh",
+      "title": "علی علیزاده",
+      "severity": "high",
+      "issue": "Never fetched",
+      "last_fetched": null
+    },
+    {
+      "channel": "@ammar_maleki",
+      "title": "عمار ملکی",
+      "severity": "high",
+      "issue": "Never fetched",
+      "last_fetched": null
+    },
+    {
+      "channel": "@akaborz",
+      "title": "آخرین خبر",
+      "severity": "high",
+      "issue": "Never fetched",
+      "last_fetched": null
+    }
+  ],
+  "article_quality": {
+    "total_articles": 3103,
+    "missing_embedding": 0,
+    "missing_title": 0,
+    "missing_source": 0,
+    "missing_en_title": 2954,
+    "embedding_pct": 100.0
+  },
+  "stories_missing_summary": []
+}

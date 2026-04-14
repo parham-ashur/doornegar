@@ -88,7 +88,7 @@ bias_explanation_fa باید عمیق و مشخص باشد. ۵ تا ۷ نکته 
 فقط JSON. بدون توضیح اضافی، بدون بلوک کد markdown.
 
 {{
-  "title_fa": "<تیتر خبری ۱۰-۱۵ کلمه، حاوی ارقام و جزئیات کلیدی رویداد>",
+  "title_fa": "<تیتر خبری ۸-۱۲ کلمه — فقط جوهره رویداد: چه اتفاقی افتاد، کجا، چه ارقامی. هرگز از این واژه‌ها استفاده نکن: تحلیل، سوگیری، پوشش رسانه‌ای، روایت، بررسی، مقایسه، نقش عوامل خارجی. تیتر باید مثل روزنامه باشد نه عنوان پژوهش>",
   "title_en": "<English translation>",
   "summary_fa": "<۱-۲ جمله، ۲۰-۳۰ کلمه — فقط حقایق اصلی برای کارت صفحه اصلی>",
   "state_summary_fa": "<روایت حکومتی ۳-۴ جمله: چه گفتند، چه واژگانی به‌کار بردند، چه چیزی را پنهان کردند. یا null>",
@@ -303,6 +303,30 @@ async def generate_story_analysis(
         lines.append("# خلاصه قبلی (تحلیل پیشین این موضوع)")
         lines.append(f"  {old_summary[:300]}")
         lines.append("  فقط اطلاعات جدید را در فیلد delta بنویس. تکرار نکن.\n")
+
+    # Inject telegram media channel posts as supplementary source context
+    try:
+        from sqlalchemy import select as _sel
+        from app.models.social import TelegramChannel as _TC, TelegramPost as _TP
+        from app.database import async_session as _as
+        async with _as() as _db:
+            tg_result = await _db.execute(
+                _sel(_TP.text, _TC.title, _TC.political_leaning)
+                .join(_TC, _TP.channel_id == _TC.id)
+                .where(_TP.story_id == story.id)
+                .where(_TP.text.isnot(None))
+                .where(_TC.channel_type == "news")
+                .order_by(_TP.views.desc().nullslast())
+                .limit(10)
+            )
+            tg_posts = tg_result.all()
+            if tg_posts:
+                lines.append("# پست‌های تلگرام رسانه‌ها (منابع تکمیلی)")
+                for text, ch_title, leaning in tg_posts:
+                    lines.append(f"  [{ch_title} ({leaning})]: {(text or '')[:200]}")
+                lines.append("  از این پست‌ها برای تکمیل تحلیل منابع و شناسایی واژگان خاص هر طرف استفاده کن.\n")
+    except Exception:
+        pass  # Don't fail story analysis if telegram context fails
 
     # Add raw articles (shorter since facts are already extracted)
     for i, art in enumerate(articles_with_sources, 1):

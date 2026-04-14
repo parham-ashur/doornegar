@@ -6,22 +6,21 @@ const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 const FALLBACK_CONSERVATIVE = [
   { word: "پیروزی بزرگ", count: 12 },
-  { word: "محور مقاومت", count: 9 },
-  { word: "تسلیم دشمن", count: 7 },
+  { word: "مقاومت", count: 9 },
+  { word: "شهید", count: 7 },
   { word: "بازدارندگی", count: 6 },
-  { word: "شهدای مدافع", count: 5 },
+  { word: "شروط ده‌گانه", count: 5 },
 ];
 
 const FALLBACK_OPPOSITION = [
-  { word: "آتش‌بس شکننده", count: 14 },
-  { word: "قطع اینترنت", count: 11 },
+  { word: "شکست دیپلماتیک", count: 14 },
+  { word: "سرکوب", count: 11 },
   { word: "تلفات غیرنظامی", count: 8 },
-  { word: "سرکوب معترضان", count: 6 },
+  { word: "آتش‌بس شکننده", count: 6 },
   { word: "بحران انسانی", count: 5 },
 ];
 
 export default function WordsOfWeek() {
-  const [showConservative, setShowConservative] = useState(true);
   const [conservativeWords, setConservativeWords] = useState(FALLBACK_CONSERVATIVE);
   const [oppositionWords, setOppositionWords] = useState(FALLBACK_OPPOSITION);
   const [loading, setLoading] = useState(true);
@@ -46,47 +45,34 @@ export default function WordsOfWeek() {
     return () => { cancelled = true; };
   }, []);
 
-  useEffect(() => {
-    const interval = setInterval(() => setShowConservative(prev => !prev), 5000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const words = showConservative ? conservativeWords : oppositionWords;
-  const color = showConservative ? "#3b82f6" : "#ea580c";
-  const darkColor = showConservative ? "text-blue-300" : "text-orange-400";
-  const label = showConservative ? "محافظه‌کار" : "اپوزیسیون";
-  const maxCount = Math.max(...words.map(w => w.count));
+  const clean = (w: string) => w.replace(/[«»]/g, "");
+  const pairs = Math.min(conservativeWords.length, oppositionWords.length, 5);
 
   return (
     <div dir="rtl">
-      <div className="flex items-center justify-between mb-3">
-        <h4 className="text-[12px] font-black text-slate-900 dark:text-white">واژه‌های هفته</h4>
-        <div className="flex gap-1">
-          <button
-            onClick={() => setShowConservative(true)}
-            className={`w-2 h-2 rounded-full transition-colors ${showConservative ? "bg-[#1e3a5f] dark:bg-blue-400" : "bg-slate-300 dark:bg-slate-600"}`}
-          />
-          <button
-            onClick={() => setShowConservative(false)}
-            className={`w-2 h-2 rounded-full transition-colors ${!showConservative ? "bg-[#ea580c] dark:bg-orange-400" : "bg-slate-300 dark:bg-slate-600"}`}
-          />
+      <h4 className="text-[14px] font-black text-slate-900 dark:text-white mb-3">واژه‌های روز</h4>
+
+      <div className={`transition-all duration-300 ${loading ? "opacity-50 animate-pulse" : "opacity-100"}`}>
+        {/* Column headers */}
+        <div className="flex items-center justify-between mb-2 pb-2 border-b border-slate-200 dark:border-slate-700">
+          <span className="text-[13px] font-bold text-[#1e3a5f] dark:text-blue-300">محافظه‌کار</span>
+          <span className="text-[13px] font-bold text-[#ea580c] dark:text-orange-400">اپوزیسیون</span>
         </div>
-      </div>
 
-      <p className={`text-[11px] font-medium mb-2 ${showConservative ? "text-[#1e3a5f] dark:" + darkColor : "text-[#ea580c] dark:" + darkColor}`}
-        style={{ color }}>
-        {label}
-      </p>
-
-      <div className={`space-y-1.5 transition-all duration-300 ${loading ? "opacity-50 animate-pulse" : "opacity-100"}`}>
-        {words.map(w => (
-          <div key={w.word} className="flex items-center gap-2">
-            <span className="text-[12px] font-medium text-slate-700 dark:text-slate-300 shrink-0">«{w.word}»</span>
-            <div className="flex-1 h-1 bg-slate-100 dark:bg-slate-800 overflow-hidden">
-              <div className="h-full transition-all duration-500" style={{ width: `${(w.count / maxCount) * 100}%`, backgroundColor: color }} />
+        {/* Contrast pairs */}
+        <div className="space-y-1.5">
+          {Array.from({ length: pairs }).map((_, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <span className="flex-1 text-[13px] text-[#1e3a5f] dark:text-blue-300 font-medium truncate">
+                «{clean(conservativeWords[i].word)}»
+              </span>
+              <span className="text-slate-200 dark:text-slate-700 shrink-0 mx-1">·</span>
+              <span className="flex-1 text-[13px] text-[#ea580c] dark:text-orange-400 font-medium truncate text-left">
+                «{clean(oppositionWords[i].word)}»
+              </span>
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
     </div>
   );

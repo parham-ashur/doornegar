@@ -27,6 +27,11 @@ export const alignmentLabels: Record<StateAlignment, { en: string; fa: string }>
   diaspora: { en: "Diaspora", fa: "اپوزیسیون" },
 };
 
+/** Convert English digits to Farsi digits */
+export function toFa(n: number | string): string {
+  return String(n).replace(/[0-9]/g, (d) => "۰۱۲۳۴۵۶۷۸۹"[parseInt(d)]);
+}
+
 export function formatRelativeTime(dateStr: string, locale: string): string {
   const date = new Date(dateStr);
   const now = new Date();
@@ -37,9 +42,9 @@ export function formatRelativeTime(dateStr: string, locale: string): string {
 
   if (locale === "fa") {
     if (diffMin < 1) return "لحظاتی پیش";
-    if (diffMin < 60) return `${diffMin} دقیقه پیش`;
-    if (diffHr < 24) return `${diffHr} ساعت پیش`;
-    if (diffDay < 7) return `${diffDay} روز پیش`;
+    if (diffMin < 60) return `${toFa(diffMin)} دقیقه پیش`;
+    if (diffHr < 24) return `${toFa(diffHr)} ساعت پیش`;
+    if (diffDay < 7) return `${toFa(diffDay)} روز پیش`;
     return date.toLocaleDateString("fa-IR");
   }
 

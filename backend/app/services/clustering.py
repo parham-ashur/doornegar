@@ -552,10 +552,30 @@ async def _refresh_story_metadata(db: AsyncSession, story_id: uuid.UUID) -> None
 
     story.covered_by_state = bool(alignments & {"state", "semi_state"})
     story.covered_by_diaspora = bool(alignments & {"diaspora", "independent"})
-    story.is_blindspot = story.covered_by_state != story.covered_by_diaspora
-    if story.is_blindspot:
-        story.blindspot_type = "state_only" if story.covered_by_state else "diaspora_only"
+
+    # Count articles per side for percentage-based blindspot detection
+    count_result = await db.execute(
+        select(Source.state_alignment, func.count(Article.id))
+        .join(Article, Article.source_id == Source.id)
+        .where(Article.story_id == story_id)
+        .group_by(Source.state_alignment)
+    )
+    align_counts = {row[0]: row[1] for row in count_result.all()}
+    state_count = align_counts.get("state", 0) + align_counts.get("semi_state", 0)
+    diaspora_count = align_counts.get("diaspora", 0) + align_counts.get("independent", 0)
+    total_count = state_count + diaspora_count
+    state_pct = (state_count / total_count * 100) if total_count > 0 else 0
+    diaspora_pct = (diaspora_count / total_count * 100) if total_count > 0 else 0
+
+    # Blindspot: one side is 0% OR less than 10%
+    if not story.covered_by_state or (story.covered_by_diaspora and state_pct < 10):
+        story.is_blindspot = True
+        story.blindspot_type = "diaspora_only"
+    elif not story.covered_by_diaspora or (story.covered_by_state and diaspora_pct < 10):
+        story.is_blindspot = True
+        story.blindspot_type = "state_only"
     else:
+        story.is_blindspot = False
         story.blindspot_type = None
 
     story.coverage_diversity_score = len(alignments) / 4.0
@@ -617,9 +637,11 @@ async def _refresh_stories_metadata_batch(
     )
     alignments_by_story: dict = {}
     source_counts_by_story: dict = {}
+    article_align_counts: dict = {}  # {story_id: {alignment: count}}
     for sid, alignment, cnt in source_result.all():
         alignments_by_story.setdefault(sid, set()).add(alignment)
         source_counts_by_story[sid] = source_counts_by_story.get(sid, 0) + cnt
+        article_align_counts.setdefault(sid, {})[alignment] = cnt
 
     # 4. Apply updates in memory
     now = datetime.now(timezone.utc)
@@ -629,10 +651,23 @@ async def _refresh_stories_metadata_batch(
         alignments = alignments_by_story.get(sid, set())
         story.covered_by_state = bool(alignments & {"state", "semi_state"})
         story.covered_by_diaspora = bool(alignments & {"diaspora", "independent"})
-        story.is_blindspot = story.covered_by_state != story.covered_by_diaspora
-        if story.is_blindspot:
-            story.blindspot_type = "state_only" if story.covered_by_state else "diaspora_only"
+
+        # Percentage-based blindspot: <10% from one side = blindspot
+        ac = article_align_counts.get(sid, {})
+        s_cnt = ac.get("state", 0) + ac.get("semi_state", 0)
+        d_cnt = ac.get("diaspora", 0) + ac.get("independent", 0)
+        t_cnt = s_cnt + d_cnt
+        s_pct = (s_cnt / t_cnt * 100) if t_cnt > 0 else 0
+        d_pct = (d_cnt / t_cnt * 100) if t_cnt > 0 else 0
+
+        if not story.covered_by_state or (story.covered_by_diaspora and s_pct < 10):
+            story.is_blindspot = True
+            story.blindspot_type = "diaspora_only"
+        elif not story.covered_by_diaspora or (story.covered_by_state and d_pct < 10):
+            story.is_blindspot = True
+            story.blindspot_type = "state_only"
         else:
+            story.is_blindspot = False
             story.blindspot_type = None
         story.coverage_diversity_score = len(alignments) / 4.0
         story.last_updated_at = now
@@ -994,13 +1029,22 @@ async def _create_story(
     covered_by_state = bool(source_alignments & {"state", "semi_state"})
     covered_by_diaspora = bool(source_alignments & {"diaspora", "independent"})
 
-    is_blindspot = covered_by_state != covered_by_diaspora
+    # Count per side for percentage-based blindspot
+    state_n = sum(1 for a in articles if (source_alignments_map or {}).get(str(a.id)) in ("state", "semi_state"))
+    diaspora_n = sum(1 for a in articles if (source_alignments_map or {}).get(str(a.id)) in ("diaspora", "independent"))
+    total_n = state_n + diaspora_n
+    state_pct = (state_n / total_n * 100) if total_n > 0 else 0
+    diaspora_pct = (diaspora_n / total_n * 100) if total_n > 0 else 0
+
     blindspot_type = None
-    if is_blindspot:
-        if covered_by_state and not covered_by_diaspora:
-            blindspot_type = "state_only"
-        elif covered_by_diaspora and not covered_by_state:
-            blindspot_type = "diaspora_only"
+    if not covered_by_state or (covered_by_diaspora and state_pct < 10):
+        is_blindspot = True
+        blindspot_type = "diaspora_only"
+    elif not covered_by_diaspora or (covered_by_state and diaspora_pct < 10):
+        is_blindspot = True
+        blindspot_type = "state_only"
+    else:
+        is_blindspot = False
 
     # Coverage diversity
     all_alignments = {"state", "semi_state", "independent", "diaspora"}

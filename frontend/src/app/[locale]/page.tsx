@@ -2,15 +2,19 @@ import { setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import SafeImage from "@/components/common/SafeImage";
 import type { StoryBrief } from "@/lib/types";
-import NarrativeMap from "@/components/home/NarrativeMap";
 import WordsOfWeek from "@/components/home/WordsOfWeek";
-import { formatRelativeTime } from "@/lib/utils";
+import TelegramDiscussions from "@/components/home/TelegramDiscussions";
+import WeeklyDigest from "@/components/home/WeeklyDigest";
+import { formatRelativeTime, toFa } from "@/lib/utils";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 async function fetchAPI<T>(path: string): Promise<T | null> {
   try {
-    const res = await fetch(`${API}${path}`, { next: { revalidate: 30 } });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    const res = await fetch(`${API}${path}`, { next: { revalidate: 30 }, signal: controller.signal });
+    clearTimeout(timeout);
     if (!res.ok) return null;
     return res.json();
   } catch {
@@ -39,6 +43,20 @@ async function fetchAnalysis(storyId: string): Promise<{ summary_fa?: string; bi
   }
 }
 
+async function fetchTelegramAnalysis(storyId: string): Promise<{ discourse_summary?: string; predictions?: string[]; key_claims?: string[]; worldviews?: { pro_regime?: string; opposition?: string } } | null> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    const res = await fetch(`${API}/api/v1/social/stories/${storyId}/telegram-analysis`, { next: { revalidate: 300 }, signal: controller.signal });
+    clearTimeout(timeout);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.status === "ok" ? data.analysis : null;
+  } catch {
+    return null;
+  }
+}
+
 function Meta({ story }: { story: StoryBrief }) {
   const published = story.first_published_at
     ? formatRelativeTime(story.first_published_at, "fa")
@@ -51,18 +69,20 @@ function Meta({ story }: { story: StoryBrief }) {
   const hasSides = story.state_pct > 0 || story.diaspora_pct > 0;
   return (
     <div className="mt-1.5" dir="rtl">
-      <p className="text-[11px] text-slate-400 dark:text-slate-500 leading-5">
-        {story.source_count} رسانه · {story.article_count} مقاله
-        {published && <span>{" · "}نشر {published}</span>}
-        {showUpdated && <span>{" · "}به‌روز {updated}</span>}
-      </p>
-      {hasSides && (
-        <p className="text-[11px] leading-5 mt-0.5">
-          {story.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300">محافظه‌کار {story.state_pct}٪</span>}
-          {story.state_pct > 0 && story.diaspora_pct > 0 && <span className="text-slate-300 dark:text-slate-600"> · </span>}
-          {story.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400">اپوزیسیون {story.diaspora_pct}٪</span>}
+      <div className="flex items-center justify-between text-[13px] leading-5">
+        <p className="text-slate-400 dark:text-slate-500">
+          {toFa(story.source_count)} رسانه · {toFa(story.article_count)} مقاله
+          {published && <span>{" · "}نشر {published}</span>}
+          {showUpdated && <span>{" · "}به‌روز {updated}</span>}
         </p>
-      )}
+        {hasSides && (
+          <p className="shrink-0">
+            {story.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300">محافظه‌کار {toFa(story.state_pct)}٪</span>}
+            {story.state_pct > 0 && story.diaspora_pct > 0 && <span className="text-slate-300 dark:text-slate-600"> · </span>}
+            {story.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400">اپوزیسیون {toFa(story.diaspora_pct)}٪</span>}
+          </p>
+        )}
+      </div>
     </div>
   );
 }
@@ -93,38 +113,56 @@ export default async function HomePage({
   const conservativeBlind = blindspots.find(s => s.blindspot_type === "state_only");
   const oppositionBlind = blindspots.find(s => s.blindspot_type === "diaspora_only");
 
-  // Most disputed: stories with biggest gap between conservative and opposition coverage
-  // Initial sort by pct gap; will be re-sorted by dispute_score after analyses are fetched
-  const disputedCandidates = [...stories]
-    .filter(s => s.state_pct > 0 && s.diaspora_pct > 0 && !s.is_blindspot)
-    .sort((a, b) => Math.abs(b.state_pct - b.diaspora_pct) - Math.abs(a.state_pct - a.diaspora_pct));
-  let mostDisputed = disputedCandidates[0] || null;
-  let secondDisputed = disputedCandidates[1] || null;
+  // ── Deduplication: track which stories are placed ──
+  const usedIds = new Set<string>();
 
-  // Common ground: stories where both sides have similar coverage (smallest gap)
-  const commonGround = [...stories]
-    .filter(s => s.state_pct > 10 && s.diaspora_pct > 10 && !s.is_blindspot)
-    .sort((a, b) => Math.abs(a.state_pct - a.diaspora_pct) - Math.abs(b.state_pct - b.diaspora_pct))
-    .slice(0, 2);
+  // Blind spots first (already picked above)
+  if (conservativeBlind) usedIds.add(conservativeBlind.id);
+  if (oppositionBlind) usedIds.add(oppositionBlind.id);
 
   const sorted = [...stories];
 
-  // ── Section 1: Hero (first 19 stories) ──
+  // Hero
   const hero = sorted[0];
-  const leftTextStories = sorted.slice(1, 4);
-  const row2Stories = sorted.slice(4, 6);
-  const remaining1 = sorted.slice(6);
-  const shortTitle = remaining1.filter(s => (s.title_fa?.length || 100) <= 45);
-  const midRow = (shortTitle.length >= 3 ? shortTitle : remaining1).slice(0, 3);
-  const midRowIds = new Set(midRow.map(s => s.id));
-  const afterMid = remaining1.filter(s => !midRowIds.has(s.id));
-  const bottomLeft = afterMid.slice(0, 2);
-  const bottomRight = afterMid.slice(2, 6);
-  const bottomTextRow = afterMid.slice(6, 7);
+  if (hero) usedIds.add(hero.id);
 
-  // Total used in section 1
-  const section1Count = 1 + leftTextStories.length + row2Stories.length + midRow.length + bottomLeft.length + bottomRight.length + bottomTextRow.length;
-  const overflow = sorted.slice(section1Count);
+  // Weekly briefing: next 4 not already used
+  const leftTextStories = sorted.filter(s => !usedIds.has(s.id)).slice(0, 4);
+  leftTextStories.forEach(s => usedIds.add(s.id));
+
+  // Most viewed: blended score = views + trending + recency bonus
+  // When views are sparse, trending score dominates; as views grow, real popularity takes over
+  const now = Date.now();
+  const mostViewed = [...sorted]
+    .filter(s => !usedIds.has(s.id))
+    .map(s => {
+      const views = s.view_count || 0;
+      const recencyHours = s.updated_at ? (now - new Date(s.updated_at).getTime()) / 3600000 : 100;
+      const recencyBonus = Math.max(0, 1 - recencyHours / 72); // decays over 3 days
+      const score = views * 2 + s.trending_score + recencyBonus * 10 + s.article_count * 0.5;
+      return { ...s, _popScore: score };
+    })
+    .sort((a, b) => b._popScore - a._popScore)
+    .slice(0, 5);
+  mostViewed.forEach(s => usedIds.add(s.id));
+
+  // Most disputed: not already used
+  const disputedCandidates = [...stories]
+    .filter(s => s.state_pct > 0 && s.diaspora_pct > 0 && !s.is_blindspot && !usedIds.has(s.id))
+    .sort((a, b) => Math.abs(b.state_pct - b.diaspora_pct) - Math.abs(a.state_pct - a.diaspora_pct));
+  let mostDisputed = disputedCandidates[0] || null;
+  let secondDisputed = disputedCandidates[1] || null;
+  if (mostDisputed) usedIds.add(mostDisputed.id);
+  if (secondDisputed) usedIds.add(secondDisputed.id);
+
+  // Common ground: not already used
+  const commonGround = [...stories]
+    .filter(s => s.state_pct > 10 && s.diaspora_pct > 10 && !s.is_blindspot && !usedIds.has(s.id))
+    .sort((a, b) => Math.abs(a.state_pct - a.diaspora_pct) - Math.abs(b.state_pct - b.diaspora_pct))
+    .slice(0, 2);
+  commonGround.forEach(s => usedIds.add(s.id));
+  // Overflow: everything not yet used
+  const overflow = sorted.filter(s => !usedIds.has(s.id));
 
   // ── Overflow: build sections sequentially, each consuming what it needs ──
   // Section types cycle: text(3) → images(4) → feature(2) → text(3) → images(4) → feature(2)...
@@ -155,7 +193,7 @@ export default async function HomePage({
   // ── Fetch summaries (all in parallel) ──
   const allStoriesForSummary = new Set<string>();
   if (hero) allStoriesForSummary.add(hero.id);
-  for (const s of [...leftTextStories, ...row2Stories, ...bottomLeft, ...bottomRight, ...bottomTextRow, ...midRow]) {
+  for (const s of [...leftTextStories, ...mostViewed, ...overflow]) {
     allStoriesForSummary.add(s.id);
   }
   for (const sec of sections) {
@@ -167,19 +205,21 @@ export default async function HomePage({
   summaryIds.forEach((id, i) => { allSummaries[id] = summaryResults[i]; });
 
   // Fetch full analysis for weekly briefing + most disputed + most read
-  const briefingStories = sorted.slice(1, 4);
-  const mostRead = [...sorted].sort((a, b) => b.article_count - a.article_count).slice(0, 5);
+  const briefingStories = leftTextStories;
   const analysisFetchIds = [hero.id, ...briefingStories.map(s => s.id)];
   // Include all disputed candidates so we can re-sort by dispute_score
   for (const s of disputedCandidates) {
     if (!analysisFetchIds.includes(s.id)) analysisFetchIds.push(s.id);
   }
-  for (const s of mostRead) {
+  for (const s of mostViewed) {
     if (!analysisFetchIds.includes(s.id)) analysisFetchIds.push(s.id);
   }
   const analysisResults = await Promise.all(analysisFetchIds.map((id) => fetchAnalysis(id)));
   const allAnalyses: Record<string, { bias_explanation_fa?: string; state_summary_fa?: string; diaspora_summary_fa?: string; dispute_score?: number; loaded_words?: { conservative: string[]; opposition: string[] } } | null> = {};
   analysisFetchIds.forEach((id, i) => { allAnalyses[id] = analysisResults[i]; });
+
+  // Fetch Telegram analysis for hero story
+  const heroTelegram = hero ? await fetchTelegramAnalysis(hero.id) : null;
 
   // Re-sort disputed candidates by dispute_score (higher = more disputed), falling back to pct gap
   const disputedResorted = [...disputedCandidates].sort((a, b) => {
@@ -192,6 +232,16 @@ export default async function HomePage({
   });
   mostDisputed = disputedResorted[0] || null;
   secondDisputed = disputedResorted[1] || null;
+
+  // Prefetch telegram analyses server-side for homepage (no client API calls)
+  const telegramAnalysisIds = sorted.slice(0, 5).map(s => s.id);
+  const telegramResults = await Promise.all(
+    telegramAnalysisIds.map(id => fetchTelegramAnalysis(id))
+  );
+  const prefetchedTelegram: { storyId: string; analysis: any }[] = [];
+  telegramAnalysisIds.forEach((id, i) => {
+    if (telegramResults[i]) prefetchedTelegram.push({ storyId: id, analysis: telegramResults[i] });
+  });
 
   return (
     <div dir="rtl" className="mx-auto max-w-7xl px-0 md:px-6 lg:px-8">
@@ -217,105 +267,122 @@ export default async function HomePage({
       {/* ═══ TOP SECTION: Blind spots | Hero | Telegram ═══ */}
       <div className="grid grid-cols-12 gap-0 border-b-2 border-slate-300 dark:border-slate-700">
 
-        {/* RIGHT: Telegram discussions */}
-        <div className="col-span-3 py-6 pl-6 border-l border-slate-200 dark:border-slate-800">
-          <h3 className="text-[13px] font-black text-slate-900 dark:text-white mb-4 pb-2 border-b border-slate-200 dark:border-slate-800">
-            بحث‌های تلگرام
+        {/* RIGHT: Telegram discussions — fixed height matching hero */}
+        <div className="col-span-3 py-6 pl-6 border-l border-slate-200 dark:border-slate-800 flex flex-col overflow-hidden" style={{ maxHeight: 700 }}>
+          <h3 className="text-[13px] font-black text-slate-900 dark:text-white mb-3 pb-2 border-b border-slate-200 dark:border-slate-800 shrink-0">
+            تحلیل روایت‌های تلگرام
           </h3>
-          <div className="space-y-4">
-            <div className="border-b border-slate-100 dark:border-slate-800 pb-3">
-              <p className="text-[13px] leading-6 text-slate-600 dark:text-slate-400">
-                واکنش کاربران به اعلام آتش‌بس؛ بسیاری از شکننده بودن توافق ابراز نگرانی کرده‌اند.
-              </p>
-              <span className="text-[11px] text-slate-400 mt-1 block">نشر ۲ ساعت پیش</span>
-            </div>
-            <div className="border-b border-slate-100 dark:border-slate-800 pb-3">
-              <p className="text-[13px] leading-6 text-slate-600 dark:text-slate-400">
-                انتقاد از قطع طولانی‌مدت اینترنت؛ کاربران خواستار شفافیت بیشتر هستند.
-              </p>
-              <span className="text-[11px] text-slate-400 mt-1 block">نشر ۴ ساعت پیش</span>
-            </div>
-            <div className="border-b border-slate-100 dark:border-slate-800 pb-3">
-              <p className="text-[13px] leading-6 text-slate-600 dark:text-slate-400">
-                بازتاب مذاکرات اسلام‌آباد در کانال‌های تلگرامی؛ نظرات متفاوت درباره نتایج.
-              </p>
-              <span className="text-[11px] text-slate-400 mt-1 block">نشر ۶ ساعت پیش</span>
-            </div>
-            <div className="pb-1">
-              <p className="text-[13px] leading-6 text-slate-600 dark:text-slate-400">
-                گزارش‌هایی از تجمعات خیابانی پس از اعلام آتش‌بس در شهرهای مختلف.
-              </p>
-              <span className="text-[11px] text-slate-400 mt-1 block">نشر ۸ ساعت پیش</span>
-            </div>
+          <div className="flex-1 min-h-0 overflow-hidden">
+            <TelegramDiscussions prefetchedData={prefetchedTelegram} locale={locale} />
           </div>
 
-          {/* Words of the week — compact, rotating */}
-          <div className="mt-4 pt-4 border-t border-slate-200 dark:border-slate-800">
+          {/* Words of the day — pushed to bottom */}
+          <div className="shrink-0 pt-4 border-t border-slate-200 dark:border-slate-800">
             <WordsOfWeek />
           </div>
         </div>
 
         {/* CENTER: Hero story — image + title below */}
         {hero && (
-          <div className="col-span-6 py-6">
+          <div className="col-span-6 py-6 px-5">
             <Link href={`/${locale}/stories/${hero.id}`} className="group block">
               <div className="aspect-[16/9] overflow-hidden bg-slate-100 dark:bg-slate-800">
                 <SafeImage src={hero.image_url} className="h-full w-full object-cover" />
               </div>
-              <h1 className="mt-4 text-[26px] font-black leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-3">
+              <h1 className="mt-4 text-[28px] font-black leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-3">
                 {hero.title_fa}
               </h1>
             </Link>
             <Meta story={hero} />
-            {/* Bias + analyst summary */}
+            {/* Two-side bias comparison */}
             {(() => {
               const analysis = allAnalyses[hero.id];
-              const bias = analysis?.bias_explanation_fa;
-              const points = bias?.split(/[.؛]/).map((p: string) => p.trim()).filter((p: string) => p.length > 10).slice(0, 2) || [];
-              if (!points.length) return null;
+              const stateSummary = analysis?.state_summary_fa;
+              const diasporaSummary = analysis?.diaspora_summary_fa;
+              if (!stateSummary && !diasporaSummary) {
+                // Fallback to bias_explanation_fa points
+                const bias = analysis?.bias_explanation_fa;
+                const points = bias?.split(/[.؛]/).map((p: string) => p.trim()).filter((p: string) => p.length > 10).slice(0, 2) || [];
+                if (!points.length) return null;
+                return (
+                  <div className="mt-3 space-y-1">
+                    {points.map((point, i) => (
+                      <p key={i} className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-1">• {point}</p>
+                    ))}
+                  </div>
+                );
+              }
               return (
-                <div className="mt-3 space-y-1">
-                  {points.map((point, i) => (
-                    <p key={i} className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-1">• {point}</p>
-                  ))}
+                <div className="mt-3 grid grid-cols-2 gap-3">
+                  {stateSummary && (
+                    <div className="border-r-2 border-[#1e3a5f] pr-3">
+                      <p className="text-[13px] font-bold text-[#1e3a5f] dark:text-blue-300 mb-1">روایت محافظه‌کار</p>
+                      <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-4">{stateSummary}</p>
+                    </div>
+                  )}
+                  {diasporaSummary && (
+                    <div className="border-r-2 border-[#ea580c] pr-3">
+                      <p className="text-[13px] font-bold text-[#ea580c] dark:text-orange-400 mb-1">روایت اپوزیسیون</p>
+                      <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-4">{diasporaSummary}</p>
+                    </div>
+                  )}
                 </div>
               );
             })()}
+            {/* Telegram discourse summary */}
+            {heroTelegram?.discourse_summary && (
+              <div className="mt-3 px-1">
+                <p className="text-[14px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">
+                  <span className="font-bold text-slate-600 dark:text-slate-300">تحلیل روایت‌های تلگرام.</span>
+                  {" "}{heroTelegram.discourse_summary}
+                </p>
+                {heroTelegram.predictions && heroTelegram.predictions.length > 0 && (
+                  <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-1">
+                    <span className="font-bold text-blue-500">پیش‌بینی:</span> {typeof heroTelegram.predictions[0] === "string" ? heroTelegram.predictions[0] : (heroTelegram.predictions[0] as any).text || ""}
+                  </p>
+                )}
+                {heroTelegram.key_claims && heroTelegram.key_claims.length > 0 && (
+                  <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-1">
+                    <span className="font-bold text-amber-500">ادعا:</span> {typeof heroTelegram.key_claims[0] === "string" ? heroTelegram.key_claims[0] : (heroTelegram.key_claims[0] as any).text || ""}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         )}
 
         {/* LEFT: Blind spot stories (one from each side) */}
-        <div className="col-span-3 py-6 pr-6 border-r border-slate-200 dark:border-slate-800 space-y-5">
-          <div className="flex items-center gap-3 mb-4">
+        <div className="col-span-3 py-4 pr-6 border-r border-slate-200 dark:border-slate-800 space-y-4 flex flex-col justify-center">
+          <div className="flex items-center gap-3 mb-2">
             <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
-            <span className="text-[13px] font-black text-slate-900 dark:text-white shrink-0">نگاه یک‌طرفه</span>
+            <span className="text-[13px] font-black text-slate-900 dark:text-white shrink-0">نگاه یک‌جانبه</span>
             <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
           </div>
           {conservativeBlind && (
-            <Link href={`/${locale}/stories/${conservativeBlind.id}`} className="group block border-2 border-[#3b82f6] shadow-[0_0_14px_rgba(59,130,246,0.5)] hover:shadow-[0_0_22px_rgba(59,130,246,0.7)] transition-shadow animate-pulse-subtle">
+            <Link href={`/${locale}/stories/${conservativeBlind.id}`} className="group block border-[3px] border-[#1e3a5f] shadow-[0_0_12px_rgba(30,58,95,0.4)] hover:shadow-[0_0_20px_rgba(30,58,95,0.6)] transition-shadow animate-pulse-glow-blue">
               <div className="aspect-[4/3] overflow-hidden bg-slate-100 dark:bg-slate-800">
                 <SafeImage src={conservativeBlind.image_url} className="h-full w-full object-cover" />
               </div>
               <div className="p-3">
-                <h3 className="text-[14px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
+                <h3 className="text-[18px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
                   {conservativeBlind.title_fa}
                 </h3>
-                <p className="mt-1.5 text-[11px] text-slate-400">
+                <p className="mt-1.5 text-[13px] text-slate-400">
                   فقط روایت محافظه‌کار · {conservativeBlind.article_count} مقاله
                 </p>
               </div>
             </Link>
           )}
           {oppositionBlind && (
-            <Link href={`/${locale}/stories/${oppositionBlind.id}`} className="group block border-2 border-[#ea580c] shadow-[0_0_10px_rgba(234,88,12,0.3)] hover:shadow-[0_0_16px_rgba(234,88,12,0.5)] transition-shadow animate-pulse-subtle">
+            <Link href={`/${locale}/stories/${oppositionBlind.id}`} className="group block border-[3px] border-[#ea580c] shadow-[0_0_12px_rgba(234,88,12,0.4)] hover:shadow-[0_0_20px_rgba(234,88,12,0.6)] transition-shadow animate-pulse-glow-orange">
               <div className="aspect-[4/3] overflow-hidden bg-slate-100 dark:bg-slate-800">
                 <SafeImage src={oppositionBlind.image_url} className="h-full w-full object-cover" />
               </div>
               <div className="p-3">
-                <h3 className="text-[14px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
+                <h3 className="text-[18px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
                   {oppositionBlind.title_fa}
                 </h3>
-                <p className="mt-1.5 text-[11px] text-orange-500">
+                <p className="mt-1.5 text-[13px] text-orange-500">
                   فقط روایت اپوزیسیون · {oppositionBlind.article_count} مقاله
                 </p>
               </div>
@@ -330,12 +397,12 @@ export default async function HomePage({
         <div className="grid grid-cols-12 gap-0 py-8 border-b border-slate-200 dark:border-slate-800">
           {/* Weekly briefing (8 cols) */}
           <div className="col-span-7 pl-6 border-l border-slate-200 dark:border-slate-800">
-            <h2 className="text-[22px] font-black text-slate-900 dark:text-white mb-6">در روزهای گذشته ...</h2>
+            <h2 className="text-[24px] font-black text-slate-900 dark:text-white mb-6">در روزهای گذشته ...</h2>
             <div className="mr-8">
-              {sorted.slice(1, 4).map((s, i) => (
+              {leftTextStories.map((s, i) => (
                 <Link key={s.id} href={`/${locale}/stories/${s.id}`}
                   className={`group block py-5 ${i > 0 ? "border-t border-slate-100 dark:border-slate-800/60" : ""}`}>
-                  <h3 className="text-[24px] font-black leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
+                  <h3 className="text-[22px] font-black leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
                     {s.title_fa}
                   </h3>
                   <Meta story={s} />
@@ -355,27 +422,31 @@ export default async function HomePage({
           <div className="col-span-5 pr-6">
             <div className="flex items-center gap-3 mb-4">
               <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
-              <span className="text-[13px] font-black text-slate-900 dark:text-white shrink-0">پرخواننده‌ترین</span>
+              <span className="text-[13px] font-black text-slate-900 dark:text-white shrink-0">پرمخاطب‌ترین</span>
               <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
             </div>
 
             <div className="space-y-0">
-              {mostRead.map((s, i) => {
+              {mostViewed.map((s, i) => {
                 const bias = allAnalyses[s.id]?.bias_explanation_fa;
                 const firstPoint = bias?.split(/[.؛]/).map((p: string) => p.trim()).find((p: string) => p.length > 10);
                 return (
                   <Link key={s.id} href={`/${locale}/stories/${s.id}`}
-                    className={`group flex items-start gap-3 py-3 ${i > 0 ? "border-t border-slate-100 dark:border-slate-800/60" : ""}`}>
-                    <span className="text-[20px] font-black text-slate-200 dark:text-slate-700 shrink-0 w-7 text-center mt-0.5">{i + 1}</span>
+                    className={`group flex items-start gap-3 py-4 ${i > 0 ? "border-t border-slate-100 dark:border-slate-800/60" : ""}`}>
+                    <span className="text-[24px] font-black text-slate-200 dark:text-slate-700 shrink-0 w-8 text-center mt-0.5">{toFa(i + 1)}</span>
                     <div className="flex-1 min-w-0">
-                      <h3 className="text-[14px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-1">
+                      <h3 className="text-[18px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
                         {s.title_fa}
                       </h3>
-                      <p className="text-[11px] text-slate-400 mt-0.5">{s.article_count} مقاله · {s.source_count} رسانه</p>
+                      <p className="text-[14px] text-slate-400 mt-1">
+                        {toFa(s.article_count)} مقاله · {toFa(s.source_count)} رسانه
+                        {s.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300"> · محافظه‌کار {toFa(s.state_pct)}٪</span>}
+                        {s.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400"> · اپوزیسیون {toFa(s.diaspora_pct)}٪</span>}
+                      </p>
                       {firstPoint && (
-                        <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1 line-clamp-1">• {firstPoint}</p>
+                        <p className="text-[14px] text-slate-400 dark:text-slate-500 mt-1 line-clamp-1">• {firstPoint}</p>
                       )}
-                    </div>
+                        </div>
                   </Link>
                 );
               })}
@@ -392,38 +463,38 @@ export default async function HomePage({
           <div className="border border-slate-300 dark:border-slate-600 h-full flex flex-col">
             <div className="flex items-center -mt-3 mx-4">
               <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
-              <span className="text-[13px] font-black text-slate-900 dark:text-white px-3 bg-white dark:bg-[#0a0e1a]">بیشترین اختلاف نظر</span>
+              <span className="text-[13px] font-black text-slate-900 dark:text-white px-3 bg-white dark:bg-[#0a0e1a]">بیشترین اختلاف نگاه</span>
               <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
             </div>
             <div className="px-4 pb-4 pt-2 flex-1">
               {[mostDisputed, secondDisputed].filter(Boolean).map((story, i) => {
                 const s = story!;
                 const analysis = allAnalyses[s.id];
-                const biasPoints = analysis?.bias_explanation_fa
-                  ?.split(/[.؛]/).map((p: string) => p.trim()).filter((p: string) => p.length > 10).slice(0, 2) || [];
+                const stateSummary = analysis?.state_summary_fa;
+                const diasporaSummary = analysis?.diaspora_summary_fa;
                 return (
                   <div key={s.id} className={`py-4 ${i > 0 ? "border-t border-slate-100 dark:border-slate-800/60" : ""}`}>
                     <Link href={`/${locale}/stories/${s.id}`} className="group block">
-                      <h4 className="text-[15px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
+                      <h4 className="text-[13px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
                         {s.title_fa}
                       </h4>
-                      <div className="mt-2 flex h-1.5 w-full overflow-hidden">
-                        <div className="bg-[#1e3a5f]" style={{ width: `${s.state_pct}%` }} />
-                        <div className="bg-[#ea580c]" style={{ width: `${s.diaspora_pct}%` }} />
-                      </div>
-                      <div className="mt-1 flex items-center justify-between text-[11px]">
-                        <span className="text-[#1e3a5f] dark:text-blue-300 font-medium">محافظه‌کار {s.state_pct}٪</span>
-                        <span className="text-[#ea580c] dark:text-orange-400 font-medium">اپوزیسیون {s.diaspora_pct}٪</span>
+                      <div className="mt-1 flex items-center justify-end gap-3 text-[13px]">
+                        <span className="text-[#1e3a5f] dark:text-blue-300 font-medium">محافظه‌کار {toFa(s.state_pct)}٪</span>
+                        <span className="text-[#ea580c] dark:text-orange-400 font-medium">اپوزیسیون {toFa(s.diaspora_pct)}٪</span>
                       </div>
                     </Link>
-                    {biasPoints.length > 0 && (
+                    {(stateSummary || diasporaSummary) && (
                       <div className="mt-2 space-y-1">
-                        {biasPoints.map((point, pi) => (
-                          <div key={pi} className="flex gap-2 text-[12px] leading-5">
-                            <span className="text-slate-400 mt-0.5 shrink-0">•</span>
-                            <span className="text-slate-500 dark:text-slate-400 line-clamp-1">{point}</span>
-                          </div>
-                        ))}
+                        {stateSummary && (
+                          <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-1">
+                            <span className="text-[#1e3a5f] dark:text-blue-300 font-medium">• </span>{stateSummary}
+                          </p>
+                        )}
+                        {diasporaSummary && (
+                          <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-1">
+                            <span className="text-[#ea580c] dark:text-orange-400 font-medium">در مقابل </span>{diasporaSummary}
+                          </p>
+                        )}
                       </div>
                     )}
                   </div>
@@ -438,7 +509,7 @@ export default async function HomePage({
           <div className="border border-slate-300 dark:border-slate-600 h-full flex flex-col">
             <div className="flex items-center -mt-3 mx-4">
               <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
-              <span className="text-[13px] font-black text-slate-900 dark:text-white px-3 bg-white dark:bg-[#0a0e1a]">مقایسه ارقام</span>
+              <span className="text-[13px] font-black text-slate-900 dark:text-white px-3 bg-white dark:bg-[#0a0e1a]">تقابل روایت‌ها</span>
               <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
             </div>
 
@@ -462,8 +533,8 @@ export default async function HomePage({
                 if (words?.conservative?.length && words?.opposition?.length) {
                   battleItems.push({
                     title: story.title_fa || "",
-                    conservative: `«${words.conservative[0]}»`,
-                    opposition: `«${words.opposition[0]}»`,
+                    conservative: `«${words.conservative[0].replace(/[«»]/g, "")}»`,
+                    opposition: `«${words.opposition[0].replace(/[«»]/g, "")}»`,
                     conservativeLabel: words.conservative.length > 1 ? words.conservative.slice(1, 3).join("، ") : "روایت محافظه‌کار",
                     oppositionLabel: words.opposition.length > 1 ? words.opposition.slice(1, 3).join("، ") : "روایت اپوزیسیون",
                   });
@@ -524,14 +595,14 @@ export default async function HomePage({
                   <p className="text-[13px] font-bold text-slate-900 dark:text-white mb-3 line-clamp-1">{item.title}</p>
                   <div className="flex gap-0 text-center">
                     <div className="flex-1 py-3 bg-[#1e3a5f]/10 dark:bg-blue-900/20 border-t-[3px] border-[#1e3a5f]">
-                      <p className={`${item.conservative.length > 20 ? "text-[18px]" : "text-[22px]"} font-black text-[#1e3a5f] dark:text-blue-300 line-clamp-1 px-2`}>{item.conservative}</p>
-                      <p className="text-[11px] text-slate-500 mt-1 line-clamp-1 px-2">{item.conservativeLabel}</p>
-                      <p className="text-[11px] text-[#1e3a5f] dark:text-blue-300 font-medium mt-0.5">محافظه‌کار</p>
+                      <p className={`${item.conservative.length > 20 ? "text-[24px]" : "text-[14px]"} font-black text-[#1e3a5f] dark:text-blue-300 line-clamp-1 px-2`}>{item.conservative}</p>
+                      <p className="text-[13px] text-slate-500 mt-1 line-clamp-1 px-2">{item.conservativeLabel}</p>
+                      <p className="text-[13px] text-[#1e3a5f] dark:text-blue-300 font-medium mt-0.5">محافظه‌کار</p>
                     </div>
                     <div className="flex-1 py-3 bg-[#ea580c]/10 dark:bg-orange-900/20 border-t-[3px] border-[#ea580c]">
-                      <p className={`${item.opposition.length > 20 ? "text-[18px]" : "text-[22px]"} font-black text-[#ea580c] dark:text-orange-400 line-clamp-1 px-2`}>{item.opposition}</p>
-                      <p className="text-[11px] text-slate-500 mt-1 line-clamp-1 px-2">{item.oppositionLabel}</p>
-                      <p className="text-[11px] text-[#ea580c] dark:text-orange-400 font-medium mt-0.5">اپوزیسیون</p>
+                      <p className={`${item.opposition.length > 20 ? "text-[24px]" : "text-[14px]"} font-black text-[#ea580c] dark:text-orange-400 line-clamp-1 px-2`}>{item.opposition}</p>
+                      <p className="text-[13px] text-slate-500 mt-1 line-clamp-1 px-2">{item.oppositionLabel}</p>
+                      <p className="text-[13px] text-[#ea580c] dark:text-orange-400 font-medium mt-0.5">اپوزیسیون</p>
                     </div>
                   </div>
                 </div>
@@ -543,18 +614,10 @@ export default async function HomePage({
 
       </div>
 
-      {/* ═══ NARRATIVE MAP ═══ */}
-      <div className="py-10 border-b-2 border-slate-300 dark:border-slate-700">
-        <div className="flex items-center gap-3 mb-2">
-          <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
-          <span className="text-[15px] font-black text-slate-900 dark:text-white shrink-0">نقشه روایت‌ها</span>
-          <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
-        </div>
-        <p className="text-center text-[12px] text-slate-400 dark:text-slate-500 mb-4">هر نقطه یک خبر است. اندازه = تعداد مقالات. روی موضوعات کلیک کنید.</p>
-        <NarrativeMap stories={sorted} />
+      {/* ═══ WEEKLY DIGEST ═══ */}
+      <div className="py-8">
+        <WeeklyDigest />
       </div>
-
-
 
       </div>
     </div>
@@ -589,11 +652,24 @@ function MobileHome({
   // Weekly briefing: stories 1-3
   const briefingStories = stories.slice(1, 4);
 
-  // Remaining stories after hero + briefing + blind spots
-  const usedIds = new Set([hero.id, ...briefingStories.map(s => s.id)]);
-  if (conservativeBlind) usedIds.add(conservativeBlind.id);
-  if (oppositionBlind) usedIds.add(oppositionBlind.id);
-  const remaining = stories.filter(s => !usedIds.has(s.id)).slice(0, 8);
+  // Most covered (by article count), deduplicated
+  const mobileUsedIds = new Set([hero.id, ...briefingStories.map(s => s.id)]);
+  if (conservativeBlind) mobileUsedIds.add(conservativeBlind.id);
+  if (oppositionBlind) mobileUsedIds.add(oppositionBlind.id);
+  const mobileNow = Date.now();
+  const mobileMostCovered = [...stories]
+    .filter(s => !mobileUsedIds.has(s.id))
+    .map(s => {
+      const views = s.view_count || 0;
+      const recencyHours = s.updated_at ? (mobileNow - new Date(s.updated_at).getTime()) / 3600000 : 100;
+      const recencyBonus = Math.max(0, 1 - recencyHours / 72);
+      return { ...s, _popScore: views * 2 + s.trending_score + recencyBonus * 10 + s.article_count * 0.5 };
+    })
+    .sort((a, b) => b._popScore - a._popScore)
+    .slice(0, 5);
+  mobileMostCovered.forEach(s => mobileUsedIds.add(s.id));
+
+  const remaining = stories.filter(s => !mobileUsedIds.has(s.id)).slice(0, 8);
 
   return (
     <div className="md:hidden">
@@ -607,23 +683,23 @@ function MobileHome({
           <SafeImage src={hero.image_url} className="h-full w-full object-cover" />
         </div>
         <div className="px-4 py-4">
-          <h1 className="text-[22px] font-black leading-snug text-slate-900 dark:text-white line-clamp-3">
+          <h1 className="text-[24px] font-black leading-snug text-slate-900 dark:text-white line-clamp-3">
             {hero.title_fa}
           </h1>
           <div className="mt-2">
-            <p className="text-[11px] text-slate-400 dark:text-slate-500">
-              {hero.source_count} رسانه · {hero.article_count} مقاله
+            <p className="text-[13px] text-slate-400 dark:text-slate-500">
+              {toFa(hero.source_count)} رسانه · {toFa(hero.article_count)} مقاله
             </p>
             {(hero.state_pct > 0 || hero.diaspora_pct > 0) && (
-              <p className="text-[11px] mt-0.5">
-                {hero.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300">محافظه‌کار {hero.state_pct}٪</span>}
+              <p className="text-[13px] mt-0.5">
+                {hero.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300">محافظه‌کار {toFa(hero.state_pct)}٪</span>}
                 {hero.state_pct > 0 && hero.diaspora_pct > 0 && <span className="text-slate-300 dark:text-slate-600"> · </span>}
-                {hero.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400">اپوزیسیون {hero.diaspora_pct}٪</span>}
+                {hero.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400">اپوزیسیون {toFa(hero.diaspora_pct)}٪</span>}
               </p>
             )}
           </div>
           {heroPoint && (
-            <p className="mt-2 text-[12px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">• {heroPoint}</p>
+            <p className="mt-2 text-[14px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">• {heroPoint}</p>
           )}
         </div>
       </Link>
@@ -633,22 +709,22 @@ function MobileHome({
         <div className="px-4 py-5 border-b border-slate-200 dark:border-slate-800">
           <div className="flex items-center gap-3 mb-4">
             <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
-            <span className="text-[13px] font-black text-slate-900 dark:text-white shrink-0">نگاه یک‌طرفه</span>
+            <span className="text-[13px] font-black text-slate-900 dark:text-white shrink-0">نگاه یک‌جانبه</span>
             <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
           </div>
           <div className="space-y-4">
             {conservativeBlind && (
               <Link href={`/${locale}/stories/${conservativeBlind.id}`}
-                className="group block border-2 border-[#3b82f6] shadow-[0_0_14px_rgba(59,130,246,0.5)] animate-pulse-subtle">
+                className="group block border-[3px] border-[#1e3a5f] shadow-[0_0_12px_rgba(30,58,95,0.4)] animate-pulse-glow-blue">
                 <div className="flex gap-3 p-3">
                   <div className="w-20 h-20 shrink-0 overflow-hidden bg-slate-100 dark:bg-slate-800">
                     <SafeImage src={conservativeBlind.image_url} className="h-full w-full object-cover" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <h3 className="text-[14px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
+                    <h3 className="text-[18px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
                       {conservativeBlind.title_fa}
                     </h3>
-                    <p className="mt-1 text-[11px] text-slate-400">
+                    <p className="mt-1 text-[13px] text-slate-400">
                       فقط روایت محافظه‌کار · {conservativeBlind.article_count} مقاله
                     </p>
                   </div>
@@ -657,16 +733,16 @@ function MobileHome({
             )}
             {oppositionBlind && (
               <Link href={`/${locale}/stories/${oppositionBlind.id}`}
-                className="group block border-2 border-[#ea580c] shadow-[0_0_10px_rgba(234,88,12,0.3)] animate-pulse-subtle">
+                className="group block border-[3px] border-[#ea580c] shadow-[0_0_12px_rgba(234,88,12,0.4)] animate-pulse-glow-orange">
                 <div className="flex gap-3 p-3">
                   <div className="w-20 h-20 shrink-0 overflow-hidden bg-slate-100 dark:bg-slate-800">
                     <SafeImage src={oppositionBlind.image_url} className="h-full w-full object-cover" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <h3 className="text-[14px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
+                    <h3 className="text-[18px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
                       {oppositionBlind.title_fa}
                     </h3>
-                    <p className="mt-1 text-[11px] text-orange-500">
+                    <p className="mt-1 text-[13px] text-orange-500">
                       فقط روایت اپوزیسیون · {oppositionBlind.article_count} مقاله
                     </p>
                   </div>
@@ -680,23 +756,23 @@ function MobileHome({
       {/* ── 3. Weekly briefing ── */}
       {briefingStories.length > 0 && (
         <div className="px-4 py-5 border-b border-slate-200 dark:border-slate-800">
-          <h2 className="text-[18px] font-black text-slate-900 dark:text-white mb-3">در روزهای گذشته ...</h2>
+          <h2 className="text-[20px] font-black text-slate-900 dark:text-white mb-3">در روزهای گذشته ...</h2>
           <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
             {briefingStories.map((s) => {
               const bias = allAnalyses[s.id]?.bias_explanation_fa;
               const firstPoint = bias?.split(/[.؛]/).map((p: string) => p.trim()).find((p: string) => p.length > 10);
               return (
                 <Link key={s.id} href={`/${locale}/stories/${s.id}`} className="group block py-4">
-                  <h3 className="text-[16px] font-black leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
+                  <h3 className="text-[22px] font-black leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
                     {s.title_fa}
                   </h3>
-                  <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
-                    {s.source_count} رسانه · {s.article_count} مقاله
-                    {s.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300"> · محافظه‌کار {s.state_pct}٪</span>}
-                    {s.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400"> · اپوزیسیون {s.diaspora_pct}٪</span>}
+                  <p className="mt-1 text-[13px] text-slate-400 dark:text-slate-500">
+                    {toFa(s.source_count)} رسانه · {toFa(s.article_count)} مقاله
+                    {s.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300"> · محافظه‌کار {toFa(s.state_pct)}٪</span>}
+                    {s.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400"> · اپوزیسیون {toFa(s.diaspora_pct)}٪</span>}
                   </p>
                   {firstPoint && (
-                    <p className="mt-1.5 text-[12px] leading-5 text-slate-400 dark:text-slate-500 line-clamp-1">• {firstPoint}</p>
+                    <p className="mt-1.5 text-[14px] leading-5 text-slate-400 dark:text-slate-500 line-clamp-1">• {firstPoint}</p>
                   )}
                 </Link>
               );
@@ -705,21 +781,62 @@ function MobileHome({
         </div>
       )}
 
-      {/* ── 4. Remaining stories ── */}
+      {/* ── 4. Most covered ── */}
+      {mobileMostCovered.length > 0 && (
+        <div className="px-4 py-5 border-b border-slate-200 dark:border-slate-800">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
+            <span className="text-[13px] font-black text-slate-900 dark:text-white shrink-0">پرمخاطب‌ترین</span>
+            <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
+          </div>
+          <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
+            {mobileMostCovered.map((s, i) => (
+              <Link key={s.id} href={`/${locale}/stories/${s.id}`} className="group flex items-start gap-3 py-3">
+                <span className="text-[14px] font-black text-slate-200 dark:text-slate-700 shrink-0 w-7 text-center mt-0.5">{toFa(i + 1)}</span>
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-[18px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
+                    {s.title_fa}
+                  </h3>
+                  <p className="text-[13px] text-slate-400 mt-0.5">
+                    {toFa(s.article_count)} مقاله · {toFa(s.source_count)} رسانه
+                    {s.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300"> · محافظه‌کار {toFa(s.state_pct)}٪</span>}
+                    {s.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400"> · اپوزیسیون {toFa(s.diaspora_pct)}٪</span>}
+                  </p>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── 5. Telegram analysis ── */}
+      <div className="px-4 py-5 border-b border-slate-200 dark:border-slate-800">
+        <h3 className="text-[13px] font-black text-slate-900 dark:text-white mb-3 pb-2 border-b border-slate-200 dark:border-slate-800">
+          تحلیل روایت‌های تلگرام
+        </h3>
+        <TelegramDiscussions storyIds={stories.slice(0, 5).map(s => s.id)} locale={locale} />
+      </div>
+
+      {/* ── 5. Words of the day ── */}
+      <div className="px-4 py-5 border-b border-slate-200 dark:border-slate-800">
+        <WordsOfWeek />
+      </div>
+
+      {/* ── 6. Remaining stories ── */}
       {remaining.length > 0 && (
         <div className="divide-y divide-slate-200 dark:divide-slate-800">
           {remaining.map((s) => (
             <Link key={s.id} href={`/${locale}/stories/${s.id}`} className="group block px-4 py-4">
-              <h3 className="text-[15px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
+              <h3 className="text-[13px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
                 {s.title_fa}
               </h3>
-              <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
-                {s.source_count} رسانه · {s.article_count} مقاله
-                {s.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300"> · محافظه‌کار {s.state_pct}٪</span>}
-                {s.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400"> · اپوزیسیون {s.diaspora_pct}٪</span>}
+              <p className="mt-1 text-[13px] text-slate-400 dark:text-slate-500">
+                {toFa(s.source_count)} رسانه · {toFa(s.article_count)} مقاله
+                {s.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300"> · محافظه‌کار {toFa(s.state_pct)}٪</span>}
+                {s.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400"> · اپوزیسیون {toFa(s.diaspora_pct)}٪</span>}
               </p>
               {summaries[s.id] && (
-                <p className="mt-1.5 text-[12px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">
+                <p className="mt-1.5 text-[14px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">
                   {summaries[s.id]}
                 </p>
               )}

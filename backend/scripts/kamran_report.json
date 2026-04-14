@@ -1,0 +1,1850 @@
+{
+  "persona": "kamran",
+  "persona_fa": "کامران",
+  "role": "Geopolitical Strategist",
+  "generated_at": "2026-04-13T17:23:51.276715+00:00",
+  "db_findings": {
+    "stories_analyzed": 20,
+    "blindspot_count": 3,
+    "state_only_count": 2,
+    "diaspora_only_count": 1,
+    "both_coverage_count": 17,
+    "stories_with_telegram": 3
+  },
+  "stories": [
+    {
+      "story_id": "9b1b87ca-114e-4756-b922-52fe9c92d982",
+      "title_fa": "آتش‌بس دو هفته‌ای ایران و آمریکا؛ واکنش‌ها و پیامدها",
+      "title_en": "Two-week ceasefire between Iran and the U.S.; U.S. accepts 'ten conditions' and 936-hour internet blackout",
+      "summary_fa": null,
+      "summary_en": "{\"state_summary_fa\": \"رسانه‌های حکومتی (پرس‌تی‌وی، فارس، تابناک) بر پذیرش «شروط ده‌گانه» ایران توسط آمریکا و «پیروزی بزرگ» تأکید کردند؛ پرس‌تی‌وی همچنین مدعی شد مواردی از اعلام مرگ معترضان «پیش‌از‌وقت یا ساختگی» بوده است و این نشان‌دهنده «شکست سیستما",
+      "article_count": 35,
+      "trending_score": 26.272025452624305,
+      "is_blindspot": false,
+      "blindspot_type": null,
+      "covered_by_state": true,
+      "covered_by_diaspora": true,
+      "articles_by_alignment": {
+        "diaspora": [
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "تهران: آتش‌بس یعنی ایجاد وقفه برای تمدید نیرو و هیچ عاقلی این کار را نمی‌کند",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "عباس عراقچی: به مدت دو هفته تردد امن در تنگه هرمز مقدور خواهد بود",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "آر‌اف‌آی فارسی",
+            "source_name_en": "RFI Farsi",
+            "title_fa": "اعلام آتش‌بس در جنگ ایران؛ آنچه تاکنون می‌دانیم",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "یورونیوز فارسی",
+            "source_name_en": "Euronews Persian",
+            "title_fa": "آتش‌بس و مذاکره آمریکا و ایران: قدم بعدی چیست؟",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "بی‌بی‌سی فارسی",
+            "source_name_en": "BBC Persian",
+            "title_fa": "**🔻تداوم قطع اینترنت در ایران پس از اعلام آتش‌بس**",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "بی‌بی‌سی فارسی",
+            "source_name_en": "BBC Persian",
+            "title_fa": "🔻**واکنش رهبران اروپایی به اعلام آتش‌بس؛ از استقبال تا انتقاد از ترامپ",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "بی‌بی‌سی فارسی",
+            "source_name_en": "BBC Persian",
+            "title_fa": "🔻 ادامه کاهش قیمت نفت در بازارها",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "بی‌بی‌سی فارسی",
+            "source_name_en": "BBC Persian",
+            "title_fa": "ایران و آمریکا با آتش‌بس دو هفته‌ای موافقت کردند، اسرائیل حمایت کرد اما گفت شامل لبنان نخواهد شد",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "بی‌بی‌سی فارسی",
+            "source_name_en": "BBC Persian",
+            "title_fa": "🔻**کویت می‌گوید که پس از اعلام آتش‌بس هدف حمله پهپادی ایران قرار گرفته است",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "حسین شریعتمداری در کیهان آتش‌بس‌ دو هفته‌ای را «هدیه چندجانبه به دشمن» خواند",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "واکنش شهروندان به آتش‌بس موقت؛ از خشم و ناامیدی تا امید به «تاکتیک پنهان»",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "رادیو زمانه",
+            "source_name_en": "Radio Zamaneh",
+            "title_fa": "**آتش‌بس شکننده میان آمریکا و ایران؛ اختلاف بر سر لبنان، واکنش‌های جهانی و سقوط قیمت نفت**",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "اکسیوس: تلاش برای آتش‌بس ۴۵ روزه میان جمهوری اسلامی و آمریکا در جریان است",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "رادیو زمانه",
+            "source_name_en": "Radio Zamaneh",
+            "title_fa": "**ایران در بسته ده‌بندی خود به پاکستان آتش‌بس موقت را رد کرد**",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "خشم و نارضایتی شهروندان از افزایش حضور نیروهای فاطمیون در شهرهای ایران",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "رادیو فردا",
+            "source_name_en": "Radio Farda",
+            "title_fa": "🔸وزیر دفاع آمریکا روز چهارشنبه گفت که جنگ ایالات متحده علیه ایران «به‌طور کامل» توانایی این کشور…",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "آکسیوس: آمریکا، جمهوری اسلامی و میانجی‌گران در حال بررسی شرایط یک آتش‌بس ۴۵ روزه هستند",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "بی‌بی‌سی فارسی",
+            "source_name_en": "BBC Persian",
+            "title_fa": "مقاومت اسلامی عراق اعلام کرد که به مدت دو هفته آتش‌بس می‌کند",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "بی‌بی‌سی فارسی",
+            "source_name_en": "BBC Persian",
+            "title_fa": "**🔻معاون رئیس‌جمهور آمریکا آتش‌بس با ایران را «شکننده» توصیف کرد",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "معاون ترامپ: آتش‌بس با جمهوری اسلامی شکننده است",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "دویچه‌وله فارسی",
+            "source_name_en": "Deutsche Welle Persian",
+            "title_fa": "ایران و آمریکا برای آتش‌بس دو هفته‌ای توافق کردند",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "بی‌بی‌سی فارسی",
+            "source_name_en": "BBC Persian",
+            "title_fa": "توافق آتش‌بس با ایران؛ پیروزی‌ نسبی برای ترامپ، اما با هزینه‌ سنگین",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "آر‌اف‌آی فارسی",
+            "source_name_en": "RFI Farsi",
+            "title_fa": "ترامپ ۴۸ ساعت به ایران فرصت داد تا با واشنگتن توافق کند؛ پتروشیمی ماهشهر هدف حملات اسرائیل و آمریکا قرار گرفت",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "بی‌بی‌سی فارسی",
+            "source_name_en": "BBC Persian",
+            "title_fa": "🔻**هگست: ایران برای آتش‌بس التماس کرد",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "رییس ستاد مشترک ارتش آمریکا: بیش از ۱۳ هزار هدف در ایران را زدیم",
+            "title_en": null
+          }
+        ],
+        "state": [
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "**'تسلیم نهایی': رسانه‌های پاکستانی می‌گویند ترامپ پس از ۴۰ روز به ایران عقب‌نشینی کرد**",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "خبرگزاری فارس",
+            "source_name_en": "Fars News Agency",
+            "title_fa": "**تلاش نتانیاهو برای کارشکنی در توافق آتش‌بس**",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "ایران تهدید به ترور علیه مذاکره‌کنندگانش در جریان مذاکرات با آمریکا را محکوم کرد",
+            "title_en": "POLITICSIran condemns assassination threats against Iranian negotiators amid US talks"
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "**▶️ انتقاد از نحوه مدیریت رئیس‌جمهور آمریکا در جنگ با ایران و اعلام یک…**",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "مشاوران ترامپ طرح تغییر رژیم نتانیاهو در ایران را «مضحک» خواندند: گزارش",
+            "title_en": null
+          }
+        ],
+        "semi_state": [
+          {
+            "source_name_fa": "خبرآنلاین",
+            "source_name_en": "Khabar Online",
+            "title_fa": "**🕊**** نخست‌وزیر انگلیس: از توافق آتش‌بس حاصل شده دیشب استقبال می‌کنم، توافقی که لحظه‌ای آرامش را…",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "خبرآنلاین",
+            "source_name_en": "Khabar Online",
+            "title_fa": "**📰**** فارس به نقل از منبع آگاه نظامی: ایران درحال جمع‌بندی برای پاسخ به نقض آتش‌بس توسط اسرائیل…",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "خبرآنلاین",
+            "source_name_en": "Khabar Online",
+            "title_fa": "✍️** مخالفت حسین شریعتمداری با آتش‌بس‌ دو هفته‌ای/ هدیه چندجانبه به دشمن است**",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "تابناک",
+            "source_name_en": "Tabnak",
+            "title_fa": "شریعتمداری : پذیرش شروط ایران توسط آمریکا پیروزی بزرگی است",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "خبرآنلاین",
+            "source_name_en": "Khabar Online",
+            "title_fa": "⚫️ **نت‌بلاکس: قطعی اینترنت به چهلمین روز رسید**",
+            "title_en": null
+          }
+        ]
+      },
+      "telegram_analysis": null
+    },
+    {
+      "story_id": "65f6102f-851f-43ec-a249-5c8ffe546fc2",
+      "title_fa": "شکست مذاکرات اسلام‌آباد ۱۱ آوریل؛ ونس: آمریکا آخرین و بهترین پیشنهاد را داد",
+      "title_en": "Islamabad talks failed on April 11; Vance: US made 'last and best offer'",
+      "summary_fa": null,
+      "summary_en": "{\"state_summary_fa\": \"رسانه‌های حکومتی گزارش دادند مذاکرات پس از «ساعت‌ها» و به‌ویژه پس از 21 ساعت گفت‌وگو بی‌نتیجه پایان یافت و بر «شروط غیرقابل مذاکره» و ضرورت توافقی «متوازن و عادلانه» تأکید کردند. این منابع اعلام کردند واشنگتن با «حسن نیت» وارد ش",
+      "article_count": 75,
+      "trending_score": 20.221767074191668,
+      "is_blindspot": false,
+      "blindspot_type": null,
+      "covered_by_state": true,
+      "covered_by_diaspora": true,
+      "articles_by_alignment": {
+        "semi_state": [
+          {
+            "source_name_fa": "تابناک",
+            "source_name_en": "Tabnak",
+            "title_fa": "بقایی: انتظار توافق در یک جلسه را نداشتیم",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "تابناک",
+            "source_name_en": "Tabnak",
+            "title_fa": "کارشناس‌آمریکایی:ایران قوی‌تر شده، چرا توافق کند؟!",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "تابناک",
+            "source_name_en": "Tabnak",
+            "title_fa": "مذاکرات به توافق نرسید؛ لحظه خروج جی‌دی ونس از پاکستان!",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "تابناک",
+            "source_name_en": "Tabnak",
+            "title_fa": "ادامه مذاکرات پس از گذشت ۴ ساعت + عکس تیم مذاکره‌کننده ایران",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "تابناک",
+            "source_name_en": "Tabnak",
+            "title_fa": "پس‌لرزه‌های مذاکرات ایران و آمریکا در اسلام‌آباد",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "تابناک",
+            "source_name_en": "Tabnak",
+            "title_fa": "پزشکیان: ایران با جدیت وارد مذاکرات شده است",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "تابناک",
+            "source_name_en": "Tabnak",
+            "title_fa": "قالیباف به پاکستان می رود",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "تابناک",
+            "source_name_en": "Tabnak",
+            "title_fa": "گزارش ونس از مذاکرات اسلام‌آباد: توافق نکردیم",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "تابناک",
+            "source_name_en": "Tabnak",
+            "title_fa": "چرا مذاکرات ایران و آمریکا به توافق نرسید؟",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "تابناک",
+            "source_name_en": "Tabnak",
+            "title_fa": "ایران زمان‌بندی برای دور بعدی مذاکرات ندارد",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "تابناک",
+            "source_name_en": "Tabnak",
+            "title_fa": "گزارش کوتاه بقایی از مذاکرات ایران ـ آمریکا",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "تابناک",
+            "source_name_en": "Tabnak",
+            "title_fa": "عکس: تصویر تازه از هیأت مذاکره‌کنندهٔ ایرانی در اسلام‌آباد",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "تابناک",
+            "source_name_en": "Tabnak",
+            "title_fa": "ادعای جی دی ونس قبل از ترک مذاکرات ایران",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "تابناک",
+            "source_name_en": "Tabnak",
+            "title_fa": "نمایندگان ارشد ایران و آمریکا در مذاکرات اسلام‌آباد",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "تابناک",
+            "source_name_en": "Tabnak",
+            "title_fa": "زیاده‌خواهی تیم آمریکا بعد از ورود به مرحله تبادل متن",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "تابناک",
+            "source_name_en": "Tabnak",
+            "title_fa": "عکس: تصویری از هیأت مذاکره‌کنندهٔ ایرانی در اسلام‌آباد",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "تابناک",
+            "source_name_en": "Tabnak",
+            "title_fa": "هیأت ایرانی پاکستان را ترک کرد",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "تابناک",
+            "source_name_en": "Tabnak",
+            "title_fa": "گره مذاکرات به تنگه هرمز رسید؛ نه ایران به زیاده‌خواهی آمریکا",
+            "title_en": null
+          }
+        ],
+        "state": [
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "پزشکian: مذاکره‌کنندگان ایرانی در مذاکرات اسلام‌آباد از منافع ملی دفاع می‌کنند",
+            "title_en": "POLITICSPezeshkian: Iranian negotiators defending national interests in Islamabad talks"
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "ایران در دفاع از حقوق از هرمز تا جبران خسارت ایستادگی خواهد کرد: معاون رئیس‌جمهور",
+            "title_en": "Iran will stand firm on defending rights from Hormuz to compensation: VP"
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "هزینه خواسته‌های افراطی آمریکا که مذاکرات با ایران را خراب کرد",
+            "title_en": "The cost of US excessive demands that wrecked talks with Iran2hr"
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "سیاست: مرحله اول مذاکرات آمریکا و ایران در اسلام‌آباد با تبادل متون مکتوب پایان یافت",
+            "title_en": "POLITICSFirst phase of US-Iran talks concludes in Islamabad with exchange of written texts"
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "دفاع | جغرافیا، انرژی، قدرت نامتقارن: تنگه هرمز به عنوان دارایی استراتژیک دائمی ایران",
+            "title_en": "DEFENSEGeography, energy, asymmetric power: Strait of Hormuz as Iran's permanent strategic asset"
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "**▶️ هند و چین پس از اعلام آتش‌بس، سفارشات فوری برای محموله‌های نفت خام ایرانی آغاز کردند…**",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "**📸 فرمانده سابق سپاه، محسن رضایی، می‌گوید رئیس‌جمهور آمریکا مجبور به پذیرش…**",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "رئیس قوه قضائیه از مذاکره‌کنندگان به عنوان «نگهبانان» حقوق جنگ ایران تقدیر کرد",
+            "title_en": "Judiciary chief hails negotiators as ‘guardians’ of Iran’s war rights4hr"
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "پایان استثنائیت آمریکایی: چگونه سیاست خارجی MAGA با واقعیت در جنگ با ایران برخورد کرد",
+            "title_en": "End of American exceptionalism: How MAGA foreign policy collided with reality in war on Iran"
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "۱۲ آوریل: آتش‌بس شکننده برقرار است در حالی که مذاکرات ایران و آمریکا در اسلام‌آباد بدون پیشرفت پایان یافت",
+            "title_en": "April 12: Fragile ceasefire in effect as Iran-US talks in Islamabad end without breakthrough3hr"
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "مذاکرات ایران-آمریکا در اسلام‌آباد، با میانجی‌گری پاکستان، وارد مرحله کارشناسی شد",
+            "title_en": "POLITICSIran-US talks in Islamabad, mediated by Pakistan, enter expert-level phase"
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "مذاکره‌کنندگان ایرانی شرایط را تحت پیشنهاد ۱۰ ماده‌ای به پاکستان ارائه کردند: سخنگو",
+            "title_en": "Iranian negotiators present conditions to Pakistan under 10-point proposal: Spox"
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "سیاست | پزشک‌کیان، پوتین درباره راه‌های بازگرداندن صلح منطقه‌ای پس از شکست مذاکرات آمریکا گفتگو کردند",
+            "title_en": "POLITICSPezeshkian, Putin discuss ways to restore regional peace after US talks fail"
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "مذاکره‌کنندگان ایرانی قبل از مذاکرات آمریکا با نخست‌وزیر پاکستان در اسلام‌آباد دیدار کردند",
+            "title_en": "Iranian negotiators meet Pakistani PM in Islamabad ahead of US talks"
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "سیاستمداران ایران با جدیت وارد مذاکرات شدند، نتیجه بستگی به رویکرد آمریکا دارد: پزشک‌پزشکی",
+            "title_en": "POLITICSIran entered talks with seriousness, outcome depends on US approach: Pezeshkian"
+          }
+        ],
+        "diaspora": [
+          {
+            "source_name_fa": "رادیو زمانه",
+            "source_name_en": "Radio Zamaneh",
+            "title_fa": "مذاکرات اسلام‌آباد: اختلاف بنیادین بر سر تنگه هرمز و سرنوشت حزب‌الله",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "رادیو فردا",
+            "source_name_en": "Radio Farda",
+            "title_fa": "🔸عباس عراقچی بامداد دوشنبه اعلام کرد ایران در مذاکراتی که به گفته او «در بالاترین سطح طی ۴۷ سال…",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "رادیو زمانه",
+            "source_name_en": "Radio Zamaneh",
+            "title_fa": "بازتاب بن‌بست در مذاکرات میان ایران و آمریکا",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "کیهان لندن",
+            "source_name_en": "Kayhan London",
+            "title_fa": "وال‌استریت ژورنال: عراقچی و قالیباف برای مذاکره با آمریکا وارد اسلام‌آباد شدند؛ تسنیم: کذب است",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "کیهان لندن",
+            "source_name_en": "Kayhan London",
+            "title_fa": "گاردین: فضای مذاکرات اسلام‌آباد بین نمایندگان آمریکا و جمهوری اسلامی پُرتنش بود",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "یورونیوز فارسی",
+            "source_name_en": "Euronews Persian",
+            "title_fa": "جدال روایت‌ها در پایان مذاکرات؛ واشنگتن: ما پیشنهاد آخر را دادیم؛ تهران: با هالیوودبازی نمی‌شود",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "رادیو فردا",
+            "source_name_en": "Radio Farda",
+            "title_fa": "🔸 جِی‌دی ونس، معاون رئیس‌جمهور آمریکا، پس از پایان مذاکرات اسلام‌آباد در روز یک‌شنبه ۲۴ فروردین در…",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "خبرگزاری سپاه: سرپرست تیم مذاکره‌کننده جمهوری اسلامی هنوز نهایی نشده است",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "دویچه‌وله فارسی",
+            "source_name_en": "Deutsche Welle Persian",
+            "title_fa": "مذاکرات ایران و آمریکا \"بدون دستیابی به توافق\" پایان گرفت",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "آر‌اف‌آی فارسی",
+            "source_name_en": "RFI Farsi",
+            "title_fa": "نقش پنهان اما حیاتی چین در آتش‌بس میان ایران و آمریکا",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "رادیو فردا",
+            "source_name_en": "Radio Farda",
+            "title_fa": "🔸 اسماعیل بقایی، سخنگوی وزارت خارجه ایران، دربارهٔ مذاکرات اسلام‌آباد گفت که «در مورد یک‌سری از…",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "یورونیوز فارسی",
+            "source_name_en": "Euronews Persian",
+            "title_fa": "پشت پرده مذاکرات اسلام‌آباد؛ آمریکا قالیباف را «رهبر بالقوه ایران در دوران گذار» می‌بیند؟",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "رادیو زمانه",
+            "source_name_en": "Radio Zamaneh",
+            "title_fa": "نه توافق، نه شکست: ظریف و معمای پایان‌ناپذیر مذاکره بدون مذاکره",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "رادیو فردا",
+            "source_name_en": "Radio Farda",
+            "title_fa": "🔸 وب‌سایت خبری اکسیوس از قول «منبعی آگاه از جریان گفت‌وگوها در اسلام‌آباد» نوشت که «بخشی از…",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "یورونیوز فارسی",
+            "source_name_en": "Euronews Persian",
+            "title_fa": "رشد سهام و قیمت نفت همزمان با انتظار بازار برای مذاکرات آتش‌بس",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "رادیو فردا",
+            "source_name_en": "Radio Farda",
+            "title_fa": "🔸مذاکرات اسلام‌آباد پس از یک نشست فشرده و طولانی بین مقامات ایران و آمریکا در پاکستان بی‌نتیجه…",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "رادیو زمانه",
+            "source_name_en": "Radio Zamaneh",
+            "title_fa": "**بازتاب بن‌بست در مذاکرات میان ایران و آمریکا**",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "رسانه‌های جمهوری اسلامی زیاده‌خواهی آمریکا را مانع دستیابی به توافق دانستند",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "کیهان لندن",
+            "source_name_en": "Kayhan London",
+            "title_fa": "مذاکرات اسلام‌آباد بی‌نتیجه تمام شد؛ منابع نزدیک به سپاه: تیم آمریکایی به دنبال بهانه‌گیری بود",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "ساندی‌تایمز: ونس مامور پایان دادن به جنگی شد که با آن مخالف بود",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "بی‌بی‌سی فارسی",
+            "source_name_en": "BBC Persian",
+            "title_fa": "«بار دیگر این مردم بودند که بهای واقعی جنگ را پرداختند»؛ روایت‌های متفاوت از آتش‌بس دوهفته‌ای",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "یورونیوز فارسی",
+            "source_name_en": "Euronews Persian",
+            "title_fa": "آرامش در تهران بعد از آتش‌بس؛ «ایرانیانی که با پایان صدای انفجارها لبخند می‌زنند»",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "آسوشیتدپرس: مذاکره آمریکا و جمهوری اسلامی با حضور کارشناسان فنی ادامه دارد",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "آسوشیتدپرس: جی‌دی ونس و چین دو بازیگر لحظه‌آخری در توافق آتش بس ترامپ و تهران بودند",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "آکسیوس: مذاکرات ایران و آمریکا در اسلام‌آباد جمعه برگزار می‌شود",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "رادیو زمانه",
+            "source_name_en": "Radio Zamaneh",
+            "title_fa": "رئیس‌جمهوری ایالات متحده، دونالد ترامپ، اعلام کرد در صورت موافقت ایران با بازگشایی تنگه هرمز، حمله…",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "آیا جمهوری اسلامی می‌تواند از عبور کشتی‌ها در تنگه هرمز عوارض بگیرد؟",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "سناتور لیندزی گراهام: جمهوری اسلامی نباید پس از بستن تنگه هرمز پاداش دریافت کند",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "اکونومیست: اگر تهران از عبور کشتی‌ها عوارض بگیرد، میلیاردها دلار در سال درآمد خواهد داشت",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "محمود نبویان: تنگه هرمز با افسانه‌سرایی و هالیوود بازی نخواهد شد",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "دونالد ترامپ مقاله‌ای درباره «محاصره دریایی ایران» را در شبکه اجتماعی خود بازنشر کرد",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "منبع امنیتی جمهوری اسلامی: وضعیت تنگه هرمز بدون توافق بر سر یک چارچوب مشترک تغییر نمی‌کند",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "یورونیوز فارسی",
+            "source_name_en": "Euronews Persian",
+            "title_fa": "برگزاری مذاکرات سه جانبه میان ایران، آمریکا و پاکستان در اسلام‌آباد؛ تیم‌های کارشناسی هم ملحق شدند",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "هیات آمریکایی برای شرکت در مذاکرات با جمهوری اسلامی وارد اسلام‌آباد شد",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "رادیو فردا",
+            "source_name_en": "Radio Farda",
+            "title_fa": "🔸در همین حال، مقام‌های ایرانی نیز اعلام کردند که عبور امن کشتی‌ها از تنگه هرمز از سر گرفته می‌شود؛…",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "یورونیوز فارسی",
+            "source_name_en": "Euronews Persian",
+            "title_fa": "پایان مذاکرات ۲۱ ساعته ایران و آمریکا؛ ونس: به توافق نرسیدیم، پیشنهاد نهایی روی میز است",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "رادیو فردا",
+            "source_name_en": "Radio Farda",
+            "title_fa": "**خبرگزاری ایسنا: محمدباقر قالیباف در اسلام‌آباد با جی‌دی ونس مذاکره خواهد کرد**",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "کیهان لندن",
+            "source_name_en": "Kayhan London",
+            "title_fa": "گزارش تحلیلی هفته؛ آتش‌بس موقت، ارفاق به حکومت یا نفسگیری برای ضربه نهایی؟",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "یورونیوز فارسی",
+            "source_name_en": "Euronews Persian",
+            "title_fa": "چرا پاکستان به‌عنوان میانجی بین آمریکا و ایران ظاهر شده است؟",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "یورونیوز فارسی",
+            "source_name_en": "Euronews Persian",
+            "title_fa": "گفتگو‌های ایران و آمریکا در پاکستان پس از جنگ ۴۰ روزه؛ درباره مذاکرات در اسلام‌آباد چه می‌دانیم؟",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "یورونیوز فارسی",
+            "source_name_en": "Euronews Persian",
+            "title_fa": "گزارش اکسیوس از موارد بن‌بست در مذاکرات؛ اختلاف بر سر کنترل تنگه هرمز و ذخایر اورانیوم",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "بی‌بی‌سی فارسی",
+            "source_name_en": "BBC Persian",
+            "title_fa": "کشور نفت‌خیز که از بحران انرژی ناشی از جنگ ایران سود نمی‌برد",
+            "title_en": null
+          }
+        ]
+      },
+      "telegram_analysis": null
+    },
+    {
+      "story_id": "44b66eb5-2d9a-4c32-aacd-68dc07d3d7cc",
+      "title_fa": "آمریکا «محاصره» تنگه هرمز را اعلام کرد؛ نفت جهانی بالای 103 دلار شد",
+      "title_en": "US Announces Strait of Hormuz 'Blockade'; Global Oil Tops $103",
+      "summary_fa": null,
+      "summary_en": "{\"state_summary_fa\": \"رسانه‌های حکومتی و نیمه‌حکومتی نقل کردند که رئیس‌جمهور آمریکا و نیروی دریایی این کشور «محاصره» تنگه هرمز را اعلام کرده‌اند و این اقدام را مداخله و تهدیدی علیه امنیت ملی ایران معرفی کردند؛ سایت‌های حکومتی افزایش بهای نفت به «بیش ",
+      "article_count": 13,
+      "trending_score": 13.941982216103472,
+      "is_blindspot": false,
+      "blindspot_type": null,
+      "covered_by_state": true,
+      "covered_by_diaspora": true,
+      "articles_by_alignment": {
+        "diaspora": [
+          {
+            "source_name_fa": "رادیو فردا",
+            "source_name_en": "Radio Farda",
+            "title_fa": "🔸داده‌های کشتیرانی نشان می‌دهد سه نفتکش فوق‌سنگین حامل نفت روز شنبه از تنگه هرمز عبور کرده‌اند.",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "ترامپ درباره تنگه هرمز: هر کس به کشتی‌های غیرنظامی حمله کند نابود خواهد شد",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "دونالد ترامپ: نیروی دریایی آمریکا محاصره تنگه هرمز را آغاز می‌کند",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "رادیو فردا",
+            "source_name_en": "Radio Farda",
+            "title_fa": "⚡️**ترامپ: آمریکا از همین لحظه روند محاصره تنگه هرمز را آغاز می‌کند**",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "کیهان لندن",
+            "source_name_en": "Kayhan London",
+            "title_fa": "محاصره «تنگه هرمز» توسط آمریکا؛ افزایش قیمت جهانی نفت و بحران برای جمهوری اسلامی در تأمین کالاهای اساسی",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "بی‌بی‌سی فارسی",
+            "source_name_en": "BBC Persian",
+            "title_fa": "🔻 ترامپ بار دیگر بر محاصره دریایی ایران تاکید کرد",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "کیهان لندن",
+            "source_name_en": "Kayhan London",
+            "title_fa": "واکنش جمهوری اسلامی به اولتیماتوم ترامپ برای محاصره بنادر ایران؛ «هیچ بندری در خلیج فارس و دریای عمان در‌ امان نخواهد بود»",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "یورونیوز فارسی",
+            "source_name_en": "Euronews Persian",
+            "title_fa": "جهش نفت بالای ۱۰۰ دلار؛ فورینت پس از انتخابات مجارستان اوج می‌گیرد",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "سخنگوی کمیسیون امنیت ملی مجلس: تهدید ترامپ به محاصره دریایی، بلوف است",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "رادیو فردا",
+            "source_name_en": "Radio Farda",
+            "title_fa": "🔸ارتش ایالات متحده اعلام کرد روند «فراهم‌سازی شرایط» برای پاکسازی مین‌های دریایی در تنگهٔ هرمز را…",
+            "title_en": null
+          }
+        ],
+        "state": [
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "قیمت نفت پس از اعلام آمریکا مبنی بر «محاصره دریایی» ایران، به بالای ۱۰۳ دلار رسید",
+            "title_en": "Oil prices spike above $103 after US announces Iran 'naval blockade'"
+          },
+          {
+            "source_name_fa": "خبرگزاری تسنیم",
+            "source_name_en": "Tasnim News Agency",
+            "title_fa": "**آیا اساسا نیروی دریایی آمریکا توان محاصره دریایی ایران را دارد؟**",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "خبرگزاری تسنیم",
+            "source_name_en": "Tasnim News Agency",
+            "title_fa": "**محاصره دریایی ترامپ یک نمایش بی‌هدف است**",
+            "title_en": null
+          }
+        ]
+      },
+      "telegram_analysis": null
+    },
+    {
+      "story_id": "d8de2492-27a1-4b51-ad47-4029d30316b2",
+      "title_fa": "عملیات ادعایی آمریکا در اصفهان و واکنش ایران",
+      "title_en": "Alleged US Operation in Isfahan and Iran's Response",
+      "summary_fa": "طی هفته‌های اخیر جنگ میان ایران و ائتلاف آمریکا و اسرائیل تشدید شده است. تهران و گروه‌های مقاومت منطقه با موشک‌ها و پهپادها به پایگاه‌ها و دارایی‌های آمریکایی و اسرائیلی در کویت، عراق، سوریه و اراضی اشغالی حمله کرده‌اند. همچنین حملاتی به دانشگاه‌ها و",
+      "summary_en": "{\"state_summary_fa\": \"«رسانه‌های حکومتی گزارش می‌دهند ایران و محور مقاومت در واکنش به 'تهاجم بی‌پیشینه آمریکا و رژیم صهیونیستی' عملیات تلافی‌جویانه گسترده‌ای را آغاز کرده‌اند.» «این گزارش‌ها از 'ضربات سنگین' به پایگاه‌های آمریکایی و تاسیسات رژیم صهیو",
+      "article_count": 3,
+      "trending_score": 9.113248319438542,
+      "is_blindspot": true,
+      "blindspot_type": "state_only",
+      "covered_by_state": true,
+      "covered_by_diaspora": false,
+      "articles_by_alignment": {
+        "state": [
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "ایران حملات آمریکایی-اسرائیلی به دانشگاه‌ها را به عنوان «بربریت بی‌سابقه» محکوم کرد",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "انصارالله بر استقلال تصمیم خود برای اقدام علیه تجاوز اسرائیلی-آمریکایی تأکید کرد",
+            "title_en": null
+          }
+        ],
+        "semi_state": [
+          {
+            "source_name_fa": "تابناک",
+            "source_name_en": "Tabnak",
+            "title_fa": "انتشار اطلاعات جدید درباره عملیات ادعایی آمریکا در اصفهان",
+            "title_en": null
+          }
+        ]
+      },
+      "telegram_analysis": null
+    },
+    {
+      "story_id": "1328cc74-3331-408f-bb00-81d417c71b38",
+      "title_fa": "تیراندازی در نزدیکی کنسولگری اسرائیل در استانبول",
+      "title_en": "Shooting Near Israeli Consulate in Istanbul",
+      "summary_fa": "در ۱۸ فروردین ۱۴۰۵ / ۷ آوریل ۲۰۲۶، تیراندازی و درگیری در نزدیکی ساختمانِ محلِ کنسولگری اسرائیل در منطقه بشیکتاش استانبول روی داد. منابع ترکیه‌ای گزارش دادند سه نفر کشته و دو افسر پلیس زخمی شدند و مهاجمانی با نیروهای امنیتی درگیر شدند. مقام‌های ترکیه ",
+      "summary_en": "{\"state_summary_fa\": \"رسانه‌های حکومتی «تبادل آتش» در برابر «کنسولگری رژیم اسرائیل» را گزارش کردند و وقوع «حمله» را به‌عنوان تهدیدی علیه امنیت برجسته نمودند. آنها بر نقش نیروهای امنیتی در «خنثی‌سازی حمله» و قرار گرفتن حادثه در بستر تنش‌های منطقه‌ای ت",
+      "article_count": 2,
+      "trending_score": 9.016478139922917,
+      "is_blindspot": false,
+      "blindspot_type": null,
+      "covered_by_state": true,
+      "covered_by_diaspora": true,
+      "articles_by_alignment": {
+        "state": [
+          {
+            "source_name_fa": "خبرگزاری فارس",
+            "source_name_en": "Fars News Agency",
+            "title_fa": "🔴 **حمله به کنسولگری اسرائیل در استانبول**",
+            "title_en": null
+          }
+        ],
+        "diaspora": [
+          {
+            "source_name_fa": "یورونیوز فارسی",
+            "source_name_en": "Euronews Persian",
+            "title_fa": "در تیراندازی در نزدیکی کنسولگری اسرائیل در استانبول ۳ نفر به‌ضرب گلوله پلیس کشته شدند",
+            "title_en": null
+          }
+        ]
+      },
+      "telegram_analysis": null
+    },
+    {
+      "story_id": "1186d21d-96d7-47fb-a18e-b88c99c05a6f",
+      "title_fa": "حملات اسرائیل به لبنان و تلفات سنگین",
+      "title_en": "Israeli Attacks on Lebanon and Heavy Casualties",
+      "summary_fa": "اسرائیل روز چهارشنبه با بمباران گسترده بیروت و مناطق دیگر لبنان حملاتی را انجام داد که رسانه‌ها آن را سنگین‌ترین حمله از آغاز جنگ با حزب‌الله خوانده‌اند. وزارت بهداشت لبنان از صدها تا بیش از هزار کشته و زخمی گزارش کرده است. گزارش‌ها از اصابت به محله‌",
+      "summary_en": "{\"state_summary_fa\": \"\\\"رژیم صهیونیستی\\\" را مسئول \\\"حملات وحشیانه\\\" و \\\"بمباران سنگین\\\" معرفی می‌کنند. رسانه‌های حکومتی تصاویر و ویدئوهایی از «تخریب گسترده» و شمار بالای مجروحان منتشر کرده‌اند.\", \"diaspora_summary_fa\": \"رسانه‌های برون‌مرزی نوشته‌اند ",
+      "article_count": 10,
+      "trending_score": 8.532971920701389,
+      "is_blindspot": false,
+      "blindspot_type": null,
+      "covered_by_state": true,
+      "covered_by_diaspora": true,
+      "articles_by_alignment": {
+        "state": [
+          {
+            "source_name_fa": "خبرگزاری فارس",
+            "source_name_en": "Fars News Agency",
+            "title_fa": "**📷**** تصاویری از حملات وحشیانه امروز اسرائیل به لبنان**",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "خبرگزاری تسنیم",
+            "source_name_en": "Tasnim News Agency",
+            "title_fa": "**تصاویر حملات وحشیانه رژیم صهیونی به مناطق جنوبی لبنان**",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "خبرگزاری تسنیم",
+            "source_name_en": "Tasnim News Agency",
+            "title_fa": "**حملات جدید اسرائیل به منطقه جبل لبنان**",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "فلسطین: ده‌ها نفر کشته شدند در حالی که اسرائیل سنگین‌ترین حملات را به لبنان از آغاز جنگ انجام می‌دهد",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "**🔴 هلال احمر لبنان: بیش از ۳۰۰ نفر در بیروت و حومه‌های جنوبی کشته یا زخمی شده‌اند، بسیاری…**",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "**▶️ ویدئو تخریب ایجاد شده در یک بلوک محله در پایتخت لبنان، بیروت، را نشان می‌دهد…",
+            "title_en": null
+          }
+        ],
+        "diaspora": [
+          {
+            "source_name_fa": "رادیو فردا",
+            "source_name_en": "Radio Farda",
+            "title_fa": "🔸اسرائیل روز چهارشنبه ۱۹ فروردین مجموعه‌ای از حملات را در بیروت و سایر نقاط لبنان انجام داد که موجب…",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "رادیو فردا",
+            "source_name_en": "Radio Farda",
+            "title_fa": "🔸در پی این حملات مرگبار، نخست‌وزیر لبنان از «دوستان» این کشور خواست که برای پایان دادن به حملات…",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "بی‌بی‌سی فارسی",
+            "source_name_en": "BBC Persian",
+            "title_fa": "♦️آمار قربانیان در لبنان به ۱۵۰۰ نفر رسید",
+            "title_en": null
+          }
+        ],
+        "semi_state": [
+          {
+            "source_name_fa": "تابناک",
+            "source_name_en": "Tabnak",
+            "title_fa": "تصاویر بمباران سنگین لبنان توسط رژیم اسرائیل",
+            "title_en": null
+          }
+        ]
+      },
+      "telegram_analysis": {}
+    },
+    {
+      "story_id": "f827fe22-d3cf-4341-b306-b3ae531e7e01",
+      "title_fa": "آتش‌بس دو هفته‌ای بین آمریکا و ایران",
+      "title_en": "Two-week ceasefire between the US and Iran",
+      "summary_fa": "ایران و ایالات متحده با میانجیگری پاکستان بر سر «آتش‌بس» دو هفته‌ای موافقت کردند که شامل امکانِ تردد هماهنگ کشتی‌ها از تنگهٔ هرمز است. اسرائیل اعلام کرده این آتش‌بس شامل لبنان نیست و حملات در آن حوالی ادامه دارد. بازارها به سرعت واکنش نشان دادند و قی",
+      "summary_en": "{\"state_summary_fa\": \"رسانه‌های حکومتی و نزدیک به دولت «استقبال جمهوری آذربایجان از آتش‌بس» و نقش میانجیگری را برجسته کردند و بر ارادهٔ تهران برای حفظ «حق غنیسازی» و شروط خود تأکید کردند. برخی منابع حکومتی جنگ را محصول «تهاجم خارجی» خواندند و آتش‌بس ",
+      "article_count": 6,
+      "trending_score": 8.450864281583334,
+      "is_blindspot": false,
+      "blindspot_type": null,
+      "covered_by_state": true,
+      "covered_by_diaspora": true,
+      "articles_by_alignment": {
+        "diaspora": [
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "فشار بر زیرساخت‌ها تهران را به پذیرش آتش‌بس موقت سوق داد",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "آتش‌بس موقت با اهداف متعارض؛ شروط واشینگتن، مطالبات تهران",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "کیهان لندن",
+            "source_name_en": "Kayhan London",
+            "title_fa": "تداوم قطع سراسری اینترنت در ایران با وجود آتش‌بس موقت میان جمهوری اسلامی و آمریکا",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "رادیو فردا",
+            "source_name_en": "Radio Farda",
+            "title_fa": "🔸 ایران و آمریکا در نخستین ساعات بامداد چهارشنبه ۱۹ فروردین با آتش‌بس برای توقف جنگی که از نهم…",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "بی‌بی‌سی فارسی",
+            "source_name_en": "BBC Persian",
+            "title_fa": "🔹ایران و آمریکا با میانجیگری پاکستان، با آتش‌بسی ۱۴ روزه موافقت کردند. اسرائیل هم با چند ساعت تاخیر…",
+            "title_en": null
+          }
+        ],
+        "semi_state": [
+          {
+            "source_name_fa": "تابناک",
+            "source_name_en": "Tabnak",
+            "title_fa": "کاهش قیمت نفت درپی توافق آتش‌بس ایران وآمریکا",
+            "title_en": null
+          }
+        ]
+      },
+      "telegram_analysis": null
+    },
+    {
+      "story_id": "0bb203a4-ff73-4063-95c7-9b728b1d1258",
+      "title_fa": "واکنش‌ها به تهدیدات ترامپ درباره ایران",
+      "title_en": "Reactions to Trump's Threats Against Iran",
+      "summary_fa": "دولت آمریکا به رهبری دونالد ترامپ تهدیداتی علیه ایران مطرح کرده و به پایان تمدن ایران اشاره کرده است. در پاسخ، مقامات و تحلیلگران آمریکایی و بین‌المللی نسبت به این تهدیدات ابراز نگرانی کرده و بر لزوم مذاکرات دیپلماتیک تأکید دارند. همچنین، تجمعات اعتر",
+      "summary_en": "{\"state_summary_fa\": \"رسانه‌های حکومتی بر لزوم پایان جنگ و تأکید بر خواسته‌های ایران در مذاکرات تأکید دارند. آن‌ها به تبادل پیام‌ها بین ایران و آمریکا اشاره کرده و بر ضرورت حفظ منافع ملی تأکید می‌کنند.\", \"diaspora_summary_fa\": \"رسانه‌های برون‌مرزی به",
+      "article_count": 6,
+      "trending_score": 8.241409420715279,
+      "is_blindspot": false,
+      "blindspot_type": null,
+      "covered_by_state": true,
+      "covered_by_diaspora": true,
+      "articles_by_alignment": {
+        "diaspora": [
+          {
+            "source_name_fa": "بی‌بی‌سی فارسی",
+            "source_name_en": "BBC Persian",
+            "title_fa": "🔻اظهارات تند دونالد ترامپ، رئیس‌جمهور آمریکا، علیه ایران واکنش‌هایی داشته است. آقای ترامپ امروز در…",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "ترامپ: چین ایران را به مذاکره برای آتش‌بس واداشت",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "رادیو فردا",
+            "source_name_en": "Radio Farda",
+            "title_fa": "**گراهام: هر توافق با ایران باید به تصویب کنگره برسد؛ تأکید بر خروج اورانیوم غنی‌شده**",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "رادیو زمانه",
+            "source_name_en": "Radio Zamaneh",
+            "title_fa": "**تجمع ایرانیان ضد جنگ در هلند در اعتراض به تهدیدهای ترامپ علیه نابودی ایران**",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "رادیو فردا",
+            "source_name_en": "Radio Farda",
+            "title_fa": "🔸نخست‌وزیر پاکستان شامگاه سه‌شنبه ۱۸ فروردین از رئیس‌جمهور آمریکا خواست ضرب‌الاجل خود علیه ایران را…",
+            "title_en": null
+          }
+        ],
+        "semi_state": [
+          {
+            "source_name_fa": "تابناک",
+            "source_name_en": "Tabnak",
+            "title_fa": "واکنش جو کنت به تهدید ترامپ علیه نابودی تمدن ایران",
+            "title_en": null
+          }
+        ]
+      },
+      "telegram_analysis": {}
+    },
+    {
+      "story_id": "3c2a8f53-3fd2-4020-8927-90591cdddf95",
+      "title_fa": "ادعاها و تکذیب‌ها درباره عبور ناوهای آمریکایی از تنگه هرمز",
+      "title_en": "Claims and Denials Regarding the Passage of American Warships through the Strait of Hormuz",
+      "summary_fa": "اخیراً ادعاهایی مبنی بر عبور ناوهای آمریکایی از تنگه هرمز مطرح شده است. رسانه‌های حکومتی این ادعاها را به شدت تکذیب کرده و بر کنترل کامل ایران بر این آبراه تأکید دارند. در مقابل، رسانه‌های برون‌مرزی به این موضوع به عنوان یک رویداد مهم و خطرناک نگاه م",
+      "summary_en": "{\"state_summary_fa\": \"رسانه‌های حکومتی با تأکید بر واژه «تکذیب» و «کنترل کامل» بر تنگه هرمز، این ادعاها را به شدت رد کرده و به «پاسخ قاطع» به هرگونه تلاش برای عبور اشاره کرده‌اند.\", \"diaspora_summary_fa\": \"رسانه‌های برون‌مرزی به این موضوع به عنوان نش",
+      "article_count": 5,
+      "trending_score": 7.584177561991667,
+      "is_blindspot": false,
+      "blindspot_type": null,
+      "covered_by_state": true,
+      "covered_by_diaspora": true,
+      "articles_by_alignment": {
+        "state": [
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "کلید تنگه هرمز ایرانی است – ناوهای آمریکایی سخت‌ترین راه را آموختند",
+            "title_en": "The key to Strait of Hormuz is Iranian – US destroyers just learned the hard way"
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "نیروی دریایی سپاه پاسداران هشدار داد کشتی‌های نظامی درباره «پاسخ قاطع» به تلاش‌های عبور از تنگه هرمز",
+            "title_en": "DEFENSEIRGC Navy warns military vessels of 'firm response' to attempts at crossing Strait of Hormuz"
+          }
+        ],
+        "semi_state": [
+          {
+            "source_name_fa": "تابناک",
+            "source_name_en": "Tabnak",
+            "title_fa": "اولین واکنش ایران به خبر عبور ناو آمریکایی از تنگه هرمز",
+            "title_en": null
+          }
+        ],
+        "diaspora": [
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "ناوهای جنگی آمریکا برای نخستین‌بار از زمان آغاز جنگ ایران از تنگه هرمز عبور کردند",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "سپاه پاسداران: تلاش برای عبور شناورهای نظامی از تنگه هرمز با برخورد سخت مواجه خواهد شد",
+            "title_en": null
+          }
+        ]
+      },
+      "telegram_analysis": null
+    },
+    {
+      "story_id": "2c6e51f2-a835-475d-bdec-0e89b8cd816a",
+      "title_fa": "آتش‌بس دو هفته‌ای ایران و آمریکا؛ میانجیگری پاکستان و واکنش سازمان ملل",
+      "title_en": "Two-week Iran–US ceasefire; Pakistan mediation and UN reaction",
+      "summary_fa": "ایران و آمریکا بر آتش‌بس موقت دو هفته‌ای توافق کردند؛ پاکستان میانجی بود؛ سازمان ملل و آژانس انرژی اتمی از آتش‌بس استقبال کردند و رسانه‌های حکومتی از «پیروزی» و آماده‌سازی پاسخ به نقض خبر دادند.",
+      "summary_en": "{\"state_summary_fa\": \"رسانه‌های حکومتی (پرس‌تی‌وی، فارس، تسنیم) آتش‌بس را دستاوردی ملی معرفی کردند و از عبارت‌هایی مانند «شهید» برای اشاره به رهبری و «مقاومت» یا «پیروزی» برای تبیین نقش مردم و رهبری استفاده کردند؛ برخی منابع حکومتی (فارس) به نقل از م",
+      "article_count": 8,
+      "trending_score": 7.576121603490625,
+      "is_blindspot": false,
+      "blindspot_type": null,
+      "covered_by_state": true,
+      "covered_by_diaspora": true,
+      "articles_by_alignment": {
+        "state": [
+          {
+            "source_name_fa": "خبرگزاری تسنیم",
+            "source_name_en": "Tasnim News Agency",
+            "title_fa": "**آلمان: آتش‌بس باید اولین گام به سوی صلحی پایدار باشد**",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "خبرگزاری تسنیم",
+            "source_name_en": "Tasnim News Agency",
+            "title_fa": "**استقبال عمان از آتش‌بس بین ایران و آمریکا**",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "رئیس‌جمهور پزشکian: ایرانیان پس از آتش‌بس به ایستادگی در کنار هم ادامه خواهند داد",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "**▶️ دبیرکل سازمان ملل، آنتونیو گوترش، آتش‌بس دو هفته‌ای تازه اعلام شده را خوشامد گفت…**",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "خبرگزاری فارس",
+            "source_name_en": "Fars News Agency",
+            "title_fa": "🔴** ایران درحال جمع‌بندی پاسخ به نقض آتش‌بس توسط اسرائیل**",
+            "title_en": null
+          }
+        ],
+        "diaspora": [
+          {
+            "source_name_fa": "یورونیوز فارسی",
+            "source_name_en": "Euronews Persian",
+            "title_fa": "آتش‌بس ایران و آمریکا همزمان با اعلام «پیروزی» دو طرف؛ ترامپ: این می‌تواند عصر طلایی خاورمیانه باشد",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "کیهان لندن",
+            "source_name_en": "Kayhan London",
+            "title_fa": "توافق آمریکا و جمهوری اسلامی برای «دو هفته آتش‌بس»",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "بی‌بی‌سی فارسی",
+            "source_name_en": "BBC Persian",
+            "title_fa": "♦️دبیرکل سازمان ملل متحد از آتش‌بس ایران و آمریکا استقبال کرد",
+            "title_en": null
+          }
+        ]
+      },
+      "telegram_analysis": null
+    },
+    {
+      "story_id": "e79f3e28-6da1-4806-8353-9b2bef4ca3b4",
+      "title_fa": "تعلیق دو هفته‌ای حملات/آتش‌بس مشروط میان آمریکا و ایران مشروط به بازگشایی تنگه هرمز",
+      "title_en": "Two-week conditional suspension of attacks/ceasefire between the US and Iran conditioned on reopening the Strait of Hormuz",
+      "summary_fa": "پس از گفت‌وگوهای دیپلماتیک و میانجی‌گری پاکستان، آمریکا پیشنهاد تعلیق حملات علیه ایران به مدت دو هفته را مطرح کرد و ایران آن را بررسی کرد. رئیس‌جمهور آمریکا این تعلیق را مشروط به «بازگشایی کامل، فوری و امن» تنگه هرمز کرده است. اسرائیل گفت آتش‌بس شامل",
+      "summary_en": "{\"state_summary_fa\": \"پرس‌تی‌وی گزارش کرده است که واشنگتن به «ادامه کنترل ایران بر تنگه هرمز» و پذیرش «ده‌ماده‌ای ایران» متعهد شده و خواستار «پایان جنگ در همه جبهه‌ها» شده است. لحن گزارش پیروزمندانه و تأکید بر دستاوردهای دیپلماسی ایران است.\", \"diaspo",
+      "article_count": 4,
+      "trending_score": 7.491024728096875,
+      "is_blindspot": false,
+      "blindspot_type": null,
+      "covered_by_state": true,
+      "covered_by_diaspora": true,
+      "articles_by_alignment": {
+        "diaspora": [
+          {
+            "source_name_fa": "رادیو فردا",
+            "source_name_en": "Radio Farda",
+            "title_fa": "**یک «وقفۀ تاکتیکی» با «حفظ گزینۀ تشدید تنش»؟**",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "بی‌بی‌سی فارسی",
+            "source_name_en": "BBC Persian",
+            "title_fa": "عباس عراقچی، وزیر خارجه ایران، با انتشار پستی در شبکه ایکس اعلام کرد که «به مدت دو هفته تردد امن در…",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "رادیو فردا",
+            "source_name_en": "Radio Farda",
+            "title_fa": "🔸دونالد ترامپ، رئیس‌جمهور آمریکا، اعلام کرد در پی گفت‌وگو با شهباز شریف، نخست‌وزیر پاکستان، و عاصم…",
+            "title_en": null
+          }
+        ],
+        "state": [
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "**شرایط ۱۰ گانه ایران که آمریکا پذیرفته است:",
+            "title_en": null
+          }
+        ]
+      },
+      "telegram_analysis": null
+    },
+    {
+      "story_id": "778df959-79d0-4432-aa64-043de6726d59",
+      "title_fa": "مجموعه گزارش‌ها و تحلیل‌های پرس‌تی‌وی درباره جنگ نظامی آمریکا و اسرائیل علیه ایران",
+      "title_en": "Collection of Press TV reports and analyses on the US-Israel military campaign against Iran",
+      "summary_fa": "از ۲۸ فوریه ۲۰۲۶ ایالات متحده و اسرائیل حملات نظامی گسترده‌ای علیه ایران آغاز کردند. در موج نخست رهبران سیاسی و نظامی و شمار زیادی از غیرنظامیان کشته شدند و کشتی‌ها و هواپیماهایی نیز هدف قرار گرفتند. این تنش منطقه‌ای پیامدهای گسترده‌ای برای امنیت خلی",
+      "summary_en": "{\"state_summary_fa\": \"«رسانه‌های حکومتی گزارش دادند که از ۲۸ فوریه «جنگ تجاوزکارانه» آمریکا و اسرائیل علیه ایران آغاز شده و در موج اول «شهادت» هزاران نفر از جمله زنان و کودکان رخ داده؛ ایران با «مقاومت» و عملیات دفاعی پاسخ داده است.»\", \"diaspora_summ",
+      "article_count": 9,
+      "trending_score": 7.18307496949375,
+      "is_blindspot": true,
+      "blindspot_type": "state_only",
+      "covered_by_state": true,
+      "covered_by_diaspora": false,
+      "articles_by_alignment": {
+        "state": [
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "دفاع: تصرف صهیونیستی: جنگ ترامپ علیه ایران نشان می‌دهد که چه کسی واقعاً سیاست خارجی آمریکا را تعیین می‌کند",
+            "title_en": "DEFENSEZionist takeover: Trump’s war on Iran reveals who really dictates US foreign policy"
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "پایان جنگ آمریکا-اسرائیل علیه ایران: واقعیت‌های میدانی و مسیر مبتنی بر شواهد به جلو",
+            "title_en": "Ending US-Israeli war on Iran: Ground realities and evidence-based path forward"
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "گفت‌وگوها: واکنش ملایم هند به حمله آمریکا به کشتی ایرانی \"پیوند تمدنی\" را فاش می‌کند: خبرنگار",
+            "title_en": "CONVERSATIONSIndia's muted response to US attack on Iranian ship betrays 'civilizational bond': Journalist"
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "مدل جنگی ایران، آمریکا را خشک می‌کند در حالی که کشورهای حاشیه خلیج فارس نظاره‌گر و یادگیرنده هستند: تحلیل‌گر",
+            "title_en": "CONVERSATIONSIranian model of warfare bleeds US dry while Persian Gulf states watch and learn: Analyst"
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "گفت‌وگوها: عدم محکومیت جنگ علیه ایران توسط اتحادیه اروپا نشان‌دهنده بندگی آن به امپراتوری آمریکا است: نماینده سابق پارلمان اروپا",
+            "title_en": "CONVERSATIONSEU's refusal to condemn war against Iran shows its subservience to US Empire: Ex-MEP"
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "درون جنگ اطلاعاتی تحت حمایت آمریکا برای خاموش کردن صدای سحر بالکان در بوسنی در میان جنگ علیه ایران",
+            "title_en": "FOREIGN POLICYInside US-sponsored information war to silence Sahar Balkan in Bosnia amid war on Iran"
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "گفت‌وگوها: ایران ضربه سنگینی به امپراتوری اپستین وارد کرد، چیزی که از زمان ویتنام دیده نشده است: تحلیلگر",
+            "title_en": "CONVERSATIONSIran dealt ‘heavy blow to Epstein empire’, something not seen since Vietnam: Analyst"
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "آمریکا در جنگش علیه ایران، حقوق بین‌الملل را نابود می‌کند در حالی که پیروزی «کاذب» را ادعا می‌کند: حقوقدان",
+            "title_en": "CONVERSATIONSUS dismantling intl. law in its war against Iran while claiming 'false' victory: Legal scholar"
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "از طبس تا اصفهان: ایران دو فروند C-130 آمریکایی را نابود کرد، یادآور فاجعه عقاب چنگال در ۱۹۸۰",
+            "title_en": "From Tabas to Isfahan: Iran destroys two US C-130s, echoing 1980 Eagle Claw debacle"
+          }
+        ]
+      },
+      "telegram_analysis": null
+    },
+    {
+      "story_id": "509a0999-c3df-4b23-aa5a-820917b88f9f",
+      "title_fa": "بمباران اسرائیل به لبنان و تأثیرات آن",
+      "title_en": "Israeli Bombing of Lebanon and Its Impacts",
+      "summary_fa": "اسرائیل حملاتی گسترده علیه لبنان اجرا کرد و نقاطی از جمله بیروت، بقاع و جنوب این کشور (صور و نبطیه) هدف قرار گرفتند. رسانه‌های ایرانی از «بمباران شهر بیروت» و حملات «بی‌وقفه» گزارش داده‌اند و بی‌بی‌سی فارسی از «نقض آتش‌بس» و نگرانی از اشغال سخن گفته ",
+      "summary_en": "{\"state_summary_fa\": \"«ایال زامیر» رئیس ستاد کل ارتش رژیم صهیونیستی اعلام کرد «بدون هیچ وقفه ای به حملات به لبنان ادامه می دهیم». رسانه‌های حکومتی و نیمه‌حکومتی موضوع را با عناوینی مانند «بمباران شهر بیروت»، «صهیونیست‌ها مناطق مختلف لبنان را بمباران ",
+      "article_count": 8,
+      "trending_score": 6.796060869675,
+      "is_blindspot": false,
+      "blindspot_type": null,
+      "covered_by_state": true,
+      "covered_by_diaspora": true,
+      "articles_by_alignment": {
+        "state": [
+          {
+            "source_name_fa": "خبرگزاری فارس",
+            "source_name_en": "Fars News Agency",
+            "title_fa": "🎥 **صهیونیست‌ها مناطق مختلف لبنان را بمباران کردند**",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "خبرگزاری تسنیم",
+            "source_name_en": "Tasnim News Agency",
+            "title_fa": "**رئیس ستاد کل ارتش اسرائیل: به حملات بی وقفه به لبنان ادامه می‌دهیم**",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "خبرگزاری فارس",
+            "source_name_en": "Fars News Agency",
+            "title_fa": "المیادین: جنگنده‌های رژیم صهیونیستی یک مراسم تشییع در بقاع را بمباران کردند.",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "**▶️ تصاویری از عواقب حملات اسرائیلی به پایتخت لبنان، بیروت، ضبط شد.**",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "**▶️ ابرهای دود در آسمان بیروت در حالی که نیروهای اسرائیلی بمباران‌های وسیعی انجام می‌دهند، بالا می‌رود…**",
+            "title_en": null
+          }
+        ],
+        "semi_state": [
+          {
+            "source_name_fa": "تابناک",
+            "source_name_en": "Tabnak",
+            "title_fa": "تصاویری از حملات وحشیانه امروز اسرائیل به لبنان",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "خبرآنلاین",
+            "source_name_en": "Khabar Online",
+            "title_fa": "🟡 **بمباران شهر بیروت توسط صهیونیست‌ها**",
+            "title_en": null
+          }
+        ],
+        "diaspora": [
+          {
+            "source_name_fa": "بی‌بی‌سی فارسی",
+            "source_name_en": "BBC Persian",
+            "title_fa": "🔻ارتش اسرائیل صبح امروز در موج جدیدی از حملاتش جنوب لبنان را هدف قرار داد.",
+            "title_en": null
+          }
+        ]
+      },
+      "telegram_analysis": null
+    },
+    {
+      "story_id": "1bb705a9-991d-4a68-b873-5b3f8739222c",
+      "title_fa": "استقبال کشورهای منطقه از توافق آتش‌بس بین ایران و آمریکا",
+      "title_en": "Regional countries welcome ceasefire agreement between Iran and the US",
+      "summary_fa": "توافق آتش‌بس دو هفته‌ای بین ایران و آمریکا اعلام شده و کشورهای مختلف از جمله قطر، عربستان و تاجیکستان از این توافق استقبال کرده‌اند. پاکستان به عنوان میانجی در این توافق نقش داشته و تلاش کرده است تا تنش‌ها را کاهش دهد. این توافق به عنوان یک گام اولیه",
+      "summary_en": "{\"state_summary_fa\": \"رسانه‌های حکومتی به استقبال از توافق آتش‌بس و نقش مثبت پاکستان در این زمینه تأکید دارند. آنها این توافق را به عنوان گامی مهم در راستای امنیت و ثبات منطقه‌ای معرفی می‌کنند.\", \"diaspora_summary_fa\": \"رسانه‌های برون‌مرزی نیز به است",
+      "article_count": 8,
+      "trending_score": 6.7839469808,
+      "is_blindspot": false,
+      "blindspot_type": null,
+      "covered_by_state": true,
+      "covered_by_diaspora": true,
+      "articles_by_alignment": {
+        "diaspora": [
+          {
+            "source_name_fa": "بی‌بی‌سی فارسی",
+            "source_name_en": "BBC Persian",
+            "title_fa": "🔻استقبال تاجیکستان از توافق آتش‌بس آمریکا و ایران",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "بی‌بی‌سی فارسی",
+            "source_name_en": "BBC Persian",
+            "title_fa": "پاکستان چگونه به برقراری آتش‌بس شکننده میان آمریکا و ایران کمک کرد؟",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "بی‌بی‌سی فارسی",
+            "source_name_en": "BBC Persian",
+            "title_fa": "🔻**استقبال قطر از آتش‌بس ایران و آمریکا**",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "نبیه بری: لبنان بخشی از توافق آتش‌بس است",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "رادیو فردا",
+            "source_name_en": "Radio Farda",
+            "title_fa": "**عربستان سعودی از توافق آتش‌بس میان آمریکا و ایران استقبال کرد",
+            "title_en": null
+          }
+        ],
+        "state": [
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "**📸 رئیس شورای اروپا، آنتونیو کوستا، می‌گوید اتحادیه اروپا آتش‌بس دو هفته‌ای را خوشامد می‌گوید…**",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "خبرگزاری تسنیم",
+            "source_name_en": "Tasnim News Agency",
+            "title_fa": "**استقبال عربستان از توافق آتش‌بس بین ایران و آمریکا**",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "خبرگزاری تسنیم",
+            "source_name_en": "Tasnim News Agency",
+            "title_fa": "**استقبال** **قطر از توافق آتش‌بس بین ایران و آمریکا**",
+            "title_en": null
+          }
+        ]
+      },
+      "telegram_analysis": null
+    },
+    {
+      "story_id": "6fed1e72-0fa8-4b4e-88cd-76b1a5179877",
+      "title_fa": "حملات نظامی اسرائیل به زیرساخت‌های ایران و واکنش ارتش",
+      "title_en": "Israeli Attacks on Iran's Infrastructure and Military Response",
+      "summary_fa": "در پی تشدید تنش‌ها میان ایران و اسرائیل، ارتش ایران دو موشک کروز دشمن را در آسمان شمال تهران و همدان سرنگون کرد. همچنین، حملات اسرائیل به زیرساخت‌های حمل‌ونقل ایران و تهدیدات دونالد ترامپ به نابودی کشور در صورت عدم بازگشایی تنگه هرمز افزایش یافته است",
+      "summary_en": "{\"state_summary_fa\": \"رسانه‌های حکومتی بر موفقیت‌های نظامی ایران در سرنگونی موشک‌ها و پاسخ به تهدیدات دشمن تأکید دارند. آنها همچنین به تشکیل زنجیره‌های انسانی در حمایت از نیروگاه‌ها اشاره می‌کنند.\", \"diaspora_summary_fa\": \"رسانه‌های برون‌مرزی به تشدی",
+      "article_count": 8,
+      "trending_score": 6.621171980927778,
+      "is_blindspot": false,
+      "blindspot_type": null,
+      "covered_by_state": true,
+      "covered_by_diaspora": true,
+      "articles_by_alignment": {
+        "semi_state": [
+          {
+            "source_name_fa": "تابناک",
+            "source_name_en": "Tabnak",
+            "title_fa": "آمار تکان دهنده شهدای لبنانی در حملات رژیم اسرائیل",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "خبرآنلاین",
+            "source_name_en": "Khabar Online",
+            "title_fa": "**🟡**** ارتش: پدافند هوایی ۲ موشک کروز دشمن را در آسمان شمال تهران و استان همدان سرنگون کرد**",
+            "title_en": null
+          }
+        ],
+        "state": [
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "**▶️ تیم‌های نجات به سرعت برای نجات افرادی که زیر آوار پس از حملات هوایی اسرائیل گیر کرده‌اند، rushed می‌کنند…**",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "پالایشگاه نفت لاوان ایران چند ساعت پس از اعلام آتش‌بس آمریکا مورد حمله قرار گرفت",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "ارتش ایران به تأسیسات پتروشیمی اسرائیل در نزدیکی دیمونا و پایگاه‌های آمریکایی در امارات و کویت حمله کرد",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "فرمانده سپاه پاسداران از آغاز \"مرحله جدید\" حملات تلافی‌جویانه علیه متجاوزان خبر داد",
+            "title_en": null
+          }
+        ],
+        "diaspora": [
+          {
+            "source_name_fa": "رادیو زمانه",
+            "source_name_en": "Radio Zamaneh",
+            "title_fa": "**ترامپ: «یک تمدن امشب از بین خواهد رفت»؛ حمله اسرائیل به زیرساخت‌های حمل‌ونقل ایران**",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "رادیو فردا",
+            "source_name_en": "Radio Farda",
+            "title_fa": "🔸رسانه‌های ایران در ساعات منتهی به پایان ضرب الاجل رئیس‌جمهور آمریکا برای هدف قرار دادن نیروگاه‌های…",
+            "title_en": null
+          }
+        ]
+      },
+      "telegram_analysis": null
+    },
+    {
+      "story_id": "7bb3b239-f4be-4156-8c01-b8c05534a30d",
+      "title_fa": "تحلیل سوگیری در پوشش خبری تهدید ترامپ علیه ایران",
+      "title_en": "Trump threatens to destroy Iran's power plants and bridges; deadline April 7",
+      "summary_fa": "دولت آمریکا به رهبری ترامپ تهدید به نابودی زیرساخت‌های ایران کرده و ضرب‌الاجل ۱۸ فروردین را برای پذیرش خواسته‌ها تعیین کرده است.",
+      "summary_en": "{\"state_summary_fa\": \"رسانه‌های حکومتی به تهدیدات ترامپ واکنش نشان داده و بر ایستادگی ایران بر منافع ملی تأکید کردند؛ واژه‌های «وحشیگری» و «قدرت درونی» به‌کار رفته است. آنها تهدیدات ترامپ را نادیده نگرفته و بر تاریخچه تمدن ایران تأکید کردند.\", \"diasp",
+      "article_count": 8,
+      "trending_score": 6.386963647361111,
+      "is_blindspot": false,
+      "blindspot_type": null,
+      "covered_by_state": true,
+      "covered_by_diaspora": true,
+      "articles_by_alignment": {
+        "state": [
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "**ایران از سازمان ملل خواست تا پس از اعتراف ترامپ به تلاش برای تسلیح تروریست‌ها در ایران اقدام کند**",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "**تهدیدات ‘توهمی’ ترامپ نمی‌تواند تحقیر آمریکا در غرب آسیا را جبران کند: ارتش ایران**",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "\"شر خالص\": قانونگذاران آمریکایی ترامپ را به خاطر تهدید به \"مرگ تمدن ایران\" مورد انتقاد قرار دادند",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "**در واکنش به لفاظی‌های خشن دونالد ترامپ علیه ایران، نماینده کنگره ایلهان عمر او را محکوم کرد…**",
+            "title_en": null
+          }
+        ],
+        "diaspora": [
+          {
+            "source_name_fa": "رادیو فردا",
+            "source_name_en": "Radio Farda",
+            "title_fa": "🔸دونالد ترامپ، رئیس‌جمهور آمریکا، بار دیگر تهدید خود مبنی بر نابودی نیروگاه‌ها و پل‌های ایران را…",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "ترامپ: مردم ایران اگر بدانند به آن‌ها شلیک نمی‌شود، با حکومت مقابله می‌کنند",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "ترامپ: ایرانیان برای رسیدن به آزادی حاضرند این رنج را تحمل کنند",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "رادیو فردا",
+            "source_name_en": "Radio Farda",
+            "title_fa": "**ترامپ: به خیابان آمدن و اعتراض در ایران «عواقبی سنگین» دارد**",
+            "title_en": null
+          }
+        ]
+      },
+      "telegram_analysis": null
+    },
+    {
+      "story_id": "485b781a-c57b-4286-8913-31742c51c7ef",
+      "title_fa": "کشته شدن مجید خادمی، رئیس سازمان اطلاعات سپاه",
+      "title_en": "Killing of Majid Khademi, Head of IRGC Intelligence",
+      "summary_fa": "در پی حملات هوایی آمریکا و اسرائیل، مجید خادمی، رئیس سازمان اطلاعات سپاه پاسداران، کشته شد. این رویداد به عنوان یک ضربه بزرگ به نظام جمهوری اسلامی تلقی می‌شود. همچنین، در این حملات، ۳۱۰ دانش‌آموز و معلم نیز جان خود را از دست داده‌اند.",
+      "summary_en": "{\"state_summary_fa\": \"رسانه‌های حکومتی بر اهمیت کشته شدن مجید خادمی تأکید دارند و آن را نشانه‌ای از ضعف دشمنان می‌دانند. آن‌ها همچنین به کشته شدن دیگر فرماندهان سپاه در این جنگ اشاره می‌کنند.\", \"diaspora_summary_fa\": \"رسانه‌های برون‌مرزی به تحلیل ابع",
+      "article_count": 8,
+      "trending_score": 6.296405313925,
+      "is_blindspot": true,
+      "blindspot_type": "diaspora_only",
+      "covered_by_state": false,
+      "covered_by_diaspora": true,
+      "articles_by_alignment": {
+        "diaspora": [
+          {
+            "source_name_fa": "رادیو زمانه",
+            "source_name_en": "Radio Zamaneh",
+            "title_fa": "۳۱۰ دانش‌آموز و معلم در حملات آمریکا و اسرائیل کشته شده‌اند",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "مجید خادمی که بود و چرا کشته شدنش مهم است؟",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "وزیر دفاع اسرائیل: ما رییس سازمان اطلاعات سپاه پاسداران را از بین بردیم",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "رادیو زمانه",
+            "source_name_en": "Radio Zamaneh",
+            "title_fa": "مجید خادمی، رئیس سازمان اطلاعات سپاه کشته شد",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "کیهان لندن",
+            "source_name_en": "Kayhan London",
+            "title_fa": "مجید خادمی رئیس سازمان اطلاعات سـپاه (ساس) کشته شد",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "عضو کابینه امنیتی اسرائیل: ۴۸ ساعت در خاورمیانه زمان بسیار زیادی است",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "محمدباقر قالیباف: کشتن رییس سازمان اطلاعات سپاه نشانه ضعف آمریکا و اسرائیل است",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "بنیامین نتانیاهو: علاوه بر مجید خادمی، فرمانده یگان ۸۴۰ نیروی قدس سپاه نیز کشته شد",
+            "title_en": null
+          }
+        ]
+      },
+      "telegram_analysis": null
+    },
+    {
+      "story_id": "c4c856e4-342f-494e-9a8d-ac4099917647",
+      "title_fa": "حملات جمهوری اسلامی به امارات و جزایر لاوان",
+      "title_en": "Iran's attacks on the UAE and the islands of Lavan",
+      "summary_fa": "در پی اعلام آتش‌بس موقت در جنگ ایران، حملات هوایی به چندین شهر ایران و همچنین حملات موشکی و پهپادی به امارات متحده عربی ادامه دارد. سپاه پاسداران از انجام عملیات نظامی به اهداف راهبردی دشمنان خبر داده و وزارت دفاع امارات از مقابله با این حملات خبر می",
+      "summary_en": "{\"state_summary_fa\": \"رسانه‌های حکومتی بر روی موفقیت‌های نظامی سپاه پاسداران و پاسخ به تهدیدات دشمنان تأکید دارند. آنها این حملات را به عنوان دفاع از ملت ایران و پاسخ به تجاوزات دشمنان می‌دانند.\", \"diaspora_summary_fa\": \"رسانه‌های برون‌مرزی به تداوم ",
+      "article_count": 7,
+      "trending_score": 5.939123052588542,
+      "is_blindspot": false,
+      "blindspot_type": null,
+      "covered_by_state": true,
+      "covered_by_diaspora": true,
+      "articles_by_alignment": {
+        "semi_state": [
+          {
+            "source_name_fa": "تابناک",
+            "source_name_en": "Tabnak",
+            "title_fa": "۱۴ پالایشگاه و تأسیسات نفتی و ۳ مرکز فناوری زیر آتش موشک‌های سپاه",
+            "title_en": null
+          }
+        ],
+        "diaspora": [
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "وزارت دفاع امارات: در حال مقابله با حملات موشکی و پهپادی تهران هستیم",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "سه نفر در حمله جدید جمهوری اسلامی به امارات زخمی شدند",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "دویچه‌وله فارسی",
+            "source_name_en": "Deutsche Welle Persian",
+            "title_fa": "وقوع چندین انفجار در پالایشگاه لاوان و جزیره سیری",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "همزمان با اعلام آتش‌بس، تعدادی از شهرهای ایران هدف حملات هوایی قرار گرفتند",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "شرکت ملی پالایش و پخش: پالایشگاه نفت لاوان هدف قرار گرفت",
+            "title_en": null
+          }
+        ],
+        "state": [
+          {
+            "source_name_fa": "خبرگزاری فارس",
+            "source_name_en": "Fars News Agency",
+            "title_fa": "🔴 سپاه پاسداران تا دقایقی دیگر در بیانیه‌ای مهم و راهبردی جزئیاتی را از یکصدمین موج عملیات وعده…",
+            "title_en": null
+          }
+        ]
+      },
+      "telegram_analysis": null
+    },
+    {
+      "story_id": "603d8621-3511-40e8-b822-508490bb3d72",
+      "title_fa": "تحلیل پیروزی ایران در جنگ",
+      "title_en": "Analysis of Iran's Victory in the War",
+      "summary_fa": "ایران در جنگ ۴۰ روزه علیه آمریکا و اسرائیل به پیروزی دست یافته است. مقامات ایرانی و برخی تحلیلگران این پیروزی را نتیجه عدم تحقق اهداف دشمنان و مقاومت مردم ایران می‌دانند. جشن‌های مردمی در عراق به مناسبت این پیروزی برگزار شده است.",
+      "summary_en": "{\"state_summary_fa\": \"رسانه‌های حکومتی بر پیروزی ایران در جنگ تأکید دارند و آن را نتیجه تفکر رهبری و مقاومت مردم می‌دانند. آنها به پیروزی‌های نظامی و سیاسی ایران در برابر دشمنان اشاره می‌کنند.\", \"diaspora_summary_fa\": null, \"independent_summary_fa\": ",
+      "article_count": 7,
+      "trending_score": 5.918995622057292,
+      "is_blindspot": false,
+      "blindspot_type": null,
+      "covered_by_state": true,
+      "covered_by_diaspora": true,
+      "articles_by_alignment": {
+        "diaspora": [
+          {
+            "source_name_fa": "ایران اینترنشنال",
+            "source_name_en": "Iran International",
+            "title_fa": "نماینده مجلس: باتوجه به سابقه بدعهدی آمریکا بسیار بعید است، پایبند بماند",
+            "title_en": null
+          }
+        ],
+        "state": [
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "**عراقی‌ها پیروزی ایران را جشن می‌گیرند در حالی که گروه‌های مقاومت به آتش‌بس متعهد می‌شوند**",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "خبرگزاری فارس",
+            "source_name_en": "Fars News Agency",
+            "title_fa": "🎥 **فواد ایزدی: یکی از دلایل پذیرفتن شکست از طرف ترامپ حضور مردم بود**",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "خبرگزاری فارس",
+            "source_name_en": "Fars News Agency",
+            "title_fa": "🎥 **بروجردی خطاب به آمریکا: متعرض شوید سیاست قبلی تکرار می‌شود**",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "**معاون رئیس‌جمهور ایران: پیروزی در جنگ ۴۰ روزه ثمره «مدرسه فکری خامنه‌ای»**",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "پرس تی‌وی",
+            "source_name_en": "Press TV",
+            "title_fa": "**ایران «پیروز واضح جنگ» است، روزنامه معتبر اسرائیلی اعتراف کرد**",
+            "title_en": null
+          }
+        ],
+        "semi_state": [
+          {
+            "source_name_fa": "خبرآنلاین",
+            "source_name_en": "Khabar Online",
+            "title_fa": "🔴 **مجید تفرشی: با توجه به نرسیدن آمریکا به اهداف خود، ایران پیروز جنگ است**",
+            "title_en": null
+          }
+        ]
+      },
+      "telegram_analysis": null
+    },
+    {
+      "story_id": "31e6d35f-2245-48f3-a45e-73b93f25eec2",
+      "title_fa": "آتش‌بس بین ایالات متحده و ایران و تبعات آن",
+      "title_en": "Ceasefire between the United States and Iran and its Consequences",
+      "summary_fa": "ایران و آمریکا به آتش‌بس مشروطی برای توقف جنگی که از نهم اسفند آغاز شده بود، توافق کردند. این آتش‌بس به دنبال تهدیدات ایران و حملات هوایی آمریکا و اسرائیل به دست آمد و قیمت نفت به شدت کاهش یافت. دونالد ترامپ این توافق را فرصتی برای صلح جهانی توصیف کر",
+      "summary_en": "{\"state_summary_fa\": \"رسانه‌های نیمه‌حکومتی به استقبال از آتش‌بس بین ایران و آمریکا پرداخته و از تلاش‌های پاکستان برای میانجی‌گری تقدیر کردند. آن‌ها بر اهمیت این توافق برای امنیت منطقه تأکید دارند.\", \"diaspora_summary_fa\": \"رسانه‌های برون‌مرزی به جزئ",
+      "article_count": 7,
+      "trending_score": 5.907331385853819,
+      "is_blindspot": false,
+      "blindspot_type": null,
+      "covered_by_state": true,
+      "covered_by_diaspora": true,
+      "articles_by_alignment": {
+        "semi_state": [
+          {
+            "source_name_fa": "خبرآنلاین",
+            "source_name_en": "Khabar Online",
+            "title_fa": "📰 **سی‌ان‌ان: ساعاتی پس از اعلام آتش‌بس بین ایران و آمریکا، داده‌های کشتیرانی حرکت کمی را در تنگه…",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "خبرآنلاین",
+            "source_name_en": "Khabar Online",
+            "title_fa": "🎥 **تکرار چرخه احمقانه تصمیمات ترامپ، این بار در آتش‌بس با ایران",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "خبرآنلاین",
+            "source_name_en": "Khabar Online",
+            "title_fa": "**🇸🇦**** وزارت خارجه عربستان سعودی: از آتش‌بس بین ایالات متحده و ایران استقبال می‌کنیم و از…",
+            "title_en": null
+          }
+        ],
+        "diaspora": [
+          {
+            "source_name_fa": "بی‌بی‌سی فارسی",
+            "source_name_en": "BBC Persian",
+            "title_fa": "سقوط قیمت نفت در پی آتش‌بس مشروط آمریکا و ایران",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "رادیو فردا",
+            "source_name_en": "Radio Farda",
+            "title_fa": "**در شب اعلام توافق آتش‌بس جنگ با ایران چه گذشت؟",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "بی‌بی‌سی فارسی",
+            "source_name_en": "BBC Persian",
+            "title_fa": "♦️ترامپ: این یک روز بزرگ برای صلح جهانی است",
+            "title_en": null
+          },
+          {
+            "source_name_fa": "بی‌بی‌سی فارسی",
+            "source_name_en": "BBC Persian",
+            "title_fa": "**🔻وزیر دفاع آمریکا می‌گوید آتش‌بس فرصتی برای «صلح واقعی» است",
+            "title_en": null
+          }
+        ]
+      },
+      "telegram_analysis": {}
+    }
+  ]
+}
