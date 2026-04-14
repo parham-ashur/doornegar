@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import StoryLayout from "./StoryLayout";
 import BlindspotLayout from "./BlindspotLayout";
 import MaxDisagreementLayout from "./MaxDisagreementLayout";
@@ -8,6 +8,39 @@ import TelegramLayout from "./TelegramLayout";
 import StoryDetailOverlay from "./StoryDetailOverlay";
 import OnboardingHints from "./OnboardingHints";
 import type { StoryCore, StorySlot } from "./types";
+
+const SEEN_KEY = "doornegar_stories_seen";
+const SEEN_CAP = 200;
+const SEEN_DELAY_MS = 2000;
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+// Bump backend view_count by GETting the story endpoint (backend increments on GET).
+// Fire-and-forget with cache: no-store so the network hit actually happens.
+function pingView(storyId: string) {
+  try {
+    fetch(`${API_BASE}/api/v1/stories/${storyId}`, {
+      method: "GET",
+      cache: "no-store",
+      credentials: "omit",
+      keepalive: true,
+    }).catch(() => {});
+  } catch {}
+}
+
+function slotStoryIds(slot: StorySlot): string[] {
+  switch (slot.kind) {
+    case "story":
+      return [slot.story.id];
+    case "blindspot":
+      return [slot.data.top.story.id, slot.data.bottom.story.id];
+    case "maxDisagreement":
+      return [slot.data.story.id];
+    case "telegram":
+      return slot.data.claims.flatMap((c) => (c.story ? [c.story.id] : []));
+    default:
+      return [];
+  }
+}
 
 type StoriesCarouselProps = {
   slots: StorySlot[];
@@ -18,9 +51,51 @@ export default function StoriesCarousel({ slots, dir = "rtl" }: StoriesCarouselP
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [drilldown, setDrilldown] = useState<StoryCore | null>(null);
+  const [seenIds, setSeenIds] = useState<Set<string>>(new Set());
 
   const slotCount = slots.length;
   const virtualSlots: StorySlot[] = [slots[slotCount - 1], ...slots, slots[0]];
+
+  // Load seen set from localStorage on mount
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SEEN_KEY);
+      if (raw) setSeenIds(new Set(JSON.parse(raw) as string[]));
+    } catch {}
+  }, []);
+
+  // After SEEN_DELAY_MS on a slot, mark its story IDs as seen AND ping backend view_count
+  useEffect(() => {
+    const slot = slots[activeIndex];
+    if (!slot) return;
+    const ids = slotStoryIds(slot);
+    if (ids.length === 0) return;
+    const newIds = ids.filter((id) => !seenIds.has(id));
+    if (newIds.length === 0) return;
+    const timer = setTimeout(() => {
+      setSeenIds((prev) => {
+        const next = new Set(prev);
+        newIds.forEach((id) => next.add(id));
+        try {
+          const arr = Array.from(next).slice(-SEEN_CAP);
+          localStorage.setItem(SEEN_KEY, JSON.stringify(arr));
+        } catch {}
+        return next;
+      });
+      // Only bump backend view_count for stories we haven't seen before (first view per user)
+      newIds.forEach(pingView);
+    }, SEEN_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [activeIndex, slots, seenIds]);
+
+  const isSlotSeen = useCallback(
+    (i: number) => {
+      const ids = slotStoryIds(slots[i]);
+      if (ids.length === 0) return false;
+      return ids.every((id) => seenIds.has(id));
+    },
+    [slots, seenIds],
+  );
 
   const openStory = (story: StoryCore) => setDrilldown(story);
   const closeStory = () => setDrilldown(null);
@@ -34,7 +109,8 @@ export default function StoriesCarousel({ slots, dir = "rtl" }: StoriesCarouselP
   useEffect(() => {
     const el = scrollerRef.current;
     if (!el) return;
-    el.scrollTo({ left: el.clientWidth, behavior: "instant" as ScrollBehavior });
+    // Use direct assignment — "instant" as ScrollBehavior is not supported in older Safari
+    el.scrollLeft = el.clientWidth;
   }, []);
 
   useEffect(() => {
@@ -54,10 +130,10 @@ export default function StoriesCarousel({ slots, dir = "rtl" }: StoriesCarouselP
         if (drift > 0.02) return;
 
         if (nearestVirtual === 0) {
-          el.scrollTo({ left: width * slotCount, behavior: "instant" as ScrollBehavior });
+          el.scrollLeft = width * slotCount;
           setActiveIndex(slotCount - 1);
         } else if (nearestVirtual === slotCount + 1) {
-          el.scrollTo({ left: width, behavior: "instant" as ScrollBehavior });
+          el.scrollLeft = width;
           setActiveIndex(0);
         } else {
           setActiveIndex(nearestVirtual - 1);
@@ -77,7 +153,12 @@ export default function StoriesCarousel({ slots, dir = "rtl" }: StoriesCarouselP
       <div
         ref={scrollerRef}
         className="h-[100dvh] w-full overflow-x-auto overflow-y-hidden whitespace-nowrap stories-scroller"
-        style={{ scrollSnapType: "x mandatory", WebkitOverflowScrolling: "touch" }}
+        style={{
+          scrollSnapType: "x mandatory",
+          WebkitOverflowScrolling: "touch",
+          // Prevent iOS bounce back-swipe from navigating browser history
+          overscrollBehaviorX: "contain",
+        }}
         dir="ltr"
       >
         {virtualSlots.map((slot, i) => {
@@ -99,14 +180,21 @@ export default function StoriesCarousel({ slots, dir = "rtl" }: StoriesCarouselP
 
       <div className="pointer-events-none fixed top-[max(0.5rem,env(safe-area-inset-top))] left-0 right-0 z-20 px-3">
         <div className="flex gap-1">
-          {Array.from({ length: slotCount }).map((_, i) => (
-            <div
-              key={i}
-              className={`h-[2px] flex-1 rounded-full transition-colors duration-200 ${
-                i === activeIndex ? "bg-white" : "bg-white/25"
-              }`}
-            />
-          ))}
+          {Array.from({ length: slotCount }).map((_, i) => {
+            const state =
+              i === activeIndex
+                ? "bg-white"
+                : isSlotSeen(i)
+                  ? "bg-white/10"
+                  : "bg-white/25";
+            return (
+              <div
+                key={i}
+                className={`h-[2px] flex-1 rounded-full transition-colors duration-200 ${state}`}
+                data-seen={isSlotSeen(i) ? "1" : "0"}
+              />
+            );
+          })}
         </div>
         <div className="mt-2 flex items-center justify-between text-[10px] tracking-[0.25em] text-white/70 uppercase">
           <span className="font-bold" dir={dir}>

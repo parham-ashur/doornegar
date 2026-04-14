@@ -5,6 +5,8 @@ import type { StoryBrief } from "@/lib/types";
 import WordsOfWeek from "@/components/home/WordsOfWeek";
 import TelegramDiscussions from "@/components/home/TelegramDiscussions";
 import WeeklyDigest from "@/components/home/WeeklyDigest";
+import StoriesCarousel from "@/components/stories/StoriesCarousel";
+import { buildStoriesSlots } from "@/lib/stories-data";
 import { formatRelativeTime, toFa } from "@/lib/utils";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -95,10 +97,12 @@ export default async function HomePage({
   params: { locale: string };
 }) {
   setRequestLocale(locale);
-  const [stories, blindspots] = await Promise.all([
+  const [stories, blindspots, mobileSlots] = await Promise.all([
     fetchAPI<StoryBrief[]>("/api/v1/stories/trending?limit=50").then(d => d || []),
     fetchAPI<StoryBrief[]>("/api/v1/stories/blindspots?limit=10").then(d => d || []),
+    buildStoriesSlots(),
   ]);
+  const mobileDir = locale === "fa" ? "rtl" : "ltr";
 
   if (stories.length === 0) {
     return (
@@ -247,17 +251,11 @@ export default async function HomePage({
     <div dir="rtl" className="mx-auto max-w-7xl px-0 md:px-6 lg:px-8">
 
       {/* ════════════════════════════════════════════ */}
-      {/* MOBILE LAYOUT (phones only, below md)        */}
+      {/* MOBILE LAYOUT — stories carousel (phones only) */}
       {/* ════════════════════════════════════════════ */}
-      <MobileHome
-        hero={hero}
-        stories={sorted}
-        summaries={allSummaries}
-        locale={locale}
-        conservativeBlind={conservativeBlind}
-        oppositionBlind={oppositionBlind}
-        allAnalyses={allAnalyses}
-      />
+      <div className="md:hidden">
+        <StoriesCarousel slots={mobileSlots} dir={mobileDir} />
+      </div>
 
       {/* ════════════════════════════════════════════ */}
       {/* DESKTOP LAYOUT (tablet and up)                */}

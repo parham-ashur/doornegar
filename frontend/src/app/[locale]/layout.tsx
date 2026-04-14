@@ -78,7 +78,9 @@ export default async function LocaleLayout({
             <ChromeGate>
               <PageAtmosphere />
             </ChromeGate>
-            <WelcomeModal />
+            <ChromeGate>
+              <WelcomeModal />
+            </ChromeGate>
           </div>
         </NextIntlClientProvider>
       </body>

@@ -90,8 +90,8 @@ export default function StoryLayout({
   // When the slot becomes inactive, reset scroll to top so State A shows on return
   // (but skip this reset when we were pre-seeded into State B for drilldown)
   useEffect(() => {
-    if (!active && initialScrollTop === undefined) {
-      scrollRef.current?.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior });
+    if (!active && initialScrollTop === undefined && scrollRef.current) {
+      scrollRef.current.scrollTop = 0;
     }
   }, [active, initialScrollTop]);
 
@@ -125,6 +125,11 @@ export default function StoryLayout({
       <div
         ref={scrollRef}
         className="story-scroll relative z-10 h-full overflow-y-auto overflow-x-hidden overscroll-contain"
+        style={{
+          // iOS: vertical pan only — lets the outer carousel receive horizontal swipes
+          touchAction: "pan-y",
+          WebkitOverflowScrolling: "touch",
+        }}
       >
         {/* State A empty zone */}
         <div className="h-[100dvh] w-full" aria-hidden="true" />

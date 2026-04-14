@@ -59,6 +59,12 @@ export default function StoryDetailOverlay({
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
       data-story-detail-overlay={story.id}
+      style={{
+        // iOS: let vertical pan scroll the inner story naturally; JS handles horizontal swipes
+        touchAction: "pan-y",
+        // Prevent horizontal overscroll from triggering iOS back-swipe gesture on the page
+        overscrollBehavior: "contain",
+      }}
     >
       <StoryLayout story={story} active={true} dir={dir} initialScrollTop={180} />
       {/* Close affordance — small pill for accessibility */}
