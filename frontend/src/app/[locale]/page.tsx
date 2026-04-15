@@ -266,6 +266,8 @@ export default async function HomePage({
           conservativeBlind={conservativeBlind}
           oppositionBlind={oppositionBlind}
           allAnalyses={allAnalyses}
+          heroTelegram={heroTelegram}
+          prefetchedTelegram={prefetchedTelegram}
         />
       )}
 
@@ -644,6 +646,8 @@ function MobileHome({
   conservativeBlind,
   oppositionBlind,
   allAnalyses,
+  heroTelegram,
+  prefetchedTelegram,
 }: {
   hero: StoryBrief | undefined;
   stories: StoryBrief[];
@@ -652,17 +656,23 @@ function MobileHome({
   conservativeBlind: StoryBrief | undefined;
   oppositionBlind: StoryBrief | undefined;
   allAnalyses: Record<string, { bias_explanation_fa?: string; state_summary_fa?: string; diaspora_summary_fa?: string } | null>;
+  heroTelegram: { discourse_summary?: string; predictions?: any[]; key_claims?: any[] } | null;
+  prefetchedTelegram: { storyId: string; analysis: any }[];
 }) {
   if (!hero) return null;
 
-  // Extract first bias point for hero
-  const heroBias = allAnalyses[hero.id]?.bias_explanation_fa;
-  const heroPoint = heroBias?.split(/[.؛]/).map((p: string) => p.trim()).find((p: string) => p.length > 10);
+  // Hero narrative fields (same two-side bias comparison used on desktop)
+  const heroAnalysis = allAnalyses[hero.id];
+  const heroStateSummary = heroAnalysis?.state_summary_fa;
+  const heroDiasporaSummary = heroAnalysis?.diaspora_summary_fa;
+  const heroBias = heroAnalysis?.bias_explanation_fa;
+  const heroBiasPoints = heroBias
+    ?.split(/[.؛]/).map((p: string) => p.trim()).filter((p: string) => p.length > 10).slice(0, 2) || [];
 
-  // Weekly briefing: stories 1-3
+  // Weekly briefing stories ("در روزهای گذشته"): stories 1–3
   const briefingStories = stories.slice(1, 4);
 
-  // Most covered (by article count), deduplicated
+  // Most covered: blended popularity score, deduplicated
   const mobileUsedIds = new Set([hero.id, ...briefingStories.map(s => s.id)]);
   if (conservativeBlind) mobileUsedIds.add(conservativeBlind.id);
   if (oppositionBlind) mobileUsedIds.add(oppositionBlind.id);
@@ -677,27 +687,31 @@ function MobileHome({
     })
     .sort((a, b) => b._popScore - a._popScore)
     .slice(0, 5);
-  mobileMostCovered.forEach(s => mobileUsedIds.add(s.id));
 
-  const remaining = stories.filter(s => !mobileUsedIds.has(s.id)).slice(0, 8);
+  // Extract first prediction and key_claim from telegram analysis (same logic as desktop hero)
+  const firstPrediction = heroTelegram?.predictions?.[0];
+  const firstClaim = heroTelegram?.key_claims?.[0];
+  const predictionText = typeof firstPrediction === "string"
+    ? firstPrediction
+    : (firstPrediction as any)?.text || "";
+  const claimText = typeof firstClaim === "string"
+    ? firstClaim
+    : (firstClaim as any)?.text || "";
 
   return (
     <div className="md:hidden">
 
-      {/* ── 1. Hero story ── */}
-      <Link
-        href={`/${locale}/stories/${hero.id}`}
-        className="block border-b border-slate-200 dark:border-slate-800"
-      >
-        <div className="aspect-[16/9] overflow-hidden bg-slate-100 dark:bg-slate-800">
-          <SafeImage src={hero.image_url} className="h-full w-full object-cover" />
-        </div>
-        <div className="px-4 py-4">
-          <h1 className="text-[24px] font-black leading-snug text-slate-900 dark:text-white line-clamp-3">
-            {hero.title_fa}
-          </h1>
-          <div className="mt-2">
-            <p className="text-[13px] text-slate-400 dark:text-slate-500">
+      {/* ── 1. Hero story — image, title, bias comparison, telegram strip ── */}
+      <div className="border-b border-slate-200 dark:border-slate-800">
+        <Link href={`/${locale}/stories/${hero.id}`} className="block">
+          <div className="aspect-[16/9] overflow-hidden bg-slate-100 dark:bg-slate-800">
+            <SafeImage src={hero.image_url} className="h-full w-full object-cover" />
+          </div>
+          <div className="px-4 pt-4">
+            <h1 className="text-[24px] font-black leading-snug text-slate-900 dark:text-white line-clamp-3">
+              {hero.title_fa}
+            </h1>
+            <p className="mt-2 text-[13px] text-slate-400 dark:text-slate-500">
               {toFa(hero.source_count)} رسانه · {toFa(hero.article_count)} مقاله
             </p>
             {(hero.state_pct > 0 || hero.diaspora_pct > 0) && (
@@ -708,13 +722,65 @@ function MobileHome({
               </p>
             )}
           </div>
-          {heroPoint && (
-            <p className="mt-2 text-[14px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">• {heroPoint}</p>
-          )}
-        </div>
-      </Link>
+        </Link>
 
-      {/* ── 2. Blind spots ── */}
+        {/* Two-side bias comparison — same structure as desktop hero */}
+        <div className="px-4 pt-3">
+          {(heroStateSummary || heroDiasporaSummary) ? (
+            <div className="grid grid-cols-2 gap-3">
+              {heroStateSummary && (
+                <div className="border-r-2 border-[#1e3a5f] pr-3">
+                  <p className="text-[12px] font-bold text-[#1e3a5f] dark:text-blue-300 mb-1">روایت محافظه‌کار</p>
+                  <p className="text-[13px] leading-5 text-slate-600 dark:text-slate-400 line-clamp-5">{heroStateSummary}</p>
+                </div>
+              )}
+              {heroDiasporaSummary && (
+                <div className="border-r-2 border-[#ea580c] pr-3">
+                  <p className="text-[12px] font-bold text-[#ea580c] dark:text-orange-400 mb-1">روایت اپوزیسیون</p>
+                  <p className="text-[13px] leading-5 text-slate-600 dark:text-slate-400 line-clamp-5">{heroDiasporaSummary}</p>
+                </div>
+              )}
+            </div>
+          ) : heroBiasPoints.length > 0 ? (
+            <div className="space-y-1">
+              {heroBiasPoints.map((point, i) => (
+                <p key={i} className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">• {point}</p>
+              ))}
+            </div>
+          ) : null}
+        </div>
+
+        {/* Telegram discourse summary + first prediction + first claim (same as desktop hero) */}
+        {heroTelegram?.discourse_summary && (
+          <div className="px-4 pt-3 pb-4">
+            <p className="text-[13px] leading-5 text-slate-600 dark:text-slate-400 line-clamp-3">
+              <span className="font-bold text-slate-700 dark:text-slate-200">تحلیل روایت‌های تلگرام.</span>
+              {" "}{heroTelegram.discourse_summary}
+            </p>
+            {predictionText && (
+              <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-500 mt-1.5 line-clamp-2">
+                <span className="font-bold text-blue-500">پیش‌بینی:</span> {predictionText}
+              </p>
+            )}
+            {claimText && (
+              <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-500 mt-1 line-clamp-2">
+                <span className="font-bold text-amber-500">ادعا:</span> {claimText}
+              </p>
+            )}
+          </div>
+        )}
+        {!heroTelegram?.discourse_summary && <div className="pb-4" />}
+      </div>
+
+      {/* ── 2. Telegram section (cross-story discussions) ── */}
+      <div className="px-4 py-5 border-b border-slate-200 dark:border-slate-800">
+        <h3 className="text-[13px] font-black text-slate-900 dark:text-white mb-3 pb-2 border-b border-slate-200 dark:border-slate-800">
+          تحلیل روایت‌های تلگرام
+        </h3>
+        <TelegramDiscussions prefetchedData={prefetchedTelegram} locale={locale} />
+      </div>
+
+      {/* ── 3. Blind spots ── */}
       {(conservativeBlind || oppositionBlind) && (
         <div className="px-4 py-5 border-b border-slate-200 dark:border-slate-800">
           <div className="flex items-center gap-3 mb-4">
@@ -763,35 +829,7 @@ function MobileHome({
         </div>
       )}
 
-      {/* ── 3. Weekly briefing ── */}
-      {briefingStories.length > 0 && (
-        <div className="px-4 py-5 border-b border-slate-200 dark:border-slate-800">
-          <h2 className="text-[20px] font-black text-slate-900 dark:text-white mb-3">در روزهای گذشته ...</h2>
-          <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
-            {briefingStories.map((s) => {
-              const bias = allAnalyses[s.id]?.bias_explanation_fa;
-              const firstPoint = bias?.split(/[.؛]/).map((p: string) => p.trim()).find((p: string) => p.length > 10);
-              return (
-                <Link key={s.id} href={`/${locale}/stories/${s.id}`} className="group block py-4">
-                  <h3 className="text-[22px] font-black leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
-                    {s.title_fa}
-                  </h3>
-                  <p className="mt-1 text-[13px] text-slate-400 dark:text-slate-500">
-                    {toFa(s.source_count)} رسانه · {toFa(s.article_count)} مقاله
-                    {s.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300"> · محافظه‌کار {toFa(s.state_pct)}٪</span>}
-                    {s.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400"> · اپوزیسیون {toFa(s.diaspora_pct)}٪</span>}
-                  </p>
-                  {firstPoint && (
-                    <p className="mt-1.5 text-[14px] leading-5 text-slate-400 dark:text-slate-500 line-clamp-1">• {firstPoint}</p>
-                  )}
-                </Link>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* ── 4. Most covered ── */}
+      {/* ── 4. Most visited ── */}
       {mobileMostCovered.length > 0 && (
         <div className="px-4 py-5 border-b border-slate-200 dark:border-slate-800">
           <div className="flex items-center gap-3 mb-4">
@@ -819,41 +857,38 @@ function MobileHome({
         </div>
       )}
 
-      {/* ── 5. Telegram analysis ── */}
-      <div className="px-4 py-5 border-b border-slate-200 dark:border-slate-800">
-        <h3 className="text-[13px] font-black text-slate-900 dark:text-white mb-3 pb-2 border-b border-slate-200 dark:border-slate-800">
-          تحلیل روایت‌های تلگرام
-        </h3>
-        <TelegramDiscussions storyIds={stories.slice(0, 5).map(s => s.id)} locale={locale} />
-      </div>
-
-      {/* ── 5. Words of the day ── */}
-      <div className="px-4 py-5 border-b border-slate-200 dark:border-slate-800">
-        <WordsOfWeek />
-      </div>
-
-      {/* ── 6. Remaining stories ── */}
-      {remaining.length > 0 && (
-        <div className="divide-y divide-slate-200 dark:divide-slate-800">
-          {remaining.map((s) => (
-            <Link key={s.id} href={`/${locale}/stories/${s.id}`} className="group block px-4 py-4">
-              <h3 className="text-[13px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
-                {s.title_fa}
-              </h3>
-              <p className="mt-1 text-[13px] text-slate-400 dark:text-slate-500">
-                {toFa(s.source_count)} رسانه · {toFa(s.article_count)} مقاله
-                {s.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300"> · محافظه‌کار {toFa(s.state_pct)}٪</span>}
-                {s.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400"> · اپوزیسیون {toFa(s.diaspora_pct)}٪</span>}
-              </p>
-              {summaries[s.id] && (
-                <p className="mt-1.5 text-[14px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">
-                  {summaries[s.id]}
-                </p>
-              )}
-            </Link>
-          ))}
+      {/* ── 5. Last days ("در روزهای گذشته") ── */}
+      {briefingStories.length > 0 && (
+        <div className="px-4 py-5 border-b border-slate-200 dark:border-slate-800">
+          <h2 className="text-[20px] font-black text-slate-900 dark:text-white mb-3">در روزهای گذشته ...</h2>
+          <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
+            {briefingStories.map((s) => {
+              const bias = allAnalyses[s.id]?.bias_explanation_fa;
+              const firstPoint = bias?.split(/[.؛]/).map((p: string) => p.trim()).find((p: string) => p.length > 10);
+              return (
+                <Link key={s.id} href={`/${locale}/stories/${s.id}`} className="group block py-4">
+                  <h3 className="text-[22px] font-black leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
+                    {s.title_fa}
+                  </h3>
+                  <p className="mt-1 text-[13px] text-slate-400 dark:text-slate-500">
+                    {toFa(s.source_count)} رسانه · {toFa(s.article_count)} مقاله
+                    {s.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300"> · محافظه‌کار {toFa(s.state_pct)}٪</span>}
+                    {s.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400"> · اپوزیسیون {toFa(s.diaspora_pct)}٪</span>}
+                  </p>
+                  {firstPoint && (
+                    <p className="mt-1.5 text-[14px] leading-5 text-slate-400 dark:text-slate-500 line-clamp-1">• {firstPoint}</p>
+                  )}
+                </Link>
+              );
+            })}
+          </div>
         </div>
       )}
+
+      {/* ── 6. Today's words — final section ── */}
+      <div className="px-4 py-5">
+        <WordsOfWeek />
+      </div>
     </div>
   );
 }
