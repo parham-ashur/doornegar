@@ -2,7 +2,7 @@ import logging
 import time as _time
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -458,7 +458,11 @@ async def article_positions(
 
 
 @router.get("/{story_id}", response_model=StoryDetail)
-async def get_story(story_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def get_story(
+    story_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
     result = await db.execute(
         select(Story)
         .options(
@@ -473,13 +477,10 @@ async def get_story(story_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     if not story:
         raise HTTPException(status_code=404, detail="Story not found")
 
-    # Increment view count (fire-and-forget, don't block response)
-    try:
-        story.view_count = (story.view_count or 0) + 1
-        await db.commit()
-    except Exception:
-        pass
-
+    # Build the response BEFORE committing — we want to touch every attribute
+    # on `story` while the session is still clean, so Pydantic's validation
+    # doesn't trigger any async refresh after a commit (which was the source
+    # of a MissingGreenlet error when view_count was bumped inline).
     articles_with_bias = []
     for article in story.articles:
         article_data = StoryArticleWithBias(
@@ -492,13 +493,40 @@ async def get_story(story_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
         )
         articles_with_bias.append(article_data)
 
-    story_data = StoryBrief.model_validate(story)
-    return StoryDetail(
-        **story_data.model_dump(),
+    # Use the same helper as the other endpoints — it returns a populated
+    # StoryBrief with image_url / state_pct / diaspora_pct / independent_pct,
+    # fields that aren't on the ORM model.
+    brief = _story_brief_with_extras(story)
+
+    response = StoryDetail(
+        **brief.model_dump(),
         summary_en=story.summary_en,
         summary_fa=story.summary_fa,
         articles=articles_with_bias,
     )
+
+    # Bump view_count AFTER the response is built, in a background task so
+    # the commit can't interfere with response serialization.
+    story_uuid = story.id
+    background_tasks.add_task(_bump_view_count, story_uuid)
+
+    return response
+
+
+async def _bump_view_count(story_id: uuid.UUID) -> None:
+    """Increment a story's view_count in a separate session after response."""
+    from app.database import async_session
+
+    try:
+        async with async_session() as session:
+            await session.execute(
+                Story.__table__.update()
+                .where(Story.id == story_id)
+                .values(view_count=Story.view_count + 1)
+            )
+            await session.commit()
+    except Exception:
+        pass
 
 
 def _is_bad_image(url: str) -> bool:

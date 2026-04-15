@@ -148,46 +148,41 @@ export default function SuggestPage() {
           {trackedOpen && (
             <div className="border-t border-slate-200 dark:border-slate-800 px-4 py-4 space-y-5">
               <p className="text-[11px] leading-6 text-slate-500 dark:text-slate-400">
-                قبل از پیشنهاد، بررسی کنید که منبع موردنظر در این فهرست نباشد. طیف فعلی ما شامل رسانه‌های محافظه‌کار، نیمه‌محافظه‌کار، مستقل و اپوزیسیون است.
+                قبل از پیشنهاد، بررسی کنید که منبع موردنظر در این فهرست نباشد.
               </p>
 
-              {/* Sources grouped by alignment */}
-              {groupOrder.map((key) => {
-                const group = grouped[key];
-                if (!group || group.length === 0) return null;
-                const cat = CATEGORY_LABELS[key];
-                return (
-                  <div key={key}>
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className={`inline-block px-2 py-0.5 text-[10px] font-bold border ${cat.color}`}>
-                        {cat.label}
-                      </span>
-                      <span className="text-[10px] text-slate-400">({group.length})</span>
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {group.map((s) => (
-                        <a
-                          key={s.slug}
-                          href={s.website_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          title={s.name_en}
-                          className="inline-flex items-center gap-1 px-2 py-1 text-[11px] border border-slate-200 dark:border-slate-800 hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-300"
-                        >
-                          {s.name_fa || s.name_en}
-                          <ExternalLink className="h-2.5 w-2.5 opacity-50" />
-                        </a>
-                      ))}
-                    </div>
+              {/* Media sources — flat list, no category grouping */}
+              {sources.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                      رسانه‌ها
+                    </span>
+                    <span className="text-[10px] text-slate-400">({sources.length})</span>
                   </div>
-                );
-              })}
+                  <div className="flex flex-wrap gap-1.5">
+                    {sources.map((s) => (
+                      <a
+                        key={s.slug}
+                        href={s.website_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title={s.name_en}
+                        className="inline-flex items-center gap-1 px-2 py-1 text-[11px] border border-slate-200 dark:border-slate-800 hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-300"
+                      >
+                        {s.name_fa || s.name_en}
+                        <ExternalLink className="h-2.5 w-2.5 opacity-50" />
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Telegram channels */}
               {channels.length > 0 && (
                 <div>
                   <div className="flex items-center gap-2 mb-2">
-                    <span className="inline-block px-2 py-0.5 text-[10px] font-bold border text-sky-600 dark:text-sky-400 border-sky-200 dark:border-sky-900/50">
+                    <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
                       کانال‌های تلگرام
                     </span>
                     <span className="text-[10px] text-slate-400">({channels.length})</span>
