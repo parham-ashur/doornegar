@@ -4,6 +4,56 @@ All notable changes to the Doornegar project are documented here, organized by w
 
 ---
 
+## April 14-15, 2026
+
+### Story editor dashboard (new)
+- New `stories.is_edited` column (alembic `e9f7a3d5c8b1`). Flipped to `true` whenever an admin hand-edits title or narrative. Clustering and force-summarize skip these stories so manual edits survive nightly regeneration.
+- `PATCH /api/v1/admin/stories/{id}` accepts `title_fa`, `title_en`, `state_summary_fa`, `diaspora_summary_fa`, `bias_explanation_fa`. Narrative fields are merged into the JSON blob in `stories.summary_en`.
+- `POST /api/v1/stories/{id}/summarize` returns 409 Conflict when `is_edited=true` to prevent accidental overwrites.
+- Removed a duplicate dead PATCH `/stories/{id}` handler that was shadowed by the earlier registration.
+- New dashboard page `/fa/dashboard/edit-stories`: search, configurable fetch limit (15/30/50/100/200), expandable row per story with 5 textareas, one-click save, inline status, amber "ویرایش دستی" badge. Persian-insensitive search normalizes ی/ي, ک/ك, zero-width joiners.
+- Linked from the main dashboard via a new "Open Editor" card.
+
+### Maintenance pipeline fixes
+- `maintenance_logs` INSERT now supplies an explicit `uuid.uuid4()` for the `id` column. Previously only 1 row had ever persisted because the INSERT omitted id and the column has no DB default. Both success + error code paths fixed in `auto_maintenance.py`.
+- `step_telegram_link_posts` crash fixed. Was raising `unsupported operand type(s) for *: 'float' and 'NoneType'` whenever a story's `centroid_embedding` contained null values or was stored in the wrong shape. Now validates vectors before use and catches any remaining shape mismatches in `cosine_similarity`.
+- `merge_similar_visible_stories` FK violation fixed. `db.delete(victim)` was failing because `telegram_posts.story_id` still referenced the victim. Now re-points `TelegramPost.story_id` to the keeper before delete.
+- `GET /api/v1/stories/{story_id}` 500 fixed. Was throwing `MissingGreenlet: greenlet_spawn has not been called` during `StoryBrief.model_validate(story)` after the inline `view_count` commit. Moved the view-count bump into a FastAPI `BackgroundTasks` handler that runs in a fresh session after the response is built. Also switched to `_story_brief_with_extras()` so the detail response now includes `image_url` / `state_pct` / `diaspora_pct` (they were missing before).
+
+### Telegram ingestion on Railway (Phase 6 partial)
+- `requirements.txt` now includes `telethon>=1.36` — it was previously only in `[project.optional-dependencies].social` so the Docker build never installed it. Before this fix, Railway maintenance cron was always returning `telegram_new: 0`.
+- New config setting `telegram_session_string`. When set, `telegram_service.py`, `social_posting.py`, and `auto_maintenance.py` use `StringSession(settings.telegram_session_string)` instead of the file-based `doornegar_session.session`. Survives Railway container rebuilds.
+- New helper script `backend/scripts/export_telegram_session.py` — converts a local file session to a `StringSession` blob for pasting into Railway.
+- Session string set on both `doornegar` and `maintenance-cron` services.
+- Verified end-to-end: manual maintenance run fetched 363 new telegram posts from the Railway container in 30 minutes. Top channels: @radiofarda (50), @Asriran_press (50), @Tasnimnews (48), @masaf (45), @mehrnews (44), @khabaronline_ir (41). Previous last-fetch was 2026-04-13 07:08 UTC.
+
+### RSS source cleanup
+- Updated 3 URLs in production DB:
+  - `press-tv`: `/RSS` → `/rss.xml`
+  - `ilna`: `/fa/rss` → `/rss`
+  - `entekhab`: `/fa/rss` → `/fa/rss/allnews`
+- Deactivated 4 sources (`is_active=false` — soft-delete, preserves articles + relationships):
+  - `fars-news`: removed their public RSS feed (every URL returns SPA HTML)
+  - `dw-persian`: DW discontinued their Farsi RSS feed ("Error: no feed by that name")
+  - `radio-zamaneh`: feed now requires Cloudflare Access authentication
+  - `isna`: Cloudflare challenge blocks all non-browser clients
+- Iran-hosted feeds still failing from Railway US IP (geoblocked): khabaronline, tasnimnews, mehrnews, mashreghnews, nournews, iribnews, etemadnewspaper. These work fine via the Telegram API so their coverage isn't lost.
+- Active source count: **27 → 23**.
+
+### Suggest-source page simplified
+- Removed the category grouping (محافظه‌کار / نیمه‌محافظه‌کار / مستقل / اپوزیسیون) from `/fa/suggest`. Now a single flat list under "رسانه‌ها" and "کانال‌های تلگرام". Shortened the intro sentence.
+
+### Mobile stories carousel exploration (parked)
+- Full 13-step build of an Instagram-style 6-slot (later 7) looping carousel for mobile. 4 layout types (Story, Telegram, Blindspot, MaxDisagreement) plus a DesktopPreview iframe slot. Drilldown via tap/swipe, StoryDetailOverlay with swipe-back, OnboardingHints, StringSession-style title animations, mix-blend-difference for auto-contrast, violet borders for MaxD, animated swipe-up arrow.
+- Lives at `/fa/stories-beta` — **NOT** the production mobile homepage. `/fa` mobile was reverted to the original `MobileHome()` scrolling list while Parham iterates on the carousel separately.
+- New files: `frontend/src/components/stories/*`, `frontend/src/lib/stories-data.ts`, `frontend/src/app/[locale]/stories-beta/page.tsx`, `frontend/src/components/layout/ChromeGate.tsx`.
+
+### Deploy pipeline
+- Discovered GitHub → Vercel auto-deploy hook is disconnected (14 h stale). Been triggering production deploys manually via `cd frontend && vercel deploy --prod --yes`. Open item: reconnect in Vercel project settings.
+- Recovered production DB from a phantom `da6408183397` alembic revision (stamped by a previous session's uncommitted migration file). Schema was unchanged; rewrote `alembic_version` directly to `d8e5f1a2b3c4` before applying the new migration. Added a permanent rule to `CLAUDE.md` and persistent memory: commit alembic files to git BEFORE running `upgrade head` on production.
+
+---
+
 ## April 12, 2026
 
 ### Maintenance Pipeline Audit — 8 fixes

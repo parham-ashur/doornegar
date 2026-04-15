@@ -759,3 +759,14 @@ flowchart TD
 - The 3-layer deduplication checks URL duplicates, embedding similarity, and content overlap.
 - All results are logged to `maintenance.log` (stdout) and `maintenance_error.log` (stderr).
 - Manual operations via `manage.py` or the Admin API can trigger the same steps on demand.
+
+
+---
+
+## Auto-detected changes (2026-04-13 11:52)
+
+**New service files**: llm_helper.py, llm_utils.py, scraper.py, seed_telegram.py, social_posting.py, telegram_analysis.py, topic_clustering.py, topic_service.py
+
+**New model files**: bias_score.py, ingestion_log.py, maintenance_log.py
+
+> These files were detected but not yet documented in the diagrams above. Update the diagrams to include them.

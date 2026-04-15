@@ -1,5 +1,63 @@
 # Doornegar Development Log
 
+## 2026-04-14 / 15 — Editor dashboard, mobile stories iteration, maintenance pipeline recovery
+
+### Key outcomes
+
+**Story editor dashboard (`/fa/dashboard/edit-stories`)**
+- New `is_edited` column on the `stories` table (alembic `e9f7a3d5c8b1`) protects hand-edits from nightly regeneration.
+- `PATCH /api/v1/admin/stories/{id}` now accepts `title_fa`, `title_en`, `state_summary_fa`, `diaspora_summary_fa`, `bias_explanation_fa`. Narrative fields are merged into the JSON blob stored in `stories.summary_en`.
+- Clustering + force-summarize both skip stories where `is_edited=true`.
+- Dashboard page lists top 15/30/50/100/200 trending stories, has Persian-insensitive search (handles ی/ي, ک/ك, zero-width joiners), one-click save per story, amber "ویرایش دستی" badge on edited rows.
+- Force-summarize endpoint returns 409 Conflict on edited stories to prevent accidental overwrites.
+
+**Maintenance pipeline recovery**
+- `maintenance_logs` INSERT was silently failing with `NotNullViolationError` on the `id` column (no DB default, INSERT omitted id). Only 1 row had ever persisted since the feature was added. Fix: explicit `uuid.uuid4()` in both success + error paths.
+- `telegram_link` step was crashing with `unsupported operand type(s) for *: 'float' and 'NoneType'` whenever a Story's `centroid_embedding` contained null values or was in an unexpected shape. Fix: validate centroids before use and wrap `cosine_similarity` in try/except.
+- `merge_similar_visible_stories` was crashing on `db.delete(victim)` because `telegram_posts.story_id` still pointed at the victim. Fix: re-point `TelegramPost.story_id` to the keeper before delete.
+- Fixed `GET /api/v1/stories/{story_id}` returning 500 with `MissingGreenlet: greenlet_spawn has not been called` — moved the `view_count` bump into a FastAPI `BackgroundTasks` running in a fresh session after the response is built.
+
+**Telegram on Railway (StringSession)**
+- Added `telethon>=1.36` to `requirements.txt` — it was previously only in `[project.optional-dependencies].social` but the Docker build only reads `requirements.txt`, so Railway never had it installed.
+- New `telegram_session_string` setting → uses Telethon `StringSession` when set, falls back to file-based `doornegar_session.session` locally.
+- All three Telethon entry points updated: `telegram_service.py`, `social_posting.py`, `auto_maintenance.py`.
+- New helper `backend/scripts/export_telegram_session.py` converts the local file session to a `StringSession` blob.
+- Generated the session string from Parham's authorized local session (353 chars) and set it on both `doornegar` and `maintenance-cron` services.
+- Triggered a manual maintenance run: **fetched 363 new telegram posts in 30 minutes** from the Railway container. Latest post timestamp `2026-04-15 06:36:42 UTC`. Previously last fetch was `2026-04-13 07:08 UTC` (2 days ago, when Parham last ran it locally).
+- Iran-hosted Telegram channels work via Telegram API even though their RSS feeds are geoblocked — Telegram is now the more reliable pipeline for those outlets.
+
+**RSS feed audit and cleanup**
+- 17 feeds were reporting "failing" in `source_health`. Probed each:
+  - **Updated URLs (3)**: `press-tv` `/RSS → /rss.xml`, `ilna` `/fa/rss → /rss`, `entekhab` `/fa/rss → /fa/rss/allnews`.
+  - **Deactivated (4)**: `fars-news` (removed public RSS), `dw-persian` (discontinued Farsi RSS), `radio-zamaneh` (Cloudflare Access auth), `isna` (Cloudflare challenge). All soft-deleted via `is_active=false` — preserves existing articles and relationships.
+  - **Iran-hosted geoblocked (7)**: `khabaronline`, `tasnimnews`, `mehrnews`, `mashreghnews`, `nournews`, `iribnews`, `etemadnewspaper`. Railway US IP can't reach them. Still fetched via Telegram.
+  - **Working but reported as failing (3)**: `radio-farda`, `voa-farsi`, `tabnak` — return valid XML on probe. Probably transient network on Railway. Watch after new telemetry.
+- Source count: **27 → 23 active**.
+
+**Mobile stories carousel — full 13-step build under `/stories-beta`**
+- Instagram-style 6-slot (later 7 with a desktop-preview iframe slot) looping horizontal carousel, drilldown via tap/swipe.
+- 4 layout types: Story, Telegram, Blindspot, MaxDisagreement, plus DesktopPreview.
+- Built StoryBackground (video + image fallback), StoryLayout (State A hero title → State B sticky), StoryContentPanel (bias + narratives + telegram + sources), SplitScreen base, BlindspotLayout, MaxDisagreementLayout, TelegramLayout, StoryDetailOverlay, OnboardingHints.
+- Real data wiring via `src/lib/stories-data.ts` using trending + blindspots + analysis + telegram endpoints. Source names come from `/api/v1/articles?story_id=X` joined with `/api/v1/sources`.
+- Iterated on design per feedback: title mix-blend-difference, scroll behavior with dead zone and snap, content panel transparency, percentages overlay on image, darker violet borders for MaxDisagreement, text-over-images for cards, seen-stories tracking, view-count pings, swipe fixes for mouse drag and trackpad wheel, Chrome devtools support, animated swipe-up arrow.
+- **Parked**: reverted `/fa` mobile to the original `MobileHome()` scrolling list. Carousel lives at `/fa/stories-beta` for continued iteration.
+
+**Suggest-source page simplified** (`/fa/suggest`)
+- Removed the category grouping (محافظه‌کار / نیمه‌محافظه‌کار / مستقل / اپوزیسیون). Now a single flat list under "رسانه‌ها" and "کانال‌های تلگرام". Shortened intro.
+
+**Deploy pipeline notes**
+- GitHub → Vercel auto-deploy hook appears disconnected (14h stale). Been triggering production deploys manually via `cd frontend && vercel deploy --prod --yes`. Worth reconnecting in the Vercel project settings.
+- A previous session left a phantom alembic revision `da6408183397` stamped in production. No file for it exists in git history (checked reflog, stashes, dangling objects, deployed commits). Schema was unchanged. Recovered by directly updating `alembic_version` to `d8e5f1a2b3c4` before applying the new migration. Added a permanent note to `CLAUDE.md` and persistent memory: commit alembic files to git BEFORE running `upgrade head` on production.
+
+### Open items for next session
+- Reconnect GitHub → Vercel auto-deploy integration.
+- Investigate `source_health` false positives (radio-farda, voa, tabnak showing failing but returning valid XML).
+- Consider removing Iran-hosted RSS feeds entirely since their Telegram channels cover the same content.
+- Continue mobile stories carousel iteration at `/stories-beta` when ready.
+- Rotate exposed credentials before launch (R2, Neon, Upstash, Anthropic).
+
+---
+
 ## 2026-04-13 — Intelligence layer, two-pass analysis, cost optimization mega-session
 
 ### Key outcomes

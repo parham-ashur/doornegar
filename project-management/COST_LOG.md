@@ -52,3 +52,11 @@ Tracks estimated OpenAI API costs per maintenance run.
 | 2026-04-12 17:22 | auto-maintenance | Est. ~$0.01-0.05 | Cluster + Summarize + Translate |
 | 2026-04-12 21:24 | auto-maintenance | Est. ~$0.01-0.05 | Cluster + Summarize + Translate |
 | 2026-04-13 01:26 | auto-maintenance | Est. ~$0.01-0.05 | Cluster + Summarize + Translate |
+| 2026-04-13 11:52 | auto-maintenance | Est. ~$0.01-0.05 | Cluster + Summarize + Translate |
+| 2026-04-13 15:54 | auto-maintenance | Est. ~$0.01-0.05 | Cluster + Summarize + Translate |
+| 2026-04-13 19:55 | auto-maintenance | Est. ~$0.01-0.05 | Cluster + Summarize + Translate |
+| 2026-04-14 07:58 | auto-maintenance | Est. ~$0.01-0.05 | Cluster + Summarize + Translate |
+| 2026-04-14 11:58 | auto-maintenance | Est. ~$0.01-0.05 | Cluster + Summarize + Translate |
+| 2026-04-14 15:58 | auto-maintenance | Est. ~$0.01-0.05 | Cluster + Summarize + Translate |
+| 2026-04-14 19:58 | auto-maintenance | Est. ~$0.01-0.05 | Cluster + Summarize + Translate |
+| 2026-04-14 23:58 | auto-maintenance | Est. ~$0.01-0.05 | Cluster + Summarize + Translate |

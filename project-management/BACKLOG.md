@@ -1,6 +1,14 @@
 # Doornegar - Backlog
 
-**Last updated**: 2026-04-13 (post intelligence layer + cost optimization mega-session)
+**Last updated**: 2026-04-15 (post editor dashboard + maintenance recovery + Telegram on Railway)
+
+## Done this session (2026-04-14/15)
+- [x] **Story editor dashboard** — `/fa/dashboard/edit-stories` with search + is_edited flag protecting manual edits from regeneration
+- [x] **Telegram ingestion on Railway** — `TELEGRAM_SESSION_STRING` env var, telethon in requirements.txt, verified 363 new posts fetched from the cron container
+- [x] **Maintenance pipeline recovery** — maintenance_logs INSERT, telegram_link NoneType, merge_similar FK violation, GET /stories/{id} MissingGreenlet
+- [x] **RSS cleanup** — 4 sources deactivated (fars-news, dw-persian, radio-zamaneh, isna), 3 URLs updated (press-tv, ilna, entekhab). Active count 27 → 23.
+- [x] **Suggest-source page** simplified (removed category grouping)
+- [x] **Mobile stories carousel** exploration at `/fa/stories-beta` — parked for future iteration; production mobile homepage reverted to original `MobileHome()`
 
 ## Must Have (before public launch)
 
@@ -10,6 +18,7 @@
 - [ ] **Set OpenAI hard spending limit** ($30/month) on platform.openai.com/usage
 - [ ] **Rotate exposed R2 API token** (shared in chat) after deployment works
 - [ ] Rotate Neon DB password, Upstash Redis password, Anthropic API key (shared in chat previously)
+- [ ] **Reconnect GitHub → Vercel auto-deploy hook** — currently disconnected (14h stale), requires manual `vercel deploy --prod --yes` after every push
 
 ### Security & Operations
 - [ ] **Cloudflare CDN/WAF in front of Railway** — single biggest security win

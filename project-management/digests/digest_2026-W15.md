@@ -1,9 +1,9 @@
 # Weekly Digest — April 13, 2026
 
 ## This Week's Numbers
-- **New articles**: 8008
+- **New articles**: 8559
 - **New stories**: 1053
-- **Total articles**: 8008
+- **Total articles**: 8559
 - **Total stories**: 1053
 
 ## Top Stories This Week

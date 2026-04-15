@@ -1,6 +1,18 @@
 # Doornegar - Project Status
 
-**Last updated**: 2026-04-13 (post intelligence layer + cost optimization mega-session)
+**Last updated**: 2026-04-15 (editor dashboard + maintenance recovery + Telegram on Railway)
+
+## 2026-04-15 highlights
+
+- **Story editor dashboard** live at `/fa/dashboard/edit-stories` — hand-edit titles, narratives, bias comparison for top trending stories. New `stories.is_edited` column protects edits from nightly regeneration. Alembic migration `e9f7a3d5c8b1`.
+- **Maintenance pipeline** recovered from 3 silent bugs: `maintenance_logs.id` null, `telegram_link` NoneType crash, `merge_similar` FK violation. Cron telemetry now actually persists.
+- **Telegram ingestion on Railway** — no longer laptop-dependent. `TELEGRAM_SESSION_STRING` env var (StringSession serialization). Verified: 363 new telegram posts fetched in 30 minutes by the Railway container.
+- **4 sources deactivated** (is_active=false, preserving existing articles): fars-news, dw-persian, radio-zamaneh, isna. All lost public RSS or gated behind Cloudflare Access. Iran-hosted outlets (khabaronline, tasnimnews, mehrnews, mashreghnews, nournews, iribnews, etemadnewspaper) still geoblocked from Railway US IPs for RSS but work fine via Telegram API.
+- **3 RSS URLs updated**: press-tv → `/rss.xml`, ilna → `/rss`, entekhab → `/fa/rss/allnews`.
+- **Active sources: 27 → 23.**
+- **`GET /stories/{id}` 500 fixed**: view_count bump moved to FastAPI BackgroundTask; was hitting `MissingGreenlet` on post-commit pydantic validation.
+- **Suggest-source page** simplified — removed category grouping, just flat media + telegram lists.
+- **Mobile stories carousel** (`/fa/stories-beta`) — full 13-step build complete as an exploration. Main `/fa` mobile reverted to the original `MobileHome()` list until Parham wants to cut over.
 
 ## What is Doornegar?
 
