@@ -540,6 +540,8 @@ def _is_bad_image(url: str) -> bool:
         "placeholder", "default.jpg", "default.png", "no-image",
         "logo-", "/logo.", "/icon.", "favicon",
         ".svg",  # SVGs are usually logos/icons
+        "telesco.pe",  # Telegram CDN auth tokens expire — unreliable public URLs
+        "cdn.telegram",  # Same story for the older Telegram CDN host
     ]
     return any(p in lower for p in bad_patterns)
 
@@ -557,6 +559,22 @@ def _story_brief_with_extras(story: Story) -> StoryBrief:
 
     brief = StoryBrief.model_validate(story)
 
+    # Manual override: if a curator has hand-edited the story AND set an
+    # explicit image_url, trust it and skip the title-overlap scorer.
+    # Niloofar (or Parham in the dashboard) uses this escape hatch when the
+    # scorer's best pick is low-quality or the wrong frame.
+    manual_image = getattr(story, "image_url", None)
+    if (
+        getattr(story, "is_edited", False)
+        and manual_image
+        and not _is_bad_image(manual_image)
+    ):
+        brief.image_url = manual_image
+        # Continue to compute coverage percentages below but skip the scorer.
+        _skip_scorer = True
+    else:
+        _skip_scorer = False
+
     def _title_words(s: str | None) -> set:
         if not s:
             return set()
@@ -569,7 +587,7 @@ def _story_brief_with_extras(story: Story) -> StoryBrief:
         a for a in story.articles
         if a.image_url and not _is_bad_image(a.image_url)
     ]
-    if candidates:
+    if candidates and not _skip_scorer:
         def _score(a) -> tuple:
             art_words = _title_words(a.title_fa or a.title_original or a.title_en)
             overlap = len(story_words & art_words)
