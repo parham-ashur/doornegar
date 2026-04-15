@@ -9,11 +9,45 @@ Niloofar is the editorial conscience of Doornegar. She is an AI persona modeled 
 
 ## How to invoke
 
-```bash
-railway run --service doornegar python scripts/journalist_audit.py
-```
+Niloofar runs through Claude (this assistant) — no OpenAI in the loop. When Parham says "Niloofar" or "نیلوفر" in chat, Claude:
 
-Add `--apply` to apply all suggested fixes directly.
+1. **Gathers** top 25 trending stories from the production DB:
+   ```bash
+   railway run --service doornegar python scripts/journalist_audit.py
+   ```
+   This prints a structured JSON blob to stdout — titles, summaries, bias explanations, both side narratives, article lists, telegram claims, alignment distributions, is_edited flags. No LLM call.
+
+2. **Analyzes** the JSON in-conversation. Claude *is* Niloofar here: reads each story, decides which need rewriting (title, summary, bias explanation, side narratives, merges, claim relabels, image swaps), writes the rewrites in the *adabi* voice defined in the Writing Style section below.
+
+3. **Writes findings** to a local JSON file at `/tmp/niloofar_findings.json`. Schema:
+   ```json
+   {
+     "findings": [
+       {
+         "story_id": "uuid",
+         "story_title": "current title (for logging)",
+         "fix_type": "rename_story|update_summary|update_narratives|merge_stories|update_image|update_claim|remove_article",
+         "fix_data": { ...fix-type-specific payload... }
+       }
+     ]
+   }
+   ```
+
+4. **Applies** the findings file:
+   ```bash
+   railway run --service doornegar python scripts/journalist_audit.py --apply-from /tmp/niloofar_findings.json
+   ```
+
+Every write flips `story.is_edited = true` so the nightly maintenance pipeline will not clobber the edits.
+
+### Legacy OpenAI mode (not default)
+
+Still supported for unattended runs, but should only be used when Claude-in-conversation is not available:
+
+```bash
+railway run --service doornegar python scripts/journalist_audit.py --llm
+railway run --service doornegar python scripts/journalist_audit.py --llm --apply
+```
 
 ## Capabilities
 

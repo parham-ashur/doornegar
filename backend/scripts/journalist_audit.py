@@ -5,15 +5,25 @@ Senior geopolitics editor with 20 years of experience.
 Can read, evaluate, edit, and correct all content on Doornegar.
 
 Capabilities:
-- Edit story titles, summaries, images
+- Edit story titles, summaries, bias explanations, side narratives, images
 - Remove irrelevant articles from stories
 - Merge duplicate stories
-- Flag quality issues
+- Relabel / shorten telegram claims
 - Propose pipeline/prompt improvements
 
-Usage:
+Three modes — all driven from a chat conversation with Claude, no OpenAI:
+
+  # 1) Gather — dump top trending stories as structured JSON
   railway run --service doornegar python scripts/journalist_audit.py
-  railway run --service doornegar python scripts/journalist_audit.py --apply
+  # (Claude reads the JSON, analyzes as Niloofar, writes a findings file)
+
+  # 2) Apply findings — take a JSON file Claude wrote and apply each fix
+  railway run --service doornegar python scripts/journalist_audit.py \\
+      --apply-from /tmp/niloofar_findings.json
+
+  # 3) Legacy OpenAI mode — still available but NOT the default. Use only
+  #    if you want the LLM to generate findings automatically, unattended.
+  railway run --service doornegar python scripts/journalist_audit.py --llm --apply
 """
 
 import asyncio
@@ -379,6 +389,17 @@ async def apply_fix(finding: dict) -> str:
             moved = await db.execute(
                 update(Article).where(Article.story_id == story_id).values(story_id=target_id)
             )
+            # Re-point telegram posts so the FK doesn't block source deletion
+            # (mirrors the fix applied to clustering.merge_similar_visible_stories).
+            try:
+                from app.models.social import TelegramPost
+                await db.execute(
+                    update(TelegramPost)
+                    .where(TelegramPost.story_id == story_id)
+                    .values(story_id=target_id)
+                )
+            except Exception:
+                pass
             # Hide source story
             source = await db.get(Story, story_id)
             if source:
@@ -395,8 +416,12 @@ async def apply_fix(finding: dict) -> str:
             if target:
                 target.article_count = actual
                 target.source_count = source_count
-                target.summary_fa = None
-                target.telegram_analysis = None
+                # Only clear summary/telegram when the target is NOT curated.
+                # is_edited targets have a hand-written summary the curator
+                # (Parham or Niloofar) wants preserved across merges.
+                if not getattr(target, "is_edited", False):
+                    target.summary_fa = None
+                    target.telegram_analysis = None
             await db.commit()
             return f"✓ ادغام شد: {moved.rowcount} مقاله منتقل شد"
 
@@ -434,6 +459,167 @@ async def apply_fix(finding: dict) -> str:
 
         else:
             return f"⏭ نوع اصلاح ناشناخته: {fix_type}"
+
+
+async def gather_stories_json(limit: int = 25) -> dict:
+    """Fetch top trending stories as structured JSON.
+
+    This is the default mode — no LLM call. The JSON is meant to be
+    read by Claude (in a chat conversation) so Niloofar can do the
+    audit herself and then emit a findings file for --apply-from.
+    """
+    import json as _json
+    from datetime import datetime, timezone
+
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    from app.database import async_session
+    from app.models.article import Article
+    from app.models.story import Story
+
+    async with async_session() as db:
+        result = await db.execute(
+            select(Story)
+            .options(selectinload(Story.articles).selectinload(Article.source))
+            .where(Story.article_count >= 2)
+            .order_by(Story.trending_score.desc())
+            .limit(limit)
+        )
+        stories = list(result.scalars().all())
+
+    now = datetime.now(timezone.utc)
+    output: dict = {
+        "fetched_at": now.isoformat(),
+        "story_count": len(stories),
+        "stories": [],
+    }
+
+    for story in stories:
+        # Narrative fields live inside summary_en JSON
+        blob: dict = {}
+        if story.summary_en:
+            try:
+                blob = _json.loads(story.summary_en)
+            except Exception:
+                blob = {}
+
+        # Alignment distribution + article list
+        alignment_counts: dict[str, int] = {}
+        articles_out: list[dict] = []
+        for a in story.articles:
+            if a.source:
+                align = a.source.state_alignment or "unknown"
+                alignment_counts[align] = alignment_counts.get(align, 0) + 1
+            articles_out.append({
+                "id": str(a.id),
+                "title_fa": (a.title_fa or a.title_original or "بدون عنوان")[:200],
+                "title_original": (a.title_original or "")[:200] if a.title_original else None,
+                "source_slug": a.source.slug if a.source else None,
+                "source_name_fa": a.source.name_fa if a.source else None,
+                "alignment": a.source.state_alignment if a.source else None,
+            })
+
+        # Telegram claims (can be strings or dicts depending on pipeline version)
+        tg = story.telegram_analysis or {}
+        claims_out: list[dict] = []
+        raw_claims = tg.get("key_claims", []) or [] if isinstance(tg, dict) else []
+        for c in raw_claims:
+            if isinstance(c, dict):
+                claims_out.append({"text": c.get("text", ""), "label": c.get("label", "")})
+            else:
+                claims_out.append({"text": str(c), "label": ""})
+
+        # Age in days
+        age_days = None
+        if story.last_updated_at:
+            age_days = round((now - story.last_updated_at).total_seconds() / 86400, 2)
+
+        output["stories"].append({
+            "id": str(story.id),
+            "title_fa": story.title_fa,
+            "title_en": story.title_en,
+            "summary_fa": story.summary_fa,
+            "bias_explanation_fa": blob.get("bias_explanation_fa"),
+            "state_summary_fa": blob.get("state_summary_fa"),
+            "diaspora_summary_fa": blob.get("diaspora_summary_fa"),
+            "article_count": story.article_count,
+            "source_count": story.source_count,
+            "trending_score": round(float(story.trending_score or 0), 2),
+            "age_days": age_days,
+            "is_edited": bool(getattr(story, "is_edited", False)),
+            "alignment_distribution": alignment_counts,
+            "articles": articles_out[:15],
+            "telegram_claims": claims_out[:8],
+        })
+
+    return output
+
+
+async def apply_from_file(path: str) -> dict:
+    """Read a findings JSON file written by Claude and apply each fix.
+
+    Accepts either a bare list of findings, or a dict with a 'findings' key.
+    Returns a stats dict.
+    """
+    import json as _json
+
+    stats = {"applied": 0, "failed": 0, "skipped": 0, "total": 0}
+
+    try:
+        with open(path, "r", encoding="utf-8") as fp:
+            data = _json.load(fp)
+    except Exception as e:
+        print(f"✗ خطا در خواندن فایل {path}: {e}")
+        return stats
+
+    if isinstance(data, dict):
+        findings = data.get("findings", [])
+    elif isinstance(data, list):
+        findings = data
+    else:
+        print("✗ فرمت فایل نامعتبر است — باید لیست یا دیکشنری با کلید findings باشد")
+        return stats
+
+    if not isinstance(findings, list):
+        print("✗ کلید findings باید لیست باشد")
+        return stats
+
+    stats["total"] = len(findings)
+    print(f"\n🔧 در حال اعمال {len(findings)} اصلاح...\n")
+
+    applicable = {
+        "rename_story",
+        "update_summary",
+        "update_narratives",
+        "remove_article",
+        "merge_stories",
+        "update_image",
+        "update_claim",
+    }
+
+    for i, finding in enumerate(findings, 1):
+        fix_type = finding.get("fix_type", "") or ""
+        story_title = (finding.get("story_title") or finding.get("story_id") or "?")[:50]
+
+        if fix_type not in applicable:
+            stats["skipped"] += 1
+            print(f"  [{i}/{len(findings)}] ⏭  {fix_type}: {story_title}")
+            continue
+
+        try:
+            result = await apply_fix(finding)
+            if isinstance(result, str) and result.startswith("✓"):
+                stats["applied"] += 1
+            else:
+                stats["failed"] += 1
+            print(f"  [{i}/{len(findings)}] {result} — {story_title}")
+        except Exception as e:
+            stats["failed"] += 1
+            print(f"  [{i}/{len(findings)}] ✗ خطا: {e}")
+
+    print(f"\nخلاصه: ✓ {stats['applied']} موفق  ·  ✗ {stats['failed']} خطا  ·  ⏭ {stats['skipped']} نادیده")
+    return stats
 
 
 def print_report(report: dict, applied_results: list[str] | None = None):
@@ -480,41 +666,80 @@ def print_report(report: dict, applied_results: list[str] | None = None):
 
 
 async def main():
-    parser = argparse.ArgumentParser(description="نیلوفر — ویراستار ارشد دورنگر")
-    parser.add_argument("--apply", action="store_true", help="Apply all fixes automatically")
+    parser = argparse.ArgumentParser(
+        description="نیلوفر — ویراستار ارشد دورنگر. Default mode is gather (dump JSON for Claude to analyze).",
+    )
+    parser.add_argument(
+        "--apply-from",
+        type=str,
+        default=None,
+        metavar="FILE",
+        help="Read findings JSON from FILE and apply each fix (no LLM call)",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=25,
+        help="Number of top trending stories to gather (default: 25)",
+    )
+    parser.add_argument(
+        "--llm",
+        action="store_true",
+        help="Legacy: call OpenAI to generate findings automatically. Not the default.",
+    )
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="(only with --llm) Auto-apply findings returned by OpenAI",
+    )
     args = parser.parse_args()
 
-    stories = await fetch_stories()
-    if not stories:
-        print("هیچ موضوعی یافت نشد")
+    # Mode 1: apply findings from a file Claude wrote — no LLM at all.
+    if args.apply_from:
+        await apply_from_file(args.apply_from)
         return
 
-    stories_block = build_stories_block(stories)
-    report = await call_niloofar(stories_block)
-    if not report:
+    # Mode 2: legacy OpenAI-backed audit.
+    if args.llm:
+        stories = await fetch_stories()
+        if not stories:
+            print("هیچ موضوعی یافت نشد")
+            return
+
+        stories_block = build_stories_block(stories)
+        report = await call_niloofar(stories_block)
+        if not report:
+            return
+
+        applied = None
+        if args.apply:
+            print("\n🔧 در حال اعمال اصلاحات...")
+            applied = []
+            for f in report.get("findings", []):
+                if f.get("fix_type") in (
+                    "rename_story", "update_summary", "update_narratives",
+                    "remove_article", "merge_stories", "update_image", "update_claim",
+                ):
+                    result = await apply_fix(f)
+                    applied.append(result)
+                    print(f"  {result}")
+                elif f.get("fix_type") == "pipeline_change":
+                    applied.append(f"📝 {f.get('fix_data', {}).get('pipeline_description', '?')[:80]}")
+                else:
+                    applied.append("⏭ بدون اقدام")
+
+        print_report(report, applied)
+
+        output_path = os.path.join(os.path.dirname(__file__), "journalist_report.json")
+        with open(output_path, "w", encoding="utf-8") as fp:
+            json.dump(report, fp, ensure_ascii=False, indent=2)
+        print(f"\n💾 گزارش ذخیره شد: {output_path}")
         return
 
-    applied = None
-    if args.apply:
-        print("\n🔧 در حال اعمال اصلاحات...")
-        applied = []
-        for f in report.get("findings", []):
-            if f.get("fix_type") in ("rename_story", "update_summary", "update_narratives", "remove_article", "merge_stories", "update_image", "update_claim"):
-                result = await apply_fix(f)
-                applied.append(result)
-                print(f"  {result}")
-            elif f.get("fix_type") == "pipeline_change":
-                applied.append(f"📝 {f.get('fix_data', {}).get('pipeline_description', '?')[:80]}")
-            else:
-                applied.append("⏭ بدون اقدام")
-
-    print_report(report, applied)
-
-    # Save report
-    output_path = os.path.join(os.path.dirname(__file__), "journalist_report.json")
-    with open(output_path, "w", encoding="utf-8") as fp:
-        json.dump(report, fp, ensure_ascii=False, indent=2)
-    print(f"\n💾 گزارش ذخیره شد: {output_path}")
+    # Mode 3 (default): pure gather — dump JSON to stdout for Claude.
+    output = await gather_stories_json(limit=args.limit)
+    # Write to stdout as plain JSON so Claude can parse the run output.
+    print(json.dumps(output, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":
