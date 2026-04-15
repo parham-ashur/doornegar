@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import Image from "next/image";
 import { Newspaper } from "lucide-react";
 
-// Images smaller than this are considered low quality (tracking pixels, tiny icons)
+// Images smaller than this are considered low quality (tracking pixels, tiny icons).
 const MIN_WIDTH = 120;
 const MIN_HEIGHT = 80;
 
@@ -20,18 +21,26 @@ export default function SafeImage({
   alt = "تصویر خبر",
   className,
   placeholderClass,
+  sizes = "(max-width: 768px) 100vw, 50vw",
+  priority = false,
 }: {
   src: string | null;
   alt?: string;
   className?: string;
   placeholderClass?: string;
+  /** Next.js Image sizes attribute — tune per call site for best srcset. */
+  sizes?: string;
+  /** Set true for above-the-fold hero images (disables lazy-loading + preloads). */
+  priority?: boolean;
 }) {
   const [failed, setFailed] = useState(false);
 
   const handleLoad = useCallback((e: React.SyntheticEvent<HTMLImageElement>) => {
     const img = e.currentTarget;
-    if (img.naturalWidth < MIN_WIDTH || img.naturalHeight < MIN_HEIGHT) {
-      setFailed(true);
+    if (img.naturalWidth && img.naturalHeight) {
+      if (img.naturalWidth < MIN_WIDTH || img.naturalHeight < MIN_HEIGHT) {
+        setFailed(true);
+      }
     }
   }, []);
 
@@ -43,14 +52,21 @@ export default function SafeImage({
     );
   }
 
+  // next/image fill mode needs a position:relative parent. We render our own
+  // so callers don't have to add `relative` to every aspect-ratio wrapper.
   return (
-    <img
-      src={resolveUrl(src)}
-      alt={alt}
-      className={className}
-      loading="lazy"
-      onError={() => setFailed(true)}
-      onLoad={handleLoad}
-    />
+    <div className="relative h-full w-full">
+      <Image
+        src={resolveUrl(src)}
+        alt={alt}
+        fill
+        sizes={sizes}
+        priority={priority}
+        className={className || "object-cover"}
+        onError={() => setFailed(true)}
+        onLoad={handleLoad}
+        unoptimized={false}
+      />
+    </div>
   );
 }

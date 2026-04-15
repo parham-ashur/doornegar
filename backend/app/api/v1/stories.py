@@ -176,6 +176,73 @@ async def get_story_analysis(request: Request, story_id: uuid.UUID, db: AsyncSes
     )
 
 
+@router.get("/analyses")
+@_limiter.limit("60/minute")
+async def get_story_analyses_batch(
+    request: Request,
+    ids: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Batch-fetch story analyses in a single round trip.
+
+    Accepts ?ids=uuid,uuid,uuid (comma-separated). Returns a dict keyed by
+    story_id string with the same shape as GET /stories/{id}/analysis for
+    each story found. Missing stories are simply absent from the response.
+
+    The homepage needs analyses for ~30 stories to render narratives, bias
+    explanations, and dispute scores. Doing that as N parallel
+    /stories/{id}/analysis calls from Next.js to Railway (US) costs 30
+    round trips per cache miss — this endpoint cuts that to one.
+    """
+    import json as _json
+
+    # Parse + dedupe IDs, ignore junk
+    id_list: list[uuid.UUID] = []
+    for raw in ids.split(","):
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            id_list.append(uuid.UUID(raw))
+        except (ValueError, AttributeError):
+            continue
+    if not id_list:
+        return {}
+
+    # Cap to something reasonable so a crafted URL can't DoS the endpoint.
+    id_list = id_list[:60]
+
+    result = await db.execute(select(Story).where(Story.id.in_(id_list)))
+    stories = result.scalars().all()
+
+    out: dict[str, dict] = {}
+    for story in stories:
+        extra: dict = {}
+        if story.summary_en:
+            try:
+                extra = _json.loads(story.summary_en)
+            except Exception:
+                extra = {}
+        out[str(story.id)] = {
+            "story_id": str(story.id),
+            "summary_fa": story.summary_fa,
+            "state_summary_fa": extra.get("state_summary_fa"),
+            "diaspora_summary_fa": extra.get("diaspora_summary_fa"),
+            "independent_summary_fa": extra.get("independent_summary_fa"),
+            "bias_explanation_fa": extra.get("bias_explanation_fa"),
+            "scores": extra.get("scores"),
+            "source_neutrality": extra.get("source_neutrality"),
+            "dispute_score": extra.get("dispute_score"),
+            "loaded_words": extra.get("loaded_words"),
+            "narrative_arc": extra.get("narrative_arc"),
+            "delta": extra.get("delta"),
+            "analyst": extra.get("analyst"),
+            "silence_analysis": extra.get("silence_analysis"),
+            "coordinated_messaging": extra.get("coordinated_messaging"),
+        }
+    return out
+
+
 @router.get("/weekly-digest")
 @_limiter.limit("30/minute")
 async def weekly_digest(request: Request, db: AsyncSession = Depends(get_db)):

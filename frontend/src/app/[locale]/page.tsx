@@ -9,11 +9,19 @@ import { formatRelativeTime, toFa } from "@/lib/utils";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+// Cache TTLs tuned for a homepage where stories update on the hour, not the
+// minute. Every miss is a round trip from Vercel (US or EU) to Railway in the
+// US, so bumping these from 30/60/120 to 300/600/600 cuts origin pressure
+// dramatically without noticeably aging the content.
+const TRENDING_TTL = 300;        // 5 min for trending + blindspots
+const ANALYSIS_TTL = 600;        // 10 min for per-story narratives
+const TELEGRAM_TTL = 600;        // 10 min for telegram analysis
+
 async function fetchAPI<T>(path: string): Promise<T | null> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 8000);
-    const res = await fetch(`${API}${path}`, { next: { revalidate: 30 }, signal: controller.signal });
+    const res = await fetch(`${API}${path}`, { next: { revalidate: TRENDING_TTL }, signal: controller.signal });
     clearTimeout(timeout);
     if (!res.ok) return null;
     return res.json();
@@ -24,7 +32,7 @@ async function fetchAPI<T>(path: string): Promise<T | null> {
 
 async function fetchSummary(storyId: string): Promise<string | null> {
   try {
-    const res = await fetch(`${API}/api/v1/stories/${storyId}/analysis`, { next: { revalidate: 60 } });
+    const res = await fetch(`${API}/api/v1/stories/${storyId}/analysis`, { next: { revalidate: ANALYSIS_TTL } });
     if (!res.ok) return null;
     const data = await res.json();
     return data.summary_fa || null;
@@ -35,7 +43,7 @@ async function fetchSummary(storyId: string): Promise<string | null> {
 
 async function fetchAnalysis(storyId: string): Promise<{ summary_fa?: string; bias_explanation_fa?: string; state_summary_fa?: string; diaspora_summary_fa?: string; dispute_score?: number; loaded_words?: { conservative: string[]; opposition: string[] } } | null> {
   try {
-    const res = await fetch(`${API}/api/v1/stories/${storyId}/analysis`, { next: { revalidate: 120 } });
+    const res = await fetch(`${API}/api/v1/stories/${storyId}/analysis`, { next: { revalidate: ANALYSIS_TTL } });
     if (!res.ok) return null;
     return res.json();
   } catch {
@@ -43,11 +51,30 @@ async function fetchAnalysis(storyId: string): Promise<{ summary_fa?: string; bi
   }
 }
 
+async function fetchAnalysesBatch(storyIds: string[]): Promise<Record<string, { summary_fa?: string; bias_explanation_fa?: string; state_summary_fa?: string; diaspora_summary_fa?: string; dispute_score?: number; loaded_words?: { conservative: string[]; opposition: string[] } } | null>> {
+  if (storyIds.length === 0) return {};
+  // Dedupe + stable-sort so identical sets share a cache key.
+  const ids = Array.from(new Set(storyIds)).sort();
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    const res = await fetch(
+      `${API}/api/v1/stories/analyses?ids=${ids.join(",")}`,
+      { next: { revalidate: ANALYSIS_TTL }, signal: controller.signal },
+    );
+    clearTimeout(timeout);
+    if (!res.ok) return {};
+    return await res.json();
+  } catch {
+    return {};
+  }
+}
+
 async function fetchTelegramAnalysis(storyId: string): Promise<{ discourse_summary?: string; predictions?: string[]; key_claims?: string[]; worldviews?: { pro_regime?: string; opposition?: string } } | null> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 8000);
-    const res = await fetch(`${API}/api/v1/social/stories/${storyId}/telegram-analysis`, { next: { revalidate: 300 }, signal: controller.signal });
+    const res = await fetch(`${API}/api/v1/social/stories/${storyId}/telegram-analysis`, { next: { revalidate: TELEGRAM_TTL }, signal: controller.signal });
     clearTimeout(timeout);
     if (!res.ok) return null;
     const data = await res.json();
@@ -196,33 +223,26 @@ export default async function HomePage({
     cursor += chunk.length;
   }
 
-  // ── Fetch summaries (all in parallel) ──
-  const allStoriesForSummary = new Set<string>();
-  if (hero) allStoriesForSummary.add(hero.id);
-  for (const s of [...leftTextStories, ...mostViewed, ...overflow]) {
-    allStoriesForSummary.add(s.id);
+  // ── Batch-fetch all analyses the homepage needs in ONE backend call ──
+  // Was: N parallel GET /stories/{id}/analysis (up to ~30+ round trips).
+  // Now: single GET /stories/analyses?ids=... — one RTT, shared cache key.
+  const allIds = new Set<string>();
+  if (hero) allIds.add(hero.id);
+  for (const s of [...leftTextStories, ...mostViewed, ...overflow, ...disputedCandidates]) {
+    allIds.add(s.id);
   }
   for (const sec of sections) {
-    for (const s of sec.stories) allStoriesForSummary.add(s.id);
+    for (const s of sec.stories) allIds.add(s.id);
   }
-  const summaryIds = Array.from(allStoriesForSummary);
-  const summaryResults = await Promise.all(summaryIds.map((id) => fetchSummary(id)));
-  const allSummaries: Record<string, string | null> = {};
-  summaryIds.forEach((id, i) => { allSummaries[id] = summaryResults[i]; });
+  const allAnalyses = await fetchAnalysesBatch(Array.from(allIds));
 
-  // Fetch full analysis for weekly briefing + most disputed + most read
-  const briefingStories = leftTextStories;
-  const analysisFetchIds = [hero.id, ...briefingStories.map(s => s.id)];
-  // Include all disputed candidates so we can re-sort by dispute_score
-  for (const s of disputedCandidates) {
-    if (!analysisFetchIds.includes(s.id)) analysisFetchIds.push(s.id);
+  // Backwards-compat shims: the existing render code reads summaries via
+  // allSummaries[id] (just the summary_fa string) and the richer narrative
+  // fields via allAnalyses[id]. Rebuild allSummaries out of the batch result.
+  const allSummaries: Record<string, string | null> = {};
+  for (const id of Array.from(allIds)) {
+    allSummaries[id] = allAnalyses[id]?.summary_fa || null;
   }
-  for (const s of mostViewed) {
-    if (!analysisFetchIds.includes(s.id)) analysisFetchIds.push(s.id);
-  }
-  const analysisResults = await Promise.all(analysisFetchIds.map((id) => fetchAnalysis(id)));
-  const allAnalyses: Record<string, { bias_explanation_fa?: string; state_summary_fa?: string; diaspora_summary_fa?: string; dispute_score?: number; loaded_words?: { conservative: string[]; opposition: string[] } } | null> = {};
-  analysisFetchIds.forEach((id, i) => { allAnalyses[id] = analysisResults[i]; });
 
   // Fetch Telegram analysis for hero story
   const heroTelegram = hero ? await fetchTelegramAnalysis(hero.id) : null;
@@ -299,7 +319,12 @@ export default async function HomePage({
           <div className="col-span-6 py-6 px-5">
             <Link href={`/${locale}/stories/${hero.id}`} className="group block">
               <div className="aspect-[16/9] overflow-hidden bg-slate-100 dark:bg-slate-800">
-                <SafeImage src={hero.image_url} className="h-full w-full object-cover" />
+                <SafeImage
+                  src={hero.image_url}
+                  className="h-full w-full object-cover"
+                  sizes="(max-width: 1024px) 100vw, 50vw"
+                  priority
+                />
               </div>
               <h1 className="mt-4 text-[28px] font-black leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-3">
                 {hero.title_fa}
@@ -705,7 +730,12 @@ function MobileHome({
       <div className="border-b border-slate-200 dark:border-slate-800">
         <Link href={`/${locale}/stories/${hero.id}`} className="block">
           <div className="aspect-[16/9] overflow-hidden bg-slate-100 dark:bg-slate-800">
-            <SafeImage src={hero.image_url} className="h-full w-full object-cover" />
+            <SafeImage
+              src={hero.image_url}
+              className="h-full w-full object-cover"
+              sizes="100vw"
+              priority
+            />
           </div>
           <div className="px-4 pt-4">
             <h1 className="text-[24px] font-black leading-snug text-slate-900 dark:text-white line-clamp-3">
