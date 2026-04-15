@@ -680,11 +680,17 @@ async def step_story_quality():
     stats = {"summaries_regenerated": 0, "duplicates_flagged": 0, "stale_cleared": 0}
 
     async with async_session() as db:
-        # 1. Regenerate summaries for stories that got 3+ new articles since last summary
+        # 1. Regenerate summaries for stories that got 3+ new articles since last summary.
+        #    Skip is_edited stories — their content is curated by hand and the nightly
+        #    pipeline must never clobber it.
         result = await db.execute(
             select(Story)
             .options(selectinload(Story.articles).selectinload(Article.source))
-            .where(Story.article_count >= 5, Story.summary_fa.isnot(None))
+            .where(
+                Story.article_count >= 5,
+                Story.summary_fa.isnot(None),
+                Story.is_edited.is_(False),
+            )
         )
         for story in result.scalars().all():
             actual_count = len(story.articles)
@@ -1778,11 +1784,17 @@ async def step_quality_postprocess():
     stats = {"checked": 0, "articles_flagged": 0, "titles_improved": 0, "bias_corrected": 0}
 
     async with async_session() as db:
-        # Get top 15 visible stories
+        # Get top 15 visible stories — excluding hand-edited ones. The quality
+        # post-process can overwrite title_fa and drop articles, so curated
+        # stories must be skipped entirely.
         result = await db.execute(
             select(Story)
             .options(selectinload(Story.articles))
-            .where(Story.article_count >= 5, Story.summary_fa.isnot(None))
+            .where(
+                Story.article_count >= 5,
+                Story.summary_fa.isnot(None),
+                Story.is_edited.is_(False),
+            )
             .order_by(Story.priority.desc(), Story.trending_score.desc())
             .limit(15)
         )
@@ -2924,6 +2936,97 @@ async def step_niloofar_editorial():
     return stats
 
 
+async def step_niloofar_audit_apply():
+    """Run Niloofar's content audit and auto-apply safe editorial fixes.
+
+    Reviews the top 25 trending stories for:
+      - Weak or translation-ese titles (rename_story)
+      - Thin or stale summaries (update_summary)
+      - Narrative fields in the wrong voice (update_narratives)
+      - Duplicate stories that should be merged (merge_stories)
+      - Telegram claims that need relabeling or shortening (update_claim)
+      - Irrelevant cover images (update_image)
+
+    Auto-applies the fixes above. Deliberately does NOT auto-apply:
+      - remove_article (destructive, needs human review)
+      - pipeline_change (informational only)
+
+    Each rewrite goes through the Niloofar style guide baked into the
+    audit prompt, so titles/summaries/narratives come back in her
+    literary-adabi voice. Every applied fix flips story.is_edited=True
+    so nothing gets clobbered on the next maintenance pass.
+    """
+    stats = {"findings": 0, "applied": 0, "skipped": 0, "failed": 0}
+
+    from app.config import settings
+    if not settings.openai_api_key:
+        logger.warning("Niloofar audit: no OpenAI key, skipping")
+        return stats
+
+    try:
+        from scripts.journalist_audit import (
+            apply_fix,
+            build_stories_block,
+            call_niloofar,
+            fetch_stories,
+        )
+    except Exception as e:
+        logger.warning(f"Niloofar audit: import failed: {e}")
+        return stats
+
+    # Safe allowlist — content rewrites, merges, claim edits, image swaps.
+    # Excludes remove_article (destructive) and pipeline_change (note-only).
+    safe_fix_types = {
+        "rename_story",
+        "update_summary",
+        "update_narratives",
+        "merge_stories",
+        "update_image",
+        "update_claim",
+    }
+
+    try:
+        stories = await fetch_stories()
+        if not stories:
+            logger.info("Niloofar audit: no stories to review")
+            return stats
+
+        stories_block = build_stories_block(stories)
+        report = await call_niloofar(stories_block)
+        if not report:
+            logger.warning("Niloofar audit: no report returned from LLM")
+            return stats
+
+        findings = report.get("findings", []) or []
+        stats["findings"] = len(findings)
+        logger.info(
+            f"Niloofar audit: grade={report.get('overall_grade', '?')}, "
+            f"findings={len(findings)}"
+        )
+
+        for finding in findings:
+            fix_type = finding.get("fix_type", "") or ""
+            if fix_type not in safe_fix_types:
+                stats["skipped"] += 1
+                continue
+            try:
+                result = await apply_fix(finding)
+                if isinstance(result, str) and result.startswith("✓"):
+                    stats["applied"] += 1
+                    logger.info(f"Niloofar audit: {result}")
+                else:
+                    stats["failed"] += 1
+                    logger.warning(f"Niloofar audit: {result}")
+            except Exception as e:
+                stats["failed"] += 1
+                logger.warning(f"Niloofar audit: apply failed for {fix_type}: {e}")
+    except Exception as e:
+        logger.warning(f"Niloofar audit: run failed: {e}", exc_info=True)
+
+    logger.info(f"Niloofar audit: {stats}")
+    return stats
+
+
 async def run_maintenance():
     """Run full maintenance cycle with per-step progress tracking."""
     from app.services import maintenance_state
@@ -2968,6 +3071,7 @@ async def run_maintenance():
         ("backup", "Database backup", step_database_backup),
         ("quality_postprocess", "Quality post-processing (LLM review)", step_quality_postprocess),
         ("niloofar_editorial", "Niloofar editorial context for top stories", step_niloofar_editorial),
+        ("niloofar_audit", "Niloofar content audit (auto-apply edits)", step_niloofar_audit_apply),
         ("weekly_digest", "Weekly digest", step_weekly_digest),
     ]
 
