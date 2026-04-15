@@ -322,7 +322,18 @@ async def link_posts_by_embedding(db: AsyncSession, threshold: float = 0.35) -> 
         )
     )
     stories = list(result.scalars().all())
-    story_data = [(str(s.id), s.centroid_embedding) for s in stories]
+    # Validate centroids — some rows have dicts, lists with None values, or
+    # partially-initialized vectors from older code. Skip anything that
+    # isn't a clean list of finite numbers so cosine_similarity can't raise
+    # "unsupported operand type(s) for *: 'float' and 'NoneType'".
+    story_data = []
+    for s in stories:
+        c = s.centroid_embedding
+        if not isinstance(c, list) or len(c) == 0:
+            continue
+        if any(v is None or not isinstance(v, (int, float)) for v in c):
+            continue
+        story_data.append((str(s.id), c))
 
     if not story_data:
         return {"linked": 0, "reason": "no stories with centroids"}
@@ -348,13 +359,18 @@ async def link_posts_by_embedding(db: AsyncSession, threshold: float = 0.35) -> 
     from sqlalchemy import update
     linked = 0
     for post, emb in zip(posts, embeddings):
-        if not emb or all(v == 0 for v in emb):
+        if not emb or all(v == 0 for v in emb) or any(v is None for v in emb):
             continue
 
         best_score = 0
         best_story_id = None
         for story_id, centroid in story_data:
-            score = cosine_similarity(emb, centroid)
+            try:
+                score = cosine_similarity(emb, centroid)
+            except Exception:
+                # Defensive: any shape/type mismatch between emb and centroid
+                # (dimension mismatch, null inside) should skip, not crash
+                continue
             if score > best_score:
                 best_score = score
                 best_story_id = story_id

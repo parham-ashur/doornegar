@@ -983,6 +983,14 @@ async def merge_similar_visible_stories(db: AsyncSession) -> int:
                 .where(Article.story_id == victim.id)
                 .values(story_id=keeper.id)
             )
+            # Re-point any telegram posts that were linked to the victim story
+            # so the DELETE doesn't fail on the FK constraint.
+            from app.models.social import TelegramPost  # local import: avoid circular
+            await db.execute(
+                update(TelegramPost)
+                .where(TelegramPost.story_id == victim.id)
+                .values(story_id=keeper.id)
+            )
             # Delete victim
             await db.delete(victim)
             total_merged += 1

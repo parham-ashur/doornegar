@@ -32,16 +32,29 @@ _client = None
 
 
 async def _get_telegram_client():
-    """Get or create the Telethon client."""
+    """Get or create the Telethon client.
+
+    Prefers a serialized session from settings.telegram_session_string (used on
+    Railway where filesystem is ephemeral). Falls back to the local
+    doornegar_session.session file for dev.
+    """
     global _client
     if _client is not None and _client.is_connected():
         return _client
 
     try:
         from telethon import TelegramClient
+        from telethon.sessions import StringSession
+
+        if settings.telegram_session_string:
+            logger.info("Using TELEGRAM_SESSION_STRING session")
+            session = StringSession(settings.telegram_session_string)
+        else:
+            logger.info("Using file-based session (doornegar_session.session)")
+            session = "doornegar_session"
 
         _client = TelegramClient(
-            "doornegar_session",
+            session,
             settings.telegram_api_id,
             settings.telegram_api_hash,
         )

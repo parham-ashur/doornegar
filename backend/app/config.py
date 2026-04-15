@@ -60,6 +60,11 @@ class Settings(BaseSettings):
     telegram_api_hash: str = ""
     telegram_fetch_interval_minutes: int = 30
     telegram_channel_username: str = ""  # Your Doornegar public channel
+    # Serialized Telethon session (StringSession.save output). Used on Railway
+    # where a file-based session doesn't persist across deploys. Generate it
+    # locally once with `python scripts/export_telegram_session.py` and set it
+    # as the TELEGRAM_SESSION_STRING env var in Railway.
+    telegram_session_string: str = ""
 
     # Twitter/X
     twitter_api_key: str = ""

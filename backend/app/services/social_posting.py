@@ -156,7 +156,13 @@ async def post_to_telegram(story_id: str, text: str) -> dict:
         return {"error": "TELEGRAM_CHANNEL_USERNAME not set"}
     try:
         from telethon import TelegramClient
-        client = TelegramClient("doornegar_session", settings.telegram_api_id, settings.telegram_api_hash)
+        from telethon.sessions import StringSession
+        session = (
+            StringSession(settings.telegram_session_string)
+            if settings.telegram_session_string
+            else "doornegar_session"
+        )
+        client = TelegramClient(session, settings.telegram_api_id, settings.telegram_api_hash)
         await client.connect()
         if not await client.is_user_authorized():
             return {"error": "Telegram session expired"}

@@ -1528,13 +1528,19 @@ async def step_telegram_health():
 
     try:
         from telethon import TelegramClient
+        from telethon.sessions import StringSession
         from app.config import settings
 
         if not settings.telegram_api_id or not settings.telegram_api_hash:
             return {"skipped": True, "reason": "Telegram not configured"}
 
+        session = (
+            StringSession(settings.telegram_session_string)
+            if settings.telegram_session_string
+            else "doornegar_session"
+        )
         client = TelegramClient(
-            "doornegar_session",
+            session,
             settings.telegram_api_id,
             settings.telegram_api_hash,
         )
@@ -3001,13 +3007,15 @@ async def run_maintenance():
         # Persist log to database so it survives container restarts
         try:
             import json as _json
+            import uuid as _uuid
             from app.database import async_session as _as
             from sqlalchemy import text as _text
             async with _as() as _db:
                 await _db.execute(_text(
-                    "INSERT INTO maintenance_logs (run_at, status, elapsed_s, results, steps) "
-                    "VALUES (NOW(), 'success', :elapsed, :results, :steps)"
+                    "INSERT INTO maintenance_logs (id, run_at, status, elapsed_s, results, steps) "
+                    "VALUES (:id, NOW(), 'success', :elapsed, :results, :steps)"
                 ), {
+                    "id": _uuid.uuid4(),
                     "elapsed": round(elapsed, 1),
                     "results": _json.dumps(results, ensure_ascii=False, default=str),
                     "steps": _json.dumps(
@@ -3032,13 +3040,15 @@ async def run_maintenance():
         # Persist error log too
         try:
             import json as _json
+            import uuid as _uuid
             from app.database import async_session as _as
             from sqlalchemy import text as _text
             async with _as() as _db:
                 await _db.execute(_text(
-                    "INSERT INTO maintenance_logs (run_at, status, elapsed_s, results, error) "
-                    "VALUES (NOW(), 'error', :elapsed, :results, :error)"
+                    "INSERT INTO maintenance_logs (id, run_at, status, elapsed_s, results, error) "
+                    "VALUES (:id, NOW(), 'error', :elapsed, :results, :error)"
                 ), {
+                    "id": _uuid.uuid4(),
                     "elapsed": round(time.time() - start, 1),
                     "results": _json.dumps(results, ensure_ascii=False, default=str),
                     "error": str(e),
