@@ -429,6 +429,11 @@ async def apply_fix(finding: dict) -> str:
             story = await db.get(Story, story_id)
             if story:
                 story.image_url = fix_data["new_image_url"]
+                # Flip is_edited so the story-brief override in
+                # _story_brief_with_extras actually honors this URL
+                # (otherwise the title-overlap scorer wins).
+                if hasattr(story, "is_edited"):
+                    story.is_edited = True
                 await db.commit()
                 return f"✓ تصویر به‌روز شد"
             return "✗ موضوع یافت نشد"
