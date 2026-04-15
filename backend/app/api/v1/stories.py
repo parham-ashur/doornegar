@@ -555,22 +555,29 @@ def _story_brief_with_extras(story: Story) -> StoryBrief:
     3. Prefer R2 / stable-storage URLs, break ties by highest overlap,
        then by longest URL (often higher-resolution on Telegram CDN)
     """
+    import json as _json
+
     from app.config import settings
 
     brief = StoryBrief.model_validate(story)
 
-    # Manual override: if a curator has hand-edited the story AND set an
-    # explicit image_url, trust it and skip the title-overlap scorer.
-    # Niloofar (or Parham in the dashboard) uses this escape hatch when the
-    # scorer's best pick is low-quality or the wrong frame.
-    manual_image = getattr(story, "image_url", None)
-    if (
-        getattr(story, "is_edited", False)
-        and manual_image
-        and not _is_bad_image(manual_image)
-    ):
+    # Manual override: Story ORM has no image_url column, so the curator's
+    # override is stored inside the summary_en JSON blob as
+    # "manual_image_url" (written by journalist_audit.apply_fix and by the
+    # dashboard editor). When the story is is_edited and the blob has a
+    # manual_image_url, trust it and skip the title-overlap scorer.
+    manual_image = None
+    if getattr(story, "is_edited", False) and story.summary_en:
+        try:
+            _blob = _json.loads(story.summary_en)
+            candidate = _blob.get("manual_image_url")
+            if candidate and not _is_bad_image(candidate):
+                manual_image = candidate
+        except Exception:
+            manual_image = None
+
+    if manual_image:
         brief.image_url = manual_image
-        # Continue to compute coverage percentages below but skip the scorer.
         _skip_scorer = True
     else:
         _skip_scorer = False

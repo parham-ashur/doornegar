@@ -426,17 +426,25 @@ async def apply_fix(finding: dict) -> str:
             return f"✓ ادغام شد: {moved.rowcount} مقاله منتقل شد"
 
         elif fix_type == "update_image" and fix_data.get("new_image_url"):
+            # Story ORM has no image_url column — the cover is computed at
+            # response time from articles. The manual override is stored
+            # inside the summary_en JSON blob alongside narratives, and
+            # _story_brief_with_extras reads it when the story is is_edited.
+            import json as _json
+
             story = await db.get(Story, story_id)
-            if story:
-                story.image_url = fix_data["new_image_url"]
-                # Flip is_edited so the story-brief override in
-                # _story_brief_with_extras actually honors this URL
-                # (otherwise the title-overlap scorer wins).
-                if hasattr(story, "is_edited"):
-                    story.is_edited = True
-                await db.commit()
-                return f"✓ تصویر به‌روز شد"
-            return "✗ موضوع یافت نشد"
+            if not story:
+                return "✗ موضوع یافت نشد"
+            try:
+                blob = _json.loads(story.summary_en) if story.summary_en else {}
+            except Exception:
+                blob = {}
+            blob["manual_image_url"] = fix_data["new_image_url"]
+            story.summary_en = _json.dumps(blob, ensure_ascii=False)
+            if hasattr(story, "is_edited"):
+                story.is_edited = True
+            await db.commit()
+            return f"✓ تصویر به‌روز شد"
 
         elif fix_type == "update_claim":
             story = await db.get(Story, story_id)
