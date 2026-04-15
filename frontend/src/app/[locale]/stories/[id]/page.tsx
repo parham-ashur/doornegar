@@ -151,6 +151,18 @@ export default async function StoryDetailPage({
           <StoryAnalysisPanel analysis={analysis} />
           <SummaryRating storyId={id} />
 
+          {/* Mobile-only: Telegram + narrative development + stats, placed
+              between narratives and articles per Parham's 2026-04-15 spec. */}
+          <div className="lg:hidden mt-6 pt-6 border-t border-slate-200 dark:border-slate-800">
+            <StatsPanel
+              analysis={analysis}
+              storyId={id}
+              articleCount={story.article_count}
+              sourceCount={story.source_count}
+              containerId="telegram-mobile"
+            />
+          </div>
+
           {/* Timeline — desktop only */}
           <div className="hidden lg:block">
             <StoryTimeline articles={story.articles} />
@@ -163,13 +175,14 @@ export default async function StoryDetailPage({
           <ArticleFilterList articles={story.articles} storyId={id} />
         </div>
 
-        {/* LEFT column (RTL): stats → analyst → spectrum */}
-        <div className="lg:pr-6 lg:sticky lg:top-4 space-y-6 pt-4 lg:pt-0" id="story-sidebar">
+        {/* LEFT column (desktop sidebar only): stats → spectrum. Hidden on
+            mobile because the same StatsPanel is rendered inline above. */}
+        <div className="hidden lg:block lg:pr-6 lg:sticky lg:top-4 space-y-6" id="story-sidebar">
           <StatsPanel analysis={analysis} storyId={id} articleCount={story.article_count} sourceCount={story.source_count} />
 
           {/* Political spectrum — desktop only */}
           {coveringSources.length > 0 && (
-            <div className="hidden lg:block border-t border-slate-200 dark:border-slate-800 pt-4">
+            <div className="border-t border-slate-200 dark:border-slate-800 pt-4">
               <h3 className="text-sm font-black text-slate-900 dark:text-white mb-4 pb-2 border-b border-slate-200 dark:border-slate-800">
                 جایگاه رسانه‌ها
               </h3>

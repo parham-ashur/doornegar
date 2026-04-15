@@ -6,7 +6,7 @@ import type { StoryAnalysis } from "@/lib/types";
 import { toFa } from "@/lib/utils";
 import StoryTelegramSection from "./StoryTelegramSection";
 
-export default function StatsPanel({ analysis, storyId, articleCount, sourceCount }: { analysis: StoryAnalysis | null; storyId?: string; articleCount?: number; sourceCount?: number }) {
+export default function StatsPanel({ analysis, storyId, articleCount, sourceCount, containerId = "telegram" }: { analysis: StoryAnalysis | null; storyId?: string; articleCount?: number; sourceCount?: number; containerId?: string }) {
   // Read URL params synchronously for initial state
   const isTelegramLink = typeof window !== "undefined" && window.location.hash === "#telegram";
   const urlParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
@@ -19,10 +19,10 @@ export default function StatsPanel({ analysis, storyId, articleCount, sourceCoun
     if (isTelegramLink) {
       setShowTelegram(true);
       setTimeout(() => {
-        document.getElementById("telegram")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        document.getElementById(containerId)?.scrollIntoView({ behavior: "smooth", block: "start" });
       }, 800);
     }
-  }, [isTelegramLink]);
+  }, [isTelegramLink, containerId]);
 
   const stateFraming = analysis?.scores?.state?.framing;
   const diasporaFraming = analysis?.scores?.diaspora?.framing;
@@ -38,7 +38,7 @@ export default function StatsPanel({ analysis, storyId, articleCount, sourceCoun
   const delta = (analysis as any)?.delta;
 
   return (
-    <div id="telegram" dir="rtl" className="space-y-5">
+    <div id={containerId} dir="rtl" className="space-y-5">
       {/* Telegram analysis — button to expand */}
       {storyId && !showTelegram && (
         <button
