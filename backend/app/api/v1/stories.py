@@ -616,7 +616,10 @@ def _is_bad_image(url: str) -> bool:
         "pixel", "1x1", "blank.", "spacer.", "transparent.",
         "placeholder", "default.jpg", "default.png", "no-image",
         "logo-", "/logo.", "/icon.", "favicon",
+        "apple-touch-icon",  # Source logos, not story images
+        "google.com/s2/favicons",  # Tiny favicons (16-128px), often 404 for geo-blocked sites
         ".svg",  # SVGs are usually logos/icons
+        ".ico",  # Favicon files
         "telesco.pe",  # Telegram CDN auth tokens expire — unreliable public URLs
         "cdn.telegram",  # Same story for the older Telegram CDN host
     ]
@@ -687,11 +690,18 @@ def _story_brief_with_extras(story: Story) -> StoryBrief:
         brief.image_url = best.image_url
 
     # Last-resort fallback: if no article image AND no manual override,
-    # use the primary source's logo so the homepage card isn't blank.
+    # use the primary active source's logo so the homepage card isn't blank.
+    # Skip bad logos (tiny favicons, geo-blocked Google Favicons) and prefer
+    # active sources over deactivated ones.
     if not brief.image_url:
         source_counts: dict = {}
         for a in story.articles:
-            if a.source and a.source.logo_url:
+            if (
+                a.source
+                and a.source.logo_url
+                and not _is_bad_image(a.source.logo_url)
+                and getattr(a.source, "is_active", True)
+            ):
                 source_counts[a.source.slug] = source_counts.get(a.source.slug, 0) + 1
         if source_counts:
             top_slug = max(source_counts, key=source_counts.get)  # type: ignore[arg-type]
