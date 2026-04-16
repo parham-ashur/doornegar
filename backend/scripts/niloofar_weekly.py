@@ -200,8 +200,12 @@ async def main():
     print("  در حال تولید گزارش...")
     report = await generate_weekly_report(stories_block, source_stats_block, blindspots_block)
 
-    # Add metadata header
+    # Add metadata header with story references for frontend linking
     now = datetime.now(timezone.utc)
+    top_stories_yaml = "\n".join(
+        f'  - id: "{s.id}"\n    title: "{(s.title_fa or "").replace(chr(34), "")}"'
+        for s in stories[:10]
+    )
     header = f"""---
 title: گزارش هفتگی نیلوفر
 date: {now.strftime('%Y-%m-%d')}
@@ -210,6 +214,8 @@ stories_analyzed: {len(stories)}
 sources_active: {len(source_stats)}
 blindspots: {len(blindspots)}
 generated_by: niloofar (AI journalist)
+top_stories:
+{top_stories_yaml}
 ---
 
 """

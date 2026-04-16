@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { TrendingUp, Compass } from "lucide-react";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -8,6 +9,25 @@ const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 interface DigestItem {
   title: string;
   description: string;
+}
+
+interface StoryRef {
+  id: string;
+  title: string;
+}
+
+function extractStoryRefs(content: string): StoryRef[] {
+  // Parse top_stories from YAML frontmatter
+  const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
+  if (!fmMatch) return [];
+  const fm = fmMatch[1];
+  const refs: StoryRef[] = [];
+  const idRegex = /- id: "([^"]+)"\n\s+title: "([^"]+)"/g;
+  let m;
+  while ((m = idRegex.exec(fm)) !== null) {
+    refs.push({ id: m[1], title: m[2] });
+  }
+  return refs;
 }
 
 function extractSection(content: string, sectionName: string): DigestItem[] {
@@ -38,9 +58,11 @@ function extractSection(content: string, sectionName: string): DigestItem[] {
 export default function WeeklyDigest({ prefetchedContent }: { prefetchedContent?: string | null }) {
   const initTrends = prefetchedContent ? extractSection(prefetchedContent, "روندهای کلیدی") : [];
   const initOutlook = prefetchedContent ? extractSection(prefetchedContent, "چشم‌انداز هفته آینده") : [];
+  const initRefs = prefetchedContent ? extractStoryRefs(prefetchedContent) : [];
 
   const [trends, setTrends] = useState<DigestItem[]>(initTrends);
   const [outlook, setOutlook] = useState<DigestItem[]>(initOutlook);
+  const [storyRefs, setStoryRefs] = useState<StoryRef[]>(initRefs);
   const [loading, setLoading] = useState(!prefetchedContent);
   const [noData, setNoData] = useState(prefetchedContent === null && !prefetchedContent);
 
@@ -54,6 +76,7 @@ export default function WeeklyDigest({ prefetchedContent }: { prefetchedContent?
         if (!data.content || data.status === "no_data") { setNoData(true); return; }
         setTrends(extractSection(data.content, "روندهای کلیدی"));
         setOutlook(extractSection(data.content, "چشم‌انداز هفته آینده"));
+        setStoryRefs(extractStoryRefs(data.content));
       } catch {
         setNoData(true);
       } finally {
@@ -138,6 +161,24 @@ export default function WeeklyDigest({ prefetchedContent }: { prefetchedContent?
                     {item.description && <span className="text-slate-500 dark:text-slate-400"> — {item.description}</span>}
                   </p>
                 </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Source stories — spans both columns */}
+        {storyRefs.length > 0 && (
+          <div className="md:col-span-2 pt-2 border-t border-slate-200 dark:border-slate-700">
+            <p className="text-[12px] text-slate-400 dark:text-slate-500 mb-1.5">موضوعات این هفته:</p>
+            <div className="flex flex-wrap gap-x-3 gap-y-1">
+              {storyRefs.slice(0, 8).map((ref) => (
+                <Link
+                  key={ref.id}
+                  href={`/fa/stories/${ref.id}`}
+                  className="text-[12px] text-slate-400 dark:text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                >
+                  {ref.title.slice(0, 40)}{ref.title.length > 40 ? "…" : ""}
+                </Link>
               ))}
             </div>
           </div>
