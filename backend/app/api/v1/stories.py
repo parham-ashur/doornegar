@@ -88,7 +88,17 @@ async def trending_stories(
     result = await db.execute(
         select(Story)
         .options(selectinload(Story.articles).selectinload(Article.source))
-        .where(Story.article_count >= min_articles)
+        .where(
+            Story.article_count >= min_articles,
+            # Exclude stale tiny stories — 2-day half-life decay means
+            # 7-day-old 4-article stories score ~0.36. Threshold 0.5
+            # keeps large clusters visible while cutting old noise.
+            Story.trending_score > 0.5,
+            # Blindspots have their own dedicated section on the homepage.
+            # Keeping them out of trending prevents small one-sided stories
+            # from diluting the multi-sided feed.
+            Story.is_blindspot.is_(False),
+        )
         .order_by(Story.priority.desc(), Story.trending_score.desc())
         .limit(fetch_limit)
     )
