@@ -94,7 +94,12 @@ export default function StatsPanel({ analysis, storyId, articleCount, sourceCoun
             <VolumeX className="h-3.5 w-3.5 text-amber-500" />
             <h4 className="text-[14px] font-bold text-slate-900 dark:text-white">سکوت رسانه‌ای</h4>
           </div>
-          <p className="text-[14px] leading-5 text-amber-600 dark:text-amber-400">{silenceAnalysis}</p>
+          <p className="text-[14px] leading-5 text-amber-600 dark:text-amber-400">
+            {typeof silenceAnalysis === "string"
+              ? silenceAnalysis
+              : silenceAnalysis.hypothesis_fa
+                || `${silenceAnalysis.loud_count || 0} رسانهٔ ${silenceAnalysis.loud_side === "state" ? "محافظه‌کار" : "اپوزیسیون"} پوشش داده‌اند؛ رسانه‌های ${silenceAnalysis.silent_side === "state" ? "محافظه‌کار" : "اپوزیسیون"} سکوت کرده‌اند`}
+          </p>
         </div>
       )}
 
