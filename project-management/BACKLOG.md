@@ -35,6 +35,7 @@
 - [ ] **Set OpenAI hard spending limit** ($30/month) on platform.openai.com/usage
 - [ ] **Rotate exposed R2 API token** (shared in chat) after deployment works
 - [ ] Rotate Neon DB password, Upstash Redis password, Anthropic API key (shared in chat previously)
+- [x] **Custom domain `doornegar.org`** — Namecheap + Cloudflare free tier + Vercel custom domain. API via Cloudflare Worker at `api.doornegar.org`.
 - [ ] **Reconnect GitHub → Vercel auto-deploy hook** — currently disconnected, requires manual `vercel deploy --prod --yes` after every push
 - [ ] **Weekly Brief story links** — backend `niloofar_weekly.py` needs to emit story IDs so frontend can render clickable links under each subsection (P6 partial)
 - [ ] **Latin → Farsi digit consistency** — some story titles still use Latin digits (2055 vs ۲۰۵۵). Should be caught by Niloofar audits going forward

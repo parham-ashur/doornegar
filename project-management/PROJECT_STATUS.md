@@ -4,7 +4,8 @@
 
 ## 2026-04-16 highlights
 
-- **Homepage loads in ~3 seconds** (was ~10s). Parallelized SSR fetch waterfall, moved WeeklyDigest/WordsOfWeek to server-side props (0 client API calls post-hydration), `next/image` with AVIF/WebP + responsive srcset, batch `/stories/analyses?ids=` endpoint replaces ~30 round trips.
+- **Custom domain live: `doornegar.org`** — Cloudflare free tier (CDN, DDoS, bot protection, SSL). Frontend via Cloudflare → Vercel. API via Cloudflare Worker at `api.doornegar.org` → Railway. Domain registered on Namecheap (~€6.50/year).
+- **Homepage loads in ~3 seconds** (was ~10s). Parallelized SSR fetch waterfall, moved WeeklyDigest/WordsOfWeek to server-side props (0 client API calls post-hydration), `next/image` with AVIF/WebP + responsive srcset, batch `/stories/analyses?ids=` endpoint replaces ~30 round trips. ISR revalidate bumped to 30min/1hr — most users hit static CDN cache.
 - **Niloofar persona fully operational.** Writing style guide (Ashouri-style analytical prose, not literary memoir). Claude-driven workflow: gather JSON → analyze in chat → apply findings file. No OpenAI in the loop. Data-oriented editing principle: don't rewrite for beauty, only fix specific problems.
 - **P1–P7 bug fix sweep** completed: hero prefers balanced coverage, centroid validation for telegram analysis, source logo fallback for imageless stories, same-subject validation in number comparisons, subject-tagged key_claims, weekly brief bordered subsections, trending filter excludes stale/blindspot stories.
 - **6 story merges** (Islamabad talks hub: 121 articles from 5 duplicate clusters; Strait blockade hub: 18 articles from 3 clusters).
@@ -156,8 +157,10 @@ From local development DB, April 10, 2026:
 
 ### URLs
 
-- **Frontend (production)**: `https://frontend-tau-six-36.vercel.app`
-- **Backend API (production)**: `https://doornegar-production.up.railway.app`
+- **Frontend (production)**: `https://doornegar.org` (Cloudflare → Vercel; old URL `frontend-tau-six-36.vercel.app` still works)
+- **Backend API (production)**: `https://doornegar-production.up.railway.app` (SSR fetches directly; `api.doornegar.org` available via Cloudflare Worker for external access)
+- **Domain registrar**: Namecheap (`doornegar.org`, ~€6.50/year, auto-renew)
+- **DNS/CDN/WAF**: Cloudflare free tier (nameservers: kai.ns.cloudflare.com, martha.ns.cloudflare.com)
 - **R2 public URL**: `https://pub-65f981ecf095486aaea3482ec613d9b1.r2.dev`
 - **Local frontend**: http://localhost:3000
 - **Local backend**: http://localhost:8000
