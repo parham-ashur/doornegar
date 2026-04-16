@@ -128,9 +128,13 @@ export default async function HomePage({
   // iframe; it hides the mobile layout so the desktop layout renders alone.
   const sp = (await Promise.resolve(searchParams)) ?? {};
   const forceDesktop = sp.desktop === "1";
-  const [stories, blindspots] = await Promise.all([
+  // Stage 1: all independent fetches in parallel — trending, blindspots,
+  // weekly digest, and loaded words. None depend on story IDs.
+  const [stories, blindspots, weeklyDigestData, loadedWordsData] = await Promise.all([
     fetchAPI<StoryBrief[]>("/api/v1/stories/trending?limit=50").then(d => d || []),
     fetchAPI<StoryBrief[]>("/api/v1/stories/blindspots?limit=10").then(d => d || []),
+    fetchAPI<{ status: string; content?: string }>("/api/v1/stories/weekly-digest"),
+    fetchAPI<{ conservative: string[]; opposition: string[] }>("/api/v1/stories/insights/loaded-words"),
   ]);
 
   if (stories.length === 0) {
@@ -236,18 +240,21 @@ export default async function HomePage({
   for (const sec of sections) {
     for (const s of sec.stories) allIds.add(s.id);
   }
-  const allAnalyses = await fetchAnalysesBatch(Array.from(allIds));
+  // ── Parallel stage 2: analyses + telegram + hero telegram ──
+  // All of these need story IDs from stage 1 but are independent of
+  // each other. Running them in a single Promise.all cuts the critical
+  // path from 4 sequential stages (~5s) to 2 (~3s).
+  const telegramAnalysisIds = sorted.slice(0, 5).map(s => s.id);
+  const [allAnalyses, heroTelegram, ...telegramResults] = await Promise.all([
+    fetchAnalysesBatch(Array.from(allIds)),
+    hero ? fetchTelegramAnalysis(hero.id) : Promise.resolve(null),
+    ...telegramAnalysisIds.map(id => fetchTelegramAnalysis(id)),
+  ]);
 
-  // Backwards-compat shims: the existing render code reads summaries via
-  // allSummaries[id] (just the summary_fa string) and the richer narrative
-  // fields via allAnalyses[id]. Rebuild allSummaries out of the batch result.
   const allSummaries: Record<string, string | null> = {};
   for (const id of Array.from(allIds)) {
     allSummaries[id] = allAnalyses[id]?.summary_fa || null;
   }
-
-  // Fetch Telegram analysis for hero story
-  const heroTelegram = hero ? await fetchTelegramAnalysis(hero.id) : null;
 
   // Re-sort disputed candidates by dispute_score (higher = more disputed), falling back to pct gap
   const disputedResorted = [...disputedCandidates].sort((a, b) => {
@@ -261,11 +268,6 @@ export default async function HomePage({
   mostDisputed = disputedResorted[0] || null;
   secondDisputed = disputedResorted[1] || null;
 
-  // Prefetch telegram analyses server-side for homepage (no client API calls)
-  const telegramAnalysisIds = sorted.slice(0, 5).map(s => s.id);
-  const telegramResults = await Promise.all(
-    telegramAnalysisIds.map(id => fetchTelegramAnalysis(id))
-  );
   const prefetchedTelegram: { storyId: string; analysis: any }[] = [];
   telegramAnalysisIds.forEach((id, i) => {
     if (telegramResults[i]) prefetchedTelegram.push({ storyId: id, analysis: telegramResults[i] });
@@ -290,6 +292,7 @@ export default async function HomePage({
           allAnalyses={allAnalyses}
           heroTelegram={heroTelegram}
           prefetchedTelegram={prefetchedTelegram}
+          loadedWordsData={loadedWordsData}
         />
       )}
 
@@ -312,7 +315,7 @@ export default async function HomePage({
 
           {/* Words of the day — pushed to bottom */}
           <div className="shrink-0 pt-4 border-t border-slate-200 dark:border-slate-800">
-            <WordsOfWeek />
+            <WordsOfWeek prefetchedData={loadedWordsData} />
           </div>
         </div>
 
@@ -655,7 +658,7 @@ export default async function HomePage({
 
       {/* ═══ WEEKLY DIGEST ═══ */}
       <div className="py-8">
-        <WeeklyDigest />
+        <WeeklyDigest prefetchedContent={weeklyDigestData?.content || null} />
       </div>
 
       </div>
@@ -675,6 +678,7 @@ function MobileHome({
   allAnalyses,
   heroTelegram,
   prefetchedTelegram,
+  loadedWordsData,
 }: {
   hero: StoryBrief | undefined;
   stories: StoryBrief[];
@@ -685,6 +689,7 @@ function MobileHome({
   allAnalyses: Record<string, { bias_explanation_fa?: string; state_summary_fa?: string; diaspora_summary_fa?: string } | null>;
   heroTelegram: { discourse_summary?: string; predictions?: any[]; key_claims?: any[] } | null;
   prefetchedTelegram: { storyId: string; analysis: any }[];
+  loadedWordsData: { conservative?: any[]; opposition?: any[] } | null;
 }) {
   if (!hero) return null;
 
@@ -919,7 +924,7 @@ function MobileHome({
 
       {/* ── 6. Today's words — final section ── */}
       <div className="px-4 py-5">
-        <WordsOfWeek />
+        <WordsOfWeek prefetchedData={loadedWordsData} />
       </div>
     </div>
   );

@@ -35,13 +35,17 @@ function extractSection(content: string, sectionName: string): DigestItem[] {
     });
 }
 
-export default function WeeklyDigest() {
-  const [trends, setTrends] = useState<DigestItem[]>([]);
-  const [outlook, setOutlook] = useState<DigestItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [noData, setNoData] = useState(false);
+export default function WeeklyDigest({ prefetchedContent }: { prefetchedContent?: string | null }) {
+  const initTrends = prefetchedContent ? extractSection(prefetchedContent, "روندهای کلیدی") : [];
+  const initOutlook = prefetchedContent ? extractSection(prefetchedContent, "چشم‌انداز هفته آینده") : [];
+
+  const [trends, setTrends] = useState<DigestItem[]>(initTrends);
+  const [outlook, setOutlook] = useState<DigestItem[]>(initOutlook);
+  const [loading, setLoading] = useState(!prefetchedContent);
+  const [noData, setNoData] = useState(prefetchedContent === null && !prefetchedContent);
 
   useEffect(() => {
+    if (prefetchedContent !== undefined) return;
     async function fetchDigest() {
       try {
         const res = await fetch(`${API}/api/v1/stories/weekly-digest`);
@@ -57,7 +61,7 @@ export default function WeeklyDigest() {
       }
     }
     fetchDigest();
-  }, []);
+  }, [prefetchedContent]);
 
   if (loading) {
     return (

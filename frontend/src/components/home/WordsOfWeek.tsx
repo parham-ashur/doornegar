@@ -20,12 +20,17 @@ const FALLBACK_OPPOSITION = [
   { word: "بحران انسانی", count: 5 },
 ];
 
-export default function WordsOfWeek() {
-  const [conservativeWords, setConservativeWords] = useState(FALLBACK_CONSERVATIVE);
-  const [oppositionWords, setOppositionWords] = useState(FALLBACK_OPPOSITION);
-  const [loading, setLoading] = useState(true);
+export default function WordsOfWeek({ prefetchedData }: { prefetchedData?: { conservative?: any[]; opposition?: any[] } | null }) {
+  const [conservativeWords, setConservativeWords] = useState(
+    prefetchedData?.conservative?.length ? prefetchedData.conservative : FALLBACK_CONSERVATIVE
+  );
+  const [oppositionWords, setOppositionWords] = useState(
+    prefetchedData?.opposition?.length ? prefetchedData.opposition : FALLBACK_OPPOSITION
+  );
+  const [loading, setLoading] = useState(!prefetchedData);
 
   useEffect(() => {
+    if (prefetchedData) return;
     let cancelled = false;
     async function fetchWords() {
       try {
@@ -43,7 +48,7 @@ export default function WordsOfWeek() {
     }
     fetchWords();
     return () => { cancelled = true; };
-  }, []);
+  }, [prefetchedData]);
 
   const clean = (w: string) => w.replace(/[«»]/g, "");
   const pairs = Math.min(conservativeWords.length, oppositionWords.length, 5);
