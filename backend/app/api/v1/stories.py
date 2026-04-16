@@ -626,6 +626,16 @@ def _is_bad_image(url: str) -> bool:
     return any(p in lower for p in bad_patterns)
 
 
+_LATIN_TO_FARSI = str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹")
+
+
+def _to_farsi_digits(text: str | None) -> str | None:
+    """Convert Latin digits to Farsi digits in a string."""
+    if not text:
+        return text
+    return text.translate(_LATIN_TO_FARSI)
+
+
 def _story_brief_with_extras(story: Story) -> StoryBrief:
     """Build StoryBrief with image_url and coverage percentages.
 
@@ -640,6 +650,9 @@ def _story_brief_with_extras(story: Story) -> StoryBrief:
     from app.config import settings
 
     brief = StoryBrief.model_validate(story)
+
+    # Normalize Latin digits → Farsi in titles served to the frontend
+    brief.title_fa = _to_farsi_digits(brief.title_fa)
 
     # Manual override: Story ORM has no image_url column, so the curator's
     # override is stored inside the summary_en JSON blob as
