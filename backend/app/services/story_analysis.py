@@ -325,8 +325,8 @@ async def generate_story_analysis(
                 for text, ch_title, leaning in tg_posts:
                     lines.append(f"  [{ch_title} ({leaning})]: {(text or '')[:200]}")
                 lines.append("  از این پست‌ها برای تکمیل تحلیل منابع و شناسایی واژگان خاص هر طرف استفاده کن.\n")
-    except Exception:
-        pass  # Don't fail story analysis if telegram context fails
+    except Exception as e:
+        logger.warning("Telegram context enrichment failed for story analysis: %s", e)
 
     # Add raw articles (shorter since facts are already extracted)
     for i, art in enumerate(articles_with_sources, 1):

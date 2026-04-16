@@ -394,7 +394,7 @@ async def _call_openai(prompt: str) -> str:
         model=settings.bias_scoring_model,
         prompt=prompt,
         max_tokens=1024,
-        temperature=0.3,
+        temperature=0,
     )
     response = await client.chat.completions.create(**params)
     return response.choices[0].message.content

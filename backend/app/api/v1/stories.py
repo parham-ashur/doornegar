@@ -602,8 +602,8 @@ async def _bump_view_count(story_id: uuid.UUID) -> None:
                 .values(view_count=Story.view_count + 1)
             )
             await session.commit()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("view_count increment failed for story %s: %s", story_id, e)
 
 
 def _is_bad_image(url: str) -> bool:

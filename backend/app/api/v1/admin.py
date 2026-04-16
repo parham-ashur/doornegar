@@ -79,8 +79,8 @@ async def _get_maintenance_info(db: AsyncSession) -> dict:
             except (ValueError, AttributeError):
                 pass
             return info
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Could not read maintenance state file: %s", e)
 
     # ── 2. DB evidence (survives deploys) ───────────────────────────
     try:
@@ -112,8 +112,8 @@ async def _get_maintenance_info(db: AsyncSession) -> dict:
                 info["last_run"] = dt.isoformat()
                 info["last_result"] = "success"
                 info["next_run_approx"] = (dt + timedelta(hours=24)).isoformat()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Could not parse maintenance log file: %s", e)
 
     return info
 

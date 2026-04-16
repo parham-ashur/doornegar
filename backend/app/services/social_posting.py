@@ -32,8 +32,8 @@ def _load_posted() -> dict:
     if POSTED_FILE.exists():
         try:
             return json.loads(POSTED_FILE.read_text())
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("posted_stories.json unreadable (resetting): %s", e)
     return {p: [] for p in PLATFORMS}
 
 

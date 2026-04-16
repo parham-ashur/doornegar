@@ -1204,6 +1204,22 @@ async def cluster_articles(db: AsyncSession) -> dict:
     )
     unclustered_count = unclustered_result.scalar() or 0
 
+    # Orphans that aged past the 30-day window — these will never cluster again
+    # without a manual reset. Surface the number so ops can notice drift.
+    orphan_result = await db.execute(
+        select(func.count(Article.id)).where(
+            Article.story_id.is_(None),
+            Article.ingested_at < cutoff,
+        )
+    )
+    aged_orphans = orphan_result.scalar() or 0
+    if aged_orphans > 0:
+        logger.warning(
+            "%d articles have story_id=NULL and ingested >30d ago — "
+            "outside the clustering window; consider manual review",
+            aged_orphans,
+        )
+
     await db.commit()
 
     stats = {
@@ -1212,6 +1228,7 @@ async def cluster_articles(db: AsyncSession) -> dict:
         "new_stories_hidden": new_hidden,
         "merged": merged_count,
         "unclustered": unclustered_count,
+        "aged_orphans": aged_orphans,
     }
     logger.info(f"Incremental clustering complete: {stats}")
     return stats

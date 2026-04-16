@@ -197,7 +197,12 @@ async def ingest_all_sources(db: AsyncSession) -> dict:
     total_stats = {"found": 0, "new": 0, "errors": 0, "scraped": 0, "sources": len(sources)}
     for source in sources:
         logger.info(f"Ingesting source: {source.slug}")
-        source_stats = await ingest_source(source, db)
+        try:
+            source_stats = await ingest_source(source, db)
+        except Exception as e:
+            logger.exception(f"Source {source.slug} crashed during ingest: {e}")
+            total_stats["errors"] += 1
+            continue
         total_stats["found"] += source_stats["found"]
         total_stats["new"] += source_stats["new"]
         total_stats["errors"] += source_stats["errors"]

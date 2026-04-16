@@ -1,8 +1,10 @@
 """API endpoints for social media (Telegram) data."""
 
+import logging
 import uuid
+from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -18,7 +20,12 @@ from app.schemas.social import (
     TelegramPostResponse,
 )
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# Telegram discourse analysis is refreshed after this many hours; before that
+# the cached JSONB is served as-is. Admin `force_refresh=1` bypasses it.
+TELEGRAM_ANALYSIS_TTL_HOURS = 48
 
 
 @router.get("/channels", response_model=list[TelegramChannelResponse])
@@ -137,16 +144,43 @@ async def get_recent_posts(
     return [TelegramPostResponse.model_validate(p) for p in posts]
 
 
+def _cache_is_fresh(cached: dict | None) -> bool:
+    """True if the analysis dict has a cached_at stamp within the TTL window."""
+    if not cached:
+        return False
+    stamp = cached.get("cached_at")
+    if not stamp:
+        return False  # legacy cache without timestamp — treat as stale, re-run once
+    try:
+        dt = datetime.fromisoformat(stamp)
+    except (TypeError, ValueError):
+        return False
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - dt < timedelta(hours=TELEGRAM_ANALYSIS_TTL_HOURS)
+
+
 @router.get("/stories/{story_id}/telegram-analysis")
 async def get_telegram_analysis(
     story_id: uuid.UUID,
+    force_refresh: bool = Query(False, description="Admin: bypass cache TTL (requires ADMIN_TOKEN)"),
+    authorization: str = Header(""),
     db: AsyncSession = Depends(get_db),
 ):
     """Deep LLM analysis of Telegram discourse around a story.
 
-    Returns cached analysis if available, otherwise runs LLM analysis and caches it.
+    Returns cached analysis if fresh (< TELEGRAM_ANALYSIS_TTL_HOURS); otherwise
+    regenerates and caches. `force_refresh=1` bypasses the cache entirely and
+    requires a valid admin token.
     """
     from app.models.story import Story
+
+    if force_refresh:
+        # Admin-only bypass. Don't 500 if unauthed — just ignore the flag.
+        try:
+            await require_admin(authorization)
+        except HTTPException:
+            force_refresh = False
 
     # Channel stats — only non-media channels (analysts, commentators, aggregators)
     NON_MEDIA_TYPES = ("commentary", "aggregator", "activist", "political_party", "citizen")
@@ -164,24 +198,59 @@ async def get_telegram_analysis(
         channel_stats.append({"name": title, "type": ch_type, "posts": cnt})
     total_posts = sum(c["posts"] for c in channel_stats)
 
-    # Check for cached analysis first
+    # Serve from cache if fresh and not force-refreshing
     story_result = await db.execute(select(Story).where(Story.id == story_id))
     story = story_result.scalar_one_or_none()
-    if story and story.telegram_analysis:
-        return {"status": "ok", "analysis": story.telegram_analysis, "channels": channel_stats, "total_posts": total_posts}
+    if story and not force_refresh and _cache_is_fresh(story.telegram_analysis):
+        return {
+            "status": "ok",
+            "analysis": story.telegram_analysis,
+            "channels": channel_stats,
+            "total_posts": total_posts,
+            "cached": True,
+        }
 
-    # No cache — run analysis and store
+    # Cache is stale/missing — regenerate
     from app.services.telegram_analysis import analyze_story_telegram
     result = await analyze_story_telegram(db, str(story_id))
     if result is None:
         return {"status": "no_data", "message": "Not enough Telegram posts for analysis", "channels": channel_stats, "total_posts": total_posts}
 
-    # Cache in DB
+    # Stamp with cache time so future reads can check freshness
+    result["cached_at"] = datetime.now(timezone.utc).isoformat()
+
     if story:
         story.telegram_analysis = result
         await db.commit()
 
-    return {"status": "ok", "analysis": result, "channels": channel_stats, "total_posts": total_posts}
+    return {
+        "status": "ok",
+        "analysis": result,
+        "channels": channel_stats,
+        "total_posts": total_posts,
+        "cached": False,
+    }
+
+
+@router.post(
+    "/stories/{story_id}/telegram-analysis/invalidate",
+    dependencies=[Depends(require_admin)],
+)
+async def invalidate_telegram_analysis(
+    story_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin: clear the cached Telegram analysis for a story. Next visitor regenerates."""
+    from app.models.story import Story
+
+    result = await db.execute(select(Story).where(Story.id == story_id))
+    story = result.scalar_one_or_none()
+    if not story:
+        raise HTTPException(status_code=404, detail="Story not found")
+    story.telegram_analysis = None
+    await db.commit()
+    logger.info("Admin invalidated Telegram cache for story %s", story_id)
+    return {"status": "ok", "story_id": str(story_id)}
 
 
 @router.get("/stories/{story_id}/sentiment/history", response_model=list[SocialSentimentResponse])
