@@ -6,23 +6,35 @@ import type { StoryAnalysis } from "@/lib/types";
 import { toFa } from "@/lib/utils";
 import StoryTelegramSection from "./StoryTelegramSection";
 
-export default function StatsPanel({ analysis, storyId, articleCount, sourceCount, containerId = "telegram" }: { analysis: StoryAnalysis | null; storyId?: string; articleCount?: number; sourceCount?: number; containerId?: string }) {
-  // Read URL params synchronously for initial state
-  const isTelegramLink = typeof window !== "undefined" && window.location.hash === "#telegram";
-  const urlParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
-  const initialTab = urlParams?.get("tg") || null;
-  const highlightText = urlParams?.get("hl") ? decodeURIComponent(urlParams.get("hl")!) : null;
-
-  const [showTelegram, setShowTelegram] = useState(isTelegramLink);
+export default function StatsPanel({
+  analysis,
+  storyId,
+  articleCount,
+  sourceCount,
+  containerId = "telegram",
+  initialTab = null,
+  highlightText = null,
+}: {
+  analysis: StoryAnalysis | null;
+  storyId?: string;
+  articleCount?: number;
+  sourceCount?: number;
+  containerId?: string;
+  initialTab?: string | null;
+  highlightText?: string | null;
+}) {
+  const hasTelegramIntent = !!(initialTab || highlightText);
+  const [showTelegram, setShowTelegram] = useState(hasTelegramIntent);
 
   useEffect(() => {
-    if (isTelegramLink) {
+    if (hasTelegramIntent) {
       setShowTelegram(true);
-      setTimeout(() => {
-        document.getElementById(containerId)?.scrollIntoView({ behavior: "smooth", block: "start" });
-      }, 800);
+      return;
     }
-  }, [isTelegramLink, containerId]);
+    if (typeof window !== "undefined" && window.location.hash === "#telegram") {
+      setShowTelegram(true);
+    }
+  }, [hasTelegramIntent]);
 
   const stateFraming = analysis?.scores?.state?.framing;
   const diasporaFraming = analysis?.scores?.diaspora?.framing;
@@ -64,7 +76,7 @@ export default function StatsPanel({ analysis, storyId, articleCount, sourceCoun
             </div>
             <button onClick={() => setShowTelegram(false)} className="text-[13px] text-slate-400 hover:text-slate-600">بستن</button>
           </div>
-          <StoryTelegramSection storyId={storyId!} initialTab={initialTab} highlightText={highlightText} />
+          <StoryTelegramSection storyId={storyId!} initialTab={initialTab} highlightText={highlightText} scrollTargetId={containerId} />
         </div>
       )}
 

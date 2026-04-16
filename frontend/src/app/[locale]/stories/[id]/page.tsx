@@ -37,10 +37,15 @@ export async function generateMetadata({
 
 export default async function StoryDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ locale: string; id: string }>;
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
   const { locale, id } = await params;
+  const sp = await searchParams;
+  const tgParam = typeof sp.tg === "string" ? sp.tg : null;
+  const hlParam = typeof sp.hl === "string" ? sp.hl : null;
   setRequestLocale(locale);
 
   // Fetch story, analysis, and sources in parallel (no waterfall)
@@ -160,6 +165,8 @@ export default async function StoryDetailPage({
               articleCount={story.article_count}
               sourceCount={story.source_count}
               containerId="telegram-mobile"
+              initialTab={tgParam}
+              highlightText={hlParam}
             />
           </div>
 
@@ -178,7 +185,14 @@ export default async function StoryDetailPage({
         {/* LEFT column (desktop sidebar only): stats → spectrum. Hidden on
             mobile because the same StatsPanel is rendered inline above. */}
         <div className="hidden lg:block lg:pr-6 lg:sticky lg:top-4 space-y-6" id="story-sidebar">
-          <StatsPanel analysis={analysis} storyId={id} articleCount={story.article_count} sourceCount={story.source_count} />
+          <StatsPanel
+            analysis={analysis}
+            storyId={id}
+            articleCount={story.article_count}
+            sourceCount={story.source_count}
+            initialTab={tgParam}
+            highlightText={hlParam}
+          />
 
           {/* Political spectrum — desktop only */}
           {coveringSources.length > 0 && (
