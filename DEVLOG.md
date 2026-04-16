@@ -1,5 +1,36 @@
 # Doornegar Development Log
 
+## 2026-04-15 / 16 — Niloofar persona, performance optimization, bug fix sweep (P1–P7)
+
+### Key outcomes
+- **Niloofar writing style** defined via writing samples analysis → `.claude/agents/niloofar.md` + `~/.claude/output-styles/farsi-niloofar.md`. Iterated from literary-memoir (Khorramshahi-style) → analytical-essayist (Ashouri-style) → data-oriented copy-editor. Final principle: "edit and improve, don't replace."
+- **Niloofar workflow: Claude-driven, no OpenAI.** `journalist_audit.py` restructured into gather (JSON dump) + apply-from (findings file). Claude reads the JSON in-conversation, writes findings, applies. Legacy `--llm` flag still available but not default.
+- **Full Niloofar audit** (P7): 6 merges (Islamabad talks: 4 duplicates → 1 hub with 121 articles; Strait blockade: 3 → 1 hub with 18 articles), 3 title rewrites, «شهید» → «کشته» for editorial neutrality, Press TV meta-story hidden.
+- **Homepage performance: 9.9s → 3.0s** (3.3× faster). Root cause: 4-stage sequential SSR waterfall. Fix: parallelized fetch stages + moved WeeklyDigest/WordsOfWeek to server-side props (0 client API calls).
+- **`next/image` migration** — SafeImage rewritten on `next/image` fill mode with AVIF/WebP, responsive srcset, priority preload for hero. ~5-10× fewer image bytes on mobile.
+- **Batch analyses endpoint** — `GET /stories/analyses?ids=a,b,c` replaces ~30 parallel round trips with 1.
+- **Revalidate TTLs** bumped: trending 30→300s, analyses 60/120→600s.
+- **Mobile homepage restructured** — hero now shows both-side bias comparison + telegram predictions/claims (matching desktop). Section order: hero → telegram → blindspot → most visited → last days → today's words.
+- **Mobile story detail restructured** — narratives → telegram → narrative development → stats → articles. Desktop sidebar hidden on mobile, StatsPanel rendered inline.
+- **P1: Hero selection** now prefers balanced stories (state_pct ≥5% AND diaspora_pct ≥5%). Telegram analysis centroid validation fixed (float*None crash).
+- **P2: Image fallback** — source logo used when no article has an image.
+- **P4/P5: Prompt fixes** — cross-narrative comparisons require same-subject validation; key_claims now subject-tagged.
+- **P6: Weekly Brief** subsections wrapped in bordered containers.
+- **Trending filter** — excludes stale stories (score <0.5) and blindspots from the feed.
+- **3 new sources/channels**: HRA-News (RSS), @ettelaatonline, @kayhan_online. 1 new analyst: @Naghal_bashi.
+- **`update_image` fix** — was a silent no-op for months (Story ORM has no image_url column). Now stores manual override in `summary_en` JSON blob.
+- **`is_edited` guards** added to `step_story_quality` and `step_quality_postprocess` — prevents nightly pipeline from clobbering hand-edited titles/narratives.
+- **Telegram CDN URLs blacklisted** in image scorer (auth tokens expire → 404 covers).
+- **Playwright verify script** committed at `frontend/verify_homepage.mjs`.
+
+### Open items for next session
+- Cloudflare CDN in front of Railway (Phase 6) — biggest remaining perf win after the 3s baseline
+- Weekly Brief story links (needs backend change: niloofar_weekly.py to emit story IDs)
+- Latin → Farsi digit consistency in some story titles
+- Further Niloofar audit refinement after observing the data-oriented principle in practice
+
+---
+
 ## 2026-04-14 / 15 — Editor dashboard, mobile stories iteration, maintenance pipeline recovery
 
 ### Key outcomes

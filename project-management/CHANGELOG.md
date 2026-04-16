@@ -4,6 +4,55 @@ All notable changes to the Doornegar project are documented here, organized by w
 
 ---
 
+## April 15-16, 2026
+
+### Niloofar Persona
+- Writing style guide created from Farsi writing samples analysis. Iterated through three versions: literary-memoir → analytical-essayist → data-oriented copy-editor.
+- Style guide stored in `~/.claude/output-styles/farsi-niloofar.md`, `.claude/agents/niloofar.md`, and embedded in `journalist_audit.py` prompt.
+- `journalist_audit.py` restructured into 3 modes: `--gather` (default, JSON dump, no LLM), `--apply-from FILE` (findings file), `--llm` (legacy OpenAI). Default workflow is Claude-driven.
+- `apply_fix` extended with `update_narratives` (writes bias_explanation_fa + state_summary_fa + diaspora_summary_fa to summary_en JSON blob), `is_edited=true` flip on all fix types.
+- Editing principles added: "don't rewrite for beauty", "stay data-oriented", "smallest change that fixes the specific problem".
+
+### Homepage Performance (9.9s → 3.0s)
+- `SafeImage` migrated to `next/image` fill mode: AVIF/WebP, responsive srcset, `priority` on hero images.
+- New `GET /api/v1/stories/analyses?ids=a,b,c` batch endpoint — replaces ~30 parallel `/stories/{id}/analysis` calls with 1 round trip.
+- SSR fetch waterfall parallelized: stages 2-4 (analyses + telegram) now run in single `Promise.all`.
+- WeeklyDigest + WordsOfWeek moved from client-side fetch to server-rendered props (0 post-hydration API calls).
+- Revalidate TTLs: trending 30→300s, analyses 60/120→600s, telegram 300→600s.
+
+### Mobile Layout
+- Mobile homepage restructured: hero → telegram → blindspot → most visited → last days → today's words.
+- Hero now shows both-side bias comparison + telegram predictions/claims (matching desktop).
+- Mobile story detail: narratives → telegram → narrative development → stats → articles. Desktop sidebar hidden on mobile, StatsPanel rendered inline with `containerId` prop to avoid duplicate DOM IDs.
+
+### Bug Fixes (P1–P7)
+- **P1**: Hero selection prefers balanced coverage (state_pct ≥5% AND diaspora_pct ≥5%). Centroid validation in `_get_cross_story_context` (was crashing with float*None). Telegram analysis regenerated for hero story.
+- **P2**: Source logo fallback in `_story_brief_with_extras` when no article has an image.
+- **P4**: Story analysis + telegram analysis prompts now require same-subject validation before number comparisons.
+- **P5**: key_claims in telegram analysis now require "موضوع: [subject]" prefix for same-topic pairing.
+- **P6**: Weekly Brief subsections wrapped in bordered containers with header dividers.
+- **P7**: Trending endpoint filters out stale stories (score <0.5) and blindspots. Press TV meta-story hidden. 6 story merges (Islamabad: 5→1, Strait: 3→1). «شهید» → «کشته» for neutrality.
+
+### Image System Fixes
+- `update_image` was a silent no-op (Story ORM has no image_url column). Override now stored as `manual_image_url` in summary_en JSON blob, read by `_story_brief_with_extras` when is_edited=true.
+- Telegram CDN URLs (`telesco.pe`, `cdn.telegram`) added to bad-image blacklist (auth tokens expire → 404).
+- Ceasefire hero image upgraded from 240×134 thumbnail to 1000×563 full-res via manual_image_url override.
+
+### Maintenance Pipeline Guards
+- `step_story_quality` and `step_quality_postprocess` now skip `is_edited=true` stories (was a latent bug — nightly pipeline could clobber hand-edited titles/narratives).
+- `apply_fix` merge handler: re-points TelegramPost.story_id to target (FK fix), preserves summary_fa/telegram_analysis on is_edited targets.
+
+### New Sources & Analysts
+- **HRA-News** (خبرگزاری فعالان حقوق بشر) added as RSS source. state_alignment=diaspora, RSS at `/feed/`.
+- **@ettelaatonline** (روزنامه اطلاعات) added as Telegram channel. political_leaning=pro_regime.
+- **@kayhan_online** (کیهان آنلاین) added as Telegram channel. political_leaning=pro_regime.
+- **@Naghal_bashi** (نقال‌باشی) added as Analyst. political_leaning=independent.
+
+### Tooling
+- `frontend/verify_homepage.mjs` — Playwright script for browser verification (mobile viewport, image dimensions, section ordering).
+
+---
+
 ## April 14-15, 2026
 
 ### Story editor dashboard (new)

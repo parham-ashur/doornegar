@@ -280,13 +280,18 @@ doornegar/
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/health` | Health check |
-| GET | `/api/v1/sources` | List all 18 news sources |
+| GET | `/api/v1/sources` | List all 24 news sources |
 | GET | `/api/v1/sources/{slug}` | Single source details |
 | GET | `/api/v1/articles` | List articles (paginated, filterable) |
 | GET | `/api/v1/stories` | List stories (paginated) |
-| GET | `/api/v1/stories/trending` | Top trending stories |
+| GET | `/api/v1/stories/trending` | Top trending stories (filters: score >0.5, not blindspot) |
 | GET | `/api/v1/stories/blindspots` | Stories with one-sided coverage |
+| GET | `/api/v1/stories/analyses?ids=a,b,c` | Batch-fetch story analyses (up to 60, replaces N parallel calls) |
 | GET | `/api/v1/stories/{id}` | Story detail with all articles + bias |
+| GET | `/api/v1/stories/{id}/analysis` | Single story analysis (cached in summary_en JSON blob) |
+| GET | `/api/v1/stories/weekly-digest` | Latest weekly editorial digest |
+| GET | `/api/v1/stories/insights/loaded-words` | Aggregated loaded vocabulary across trending stories |
+| GET | `/api/v1/social/stories/{id}/telegram-analysis` | Deep Telegram discourse analysis (two-pass) |
 
 ### Admin endpoints (pipeline control)
 

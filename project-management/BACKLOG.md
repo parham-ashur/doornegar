@@ -1,6 +1,23 @@
 # Doornegar - Backlog
 
-**Last updated**: 2026-04-15 (post editor dashboard + maintenance recovery + Telegram on Railway)
+**Last updated**: 2026-04-16 (Niloofar persona + performance + P1–P7 bug sweep)
+
+## Done this session (2026-04-15/16)
+- [x] **Niloofar writing style** — defined, iterated 3 versions, agent file + output style + prompt all aligned
+- [x] **Niloofar Claude-driven workflow** — gather JSON → analyze in chat → apply findings. No OpenAI.
+- [x] **Homepage performance 9.9s → 3.0s** — parallelized SSR, batch analyses, server-side WeeklyDigest/WordsOfWeek, next/image
+- [x] **Mobile homepage restructured** — hero with bias+telegram, section reorder (telegram → blindspot → most visited → last days → words)
+- [x] **Mobile story detail restructured** — narratives → telegram → dev → stats → articles
+- [x] **P1: Hero balanced coverage** + centroid validation fix + telegram analysis regenerated
+- [x] **P2: Source logo fallback** for imageless stories
+- [x] **P4: Same-subject validation** in number comparison prompts
+- [x] **P5: Subject-tagged key_claims** for same-topic pairing
+- [x] **P6: Weekly Brief** bordered subsections
+- [x] **P7: Trending filter** (stale + blindspot exclusion), 6 merges, neutral title, Press TV hidden
+- [x] **update_image fix** — was silent no-op, now writes to summary_en blob
+- [x] **is_edited guards** on step_story_quality + step_quality_postprocess
+- [x] **3 new sources/channels** (HRA-News, @ettelaatonline, @kayhan_online) + 1 analyst (@Naghal_bashi)
+- [x] **Playwright verify script** committed
 
 ## Done this session (2026-04-14/15)
 - [x] **Story editor dashboard** — `/fa/dashboard/edit-stories` with search + is_edited flag protecting manual edits from regeneration
@@ -18,7 +35,9 @@
 - [ ] **Set OpenAI hard spending limit** ($30/month) on platform.openai.com/usage
 - [ ] **Rotate exposed R2 API token** (shared in chat) after deployment works
 - [ ] Rotate Neon DB password, Upstash Redis password, Anthropic API key (shared in chat previously)
-- [ ] **Reconnect GitHub → Vercel auto-deploy hook** — currently disconnected (14h stale), requires manual `vercel deploy --prod --yes` after every push
+- [ ] **Reconnect GitHub → Vercel auto-deploy hook** — currently disconnected, requires manual `vercel deploy --prod --yes` after every push
+- [ ] **Weekly Brief story links** — backend `niloofar_weekly.py` needs to emit story IDs so frontend can render clickable links under each subsection (P6 partial)
+- [ ] **Latin → Farsi digit consistency** — some story titles still use Latin digits (2055 vs ۲۰۵۵). Should be caught by Niloofar audits going forward
 
 ### Security & Operations
 - [ ] **Cloudflare CDN/WAF in front of Railway** — single biggest security win

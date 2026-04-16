@@ -1,6 +1,18 @@
 # Doornegar - Project Status
 
-**Last updated**: 2026-04-15 (editor dashboard + maintenance recovery + Telegram on Railway)
+**Last updated**: 2026-04-16 (Niloofar persona + performance 9.9s→3.0s + P1–P7 bug sweep)
+
+## 2026-04-16 highlights
+
+- **Homepage loads in ~3 seconds** (was ~10s). Parallelized SSR fetch waterfall, moved WeeklyDigest/WordsOfWeek to server-side props (0 client API calls post-hydration), `next/image` with AVIF/WebP + responsive srcset, batch `/stories/analyses?ids=` endpoint replaces ~30 round trips.
+- **Niloofar persona fully operational.** Writing style guide (Ashouri-style analytical prose, not literary memoir). Claude-driven workflow: gather JSON → analyze in chat → apply findings file. No OpenAI in the loop. Data-oriented editing principle: don't rewrite for beauty, only fix specific problems.
+- **P1–P7 bug fix sweep** completed: hero prefers balanced coverage, centroid validation for telegram analysis, source logo fallback for imageless stories, same-subject validation in number comparisons, subject-tagged key_claims, weekly brief bordered subsections, trending filter excludes stale/blindspot stories.
+- **6 story merges** (Islamabad talks hub: 121 articles from 5 duplicate clusters; Strait blockade hub: 18 articles from 3 clusters).
+- **Editorial neutrality**: «شهید» → «کشته» in Lebanon casualties title.
+- **3 new sources/channels**: HRA-News (RSS, opposition), @ettelaatonline (conservative), @kayhan_online (conservative). 1 new analyst: @Naghal_bashi.
+- **`update_image` fixed** — was a silent no-op since Story ORM has no image_url column. Override now stored in summary_en JSON blob.
+- **`is_edited` guards** on step_story_quality and step_quality_postprocess prevent nightly pipeline from clobbering hand-edited content.
+- **Active sources: 24** (was 23; added HRA-News).
 
 ## 2026-04-15 highlights
 
@@ -87,18 +99,26 @@ Doornegar (دورنگر) is a free, bilingual (Persian/English) media transparen
 
 ### What needs work
 
-- Cloudflare CDN/WAF not yet in front of Railway backend (biggest security win remaining)
+- Cloudflare CDN/WAF not yet in front of Railway backend — remaining ~3s load time is Railway API latency from Europe; Cloudflare would cache backend responses at edge
 - UptimeRobot / monitoring not configured
 - Custom domain not yet purchased
 - OpenAI hard spending limit not yet set
-- Image quality threshold might need tuning (currently 120×80)
 - State media RSS feeds geo-blocked — relying on Telegram as workaround
-- Existing oversized clusters (pre-size-ceiling) may still exist — need manual cleanup via "Unclaim story articles" dashboard button when spotted
-- ~2,000 articles still have `localhost:8000` image URLs (dev-only leftovers). Fix: click "Null localhost image URLs" on dashboard then Run Maintenance a few times to let `step_fix_images` re-fetch from source URLs
-- Bias scoring catching up — priority scoring now focuses on visible stories (100/run cap)
-- Analyst database not yet seeded — need to add Iranian political commentators for AnalystTake extraction
-- Intelligence features (silence, coordination, narrative arc, delta) generate data but no frontend display yet
-- Prediction verification needs analyst takes seeded first to have data to verify
+- ~2,000 articles still have `localhost:8000` image URLs (dev-only leftovers). Fix: click "Null localhost image URLs" on dashboard then Run Maintenance
+- Weekly Brief story links need backend change (niloofar_weekly.py → emit story IDs)
+- Latin → Farsi digit consistency in some story titles
+- Intelligence features (silence, coordination, narrative arc, delta) generate data but only show in StatsPanel on story detail page — no dedicated frontend views yet
+- Reconnect GitHub → Vercel auto-deploy hook (currently manual `vercel deploy --prod --yes` after pushes)
+
+### What was fixed this session (2026-04-16)
+
+- ~~Homepage load 10s~~ → 3s (parallelized SSR, batch analyses, next/image, server-rendered WeeklyDigest/WordsOfWeek)
+- ~~Image quality bugs~~ → next/image AVIF/WebP + manual override via summary_en blob + source logo fallback + Telegram CDN blacklist
+- ~~Analyst database empty~~ → 17 analysts seeded (added @Naghal_bashi)
+- ~~update_image silent no-op~~ → stores in summary_en JSON blob, read by _story_brief_with_extras
+- ~~Nightly pipeline clobbers hand-edits~~ → is_edited guards on step_story_quality + step_quality_postprocess
+- ~~Misleading cross-narrative comparisons~~ → same-subject validation in prompts
+- ~~Stale/blindspot stories in trending~~ → score >0.5 + is_blindspot=false filters
 
 ## Data Metrics
 
@@ -106,12 +126,12 @@ From local development DB, April 10, 2026:
 
 | Metric | Count |
 |--------|-------|
-| News sources | 28 |
+| News sources | 24 active (28 total, 4 deactivated) |
 | Articles ingested | ~1,300+ |
 | Stories (visible, ≥2 sources) | 294 |
 | Stories with AI summaries | 247 |
 | Images stored in R2 | 765 |
-| Telegram channels tracked | 16 |
+| Telegram channels tracked | 18 (added @ettelaatonline, @kayhan_online) |
 | Media dimension scores | 28 sources × 8 dimensions |
 
 ## Infrastructure
