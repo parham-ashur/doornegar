@@ -150,7 +150,13 @@ async def _get_cross_story_context(db: AsyncSession, story_id: str) -> str:
 
     related = []
     for s in candidates:
-        sim = cosine_similarity(story.centroid_embedding, s.centroid_embedding)
+        c = s.centroid_embedding
+        if not isinstance(c, list) or not c or any(v is None for v in c):
+            continue
+        try:
+            sim = cosine_similarity(story.centroid_embedding, c)
+        except (TypeError, ValueError):
+            continue
         if sim > 0.5:
             related.append((sim, s))
 
