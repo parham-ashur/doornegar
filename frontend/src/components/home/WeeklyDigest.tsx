@@ -98,11 +98,11 @@ export default function WeeklyDigest() {
         <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
       </div>
 
-      <div className="px-5 pb-5 pt-3 grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="px-5 pb-5 pt-3 grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Trends */}
         {trends.length > 0 && (
-          <div>
-            <div className="flex items-center gap-1.5 mb-3">
+          <div className="border border-slate-200 dark:border-slate-700 p-4">
+            <div className="flex items-center gap-1.5 mb-3 pb-2 border-b border-slate-200 dark:border-slate-700">
               <TrendingUp className="h-3.5 w-3.5 text-blue-500" />
               <h4 className="text-[14px] font-black text-slate-900 dark:text-white">روندهای کلیدی</h4>
             </div>
@@ -121,8 +121,8 @@ export default function WeeklyDigest() {
 
         {/* Outlook */}
         {outlook.length > 0 && (
-          <div>
-            <div className="flex items-center gap-1.5 mb-3">
+          <div className="border border-slate-200 dark:border-slate-700 p-4">
+            <div className="flex items-center gap-1.5 mb-3 pb-2 border-b border-slate-200 dark:border-slate-700">
               <Compass className="h-3.5 w-3.5 text-emerald-500" />
               <h4 className="text-[14px] font-black text-slate-900 dark:text-white">چشم‌انداز هفته آینده</h4>
             </div>
