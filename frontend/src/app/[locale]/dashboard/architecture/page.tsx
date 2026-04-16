@@ -4,8 +4,6 @@ import { useEffect, useState } from "react";
 import { ArrowLeft, Database, Globe, Server, Cpu, MessageSquare, Brain, Newspaper, Users, Shield, ChevronDown, ChevronUp } from "lucide-react";
 import Link from "next/link";
 
-const ADMIN_PASS = "doornegar2026";
-
 interface ComponentInfo {
   id: string;
   name: string;
@@ -302,7 +300,7 @@ export default function ArchitecturePage() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    if (typeof window !== "undefined" && localStorage.getItem("doornegar_admin") === "true") {
+    if (typeof window !== "undefined" && localStorage.getItem("doornegar_admin_token")) {
       setAuthed(true);
     }
   }, []);

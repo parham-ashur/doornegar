@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.api.v1.admin import require_admin
 from app.database import get_db
 from app.models.social import SocialSentimentSnapshot, TelegramChannel, TelegramPost
 from app.schemas.social import (
@@ -35,7 +36,7 @@ async def list_channels(
     return [TelegramChannelResponse.model_validate(c) for c in channels]
 
 
-@router.post("/channels", response_model=TelegramChannelResponse)
+@router.post("/channels", response_model=TelegramChannelResponse, dependencies=[Depends(require_admin)])
 async def add_channel(
     channel: TelegramChannelCreate,
     db: AsyncSession = Depends(get_db),

@@ -40,9 +40,11 @@ export default function EditStoriesPage() {
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      if (localStorage.getItem("doornegar_admin") === "true") setAuthed(true);
       const token = localStorage.getItem("doornegar_admin_token");
-      if (token) setAdminToken(token);
+      if (token) {
+        setAdminToken(token);
+        setAuthed(true);
+      }
     }
   }, []);
 
@@ -162,28 +164,18 @@ export default function EditStoriesPage() {
     }
   };
 
-  // Login gate
+  // Login gate — requires backend ADMIN_TOKEN
   if (!authed) {
     return (
       <div dir="rtl" className="mx-auto max-w-md p-6">
         <h1 className="mb-4 text-2xl font-bold text-slate-900 dark:text-white">
           ویرایش داستان‌ها
         </h1>
-        <p className="mb-4 text-sm text-slate-500">رمز مدیریت را وارد کنید</p>
-        <input
-          type="password"
-          className="w-full rounded border border-slate-300 bg-white p-3 text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-          placeholder="Admin password"
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              const v = (e.target as HTMLInputElement).value;
-              if (v === process.env.NEXT_PUBLIC_DASHBOARD_PASS || v === "doornegar2026") {
-                localStorage.setItem("doornegar_admin", "true");
-                setAuthed(true);
-              }
-            }
-          }}
-        />
+        <p className="mb-4 text-sm text-slate-500">
+          برای دسترسی به داشبورد ابتدا از صفحه{" "}
+          <a href="./" className="underline">اصلی داشبورد</a>{" "}
+          توکن مدیریت را وارد کنید.
+        </p>
       </div>
     );
   }

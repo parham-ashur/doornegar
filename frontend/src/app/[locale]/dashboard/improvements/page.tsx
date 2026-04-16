@@ -84,9 +84,11 @@ export default function ImprovementsAdminPage() {
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      if (localStorage.getItem("doornegar_admin") === "true") setAuthed(true);
       const token = localStorage.getItem("doornegar_admin_token");
-      if (token) setAdminToken(token);
+      if (token) {
+        setAdminToken(token);
+        setAuthed(true);
+      }
     }
   }, []);
 

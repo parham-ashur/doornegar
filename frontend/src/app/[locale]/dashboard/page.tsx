@@ -107,11 +107,11 @@ function StatCard({ icon, label, value, sub, iconBg }: { icon: React.ReactNode; 
   );
 }
 
-const ADMIN_PASS = "doornegar2026";
-
 export default function DashboardPage() {
   const [authed, setAuthed] = useState(false);
-  const [passInput, setPassInput] = useState("");
+  const [tokenInput, setTokenInput] = useState("");
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authChecking, setAuthChecking] = useState(false);
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -120,11 +120,11 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      if (localStorage.getItem("doornegar_admin") === "true") {
+      const token = localStorage.getItem("doornegar_admin_token");
+      if (token) {
+        setAdminToken(token);
         setAuthed(true);
       }
-      const token = localStorage.getItem("doornegar_admin_token");
-      if (token) setAdminToken(token);
     }
   }, []);
 
@@ -441,26 +441,49 @@ export default function DashboardPage() {
     return (
       <div className="mx-auto max-w-sm px-4 py-24">
         <h1 className="text-xl font-bold text-slate-900 dark:text-white mb-4">Admin Dashboard</h1>
-        <p className="text-sm text-slate-500 mb-4">Enter admin password to access the dashboard.</p>
-        <form onSubmit={(e) => {
+        <p className="text-sm text-slate-500 mb-4">Paste the backend <code>ADMIN_TOKEN</code> (from Railway env).</p>
+        <form onSubmit={async (e) => {
           e.preventDefault();
-          if (passInput === ADMIN_PASS) {
-            localStorage.setItem("doornegar_admin", "true");
-            setAuthed(true);
-          } else {
-            alert("Wrong password");
+          const candidate = tokenInput.trim();
+          if (!candidate) return;
+          setAuthChecking(true);
+          setAuthError(null);
+          try {
+            const res = await fetch(`${API}/api/v1/admin/dashboard`, {
+              headers: { Authorization: `Bearer ${candidate}` },
+            });
+            if (res.ok) {
+              localStorage.setItem("doornegar_admin_token", candidate);
+              setAdminToken(candidate);
+              setAuthed(true);
+            } else if (res.status === 401 || res.status === 403) {
+              setAuthError("Invalid token");
+            } else {
+              setAuthError(`Unexpected response: HTTP ${res.status}`);
+            }
+          } catch (err: any) {
+            setAuthError(err?.message || "Network error");
           }
+          setAuthChecking(false);
         }}>
           <input
             type="password"
-            value={passInput}
-            onChange={(e) => setPassInput(e.target.value)}
-            placeholder="Password"
+            value={tokenInput}
+            onChange={(e) => setTokenInput(e.target.value)}
+            placeholder="ADMIN_TOKEN"
+            autoComplete="off"
             className="w-full border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white px-3 py-2 text-sm mb-3 focus:outline-none focus:border-blue-500"
           />
-          <button type="submit" className="w-full bg-slate-900 dark:bg-white text-white dark:text-slate-900 py-2 text-sm font-medium hover:opacity-90">
-            Access Dashboard
+          <button
+            type="submit"
+            disabled={authChecking || !tokenInput.trim()}
+            className="w-full bg-slate-900 dark:bg-white text-white dark:text-slate-900 py-2 text-sm font-medium hover:opacity-90 disabled:opacity-50"
+          >
+            {authChecking ? "Verifying…" : "Access Dashboard"}
           </button>
+          {authError && (
+            <p className="mt-3 text-sm text-red-500">{authError}</p>
+          )}
         </form>
       </div>
     );
