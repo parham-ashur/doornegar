@@ -13,9 +13,9 @@ const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 // minute. Every miss is a round trip from Vercel (US or EU) to Railway in the
 // US, so bumping these from 30/60/120 to 300/600/600 cuts origin pressure
 // dramatically without noticeably aging the content.
-const TRENDING_TTL = 300;        // 5 min for trending + blindspots
-const ANALYSIS_TTL = 600;        // 10 min for per-story narratives
-const TELEGRAM_TTL = 600;        // 10 min for telegram analysis
+const TRENDING_TTL = 1800;       // 30 min — pipeline runs daily, stories don't change faster
+const ANALYSIS_TTL = 3600;       // 1 hour — narratives/bias are stable once generated
+const TELEGRAM_TTL = 3600;       // 1 hour — telegram analysis is stable once generated
 
 async function fetchAPI<T>(path: string): Promise<T | null> {
   try {

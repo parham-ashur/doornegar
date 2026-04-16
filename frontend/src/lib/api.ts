@@ -21,48 +21,51 @@ async function fetchAPI<T>(
   return res.json();
 }
 
-// Sources — rarely change, cache 10 min
+// Sources — rarely change
 export async function getSources() {
   return fetchAPI<{ sources: import("./types").Source[]; total: number }>(
     "/api/v1/sources",
-    { revalidate: 600 },
+    { revalidate: 3600 },
   );
 }
 
 export async function getSource(slug: string) {
   return fetchAPI<import("./types").Source>(`/api/v1/sources/${slug}`, {
-    revalidate: 600,
+    revalidate: 3600,
   });
 }
 
-// Stories — update on maintenance runs (~daily), cache 2 min
+// Stories — update on maintenance runs (~daily)
 export async function getStories(page = 1, pageSize = 20) {
   return fetchAPI<{
     stories: import("./types").StoryBrief[];
     total: number;
     page: number;
     page_size: number;
-  }>(`/api/v1/stories?page=${page}&page_size=${pageSize}`);
+  }>(`/api/v1/stories?page=${page}&page_size=${pageSize}`, {
+    revalidate: 1800,
+  });
 }
 
 export async function getBlindspotStories(limit = 20) {
   return fetchAPI<import("./types").StoryBrief[]>(
     `/api/v1/stories/blindspots?limit=${limit}`,
+    { revalidate: 1800 },
   );
 }
 
-// Story detail — cache 5 min (rarely changes between maintenance runs)
+// Story detail — stable between maintenance runs
 export async function getStory(id: string) {
   return fetchAPI<import("./types").StoryDetail>(`/api/v1/stories/${id}`, {
-    revalidate: 300,
+    revalidate: 3600,
   });
 }
 
-// Story analysis — fetched server-side in parallel with story detail
+// Story analysis — stable once generated
 export async function getStoryAnalysis(id: string) {
   return fetchAPI<import("./types").StoryAnalysis>(
     `/api/v1/stories/${id}/analysis`,
-    { revalidate: 300 },
+    { revalidate: 3600 },
   );
 }
 
