@@ -675,6 +675,21 @@ def _story_brief_with_extras(story: Story) -> StoryBrief:
 
         best = max(candidates, key=_score)
         brief.image_url = best.image_url
+
+    # Last-resort fallback: if no article image AND no manual override,
+    # use the primary source's logo so the homepage card isn't blank.
+    if not brief.image_url:
+        source_counts: dict = {}
+        for a in story.articles:
+            if a.source and a.source.logo_url:
+                source_counts[a.source.slug] = source_counts.get(a.source.slug, 0) + 1
+        if source_counts:
+            top_slug = max(source_counts, key=source_counts.get)  # type: ignore[arg-type]
+            for a in story.articles:
+                if a.source and a.source.slug == top_slug and a.source.logo_url:
+                    brief.image_url = a.source.logo_url
+                    break
+
     # Coverage percentages
     total = len(story.articles)
     if total > 0:
