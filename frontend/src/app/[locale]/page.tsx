@@ -155,8 +155,10 @@ export default async function HomePage({
 
   const sorted = [...stories];
 
-  // Hero
-  const hero = sorted[0];
+  // Hero: prefer a story with genuine two-sided coverage (state + diaspora
+  // each ≥5%) so the bias comparison panel is meaningful. Fall back to the
+  // top trending story if no balanced candidate exists.
+  const hero = sorted.find(s => s.state_pct >= 5 && s.diaspora_pct >= 5) || sorted[0];
   if (hero) usedIds.add(hero.id);
 
   // Weekly briefing: next 4 not already used
