@@ -50,6 +50,20 @@ All notable changes to the Doornegar project are documented here, organized by w
 
 ### Tooling
 - `frontend/verify_homepage.mjs` — Playwright script for browser verification (mobile viewport, image dimensions, section ordering).
+- `frontend/qa_stories.mjs` — E2E quality check: clicks through every story on the homepage and verifies title, coverage bar, bias tabs, narrative tabs, telegram section, stats, articles, and placeholder images. Exit code 1 on failures.
+
+### Domain & Infrastructure (April 16-17)
+- **`doornegar.org`** purchased from Namecheap (~€6.50/year). Domain Privacy enabled (free). Registered under Parham Ashur until IID is incorporated.
+- **Cloudflare free tier** configured: DNS hosting (nameservers: kai/martha.ns.cloudflare.com), CDN with proxied CNAME records, DDoS protection, Bot Fight Mode, SSL Full mode.
+- **Cloudflare Worker `api-proxy`**: routes `api.doornegar.org/*` → `doornegar-production.up.railway.app` with host header rewrite. Workaround for Railway free plan custom domain limit.
+- **Vercel custom domains**: `doornegar.org` + `www.doornegar.org` added and verified.
+- **CORS**: Railway `CORS_ORIGINS` updated to include `doornegar.org` and `www.doornegar.org`.
+- **SSR data fetching**: kept direct to Railway for reliability (Worker adds latency). `NEXT_PUBLIC_API_URL` = `https://doornegar-production.up.railway.app`.
+- **ISR revalidate bumped**: trending 5min→30min, analyses/telegram 10min→1hr, story detail 5min→1hr, sources 10min→1hr. Most page views now served as static HTML from Vercel CDN.
+
+### Bug Fixes (additional)
+- **silence_analysis crash** (React error #31): `StatsPanel.tsx` rendered a `silence_analysis` object directly as JSX text. When the field was a structured object `{silent_side, loud_side, ...}` instead of a string, React threw. Fixed with type check + human-readable fallback rendering. This was the root cause of story `603d8621` ("تحلیل پیروزی ایران") crashing entirely.
+- **Image fallback chain hardened**: added `google.com/s2/favicons`, `apple-touch-icon`, `.ico` to bad-image blacklist. Source-logo fallback now validates URLs via `_is_bad_image` and prefers active sources over deactivated ones. Fixed the gatherings story (`8b61745c`) placeholder by setting a permanent R2-hosted manual image override.
 
 ---
 

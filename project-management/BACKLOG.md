@@ -110,33 +110,30 @@
 - [ ] Tune quality audit thresholds after initial data collection
 - [ ] Auto-merge confidence threshold tuning (monitor false merges)
 
-## Phase 5: Cloudflare + Monitoring (Next Up)
+## Phase 5: Cloudflare + Monitoring — DONE (2026-04-17)
 
 **Goal**: Make the site resilient to attacks and get visibility into outages.
 
 ### Setup checklist
-- [ ] Purchase domain (e.g. `doornegar.com`) from Namecheap / Porkbun
-- [ ] Sign up for Cloudflare (free tier)
-- [ ] Add domain to Cloudflare, update nameservers at registrar
-- [ ] DNS records:
-  - `doornegar.com` → CNAME to Vercel (proxied, orange cloud ON)
-  - `api.doornegar.com` → CNAME to Railway (proxied, orange cloud ON)
-- [ ] Add custom domain in Railway dashboard for backend
-- [ ] Add custom domain in Vercel dashboard for frontend
-- [ ] Update `NEXT_PUBLIC_API_URL=https://api.doornegar.com` in Vercel env
-- [ ] Cloudflare settings:
-  - SSL/TLS → Full (strict)
-  - Security → Bots → Enable Bot Fight Mode
-  - Security → WAF → Enable Free Managed Ruleset
-  - Rules → Rate limiting → 100 req/min per IP → challenge
-  - Speed → Cache → Aggressive
+- [x] Purchase domain — `doornegar.org` from Namecheap (~€6.50/year, Domain Privacy free, auto-renew)
+- [x] Cloudflare free tier — existing account (same as R2)
+- [x] Add domain to Cloudflare, update nameservers (kai.ns.cloudflare.com, martha.ns.cloudflare.com)
+- [x] DNS records:
+  - `doornegar.org` → CNAME to `cname.vercel-dns.com` (proxied)
+  - `api.doornegar.org` → CNAME to `doornegar-production.up.railway.app` (proxied) + Cloudflare Worker `api-proxy` for host header rewrite
+  - `www.doornegar.org` → CNAME to `cname.vercel-dns.com` (proxied)
+- [x] Add custom domain in Vercel: `doornegar.org` + `www.doornegar.org`
+- [x] Railway custom domain skipped (free plan limit) — Worker proxy handles `api.doornegar.org` instead
+- [x] SSR data fetching kept direct to Railway for reliability (`NEXT_PUBLIC_API_URL=https://doornegar-production.up.railway.app`)
+- [x] Cloudflare settings: SSL/TLS → Full, Bot Fight Mode → enabled, detection tools active
+- [x] CORS updated to allow `doornegar.org` + `www.doornegar.org`
 - [ ] UptimeRobot:
   - Create free account (uptimerobot.com)
-  - Add monitor: HTTPS, `https://api.doornegar.com/health`, check every 5 min
+  - Add monitor: HTTPS, `https://api.doornegar.org/health`, check every 5 min
   - Add email alert
-  - Add second monitor for the frontend homepage
-- [ ] Test "Under Attack" mode toggle (one-click WAF lockdown)
+  - Add second monitor: `https://doornegar.org`
 - [ ] Document DNS/domain credentials in a password manager
+- [ ] Transfer domain + accounts to IID once nonprofit is registered
 
 ## Phase 6: OVHcloud Migration (Future)
 

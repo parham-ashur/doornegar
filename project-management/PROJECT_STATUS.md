@@ -100,7 +100,7 @@ Doornegar (دورنگر) is a free, bilingual (Persian/English) media transparen
 
 ### What needs work
 
-- Cloudflare CDN/WAF not yet in front of Railway backend — remaining ~3s load time is Railway API latency from Europe; Cloudflare would cache backend responses at edge
+- ~~Cloudflare CDN/WAF~~ — **Done.** `doornegar.org` on Cloudflare free tier. Remaining ~3s load is Railway API latency from Vercel SSR; cached by ISR (30min/1hr windows) so most users get instant CDN-served static HTML
 - UptimeRobot / monitoring not configured
 - Custom domain not yet purchased
 - OpenAI hard spending limit not yet set
@@ -188,9 +188,9 @@ From local development DB, April 10, 2026:
 | Memory exhaustion | 1 MB max request body |
 | CORS | Restricted to specific frontend origins |
 | Headers | X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy |
-| DDoS (edge) | **Not yet — needs Cloudflare proxy in front of Railway** |
-| Bot protection | **Not yet — needs Cloudflare Bot Fight Mode** |
-| WAF | **Not yet — needs Cloudflare managed ruleset** |
+| DDoS (edge) | **Cloudflare free tier — active on doornegar.org and api.doornegar.org** |
+| Bot protection | **Cloudflare Bot Fight Mode — enabled** |
+| WAF | Cloudflare free detection tools active (web app exploits, DDoS, API abuse, fraud) |
 | Uptime monitoring | **Not yet — needs UptimeRobot** |
 | OpenAI hard cap | **Not yet — needs to be set in OpenAI dashboard** |
 
@@ -204,5 +204,6 @@ From local development DB, April 10, 2026:
 | Phase 4 | Private rating system (invite-only) | Code deployed, no raters yet |
 | Phase 5 | R2 image storage + security hardening | **Done (2026-04-10)** |
 | Phase 5.5 | Intelligence layer: two-pass analysis, silence/coordination detection, analyst tracking, cost optimization | **Done (2026-04-13)** |
-| Phase 6 | Cloudflare CDN/WAF + UptimeRobot + OpenAI caps | **Next** |
+| Phase 6 | Cloudflare CDN/WAF + custom domain | **Done (2026-04-17)** — doornegar.org live, Cloudflare free tier, Worker proxy for API |
+| Phase 6.5 | UptimeRobot + OpenAI spending cap | **Next** |
 | Phase 7 | OVHcloud VPS migration | Not started |

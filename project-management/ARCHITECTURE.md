@@ -10,12 +10,13 @@
                                    |
                                    v
                    +-------------------------------+
-                   |  Cloudflare (PLANNED)         |
+                   |  Cloudflare (LIVE)            |
+                   |  doornegar.org (free tier)    |
                    |  - DDoS protection (L3/L4/L7) |
                    |  - Bot Fight Mode             |
-                   |  - WAF (free ruleset)         |
-                   |  - Edge rate limiting         |
-                   |  - Global CDN cache           |
+                   |  - SSL Full mode              |
+                   |  - Global CDN (proxied CNAME) |
+                   |  - Worker: api-proxy          |
                    +---------------+---------------+
                                    |
             +----------------------+------------------------+
@@ -24,12 +25,13 @@
   +-------------------+                      +------------------------+
   | Frontend          |                      | Backend API            |
   | Vercel            |                      | Railway (FastAPI)      |
-  | Next.js 14        |                      |                        |
+  | doornegar.org     |                      | api.doornegar.org      |
+  | Next.js 14        |                      | (via CF Worker proxy)  |
   | - Bilingual RTL   |                      | - slowapi rate limits  |
-  | - Radix UI        |                      |   (200/min, 2000/hr)   |
+  | - next/image      |                      |   (200/min, 2000/hr)   |
   | - Tailwind        |   REST JSON          | - 1 MB req body limit  |
-  | - SafeImage       | -------------------> | - Admin token auth     |
-  | - WelcomeModal    |                      | - Security headers     |
+  | - SafeImage       | ---(SSR direct)----> | - Admin token auth     |
+  | - ISR 30min/1hr   |                      | - Security headers     |
   | - DoornegarAnim   |                      | - 60+ endpoints        |
   +---------+---------+                      +--+--------+--------+---+
             |                                   |        |        |

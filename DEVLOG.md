@@ -23,11 +23,23 @@
 - **Telegram CDN URLs blacklisted** in image scorer (auth tokens expire → 404 covers).
 - **Playwright verify script** committed at `frontend/verify_homepage.mjs`.
 
+### Domain & infrastructure (late April 16 / early April 17)
+- **Purchased `doornegar.org`** from Namecheap (~€6.50/year, Domain Privacy free, auto-renew). Registered under Parham's name until IID is incorporated.
+- **Cloudflare free tier** set up: DNS hosting, CDN, DDoS protection, Bot Fight Mode enabled, SSL Full mode.
+- DNS records: `doornegar.org` → CNAME to Vercel (proxied), `www` → same, `api` → CNAME to Railway (proxied via Worker).
+- **Cloudflare Worker `api-proxy`** created to route `api.doornegar.org/*` → `doornegar-production.up.railway.app` with host header rewrite. Bypasses Railway's custom domain limit (free plan) entirely.
+- **Vercel custom domain** added: `doornegar.org` and `www.doornegar.org` both resolve to the frontend.
+- **CORS updated** on Railway to allow `doornegar.org` and `www.doornegar.org`.
+- **SSR data fetching** kept direct to Railway (`NEXT_PUBLIC_API_URL=https://doornegar-production.up.railway.app`) for reliability — the Worker route adds latency and isn't needed for server-side rendering.
+- **ISR revalidate windows bumped**: trending 30min, analyses/telegram/story detail 1 hour. Most users now hit Vercel's static CDN cache (0ms compute, ~20ms TTFB).
+- Old URLs (`frontend-tau-six-36.vercel.app`, `doornegar-production.up.railway.app`) still work as fallbacks.
+
 ### Open items for next session
-- Cloudflare CDN in front of Railway (Phase 6) — biggest remaining perf win after the 3s baseline
 - Weekly Brief story links (needs backend change: niloofar_weekly.py to emit story IDs)
 - Latin → Farsi digit consistency in some story titles
 - Further Niloofar audit refinement after observing the data-oriented principle in practice
+- Transfer domain/accounts to IID once nonprofit is registered
+- Reconnect GitHub → Vercel auto-deploy hook
 
 ---
 
