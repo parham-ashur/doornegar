@@ -524,6 +524,20 @@ export default function DashboardPage() {
   const [niloofarRunning, setNiloofarRunning] = useState(false);
   const [niloofarResult, setNiloofarResult] = useState<any>(null);
   const [niloofarOpen, setNiloofarOpen] = useState(false);
+  // Elapsed ticker for the Niloofar audit. The backend endpoint is fully
+  // synchronous — no progress state is written server-side — so we
+  // estimate the phase from wall time based on typical run shape
+  // (fetch 1-5s → LLM 30-90s → apply 0-30s).
+  const [niloofarStart, setNiloofarStart] = useState<number | null>(null);
+  const [niloofarElapsed, setNiloofarElapsed] = useState(0);
+
+  useEffect(() => {
+    if (!niloofarStart || !niloofarRunning) return;
+    const interval = setInterval(() => {
+      setNiloofarElapsed(Math.floor((Date.now() - niloofarStart) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [niloofarStart, niloofarRunning]);
 
   const [niloofarApplying, setNiloofarApplying] = useState<Record<number, string>>({});
 
@@ -532,6 +546,8 @@ export default function DashboardPage() {
     setNiloofarResult(null);
     setNiloofarApplying({});
     setNiloofarOpen(true);
+    setNiloofarStart(Date.now());
+    setNiloofarElapsed(0);
     try {
       const res = await fetch(`${API}/api/v1/admin/niloofar/audit`, {
         method: "POST",
@@ -561,6 +577,8 @@ export default function DashboardPage() {
 
   const applyAllNiloofarFixes = useCallback(async () => {
     setNiloofarRunning(true);
+    setNiloofarStart(Date.now());
+    setNiloofarElapsed(0);
     try {
       const res = await fetch(`${API}/api/v1/admin/niloofar/audit?apply=true`, {
         method: "POST",
@@ -1583,12 +1601,37 @@ export default function DashboardPage() {
 
         {niloofarOpen && (
           <div className="mt-3">
-            {niloofarRunning && !niloofarResult && (
-              <div className="flex items-center gap-2 text-xs text-slate-500 py-4">
-                <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                <span dir="rtl">نیلوفر در حال بررسی محتوا...</span>
-              </div>
-            )}
+            {niloofarRunning && !niloofarResult && (() => {
+              // Phase estimate from wall time — the backend doesn't report
+              // progress, so we infer where we are from typical timings.
+              const phase =
+                niloofarElapsed < 5 ? { fa: "دریافت موضوعات از پایگاه داده", pct: 10 } :
+                niloofarElapsed < 25 ? { fa: "تحلیل محتوا با مدل زبانی (معمولاً ۳۰–۹۰ ثانیه)", pct: 35 } :
+                niloofarElapsed < 60 ? { fa: "تحلیل محتوا با مدل زبانی (در حال ادامه)", pct: 60 } :
+                niloofarElapsed < 120 ? { fa: "تحلیل محتوا با مدل زبانی — ممکن است تا ۲ دقیقه طول بکشد", pct: 80 } :
+                { fa: "تحلیل طولانی‌تر از حد معمول — در حال اجرا", pct: 90 };
+              return (
+                <div className="py-3" dir="rtl">
+                  <div className="flex items-center justify-between gap-3 mb-2">
+                    <div className="flex items-center gap-2 text-xs text-violet-700 dark:text-violet-300">
+                      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                      <span className="font-medium">نیلوفر در حال بررسی محتوا</span>
+                    </div>
+                    <span className="text-[11px] font-mono text-slate-500">{fmtDuration(niloofarElapsed)}</span>
+                  </div>
+                  <div className="h-1.5 w-full bg-violet-100 dark:bg-violet-900/20 overflow-hidden">
+                    <div
+                      className="h-full bg-violet-500 transition-all duration-500"
+                      style={{ width: `${phase.pct}%` }}
+                    />
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-2 leading-5">{phase.fa}</p>
+                  <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1 leading-4">
+                    درخواست به سرور ارسال شده و تا دریافت پاسخ منتظر می‌ماند. بستن این پنجره جلوی اجرای پشت‌صحنه را نمی‌گیرد، ولی نتیجه نمایش داده نخواهد شد.
+                  </p>
+                </div>
+              );
+            })()}
             {niloofarResult && niloofarResult.error && (
               <div className="border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-900/10 p-3 text-xs text-red-700 dark:text-red-400">
                 Error: {niloofarResult.error}
