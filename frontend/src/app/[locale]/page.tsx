@@ -123,6 +123,22 @@ function Meta({ story }: { story: StoryBrief }) {
   );
 }
 
+// Compact "بروزرسانی" pill for secondary story lists. The hero still
+// uses the fuller dot-and-label chip next to its title; this version is
+// optimized for dense 4–5-item grids. Shows the reason_fa inline when
+// available so users can see *what* changed without clicking through.
+function UpdateBadge({ story, className = "mt-1.5" }: { story: StoryBrief; className?: string }) {
+  if (!story.update_signal?.has_update) return null;
+  const reason = story.update_signal.reason_fa;
+  return (
+    <span
+      className={`${className} inline-block border border-orange-300 dark:border-orange-700 bg-orange-50 dark:bg-orange-900/20 px-1.5 py-0.5 text-[10px] font-bold text-orange-700 dark:text-orange-300`}
+    >
+      بروزرسانی{reason ? ` · ${reason}` : ""}
+    </span>
+  );
+}
+
 // ─── Main page ─────────────────────────────────────────────────
 
 export default async function HomePage({
@@ -534,6 +550,7 @@ export default async function HomePage({
                   <h3 className="text-[22px] font-black leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
                     {s.title_fa}
                   </h3>
+                  <UpdateBadge story={s} className="mt-2" />
                   <Meta story={s} />
                   {(() => {
                     const bias = allAnalyses[s.id]?.bias_explanation_fa;
@@ -567,6 +584,7 @@ export default async function HomePage({
                       <h3 className="text-[18px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
                         {s.title_fa}
                       </h3>
+                      <UpdateBadge story={s} className="mt-1" />
                       <p className="text-[14px] text-slate-400 mt-1">
                         {toFa(s.article_count)} مقاله · {toFa(s.source_count)} رسانه
                         {s.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300"> · درون‌مرزی {toFa(s.state_pct)}٪</span>}
@@ -607,6 +625,7 @@ export default async function HomePage({
                       <h4 className="text-[13px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
                         {s.title_fa}
                       </h4>
+                      <UpdateBadge story={s} className="mt-1" />
                       <div className="mt-1 flex items-center justify-end gap-3 text-[13px]">
                         <span className="text-[#1e3a5f] dark:text-blue-300 font-medium">درون‌مرزی {toFa(s.state_pct)}٪</span>
                         <span className="text-[#ea580c] dark:text-orange-400 font-medium">برون‌مرزی {toFa(s.diaspora_pct)}٪</span>
@@ -965,6 +984,7 @@ function MobileHome({
                   <h3 className="text-[18px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
                     {s.title_fa}
                   </h3>
+                  <UpdateBadge story={s} className="mt-0.5" />
                   <p className="text-[13px] text-slate-400 mt-0.5">
                     {toFa(s.article_count)} مقاله · {toFa(s.source_count)} رسانه
                     {s.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300"> · درون‌مرزی {toFa(s.state_pct)}٪</span>}
@@ -990,6 +1010,7 @@ function MobileHome({
                   <h3 className="text-[22px] font-black leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
                     {s.title_fa}
                   </h3>
+                  <UpdateBadge story={s} className="mt-1" />
                   <p className="mt-1 text-[13px] text-slate-400 dark:text-slate-500">
                     {toFa(s.source_count)} رسانه · {toFa(s.article_count)} مقاله
                     {s.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300"> · درون‌مرزی {toFa(s.state_pct)}٪</span>}
