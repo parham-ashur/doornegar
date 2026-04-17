@@ -16,10 +16,10 @@ type BlindspotLayoutProps = {
 const LABELS = {
   rtl: {
     eyebrow: "نگاه یک‌جانبه",
-    conservativeLabel: "محافظه‌کار",
-    oppositionLabel: "اپوزیسیون",
-    onlyConservative: "فقط در رسانه‌های محافظه‌کار",
-    onlyOpposition: "فقط در رسانه‌های اپوزیسیون",
+    conservativeLabel: "درون‌مرزی",
+    oppositionLabel: "برون‌مرزی",
+    onlyConservative: "فقط در رسانه‌های درون‌مرزی",
+    onlyOpposition: "فقط در رسانه‌های برون‌مرزی",
   },
   ltr: {
     eyebrow: "Blind spot",

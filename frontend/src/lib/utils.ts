@@ -24,7 +24,7 @@ export const alignmentLabels: Record<StateAlignment, { en: string; fa: string }>
   state: { en: "State", fa: "دولتی" },
   semi_state: { en: "Semi-State", fa: "نیمه‌دولتی" },
   independent: { en: "Independent", fa: "مستقل" },
-  diaspora: { en: "Diaspora", fa: "اپوزیسیون" },
+  diaspora: { en: "Diaspora", fa: "برون‌مرزی" },
 };
 
 /** Convert English digits to Farsi digits */
@@ -56,9 +56,9 @@ export function formatRelativeTime(dateStr: string, locale: string): string {
 }
 
 export function biasAlignmentLabel(value: number, _locale?: string): string {
-  if (value < -0.6) return "محافظه‌کار";
+  if (value < -0.6) return "درون‌مرزی";
   if (value < -0.2) return "نزدیک به حکومت";
   if (value <= 0.2) return "میانه";
-  if (value <= 0.6) return "نزدیک به اپوزیسیون";
-  return "اپوزیسیون";
+  if (value <= 0.6) return "نزدیک به برون‌مرزی";
+  return "برون‌مرزی";
 }

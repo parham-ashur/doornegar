@@ -94,11 +94,11 @@ export default function StoryTimeline({ articles }: Props) {
       <div className="grid grid-cols-2 gap-3 mb-3">
         <div className="flex items-center gap-1.5">
           <span className="inline-block w-[3px] h-3 bg-[#1e3a5f]" />
-          <span className="text-[13px] font-bold text-[#1e3a5f] dark:text-blue-300">محافظه‌کار</span>
+          <span className="text-[13px] font-bold text-[#1e3a5f] dark:text-blue-300">درون‌مرزی</span>
         </div>
         <div className="flex items-center gap-1.5">
           <span className="inline-block w-[3px] h-3 bg-[#ea580c]" />
-          <span className="text-[13px] font-bold text-[#ea580c] dark:text-orange-400">اپوزیسیون</span>
+          <span className="text-[13px] font-bold text-[#ea580c] dark:text-orange-400">برون‌مرزی</span>
         </div>
       </div>
 

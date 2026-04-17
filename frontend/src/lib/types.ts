@@ -56,6 +56,19 @@ export interface BiasScore {
   created_at: string;
 }
 
+export type NarrativeGroup =
+  | "principlist"
+  | "reformist"
+  | "moderate_diaspora"
+  | "radical_diaspora";
+
+export interface NarrativeGroups {
+  principlist: number;         // درون‌مرزی — اصول‌گرا
+  reformist: number;           // درون‌مرزی — اصلاح‌طلب
+  moderate_diaspora: number;   // برون‌مرزی — میانه‌رو
+  radical_diaspora: number;    // برون‌مرزی — رادیکال
+}
+
 export interface StoryBrief {
   id: string;
   title_en: string;
@@ -75,9 +88,15 @@ export interface StoryBrief {
   view_count: number;
   priority: number;
   image_url: string | null;
+  // Legacy 3-bucket percentages (kept while the 4-group UI is rolled out).
   state_pct: number;
   diaspora_pct: number;
   independent_pct: number;
+  // New 4-subgroup taxonomy. Optional because older cached responses may
+  // not include them; fall back to the legacy fields when missing.
+  narrative_groups?: NarrativeGroups;
+  inside_border_pct?: number;    // = principlist + reformist
+  outside_border_pct?: number;   // = moderate_diaspora + radical_diaspora
 }
 
 export interface StoryArticleWithBias extends ArticleBrief {

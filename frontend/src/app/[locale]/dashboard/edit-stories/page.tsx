@@ -304,13 +304,13 @@ export default function EditStoriesPage() {
                     ltr
                   />
                   <Field
-                    label="روایت محافظه‌کار"
+                    label="روایت درون‌مرزی"
                     value={draft.state_summary_fa}
                     onChange={(v) => updateDraft(s.id, "state_summary_fa", v)}
                     multiline
                   />
                   <Field
-                    label="روایت اپوزیسیون"
+                    label="روایت برون‌مرزی"
                     value={draft.diaspora_summary_fa}
                     onChange={(v) => updateDraft(s.id, "diaspora_summary_fa", v)}
                     multiline

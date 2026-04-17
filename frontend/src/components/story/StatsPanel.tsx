@@ -110,7 +110,7 @@ export default function StatsPanel({
             {typeof silenceAnalysis === "string"
               ? silenceAnalysis
               : silenceAnalysis.hypothesis_fa
-                || `${silenceAnalysis.loud_count || 0} رسانهٔ ${silenceAnalysis.loud_side === "state" ? "محافظه‌کار" : "اپوزیسیون"} پوشش داده‌اند؛ رسانه‌های ${silenceAnalysis.silent_side === "state" ? "محافظه‌کار" : "اپوزیسیون"} سکوت کرده‌اند`}
+                || `${silenceAnalysis.loud_count || 0} رسانهٔ ${silenceAnalysis.loud_side === "state" ? "درون‌مرزی" : "برون‌مرزی"} پوشش داده‌اند؛ رسانه‌های ${silenceAnalysis.silent_side === "state" ? "درون‌مرزی" : "برون‌مرزی"} سکوت کرده‌اند`}
           </p>
         </div>
       )}
@@ -123,7 +123,7 @@ export default function StatsPanel({
             <h4 className="text-[14px] font-bold text-slate-900 dark:text-white">پیام هماهنگ</h4>
           </div>
           <p className="text-[14px] text-slate-500 dark:text-slate-400">
-            {coordination.sources?.length || 0} رسانه {coordination.side === "state" ? "محافظه‌کار" : "اپوزیسیون"} پیام مشابه منتشر کردند
+            {coordination.sources?.length || 0} رسانه {coordination.side === "state" ? "درون‌مرزی" : "برون‌مرزی"} پیام مشابه منتشر کردند
           </p>
           {coordination.sources && (
             <p className="text-[13px] text-slate-400 mt-1">{coordination.sources.join(" · ")}</p>

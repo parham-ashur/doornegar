@@ -60,8 +60,8 @@ export default function WordsOfWeek({ prefetchedData }: { prefetchedData?: { con
       <div className={`transition-all duration-300 ${loading ? "opacity-50 animate-pulse" : "opacity-100"}`}>
         {/* Column headers */}
         <div className="flex items-center justify-between mb-2 pb-2 border-b border-slate-200 dark:border-slate-700">
-          <span className="text-[13px] font-bold text-[#1e3a5f] dark:text-blue-300">محافظه‌کار</span>
-          <span className="text-[13px] font-bold text-[#ea580c] dark:text-orange-400">اپوزیسیون</span>
+          <span className="text-[13px] font-bold text-[#1e3a5f] dark:text-blue-300">درون‌مرزی</span>
+          <span className="text-[13px] font-bold text-[#ea580c] dark:text-orange-400">برون‌مرزی</span>
         </div>
 
         {/* Contrast pairs */}

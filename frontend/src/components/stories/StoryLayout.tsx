@@ -52,7 +52,7 @@ export default function StoryLayout({
   const hasBias = statePct > 0 || diasporaPct > 0;
   const fmt = (n: number) => (dir === "rtl" ? `${toFa(n)}٪` : `${n}%`);
   const L = dir === "rtl"
-    ? { conservative: "محافظه‌کار", opposition: "اپوزیسیون", swipeHint: "برای ادامه بالا بکشید" }
+    ? { conservative: "درون‌مرزی", opposition: "برون‌مرزی", swipeHint: "برای ادامه بالا بکشید" }
     : { conservative: "Conservative", opposition: "Opposition", swipeHint: "Swipe up to read more" };
 
   return (

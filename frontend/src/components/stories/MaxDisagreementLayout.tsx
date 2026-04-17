@@ -20,8 +20,8 @@ const LABELS = {
   rtl: {
     eyebrow: "بیشترین اختلاف نگاه",
     disagreement: "اختلاف",
-    conservativeLabel: "محافظه‌کار",
-    oppositionLabel: "اپوزیسیون",
+    conservativeLabel: "درون‌مرزی",
+    oppositionLabel: "برون‌مرزی",
   },
   ltr: {
     eyebrow: "Max disagreement",

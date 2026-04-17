@@ -3,12 +3,12 @@
 import { useState } from "react";
 import type { StoryAnalysis } from "@/lib/types";
 
-type TabKey = "bias" | "conservative" | "opposition";
+type TabKey = "bias" | "inside" | "outside";
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "bias", label: "مقایسه روایت‌ها" },
-  { key: "conservative", label: "روایت محافظه‌کار" },
-  { key: "opposition", label: "روایت اپوزیسیون" },
+  { key: "inside", label: "روایت درون‌مرزی" },
+  { key: "outside", label: "روایت برون‌مرزی" },
 ];
 
 function FramingTags({ framing }: { framing: string | string[] | null }) {
@@ -70,7 +70,7 @@ export default function StoryAnalysisPanel({ analysis }: { analysis: StoryAnalys
           </div>
         )}
 
-        {activeTab === "conservative" && (
+        {activeTab === "inside" && (
           <div>
             {analysis?.state_summary_fa ? (
               <>
@@ -78,12 +78,12 @@ export default function StoryAnalysisPanel({ analysis }: { analysis: StoryAnalys
                 <FramingTags framing={analysis.scores?.state?.framing || null} />
               </>
             ) : (
-              <p className="text-[13px] text-slate-400">روایتی از سوی رسانه‌های محافظه‌کار یافت نشد</p>
+              <p className="text-[13px] text-slate-400">روایتی از سوی رسانه‌های درون‌مرزی یافت نشد</p>
             )}
           </div>
         )}
 
-        {activeTab === "opposition" && (
+        {activeTab === "outside" && (
           <div>
             {analysis?.diaspora_summary_fa ? (
               <>
@@ -91,7 +91,7 @@ export default function StoryAnalysisPanel({ analysis }: { analysis: StoryAnalys
                 <FramingTags framing={analysis.scores?.diaspora?.framing || null} />
               </>
             ) : (
-              <p className="text-[13px] text-slate-400">روایتی از سوی رسانه‌های اپوزیسیون یافت نشد</p>
+              <p className="text-[13px] text-slate-400">روایتی از سوی رسانه‌های برون‌مرزی یافت نشد</p>
             )}
           </div>
         )}

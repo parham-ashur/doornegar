@@ -275,8 +275,8 @@ function buildBlindspotData(blindspots: StoryBrief[]): BlindspotSlotData | null 
   return {
     top: {
       story: asStoryCore(top, null, null),
-      sideLabel: "فقط در رسانه‌های محافظه‌کار",
-      excerpt: `${top.source_count} منبع محافظه‌کار این خبر را پوشش داده‌اند. دیاسپورا به آن اشاره‌ای نکرده است.`,
+      sideLabel: "فقط در رسانه‌های درون‌مرزی",
+      excerpt: `${top.source_count} منبع درون‌مرزی این خبر را پوشش داده‌اند. دیاسپورا به آن اشاره‌ای نکرده است.`,
     },
     bottom: {
       story: asStoryCore(bottom, null, null),

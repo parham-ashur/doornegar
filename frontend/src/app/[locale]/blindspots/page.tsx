@@ -48,14 +48,14 @@ export default async function BlindspotsPage({
               <div className="mb-4 flex items-center gap-2">
                 <div className="h-3 w-3 rounded-full bg-red-500" />
                 <h2 className="text-lg font-semibold text-white">
-                  فقط در رسانه‌های محافظه‌کار
+                  فقط در رسانه‌های درون‌مرزی
                 </h2>
                 <span className="rounded-full bg-red-500/20 text-red-400 ring-1 ring-red-500/30 px-2 py-0.5 text-xs font-medium">
                   {stateOnly.length}
                 </span>
               </div>
               <p className="mb-4 text-xs text-slate-400">
-                رسانه‌های اپوزیسیون این خبرها را پوشش نداده‌اند
+                رسانه‌های برون‌مرزی این خبرها را پوشش نداده‌اند
               </p>
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {stateOnly.map((story) => (
@@ -71,7 +71,7 @@ export default async function BlindspotsPage({
               <div className="mb-4 flex items-center gap-2">
                 <div className="h-3 w-3 rounded-full bg-blue-500" />
                 <h2 className="text-lg font-semibold text-white">
-                  فقط در رسانه‌های اپوزیسیون
+                  فقط در رسانه‌های برون‌مرزی
                 </h2>
                 <span className="rounded-full bg-blue-500/20 text-blue-400 ring-1 ring-blue-500/30 px-2 py-0.5 text-xs font-medium">
                   {diasporaOnly.length}

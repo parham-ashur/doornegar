@@ -8,10 +8,10 @@ const BRAND_ORANGE = "#E8913A";
 const LABELS = {
   rtl: {
     coverage: "پوشش رسانه‌ای",
-    conservativeSide: "محافظه‌کار",
-    oppositionSide: "اپوزیسیون",
-    progressive: "روایت اپوزیسیون",
-    conservative: "روایت محافظه‌کار",
+    conservativeSide: "درون‌مرزی",
+    oppositionSide: "برون‌مرزی",
+    progressive: "روایت برون‌مرزی",
+    conservative: "روایت درون‌مرزی",
     telegram: "تحلیل تلگرام",
     predictions: "پیش‌بینی‌ها",
     claims: "ادعاهای کلیدی",

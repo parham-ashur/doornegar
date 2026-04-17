@@ -159,8 +159,8 @@ export default function NarrativeMap({ stories, prefetchedPositions }: { stories
         <div className="absolute top-0 bottom-0 left-1/2 w-px bg-slate-200 dark:bg-slate-700/40" />
 
         {/* X-axis labels */}
-        <div className="absolute right-4 text-[10px] font-medium text-[#1e3a5f] dark:text-blue-300" style={{ top: "50%", transform: "translateY(4px)" }}>محافظه‌کار</div>
-        <div className="absolute left-4 text-[10px] font-medium text-[#ea580c] dark:text-orange-400" style={{ top: "50%", transform: "translateY(4px)" }}>اپوزیسیون</div>
+        <div className="absolute right-4 text-[10px] font-medium text-[#1e3a5f] dark:text-blue-300" style={{ top: "50%", transform: "translateY(4px)" }}>درون‌مرزی</div>
+        <div className="absolute left-4 text-[10px] font-medium text-[#ea580c] dark:text-orange-400" style={{ top: "50%", transform: "translateY(4px)" }}>برون‌مرزی</div>
 
         {/* Y-axis labels */}
         <div className="absolute text-[10px] font-medium text-slate-400 dark:text-slate-500" style={{ left: "50%", top: 4, transform: "translateX(-50%)" }}>بی‌طرف</div>

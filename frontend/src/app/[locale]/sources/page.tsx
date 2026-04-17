@@ -34,10 +34,10 @@ export default async function SourcesPage({
   });
 
   const groupLabels: Record<string, { label: string; color: string }> = {
-    state: { label: "رسانه‌های محافظه‌کار", color: "#dc2626" },
+    state: { label: "رسانه‌های درون‌مرزی", color: "#dc2626" },
     semi_state: { label: "رسانه‌های نیمه‌دولتی", color: "#d97706" },
     independent: { label: "رسانه‌های مستقل", color: "#059669" },
-    diaspora: { label: "رسانه‌های اپوزیسیون", color: "#2563eb" },
+    diaspora: { label: "رسانه‌های برون‌مرزی", color: "#2563eb" },
   };
 
   return (

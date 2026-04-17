@@ -25,9 +25,9 @@ const LEANING_COLORS: Record<string, string> = {
 };
 
 const LEANING_LABELS: Record<string, string> = {
-  pro_regime: "محافظه‌کار",
+  pro_regime: "درون‌مرزی",
   reformist: "اصلاح‌طلب",
-  opposition: "اپوزیسیون",
+  opposition: "برون‌مرزی",
   monarchist: "سلطنت‌طلب",
   neutral: "مستقل",
 };

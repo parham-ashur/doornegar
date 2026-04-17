@@ -1,73 +1,113 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import type { StateAlignment } from "@/lib/types";
+import {
+  GROUP_COLORS,
+  GROUP_LABELS_FA,
+  GROUPS_BY_SIDE,
+  NARRATIVE_GROUP_ORDER,
+  SIDE_LABELS_FA,
+  narrativeGroupsFrom,
+  sidePercentages,
+} from "@/lib/narrativeGroups";
+import type { NarrativeGroup, NarrativeGroups, StoryBrief } from "@/lib/types";
 
 interface CoverageBarProps {
-  segments: { alignment: StateAlignment; count: number }[];
-  showLabels?: boolean;
+  /** Either pass a full story (preferred — handles legacy fallback) or the raw groups. */
+  story?: StoryBrief;
+  groups?: NarrativeGroups;
   height?: "sm" | "md" | "lg";
+  /** When true, a row of subgroup labels + percentages appears beneath the bar. */
+  showSubgroupLabels?: boolean;
+  /** When true, a single "درون‌مرزی X٪ · برون‌مرزی Y٪" summary appears above the bar. */
+  showSideTotals?: boolean;
   className?: string;
 }
 
-const segmentColors: Record<StateAlignment, string> = {
-  state: "bg-red-500",
-  semi_state: "bg-orange-500",
-  independent: "bg-emerald-500",
-  diaspora: "bg-blue-500",
-};
-
-const segmentLabels: Record<StateAlignment, string> = {
-  state: "محافظه‌کار",
-  semi_state: "نیمه‌دولتی",
-  independent: "مستقل",
-  diaspora: "اپوزیسیون",
-};
-
-const segmentTextColors: Record<StateAlignment, string> = {
-  state: "text-red-600 dark:text-red-400",
-  semi_state: "text-orange-600 dark:text-orange-400",
-  independent: "text-emerald-600 dark:text-emerald-400",
-  diaspora: "text-blue-600 dark:text-blue-400",
-};
+const HEIGHT_CLASS = { sm: "h-1.5", md: "h-2", lg: "h-3" };
 
 export default function CoverageBar({
-  segments,
-  showLabels = false,
+  story,
+  groups,
   height = "md",
+  showSubgroupLabels = false,
+  showSideTotals = false,
   className,
 }: CoverageBarProps) {
-  const total = segments.reduce((sum, s) => sum + s.count, 0);
+  const pct: NarrativeGroups = groups ?? (story ? narrativeGroupsFrom(story) : {
+    principlist: 0,
+    reformist: 0,
+    moderate_diaspora: 0,
+    radical_diaspora: 0,
+  });
+
+  const total =
+    pct.principlist + pct.reformist + pct.moderate_diaspora + pct.radical_diaspora;
   if (total === 0) return null;
 
-  const heights = { sm: "h-1.5", md: "h-2", lg: "h-3" };
+  const inside = pct.principlist + pct.reformist;
+  const outside = pct.moderate_diaspora + pct.radical_diaspora;
 
   return (
     <div className={cn("w-full", className)}>
-      <div className={cn("flex overflow-hidden bg-slate-200 dark:bg-slate-800", heights[height])}>
-        {segments.map((segment) => {
-          const pct = (segment.count / total) * 100;
-          if (pct === 0) return null;
+      {showSideTotals && (
+        <div className="mb-1.5 flex items-center justify-between text-[11px] font-medium text-slate-500 dark:text-slate-400">
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-2 w-2" style={{ backgroundColor: GROUP_COLORS.principlist }} />
+            {SIDE_LABELS_FA.inside} {inside}٪
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-2 w-2" style={{ backgroundColor: GROUP_COLORS.radical_diaspora }} />
+            {SIDE_LABELS_FA.outside} {outside}٪
+          </span>
+        </div>
+      )}
+
+      <div
+        className={cn(
+          "flex w-full overflow-hidden bg-slate-200 dark:bg-slate-800",
+          HEIGHT_CLASS[height],
+        )}
+        role="img"
+        aria-label={`درون‌مرزی ${inside}٪ — برون‌مرزی ${outside}٪`}
+      >
+        {NARRATIVE_GROUP_ORDER.map((group, i) => {
+          const width = pct[group];
+          if (width === 0) return null;
+          // Insert a 2px divider between the inside and outside sides when both
+          // are present — makes the 2-side grouping visually obvious.
+          const isSideBoundary = i === 2 && inside > 0 && outside > 0;
           return (
-            <div
-              key={segment.alignment}
-              className={cn(segmentColors[segment.alignment], "transition-all")}
-              style={{ width: `${pct}%` }}
-            />
+            <div key={group} className="flex">
+              {isSideBoundary && <div className="w-[2px] bg-white dark:bg-slate-950 shrink-0" />}
+              <div
+                className="transition-all"
+                style={{ width: `${width}%`, backgroundColor: GROUP_COLORS[group] }}
+              />
+            </div>
           );
         })}
       </div>
 
-      {showLabels && (
-        <div className="mt-1.5 flex flex-wrap gap-3 text-[10px]">
-          {segments
-            .filter((s) => s.count > 0)
-            .map((segment) => (
-              <div key={segment.alignment} className={cn("flex items-center gap-1 font-medium", segmentTextColors[segment.alignment])}>
-                <div className={cn("h-1.5 w-1.5", segmentColors[segment.alignment])} />
-                {segmentLabels[segment.alignment]} ({segment.count})
+      {showSubgroupLabels && (
+        <div className="mt-2 grid grid-cols-2 gap-x-4 text-[11px]">
+          {(["inside", "outside"] as const).map((side) => (
+            <div key={side} className="flex flex-col gap-0.5">
+              <div className="font-bold text-slate-700 dark:text-slate-300">
+                {SIDE_LABELS_FA[side]}{" "}
+                <span className="font-normal text-slate-400">
+                  ({side === "inside" ? inside : outside}٪)
+                </span>
               </div>
-            ))}
+              {GROUPS_BY_SIDE[side].map((g: NarrativeGroup) => (
+                <div key={g} className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400">
+                  <span className="inline-block h-1.5 w-1.5" style={{ backgroundColor: GROUP_COLORS[g] }} />
+                  <span>{GROUP_LABELS_FA[g]}</span>
+                  <span className="text-slate-400">{pct[g]}٪</span>
+                </div>
+              ))}
+            </div>
+          ))}
         </div>
       )}
     </div>

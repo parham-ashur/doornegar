@@ -11,10 +11,10 @@ interface SourceSpectrumProps {
 }
 
 const alignmentInfo: Record<string, { label: string; color: string; bg: string }> = {
-  state: { label: "محافظه‌کار", color: "text-red-600 dark:text-red-400", bg: "bg-red-500" },
+  state: { label: "درون‌مرزی", color: "text-red-600 dark:text-red-400", bg: "bg-red-500" },
   semi_state: { label: "نیمه‌دولتی", color: "text-orange-600 dark:text-orange-400", bg: "bg-orange-500" },
   independent: { label: "مستقل", color: "text-emerald-600 dark:text-emerald-400", bg: "bg-emerald-500" },
-  diaspora: { label: "اپوزیسیون", color: "text-blue-600 dark:text-blue-400", bg: "bg-blue-500" },
+  diaspora: { label: "برون‌مرزی", color: "text-blue-600 dark:text-blue-400", bg: "bg-blue-500" },
 };
 
 export default function SourceSpectrum({ sources, locale, showFeedback }: SourceSpectrumProps) {

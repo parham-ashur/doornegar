@@ -9,7 +9,7 @@ const DIMENSIONS: { key: string; label: string; description: string; low: string
   { key: "operational_constraint", label: "محدودیت عملیاتی", description: "محدودیت‌های فیزیکی و قانونی — سانسور، فیلترینگ، ممنوعیت فعالیت خبرنگاران، و فشار امنیتی بر تحریریه", low: "محدودیت شدید", high: "آزادی عمل کامل" },
   { key: "source_diversity", label: "تنوع منابع", description: "تنوع منابع خبری مورد استفاده — آیا فقط از منابع رسمی نقل می‌کند یا صداهای مختلف (مردم، کارشناسان، مخالفان) را هم پوشش می‌دهد", low: "فقط منابع رسمی", high: "صداهای متنوع" },
   { key: "viewpoint_pluralism", label: "تکثر دیدگاه", description: "آیا رسانه دیدگاه‌های مختلف سیاسی و اجتماعی را بازتاب می‌دهد یا فقط یک روایت را تقویت می‌کند", low: "تک‌صدا", high: "چندصدایی" },
-  { key: "factional_capture", label: "تصرف جناحی", description: "میزان وابستگی رسانه به یک جناح سیاسی خاص — اصولگرا، اصلاح‌طلب، سپاه، یا گروه‌های اپوزیسیون", low: "وابسته به یک جناح", high: "فراجناحی" },
+  { key: "factional_capture", label: "تصرف جناحی", description: "میزان وابستگی رسانه به یک جناح سیاسی خاص — اصولگرا، اصلاح‌طلب، سپاه، یا گروه‌های برون‌مرزی", low: "وابسته به یک جناح", high: "فراجناحی" },
   { key: "audience_accountability", label: "پاسخگویی به مخاطب", description: "آیا رسانه مکانیزم بازخورد، تصحیح خطا، و پاسخگویی به مخاطبان دارد — یا یک‌جانبه پیام ارسال می‌کند", low: "بدون پاسخگویی", high: "پاسخگوی فعال" },
   { key: "crisis_behavior", label: "رفتار در بحران", description: "عملکرد رسانه در بحران‌ها (اعتراضات، سیل، جنگ) — آیا اطلاع‌رسانی می‌کند یا سانسور و تبلیغات پخش می‌کند", low: "سانسور و تبلیغات", high: "اطلاع‌رسانی صادقانه" },
 ];
@@ -103,13 +103,13 @@ export default function DimensionPlot({ sources }: { sources: Source[] }) {
       {/* Legend */}
       <div className="flex items-center gap-3 mt-4 pt-3 border-t border-slate-100 dark:border-slate-800/50">
         <span className="flex items-center gap-1 text-[9px] text-red-500">
-          <span className="inline-block w-1.5 h-1.5 bg-red-500" /> محافظه‌کار
+          <span className="inline-block w-1.5 h-1.5 bg-red-500" /> درون‌مرزی
         </span>
         <span className="flex items-center gap-1 text-[9px] text-emerald-500">
           <span className="inline-block w-1.5 h-1.5 bg-emerald-500" /> مستقل
         </span>
         <span className="flex items-center gap-1 text-[9px] text-blue-500">
-          <span className="inline-block w-1.5 h-1.5 bg-blue-500" /> اپوزیسیون
+          <span className="inline-block w-1.5 h-1.5 bg-blue-500" /> برون‌مرزی
         </span>
       </div>
     </div>

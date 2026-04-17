@@ -78,9 +78,9 @@ function Meta({ story }: { story: StoryBrief }) {
         </p>
         {hasSides && (
           <p className="shrink-0">
-            {story.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300">محافظه‌کار {toFa(story.state_pct)}٪</span>}
+            {story.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300">درون‌مرزی {toFa(story.state_pct)}٪</span>}
             {story.state_pct > 0 && story.diaspora_pct > 0 && <span className="text-slate-300 dark:text-slate-600"> · </span>}
-            {story.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400">اپوزیسیون {toFa(story.diaspora_pct)}٪</span>}
+            {story.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400">برون‌مرزی {toFa(story.diaspora_pct)}٪</span>}
           </p>
         )}
       </div>
@@ -217,9 +217,9 @@ export default async function RatePage({
                 <p className="text-[13px] text-slate-400 dark:text-slate-500">{toFa(hero.source_count)} رسانه · {toFa(hero.article_count)} مقاله</p>
                 {(hero.state_pct > 0 || hero.diaspora_pct > 0) && (
                   <p className="text-[13px] mt-0.5">
-                    {hero.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300">محافظه‌کار {toFa(hero.state_pct)}٪</span>}
+                    {hero.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300">درون‌مرزی {toFa(hero.state_pct)}٪</span>}
                     {hero.state_pct > 0 && hero.diaspora_pct > 0 && <span className="text-slate-300 dark:text-slate-600"> · </span>}
-                    {hero.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400">اپوزیسیون {toFa(hero.diaspora_pct)}٪</span>}
+                    {hero.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400">برون‌مرزی {toFa(hero.diaspora_pct)}٪</span>}
                   </p>
                 )}
               </div>
@@ -245,7 +245,7 @@ export default async function RatePage({
                       </div>
                       <div className="flex-1 min-w-0">
                         <h3 className="text-[18px] font-bold leading-snug text-slate-900 dark:text-white line-clamp-2">{conservativeBlind.title_fa}</h3>
-                        <p className="mt-1 text-[13px] text-slate-400">فقط روایت محافظه‌کار · {conservativeBlind.article_count} مقاله</p>
+                        <p className="mt-1 text-[13px] text-slate-400">فقط روایت درون‌مرزی · {conservativeBlind.article_count} مقاله</p>
                       </div>
                     </div>
                   </Link>
@@ -260,7 +260,7 @@ export default async function RatePage({
                       </div>
                       <div className="flex-1 min-w-0">
                         <h3 className="text-[18px] font-bold leading-snug text-slate-900 dark:text-white line-clamp-2">{oppositionBlind.title_fa}</h3>
-                        <p className="mt-1 text-[13px] text-orange-500">فقط روایت اپوزیسیون · {oppositionBlind.article_count} مقاله</p>
+                        <p className="mt-1 text-[13px] text-orange-500">فقط روایت برون‌مرزی · {oppositionBlind.article_count} مقاله</p>
                       </div>
                     </div>
                   </Link>
@@ -284,8 +284,8 @@ export default async function RatePage({
                       <h3 className="text-[22px] font-black leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">{s.title_fa}</h3>
                       <p className="mt-1 text-[13px] text-slate-400 dark:text-slate-500">
                         {toFa(s.source_count)} رسانه · {toFa(s.article_count)} مقاله
-                        {s.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300"> · محافظه‌کار {toFa(s.state_pct)}٪</span>}
-                        {s.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400"> · اپوزیسیون {toFa(s.diaspora_pct)}٪</span>}
+                        {s.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300"> · درون‌مرزی {toFa(s.state_pct)}٪</span>}
+                        {s.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400"> · برون‌مرزی {toFa(s.diaspora_pct)}٪</span>}
                       </p>
                       {firstPoint && <p className="mt-1.5 text-[14px] leading-5 text-slate-400 dark:text-slate-500 line-clamp-1">• {firstPoint}</p>}
                     </Link>
@@ -313,8 +313,8 @@ export default async function RatePage({
                       <h3 className="text-[18px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">{s.title_fa}</h3>
                       <p className="text-[13px] text-slate-400 mt-0.5">
                         {toFa(s.article_count)} مقاله · {toFa(s.source_count)} رسانه
-                        {s.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300"> · محافظه‌کار {toFa(s.state_pct)}٪</span>}
-                        {s.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400"> · اپوزیسیون {toFa(s.diaspora_pct)}٪</span>}
+                        {s.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300"> · درون‌مرزی {toFa(s.state_pct)}٪</span>}
+                        {s.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400"> · برون‌مرزی {toFa(s.diaspora_pct)}٪</span>}
                       </p>
                     </div>
                   </Link>
@@ -388,13 +388,13 @@ export default async function RatePage({
                 <div className="mt-3 grid grid-cols-2 gap-3">
                   {stateSummary && (
                     <div className="border-r-2 border-[#1e3a5f] pr-3">
-                      <p className="text-[13px] font-bold text-[#1e3a5f] dark:text-blue-300 mb-1">روایت محافظه‌کار</p>
+                      <p className="text-[13px] font-bold text-[#1e3a5f] dark:text-blue-300 mb-1">روایت درون‌مرزی</p>
                       <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-4">{stateSummary}</p>
                     </div>
                   )}
                   {diasporaSummary && (
                     <div className="border-r-2 border-[#ea580c] pr-3">
-                      <p className="text-[13px] font-bold text-[#ea580c] dark:text-orange-400 mb-1">روایت اپوزیسیون</p>
+                      <p className="text-[13px] font-bold text-[#ea580c] dark:text-orange-400 mb-1">روایت برون‌مرزی</p>
                       <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-4">{diasporaSummary}</p>
                     </div>
                   )}
@@ -438,7 +438,7 @@ export default async function RatePage({
                 </div>
                 <div className="p-3">
                   <h3 className="text-[18px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">{conservativeBlind.title_fa}</h3>
-                  <p className="mt-1.5 text-[13px] text-slate-400">فقط روایت محافظه‌کار · {conservativeBlind.article_count} مقاله</p>
+                  <p className="mt-1.5 text-[13px] text-slate-400">فقط روایت درون‌مرزی · {conservativeBlind.article_count} مقاله</p>
                 </div>
               </Link>
             </StoryFeedback>
@@ -451,7 +451,7 @@ export default async function RatePage({
                 </div>
                 <div className="p-3">
                   <h3 className="text-[18px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">{oppositionBlind.title_fa}</h3>
-                  <p className="mt-1.5 text-[13px] text-orange-500">فقط روایت اپوزیسیون · {oppositionBlind.article_count} مقاله</p>
+                  <p className="mt-1.5 text-[13px] text-orange-500">فقط روایت برون‌مرزی · {oppositionBlind.article_count} مقاله</p>
                 </div>
               </Link>
             </StoryFeedback>
@@ -503,8 +503,8 @@ export default async function RatePage({
                         <h3 className="text-[18px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">{s.title_fa}</h3>
                         <p className="text-[14px] text-slate-400 mt-1">
                           {toFa(s.article_count)} مقاله · {toFa(s.source_count)} رسانه
-                          {s.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300"> · محافظه‌کار {toFa(s.state_pct)}٪</span>}
-                          {s.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400"> · اپوزیسیون {toFa(s.diaspora_pct)}٪</span>}
+                          {s.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300"> · درون‌مرزی {toFa(s.state_pct)}٪</span>}
+                          {s.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400"> · برون‌مرزی {toFa(s.diaspora_pct)}٪</span>}
                         </p>
                         {firstPoint && <p className="text-[14px] text-slate-400 dark:text-slate-500 mt-1 line-clamp-1">• {firstPoint}</p>}
                       </div>
@@ -538,8 +538,8 @@ export default async function RatePage({
                       <Link href={fb(locale, s.id)} className="group block">
                         <h4 className="text-[13px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">{s.title_fa}</h4>
                         <div className="mt-1 flex items-center justify-end gap-3 text-[13px]">
-                          <span className="text-[#1e3a5f] dark:text-blue-300 font-medium">محافظه‌کار {toFa(s.state_pct)}٪</span>
-                          <span className="text-[#ea580c] dark:text-orange-400 font-medium">اپوزیسیون {toFa(s.diaspora_pct)}٪</span>
+                          <span className="text-[#1e3a5f] dark:text-blue-300 font-medium">درون‌مرزی {toFa(s.state_pct)}٪</span>
+                          <span className="text-[#ea580c] dark:text-orange-400 font-medium">برون‌مرزی {toFa(s.diaspora_pct)}٪</span>
                         </div>
                       </Link>
                     </StoryFeedback>
@@ -577,20 +577,20 @@ export default async function RatePage({
                   const diasporaSummary = analysis.diaspora_summary_fa;
                   const biasText = analysis.bias_explanation_fa;
                   if (words?.conservative?.length && words?.opposition?.length) {
-                    battleItems.push({ title: story.title_fa || "", conservative: `«${words.conservative[0].replace(/[«»]/g, "")}»`, opposition: `«${words.opposition[0].replace(/[«»]/g, "")}»`, conservativeLabel: words.conservative.length > 1 ? words.conservative.slice(1, 3).join("، ") : "روایت محافظه‌کار", oppositionLabel: words.opposition.length > 1 ? words.opposition.slice(1, 3).join("، ") : "روایت اپوزیسیون" });
+                    battleItems.push({ title: story.title_fa || "", conservative: `«${words.conservative[0].replace(/[«»]/g, "")}»`, opposition: `«${words.opposition[0].replace(/[«»]/g, "")}»`, conservativeLabel: words.conservative.length > 1 ? words.conservative.slice(1, 3).join("، ") : "روایت درون‌مرزی", oppositionLabel: words.opposition.length > 1 ? words.opposition.slice(1, 3).join("، ") : "روایت برون‌مرزی" });
                     continue;
                   }
                   if (biasText) {
                     const quotes = biasText.match(/«[^»]+»/g);
                     if (quotes && quotes.length >= 2) {
-                      battleItems.push({ title: story.title_fa || "", conservative: quotes[0], opposition: quotes[1], conservativeLabel: stateSummary ? stateSummary.slice(0, 40) + (stateSummary.length > 40 ? "..." : "") : "روایت محافظه‌کار", oppositionLabel: diasporaSummary ? diasporaSummary.slice(0, 40) + (diasporaSummary.length > 40 ? "..." : "") : "روایت اپوزیسیون" });
+                      battleItems.push({ title: story.title_fa || "", conservative: quotes[0], opposition: quotes[1], conservativeLabel: stateSummary ? stateSummary.slice(0, 40) + (stateSummary.length > 40 ? "..." : "") : "روایت درون‌مرزی", oppositionLabel: diasporaSummary ? diasporaSummary.slice(0, 40) + (diasporaSummary.length > 40 ? "..." : "") : "روایت برون‌مرزی" });
                       continue;
                     }
                   }
                   if (stateSummary && diasporaSummary) {
                     const stateShort = stateSummary.length > 25 ? stateSummary.slice(0, 25) + "..." : stateSummary;
                     const diasporaShort = diasporaSummary.length > 25 ? diasporaSummary.slice(0, 25) + "..." : diasporaSummary;
-                    battleItems.push({ title: story.title_fa || "", conservative: `«${stateShort}»`, opposition: `«${diasporaShort}»`, conservativeLabel: "خلاصه رسانه‌های محافظه‌کار", oppositionLabel: "خلاصه رسانه‌های اپوزیسیون" });
+                    battleItems.push({ title: story.title_fa || "", conservative: `«${stateShort}»`, opposition: `«${diasporaShort}»`, conservativeLabel: "خلاصه رسانه‌های درون‌مرزی", oppositionLabel: "خلاصه رسانه‌های برون‌مرزی" });
                   }
                 }
                 if (battleItems.length === 0) {
@@ -606,12 +606,12 @@ export default async function RatePage({
                       <div className="flex-1 py-3 bg-[#1e3a5f]/10 dark:bg-blue-900/20 border-t-[3px] border-[#1e3a5f]">
                         <p className={`${item.conservative.length > 20 ? "text-[24px]" : "text-[14px]"} font-black text-[#1e3a5f] dark:text-blue-300 line-clamp-1 px-2`}>{item.conservative}</p>
                         <p className="text-[13px] text-slate-500 mt-1 line-clamp-1 px-2">{item.conservativeLabel}</p>
-                        <p className="text-[13px] text-[#1e3a5f] dark:text-blue-300 font-medium mt-0.5">محافظه‌کار</p>
+                        <p className="text-[13px] text-[#1e3a5f] dark:text-blue-300 font-medium mt-0.5">درون‌مرزی</p>
                       </div>
                       <div className="flex-1 py-3 bg-[#ea580c]/10 dark:bg-orange-900/20 border-t-[3px] border-[#ea580c]">
                         <p className={`${item.opposition.length > 20 ? "text-[24px]" : "text-[14px]"} font-black text-[#ea580c] dark:text-orange-400 line-clamp-1 px-2`}>{item.opposition}</p>
                         <p className="text-[13px] text-slate-500 mt-1 line-clamp-1 px-2">{item.oppositionLabel}</p>
-                        <p className="text-[13px] text-[#ea580c] dark:text-orange-400 font-medium mt-0.5">اپوزیسیون</p>
+                        <p className="text-[13px] text-[#ea580c] dark:text-orange-400 font-medium mt-0.5">برون‌مرزی</p>
                       </div>
                     </div>
                   </div>

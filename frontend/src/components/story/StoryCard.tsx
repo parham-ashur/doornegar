@@ -5,7 +5,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { AlertTriangle, Newspaper } from "lucide-react";
 import CoverageBar from "@/components/common/CoverageBar";
 import { formatRelativeTime } from "@/lib/utils";
-import type { StoryBrief, StateAlignment } from "@/lib/types";
+import type { StoryBrief } from "@/lib/types";
 
 interface StoryCardProps {
   story: StoryBrief;
@@ -16,17 +16,6 @@ export default function StoryCard({ story }: StoryCardProps) {
   const t = useTranslations();
 
   const title = locale === "fa" ? story.title_fa : story.title_en;
-
-  // Build coverage segments from story flags
-  const segments: { alignment: StateAlignment; count: number }[] = [];
-  if (story.covered_by_state) {
-    segments.push({ alignment: "state", count: 1 });
-    segments.push({ alignment: "semi_state", count: 1 });
-  }
-  if (story.covered_by_diaspora) {
-    segments.push({ alignment: "diaspora", count: 1 });
-    segments.push({ alignment: "independent", count: 1 });
-  }
 
   return (
     <Link href={`/${locale}/stories/${story.id}`} className="card block group">
@@ -58,7 +47,7 @@ export default function StoryCard({ story }: StoryCardProps) {
 
       {/* Coverage bar */}
       <div className="mt-3">
-        <CoverageBar segments={segments} height="sm" />
+        <CoverageBar story={story} height="sm" />
       </div>
     </Link>
   );
