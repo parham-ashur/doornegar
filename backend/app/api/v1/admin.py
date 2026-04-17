@@ -322,10 +322,16 @@ async def force_resummarize(
     from app.models.article import Article
     from app.models.story import Story
 
+    # Protect Niloofar's edits: the endpoint used to overwrite every story
+    # with a fresh LLM pass, which wiped hand-curated titles, summaries,
+    # and bias comparisons. Now we skip `is_edited=True` — those stories
+    # need to be re-edited through Niloofar-in-chat if Parham wants new
+    # depth, not through the auto prompt.
     query = (
         select(Story)
         .options(selectinload(Story.articles).selectinload(Article.source))
         .where(Story.article_count >= 5)
+        .where(Story.is_edited.is_(False))
     )
     if order == "trending":
         # Match /api/v1/stories/trending: priority DESC, trending_score DESC
@@ -384,14 +390,36 @@ async def force_resummarize(
                 include_analyst_factors=True,
             )
             story.summary_fa = analysis.get("summary_fa")
+            # Preserve any manual_image_url that Niloofar set via update_image —
+            # the rest of the blob is LLM-generated and safe to replace.
+            manual_image = None
+            if story.summary_en:
+                try:
+                    _prev = _json.loads(story.summary_en)
+                    manual_image = _prev.get("manual_image_url")
+                except Exception:
+                    pass
             extras = {
+                # Legacy side-level fields (UI fallback when narrative is absent)
                 "state_summary_fa": analysis.get("state_summary_fa"),
                 "diaspora_summary_fa": analysis.get("diaspora_summary_fa"),
                 "independent_summary_fa": analysis.get("independent_summary_fa"),
                 "bias_explanation_fa": analysis.get("bias_explanation_fa"),
                 "scores": analysis.get("scores"),
+                # New 4-subgroup narrative and rich analysis fields emitted by
+                # the updated story_analysis prompt. Without these the UI
+                # can't render the subgroup bullets (principlist/reformist/
+                # moderate/radical) and the homepage widgets that read
+                # dispute_score / loaded_words lose their signal.
+                "narrative": analysis.get("narrative"),
+                "dispute_score": analysis.get("dispute_score"),
+                "loaded_words": analysis.get("loaded_words"),
+                "narrative_arc": analysis.get("narrative_arc"),
+                "source_neutrality": analysis.get("source_neutrality"),
                 "llm_model_used": chosen_model,
             }
+            if manual_image:
+                extras["manual_image_url"] = manual_image
             if analysis.get("analyst"):
                 extras["analyst"] = analysis["analyst"]
             story.summary_en = _json.dumps(extras, ensure_ascii=False)
