@@ -723,12 +723,20 @@ def _story_brief_with_extras(story: Story) -> StoryBrief:
                     brief.image_url = a.source.logo_url
                     break
 
-    # Coverage percentages
+    # Coverage percentages — legacy 3-bucket + new 4-subgroup taxonomy
     total = len(story.articles)
     if total > 0:
+        from app.schemas.story import NarrativeGroupPercentages
+        from app.services.narrative_groups import (
+            NARRATIVE_GROUPS_ORDER,
+            counts_to_percentages,
+            narrative_group,
+        )
+
         state = 0
         diaspora = 0
         independent = 0
+        group_counts = {g: 0 for g in NARRATIVE_GROUPS_ORDER}
         for a in story.articles:
             if a.source:
                 align = a.source.state_alignment
@@ -738,11 +746,20 @@ def _story_brief_with_extras(story: Story) -> StoryBrief:
                     diaspora += 1
                 else:
                     independent += 1
+                group_counts[narrative_group(a.source)] += 1
             else:
                 independent += 1
+                # Articles without a source fall into moderate_diaspora by
+                # default — same bucket independent-outside sources land in.
+                group_counts["moderate_diaspora"] += 1
         brief.state_pct = round(state * 100 / total)
         brief.diaspora_pct = round(diaspora * 100 / total)
         brief.independent_pct = round(independent * 100 / total)
+
+        pct = counts_to_percentages(group_counts)
+        brief.narrative_groups = NarrativeGroupPercentages(**pct)
+        brief.inside_border_pct = pct["principlist"] + pct["reformist"]
+        brief.outside_border_pct = pct["moderate_diaspora"] + pct["radical_diaspora"]
     return brief
 
 

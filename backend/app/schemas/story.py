@@ -7,6 +7,17 @@ from app.schemas.article import ArticleBrief
 from app.schemas.bias import BiasScoreResponse
 
 
+class NarrativeGroupPercentages(BaseModel):
+    """Share of this story's articles coming from each of the 4 narrative subgroups.
+
+    Sums to 100 unless the story has zero articles (all fields 0).
+    """
+    principlist: int = 0          # درون‌مرزی — اصول‌گرا
+    reformist: int = 0            # درون‌مرزی — اصلاح‌طلب
+    moderate_diaspora: int = 0    # برون‌مرزی — میانه‌رو
+    radical_diaspora: int = 0     # برون‌مرزی — رادیکال
+
+
 class StoryBrief(BaseModel):
     id: uuid.UUID
     title_en: str
@@ -26,9 +37,14 @@ class StoryBrief(BaseModel):
     view_count: int = 0
     priority: int = 0
     image_url: str | None = None
+    # Legacy 2-axis percentages (kept for backwards compat; remove after frontend migrates)
     state_pct: int = 0
     diaspora_pct: int = 0
     independent_pct: int = 0
+    # New 4-subgroup taxonomy — see NarrativeGroupPercentages.
+    narrative_groups: NarrativeGroupPercentages = NarrativeGroupPercentages()
+    inside_border_pct: int = 0     # = principlist + reformist
+    outside_border_pct: int = 0    # = moderate_diaspora + radical_diaspora
 
     model_config = {"from_attributes": True}
 
