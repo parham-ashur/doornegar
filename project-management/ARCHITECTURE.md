@@ -260,8 +260,9 @@ doornegar/
 | DB driver | asyncpg | latest | PostgreSQL async driver |
 | Database | PostgreSQL | 16 | Primary data store |
 | Vector search | pgvector | latest | Embedding similarity search |
-| Task queue | Celery | latest | Background job processing |
-| Cache/broker | Redis | 7 | Celery broker + caching |
+| Task queue | Celery (dormant) | latest | Code exists but `worker` / `beat` services are NOT running on Railway. The daily pipeline is driven by `auto_maintenance.py` + two Railway cron services (see below). |
+| Scheduled runs | Railway cron | — | `maintenance-cron` at `0 4 * * *` UTC → `python auto_maintenance.py` (full 34-step pipeline). `ingest-cron` at `0 */6 * * *` UTC → `python auto_maintenance.py --mode ingest` (6-step lightweight subset). Both share a Redis lock (`doornegar:maintenance:lock`, 4h TTL) so they can't overlap. |
+| Lock / cache | Redis | 7 | Single-flight lock for the cron services; fails open if Redis is unreachable so an outage doesn't block all maintenance. Also used to hold the Telegram analysis cache `cached_at` (48h TTL). |
 | Frontend framework | Next.js | 14.2 | React SSR/SSG |
 | UI library | React | 18.3 | Component rendering |
 | CSS | Tailwind CSS | 3.4 | Utility-first styling |
@@ -327,9 +328,36 @@ doornegar/
 
 ### Iranian media classification axes
 
-Each news source is classified on these dimensions:
+Each news source is classified on these dimensions (raw columns) plus a
+derived **4-subgroup narrative taxonomy** used everywhere the UI shows
+bias comparison:
 
-- **state_alignment**: state / semi_state / independent / diaspora
-- **irgc_affiliated**: boolean (affiliated with IRGC or not)
-- **factional_alignment**: principlist / reformist / moderate / independent
+- **production_location** (raw): inside_iran / outside_iran
+- **state_alignment** (raw, legacy 2-side axis): state / semi_state / independent / diaspora
+- **factional_alignment** (raw): principlist / reformist / moderate / opposition / monarchist / left / hardline / null
+- **irgc_affiliated**: boolean
+
+Derived narrative subgroup (`backend/app/services/narrative_groups.py::narrative_group()`):
+
+| Side | Subgroup | Source rule |
+|---|---|---|
+| **درون‌مرزی** (inside) | **اصول‌گرا** (principlist) | `inside_iran` + (`state` OR faction in {hardline, principlist}) |
+| **درون‌مرزی** | **اصلاح‌طلب** (reformist) | `inside_iran` + everything else |
+| **برون‌مرزی** (outside) | **میانه‌رو** (moderate) | `outside_iran` + faction NOT in {opposition, monarchist, radical} |
+| **برون‌مرزی** | **رادیکال** (radical) | `outside_iran` + faction in {opposition, monarchist, radical} |
+
+The helper is a pure function — no migration was needed to add it.
+Blindspot detection, silence detection, and `covered_by_state` /
+`covered_by_diaspora` partition all use `narrative_group()` as of the
+2026-04-17 commit; the legacy `state_alignment`-based partition is
+retired. Legacy percentage fields (`state_pct` / `diaspora_pct` /
+`independent_pct`) are still emitted by the API for backwards compat
+but will be removed once the frontend has fully migrated to the
+`narrative_groups` dict + `inside_border_pct` / `outside_border_pct`.
+
+LLM prompts (`bias_scoring.py`, `story_analysis.py`) tag each article
+by subgroup on input and emit structured per-subgroup bullet narratives
+on output (`narrative.inside.principlist`, etc., each 2–3 bullets).
+The older `state_summary_fa` / `diaspora_summary_fa` fields are
+populated by joining bullets for consumers that haven't migrated yet.
 - **production_location**: iran / abroad

@@ -1,6 +1,24 @@
 # Doornegar - Project Status
 
-**Last updated**: 2026-04-16 (Niloofar persona + performance 9.9s→3.0s + P1–P7 bug sweep)
+**Last updated**: 2026-04-17 (Audit + security + narrative taxonomy + pipeline hardening + i18n plan)
+
+## 2026-04-17 highlights
+
+- **Full wide-shallow audit across 8 dimensions** shipped at `project-management/AUDIT_2026-04.md`. 36 findings tiered Blocker/Risk/Nice-to-have. Most Blockers closed in the same session.
+- **Security pass**: removed hardcoded client-side dashboard password (5 pages), tightened `.gitignore`, deleted orphan env files, gated `POST /social/channels` with `require_admin`, added `require_admin` to the previously-ungated `PATCH /sources/{slug}`. OpenAI monthly cap + Cloudflare Bot Fight + UptimeRobot all configured.
+- **4-subgroup narrative taxonomy** replaces the old 2-sided «محافظه‌کار / اپوزیسیون» binary. New axis: «درون‌مرزی / برون‌مرزی» (geographic) × «اصول‌گرا / اصلاح‌طلب / میانه‌رو / رادیکال» (stance within side). No schema migration — derived from existing `production_location` × `factional_alignment`. LLM prompt rewritten to produce structured per-subgroup bullet lists; legacy flat summaries synthesized for backwards compat. Frontend CoverageBar renders 4 stacked segments in a navy/orange family palette; subgroup percentages shown as share-of-side.
+- **Pipeline hardening moved to `auto_maintenance.py`**. Discovered mid-session that Celery workers aren't actually running in the Railway deployment (only `web` + a daily cron); the Celery time_limit + Redis lock work from earlier in the session was architecturally dead code. Ported the protection to the real execution path: per-step `asyncio.wait_for` timeout map, Redis single-flight lock, `--mode ingest` subset for a lightweight cron.
+- **New `ingest-cron` Railway service** at `0 */6 * * *` UTC, paired with `maintenance-cron` at `0 4 * * *`. Same env vars, shared lock. First run: 33 new articles + 570 Telegram posts from 47 channels.
+- **Two new sources**: HRANA (هرانا, human-rights diaspora) and Etemad Online (اعتماد آنلاین, domestic reformist). Auto-seeded from `seed.py` on every ingest — no more manual `manage.py seed` after adding a source.
+- **Auto-detach replaces auto-flag** for misclustered articles. Articles < 0.25 cosine similarity to story centroid get `story_id = NULL` on the next clustering run; residual maintenance-bot rows in the improvement list deleted on every run. Improvements admin list now filters out bot entries by default — rater-only todo queue.
+- **Blindspot logic improved**: 10% → 20% minority threshold + a small-cluster rule (lone voice in <6-article story = blindspot regardless of percentage). Bias-scoring `temperature` bug fixed (was 0.3, breaking the prompt's determinism promise).
+- **Fetch Stats admin dashboard** shipped — per-source/channel totals + 24h/7d/freshness + click-to-drill-down + `is_active` toggle to deactivate geo-blocked feeds without touching SQL.
+- **Run Maintenance progress modal rebuilt** — minimize-to-corner pill, phase-grouped step history (Data / Cluster / Analysis / Ops), readable step stats, summary metric cards at completion, prominent failed-step banner.
+- **CI gate** at `.github/workflows/ci.yml` — frontend typecheck + backend compile + import smoke + pytest. 59 tests green.
+- **i18n plan** saved at `project-management/I18N_PLAN.md` — 3-tier plan for EN + FR with full RTL↔LTR flip. 30 anticipated complications documented. Not started; ready to execute when Parham gives the go.
+
+**Active sources: 26** (was 24).
+**Open Blockers from the audit**: header nav re-enabling (product decision), B2 backend test Pass 2, R7 automated daily backup, R6 credential rotation playbook.
 
 ## 2026-04-16 highlights
 

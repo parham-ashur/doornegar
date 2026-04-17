@@ -1,6 +1,60 @@
 # Doornegar - Backlog
 
-**Last updated**: 2026-04-16 (Niloofar persona + performance + P1–P7 bug sweep)
+**Last updated**: 2026-04-17 (Audit + security + narrative taxonomy + pipeline hardening + i18n plan)
+
+## Done this session (2026-04-17)
+
+### Audit
+- [x] **Wide-shallow audit across 8 dimensions** — security, infra, backend code, pipeline, frontend, UX, data quality, tech debt. Report at `AUDIT_2026-04.md` with 36 findings tiered Blocker/Risk/Nice-to-have.
+- [x] **I18N_PLAN.md** — 3-tier plan (chrome / content / polish) + before/after layout diagrams + 30 anticipated complications. Ready to execute when Parham greenlights.
+
+### Security (Blockers closed)
+- [x] Hardcoded `doornegar2026` password removed from 5 dashboard pages; single token-validation flow in main dashboard.
+- [x] `.gitignore` tightened to `.env*` glob with `!.env.example` exception.
+- [x] Orphan `backend/.env.backup` + `frontend/.env.vercel` deleted.
+- [x] `POST /social/channels` gated with `require_admin`.
+- [x] `PATCH /sources/{slug}` + `PATCH /channels/{id}` both gated with `require_admin` and accept `is_active`.
+- [x] OpenAI monthly spend cap set, Cloudflare Bot Fight enabled, UptimeRobot monitor active.
+
+### Pipeline hardening (moved to auto_maintenance after discovering Celery isn't running in prod)
+- [x] Per-step `asyncio.wait_for` timeout map in `auto_maintenance.py`.
+- [x] Redis single-flight lock with fail-open fallback.
+- [x] `--mode {full,ingest}` CLI flag; `ingest-cron` Railway service at `0 */6 * * *` UTC shares the lock with the daily full run.
+- [x] Auto-seed RSS sources from `seed.py` on every ingest run.
+- [x] Celery decorators + `task_lock.py` removed; worker files note dormant status.
+- [x] `step_flag_unrelated_articles` auto-detaches instead of flagging; residual bot rows cleared every run.
+- [x] Per-source try/except in `ingest_all_sources`; silent exception handlers logged.
+
+### Narrative taxonomy (3 commits)
+- [x] New `backend/app/services/narrative_groups.py` + 32 parameterized tests per existing source.
+- [x] `NarrativeGroupPercentages` on StoryBrief; `inside_border_pct` / `outside_border_pct` totals; legacy `state_pct` / `diaspora_pct` kept for backwards compat.
+- [x] `frontend/src/lib/narrativeGroups.ts` with navy/orange color palette and share-of-side percentage calculator.
+- [x] Frontend label sweep: محافظه‌کار → درون‌مرزی, اپوزیسیون → برون‌مرزی across ~28 files.
+- [x] `StoryAnalysisPanel` tabs renamed; renders subgroup bullets with colored dots when available.
+- [x] `CoverageBar` rewrite — 4 stacked segments, 2px divider, share-of-side percentages.
+- [x] `story_analysis.py` prompt rewritten to tag articles by subgroup on input and emit structured bullet output. Legacy flat summaries synthesized by joining bullets.
+- [x] Blindspot + silence-detection partition switched from `state_alignment` to `narrative_group`. Etemad-Online now correctly inside-border.
+- [x] `bias_scoring` temperature fixed to 0 (was 0.3).
+
+### Data
+- [x] HRANA + Etemad Online added to `seed.py`; both verified live.
+- [x] Blindspot threshold 10% → 20% + small-cluster rule for <6 articles.
+- [x] Aged-orphan counter (articles `story_id=NULL` older than 30 days).
+- [x] Telegram analysis cache TTL (48h) + admin `force_refresh` bypass + explicit invalidate endpoint.
+
+### Admin dashboard
+- [x] **Fetch Stats** page at `/dashboard/fetch-stats` with `is_active` toggle per row.
+- [x] `improvements/admin` default `include_bot=false` — rater-only todo list.
+- [x] **Run Maintenance progress modal** rebuilt with minimize-to-corner, phase grouping, readable step stats, summary metric cards, failed-step banner.
+- [x] 3 dead components deleted.
+
+### CI & tests
+- [x] `.github/workflows/ci.yml` — frontend tsc + backend compile + import smoke + pytest on every PR/push to main.
+- [x] 59 tests green (32 narrative_groups, 16 blindspot, 11 routes + Persian normalization).
+
+### Docs
+- [x] `DEVLOG.md`, `CHANGELOG.md`, `PROJECT_STATUS.md`, `BACKLOG.md`, `ARCHITECTURE.md` updated with this session.
+- [x] `RISK_REGISTER.md` refreshed: R2 / R14 / R18 / R19 / R21 mitigated.
 
 ## Done this session (2026-04-15/16)
 - [x] **Niloofar writing style** — defined, iterated 3 versions, agent file + output style + prompt all aligned

@@ -1,5 +1,53 @@
 # Doornegar Development Log
 
+## 2026-04-17 — Audit, security fixes, 4-group narrative taxonomy, pipeline hardening, two new sources
+
+### Key outcomes
+
+- **Full wide-shallow audit across 8 dimensions** — security, infra, backend code quality, data pipeline, frontend, UX, data quality, tech debt. Report at `project-management/AUDIT_2026-04.md`. 36 findings total, tiered Blocker/Risk/Nice-to-have.
+- **Security pass** — removed the hardcoded `doornegar2026` client-side password from 5 dashboard pages; gated `POST /api/v1/social/channels` with `require_admin`; tightened `.gitignore` to block every `.env*` variant with one glob (allowlisting `.env.example`); deleted `backend/.env.backup` and `frontend/.env.vercel` after verifying neither was in git history.
+- **Pipeline hardening moved to `auto_maintenance.py`** — initial round of Celery time_limit + Redis locks was architecturally misplaced (Celery workers aren't actually running in the Railway deployment; only `web` + a daily cron). Removed the dead Celery decorators and ported the protection to the real execution path: per-step `asyncio.wait_for` timeout (budgets per step, 15 min default, up to 60 min for bias scoring), Redis SET NX EX lock (4h TTL, fails open if Redis is unreachable), a new `--mode ingest` flag that runs a 6-step lightweight subset for a 2-3 hour cron between daily runs. Auto-seeds new sources from `seed.py` on every ingest.
+- **New ingest-cron service on Railway** (`0 */6 * * *` UTC). Paired with the daily full run at 04:00 UTC; the single-flight lock coordinates them. First run verified — produced 33 new articles + 570 Telegram posts from 47 channels.
+- **4-subgroup narrative taxonomy shipped in 3 commits.** Split from «محافظه‌کار / اپوزیسیون» (2 sides by state vs diaspora) to «درون‌مرزی / برون‌مرزی» (2 sides by geography) × «اصول‌گرا / اصلاح‌طلب / میانه‌رو / رادیکال» (4 subgroups). No schema migration — derived from existing `production_location` × `factional_alignment`. Helper `backend/app/services/narrative_groups.py` + `counts_to_percentages` (largest-remainder rounding). Frontend `lib/narrativeGroups.ts` with colors (navy family inside, orange family outside). Story-level LLM prompt rewritten to tag each article by subgroup and emit structured bullets (`narrative.inside.principlist` etc.) instead of free-prose summaries. Backwards compat: legacy `state_summary_fa` / `diaspora_summary_fa` synthesized by joining bullets.
+- **Clustering & silence-detection partition switched** from `state_alignment` to `narrative_group` (commit 3 of the taxonomy rollout). User-visible behavior change: Etemad-Online and other inside-reformist sources now correctly count as `covered_by_state` (inside-border) instead of being lumped with diaspora.
+- **Two new sources added**: HRANA («هرانا», human-rights news agency, diaspora-moderate) and Etemad Online («اعتماد آنلاین», domestic reformist — slug intentionally `etemad-online` to avoid collision with an existing broken `etemad` source using a non-functional RSS URL).
+- **Admin `is_active` toggle** on the Fetch Stats dashboard (both Sources and Channels tabs). Lets Parham deactivate geo-blocked feeds (tabnak, khabar-online, ilna, irna, mashregh-news, etc. — all covered via Telegram channels anyway) without touching SQL. Extended the existing `PATCH /sources/{slug}` endpoint to allow `is_active` and added `Depends(require_admin)` (it was previously ungated — small security fix bundled in). New `PATCH /channels/{channel_id}` for the channel side.
+- **Auto-detach misclustered articles** replaces the old "auto-flag for human review" behavior. `step_flag_unrelated_articles` now directly sets `story_id = NULL` for articles with cosine similarity < 0.25 to their story centroid; the next clustering run re-places them. Step also deletes any residual `device_info='maintenance-bot'` rows from `improvement_feedback` on every run. `GET /improvements/admin` defaults to `include_bot=false` so the rater-submitted todo list stops getting polluted.
+- **Bias scoring determinism fix** — `_call_openai` temperature was 0.3 despite the prompt explicitly promising deterministic output. Changed to 0.
+- **Ingest resilience** — `ingest_all_sources` now wraps each source in its own try/except. One bad feed no longer aborts the run.
+- **Silent exception handlers logged** — replaced `except: pass` with `logger.warning(...)` in `social_posting._load_posted`, `story_analysis` Telegram-context enrichment, `stories._increment_view_count`, `admin._get_maintenance_info`.
+- **Telegram analysis cache TTL + admin invalidate endpoint.** Cache is 48h; `?force_refresh=1` query param bypasses for admins; `POST /social/stories/{id}/telegram-analysis/invalidate` clears a single story's cache. `cached_at` timestamp stored inside the JSONB (no schema change).
+- **Aged-orphan counter.** Clustering step returns `aged_orphans` count (articles with `story_id=NULL` and `ingested_at` > 30 days) + logs a WARN. Visible to ops; doesn't auto-clean.
+- **Blindspot logic** improved: 10% minority threshold → 20%, plus a small-cluster rule for stories with fewer than 6 articles (a lone voice against ≥2 is a blindspot regardless of percentage).
+- **CI workflow** at `.github/workflows/ci.yml` runs frontend `tsc --noEmit` + backend `compileall` + import smoke + `pytest tests/` on every PR/push to main. 59 tests green (32 new for narrative_groups, 16 for blindspot, 11 for route registration + Persian normalization).
+- **Fetch Stats admin dashboard** shipped — per-source and per-channel totals/24h/7d/freshness with click-to-drill-down (last 30 articles or posts). `/dashboard/fetch-stats` + 3 new backend endpoints. Linked from main dashboard.
+- **Run Maintenance progress modal rebuilt** — minimize-to-corner pill, readable step stats ("33 new · 25 sources · 15 errors"), phase grouping (Data / Cluster / Analysis / Ops), summary metric cards instead of raw JSON dump on completion, prominent failed-steps banner during run.
+- **CoverageBar 4-group UI** — 4 stacked segments with a 2px divider between sides; subgroup percentages now rendered as share-of-side (76% / 24%) instead of share-of-total (34% / 11%). Navy family for inside, orange family for outside. Fixed an invisible-bar bug where a wrapper flex div was collapsing segment widths.
+- **i18n plan saved** at `project-management/I18N_PLAN.md` — three-tier rollout for EN + FR support with full RTL↔LTR layout flip. Tier 1 = UI chrome (~1-2 days), Tier 2 = story content (~1-2 weeks + ongoing LLM cost), Tier 3 = French native-speaker polish. Includes physical→logical Tailwind class mapping, before/after diagrams for the column swaps on story detail + homepage hero, and 30 anticipated complications (bidi content, font metrics, backend error-string leaks, LLM vocabulary decks per language, SEO hreflang, flag-icon UX, etc.).
+
+### Infra changes
+- **CORS_ORIGINS** on Railway — removed stale `frontend-tau-six-36.vercel.app`.
+- **R2 spend cap** on OpenAI dashboard — hard monthly cap set.
+- **Cloudflare Bot Fight Mode** — on (WAF ruleset deferred, paid tier).
+- **UptimeRobot monitor** on `/health` — added.
+- **Dashboard hardcoded password rip** across 5 pages (main, edit-stories, suggestions, improvements, architecture). Single token-validation flow in the main dashboard page; sub-pages read token from localStorage and redirect to main for login.
+
+### RISK_REGISTER updates
+- R2 (OpenAI cost cap) — mitigated.
+- R14, R18 (Cloudflare Bot Fight + WAF) — mitigated (WAF deferred, paid tier).
+- R19 (outage detection) — mitigated via UptimeRobot.
+- R21 (Railway 502) — marked mitigated (stale from 2026-04-10; site is live).
+
+### Open items for next session
+- **R7 — Automated daily backup** script (pg_dump to Cloudflare R2 weekly, ~45 min).
+- **R6 — Credential rotation playbook** (Parham drives; I draft the exact commands per service).
+- **i18n Tier 1** when Parham gives the go-ahead.
+- **B2 backend test suite Pass 2** — add pipeline integration tests with LLM mocks; currently Pass 1 (unit tests only) is shipping in CI.
+- **Header nav re-enabling** — currently commented out; awaiting product decision from the audit.
+- **Retire the dashboard-cosmetic-password localStorage key** (`doornegar_admin`) in a follow-up cleanup once the token-only flow has run for a week.
+
+---
+
 ## 2026-04-15 / 16 — Niloofar persona, performance optimization, bug fix sweep (P1–P7)
 
 ### Key outcomes

@@ -439,6 +439,241 @@ Migration for Tier 2 (deferred):
   `title_fr`, `summary_fr`, `bias_explanation_fr`,
   `editorial_context_fr` to `stories` (JSONB where applicable).
 
+## Complications we're anticipating
+
+Things that won't be visible from a straight-through reading of "swap
+Tailwind classes + add a translations file." Captured here so future-us
+doesn't discover them mid-sprint.
+
+### Content & language
+
+1. **Mixed-direction text inside one line.**
+   A Persian source name like «ایران اینترنشنال» rendered inside an
+   English sentence produces weird wrapping around adjacent
+   punctuation: "report by ایران اینترنشنال, London." The comma lands
+   in the wrong visual position. Fix: wrap any user-facing Persian
+   string inside a non-Persian parent with `<bdi>` or `dir="auto"`.
+   Build a small `<Bidi text={…} />` helper once; use everywhere
+   Persian leaks into an EN/FR parent (story cards, search results,
+   admin tables, tooltip labels).
+
+2. **Backend error messages are in Farsi.**
+   Endpoints currently return Farsi strings in `detail` fields
+   ("خطا در بارگذاری"). An English user will see these untranslated.
+   Two options: (a) return error *codes* and translate on the
+   frontend, or (b) accept-language-aware error responses. Option
+   (a) is cleaner but requires a ~20-endpoint refactor. Quick
+   mitigation for Tier 1: intercept known Farsi error strings in
+   the frontend fetch wrapper and swap to a translated version.
+
+3. **LLM output occasionally leaks Persian into non-Farsi fields.**
+   `title_en` produced by today's pipeline sometimes contains Persian
+   proper nouns in the middle of English sentences without bidi
+   wrapping. Before Tier 2, add a post-processing step: detect
+   Persian-script runs and wrap them with `<bdi>` in the stored
+   string, OR sanitise at render time.
+
+4. **Persian political-faction terms don't translate cleanly.**
+   - «اصول‌گرا» → "Principlist" is the academic term, but most
+     English readers parse it as "follower of principles" rather
+     than "Iranian hardliner." Alternative: "Hardliner" (loses
+     nuance — hardliners are a subset of principlists) or
+     "Conservative (pro-regime)" (wordy).
+   - «اصلاح‌طلب» → "Reformist" is widely understood in Iran coverage.
+     Safe.
+   - For French: «اصول‌گرا» → "principaliste" is not standard
+     French; "partisan de la ligne dure" reads better but is
+     verbose. Needs Tier 3 native review.
+   This is an editorial decision, not a technical one. Document the
+   chosen translation in the messages file with a comment per term.
+
+5. **Telegram post rendering.**
+   Telegram posts have emoji + Persian text + Latin URLs in the
+   same block. Even in a Farsi UI, the URL segment renders LTR
+   inside an RTL parent. In an LTR UI, the Persian text inside
+   should render RTL. Already mostly handled via `dir="auto"` on
+   the post container; double-check in `StoryTelegramSection.tsx`
+   and the mobile TelegramLayout once Tier 1 ships.
+
+6. **Search and filter inputs.**
+   The `/rate` page filters sources by Persian name (Arabic-script
+   normalization via `ی→ي`, `ک→ك`). When the UI is English, do we
+   match Latin characters? Persian? Both? Decision: search works on
+   both `name_en` and `name_fa` regardless of locale. Low-effort:
+   OR the two match conditions.
+
+### Layout & visuals
+
+7. **Persian fonts have different vertical metrics.**
+   Vazirmatn has taller ascenders/descenders than IBM Plex Sans;
+   a `leading-relaxed` that looks comfortable in Farsi will feel
+   cramped or loose when swapped to IBM Plex. Per-locale line-
+   height tweaks may be needed. Ship Tier 1 and screenshot-diff;
+   tune any obvious pain points.
+
+8. **Third-party chart libraries.**
+   We use Recharts for the political spectrum and any future graphs.
+   Recharts' axis label alignment and legend placement don't always
+   respect RTL even when the parent is `dir="rtl"`. If something
+   looks broken after the flip, reach for explicit `textAnchor` and
+   manual offset props rather than hoping CSS fixes it.
+
+9. **Font-loading flash when switching locales.**
+   Next.js preloads fonts per page. Switching from Farsi to English
+   may momentarily show Latin text in Vazirmatn (or vice versa)
+   before the right font swaps in. Mitigation: use `next/font` with
+   `display: "swap"` and declare both fonts in the root layout; the
+   browser only paints the correct family once both are cached.
+
+10. **Visual regressions in RTL after refactor.**
+    Tier 1 commit 1 (physical → logical class refactor) changes
+    the rendered output even when `dir="rtl"` is unchanged, because
+    some Tailwind class pairs behave subtly differently. Mitigation:
+    after the refactor but before merging, take screenshots of every
+    page in Farsi and diff against `main`. Any intentional movement
+    should be <= 2px.
+
+11. **Absolute positioning won't auto-flip.**
+    Any `absolute left-4` stays on the left in LTR (which is probably
+    wrong if it was "outer edge" in RTL). These must become
+    `start-4`. Scan for `left-*` / `right-*` across the codebase
+    during commit 1 — they're rarer than padding/margin/border but
+    the worst to miss.
+
+### Numbers, dates, and sorting
+
+12. **Persian numerals in admin/debug views.**
+    Admin dashboard, fetch-stats table, cron-run logs currently show
+    counts in Latin digits — correctly for admin. Make sure
+    `toFa()` stays a no-op there even when the overall locale is
+    Farsi. Simplest: stop calling `toFa` in admin; only call it in
+    user-facing components.
+
+13. **Decimal separators.**
+    Dispute score 0.34 (English) vs ۰٬۳۴ (Persian Arabic comma) vs
+    0,34 (French). `Intl.NumberFormat(locale)` handles all three.
+    Anywhere we format a float for display, go through
+    `formatNumber(value, locale)` — don't hand-format.
+
+14. **Date pickers.**
+    `<input type="date">` honors OS locale, not app locale. A French
+    user on a Farsi OS sees a Farsi calendar picker. If we ever add
+    date pickers, use a library with explicit locale prop (e.g.
+    `react-day-picker`).
+
+15. **Sorting by source name.**
+    Source names in different scripts collate unpredictably. For the
+    Sources page, sort by slug (always Latin) not by display name.
+    Render the display name in the current locale.
+
+### Routing & SEO
+
+16. **hreflang tags + canonical URLs.**
+    Every story page needs `<link rel="alternate" hreflang="fa" ...>`,
+    `hreflang="en"`, `hreflang="fr"`, and `hreflang="x-default"`.
+    Missing them, search engines treat translations as duplicate
+    content and penalize both. Add to `generateMetadata` in each
+    route.
+
+17. **Sitemap per locale.**
+    `sitemap.xml` currently (if it exists at all) only lists Farsi
+    URLs. Extend to emit a locale block per URL. Same for RSS feed
+    if one exists.
+
+18. **Accept-Language redirect loops.**
+    Next.js middleware that redirects `/` → `/fa/` based on
+    Accept-Language can loop if the user has a non-supported locale
+    header. Always fall back to `fa` (our default) after one
+    redirect attempt; store a cookie to remember the chosen locale.
+
+19. **Locale in share URLs.**
+    A user on `/fa/stories/xyz` copies the URL and sends to a French
+    friend. Friend sees Farsi UI. Fix: locale switcher should stay
+    the page's URL prefix; copy-to-clipboard should use the current
+    URL (not auto-localize).
+
+### Ops & cost
+
+20. **LLM cost scales linearly per language.**
+    Tier 2 adds EN + FR to every story analysis → ~3× the output
+    tokens on the story_analysis prompt. Plan the go/no-go gate
+    explicitly: after 2 weeks of /en traffic, if English sessions
+    are > 5% of total, commit to Tier 2. Below that, don't.
+
+21. **Niloofar prompt rewrite for French.**
+    The Farsi Niloofar prompt is carefully calibrated — rewriting
+    for French means redoing the persona voice (Ashouri-style isn't
+    a French literary reference). Either hire a French writer to
+    define a parallel voice, OR accept a more generic "professional
+    journalist" French output. Editorial decision.
+
+22. **Per-locale pipeline runtime.**
+    If Tier 2 ships, the 4am maintenance run gets ~3× slower on
+    story_analysis steps. Current full run takes ~25 min; could
+    grow to ~40 min. Still well inside the 4-hour Redis lock TTL,
+    but watch for Railway function-execution timeouts.
+
+23. **Translation quality drift.**
+    AI translations of the UI messages file will drift out of sync
+    with the Farsi source as copy changes. Set up a yearly review:
+    open the three files side-by-side, spot-check ~30 random
+    strings, update obvious drifts.
+
+### Testing
+
+24. **No visual regression coverage.**
+    We have zero Playwright/Percy/Storybook coverage today. Once
+    Tier 1 ships, every future CSS change risks breaking one of
+    the three language/direction combinations silently. Worth
+    adding a Playwright smoke test that renders homepage + a story
+    detail in each of fa/en/fr and screenshot-diffs against a
+    committed baseline. This is a separate project (~4 hours) but
+    should be scheduled alongside Tier 1.
+
+25. **Backend tests don't care about locale.**
+    Backend returns Persian strings in error fields. Tests don't
+    check the language. Future refactor (backend error codes) needs
+    corresponding test updates.
+
+### User experience
+
+26. **No flag icons in the locale switcher.**
+    🇮🇷 upsets Iranian diaspora who don't recognize the state flag.
+    🇬🇧 / 🇺🇸 erases Canadian/Australian English readers. 🇫🇷 erases
+    Quebecois / Belgian / African francophones. Use **language
+    codes** (FA / EN / FR) only, written in the target language
+    itself: فارسی / English / Français. No icons.
+
+27. **First-time-visitor language detection.**
+    Someone on a Persian-OS browser arrives at `/`: do we show
+    Farsi (match OS) or English (larger global audience)? Best-of-
+    both: detect Accept-Language → 301 to matching locale
+    prefix. If `fa` header present → `/fa/`. Else `/en/`. Save
+    choice in a cookie so the locale switcher's choice survives.
+
+28. **Admin dashboard language decision.**
+    Keep admin English-only. It's a tool for Parham + future
+    contributors, not an end-user surface. Save time not
+    translating ~100 admin-specific keys, and avoid accidental
+    Farsi leaking into English admin views.
+
+### Future-proofing
+
+29. **Arabic support re-opens this plan.**
+    If we ever add Arabic (RTL, like Farsi), the logical-CSS work
+    already done covers the layout flip. BUT: Arabic-Indic digits
+    ٠١٢٣٤٥٦٧٨٩ differ from Persian's ۰۱۲۳۴۵۶۷۸۹. `toFa()` needs
+    splitting into `toPersianDigits()` and `toArabicDigits()`. The
+    `hazm` normalizer doesn't handle Arabic correctly. Plan Arabic
+    as its own Tier-2-equivalent project, not as a free extension.
+
+30. **LLM prompt vocabulary decks per output language.**
+    The story-analysis prompt has a Farsi vocabulary section
+    (فتنه / قیام / سرکوب). Each new output language needs a
+    parallel section calibrated to that language's media idioms.
+    Store these as separate constants, not interpolated into one
+    big prompt — easier to maintain.
+
 ## Risks to flag
 
 - **Tier 1 risk**: the logical-CSS refactor is mechanical but large.

@@ -4,6 +4,70 @@ All notable changes to the Doornegar project are documented here, organized by w
 
 ---
 
+## April 17, 2026
+
+### Audit & documentation
+- `project-management/AUDIT_2026-04.md` — wide-shallow audit across 8 dimensions (security, infra, backend, pipeline, frontend, UX, data quality, tech debt). 36 findings tiered Blocker/Risk/Nice-to-have.
+- `project-management/I18N_PLAN.md` — three-tier plan for EN + FR support with full RTL↔LTR flip. 30 anticipated complications documented.
+- `RISK_REGISTER.md` refreshed — R2 / R14 / R18 / R19 / R21 marked mitigated.
+
+### Security
+- `doornegar2026` client-side password removed from 5 dashboard pages. Single token-validation flow (validates by calling `/admin/dashboard` before storing in localStorage).
+- `.gitignore` tightened to `.env*` glob with `!.env.example` exception.
+- Orphan `backend/.env.backup` + `frontend/.env.vercel` deleted (verified never in git history).
+- `POST /api/v1/social/channels` now `Depends(require_admin)`.
+- `PATCH /api/v1/admin/sources/{slug}` — added `require_admin` gate (was ungated) + accepts `is_active`.
+- New `PATCH /api/v1/admin/channels/{channel_id}` — admin-gated.
+- OpenAI monthly spend cap, Cloudflare Bot Fight Mode, UptimeRobot monitor all configured.
+
+### Pipeline hardening — ported to auto_maintenance (Celery isn't actually running in prod)
+- Per-step `asyncio.wait_for` timeout map in `auto_maintenance.py` (15m default, up to 60m for bias scoring).
+- Redis single-flight lock `doornegar:maintenance:lock`, 4h TTL, fails open on Redis outage.
+- New `--mode {full,ingest}` CLI flag. Ingest subset = 6 steps for a lightweight cron between daily full runs.
+- New Railway `ingest-cron` service wired to `0 */6 * * *` UTC; pairs with existing `maintenance-cron` at `0 4 * * *`.
+- `step_ingest` now auto-seeds RSS sources from `seed.py` every run (no more `manage.py seed` after adding a source).
+- Dead Celery decorators + `task_lock.py` removed; worker files note the dormant status.
+- `step_flag_unrelated_articles` converted from "flag for review" to "auto-detach": articles < 0.25 similarity to story centroid get `story_id = NULL`; residual `maintenance-bot` improvement rows deleted on every run.
+
+### 4-group narrative taxonomy (3 commits)
+- Split from «محافظه‌کار / اپوزیسیون» to «درون‌مرزی / برون‌مرزی» × 4 subgroups («اصول‌گرا / اصلاح‌طلب / میانه‌رو / رادیکال»).
+- No schema migration — derived from existing `production_location` × `factional_alignment`.
+- New `backend/app/services/narrative_groups.py` (classifier + largest-remainder percentage helper); new `frontend/src/lib/narrativeGroups.ts` (color palette + labels).
+- `StoryBrief` / `StoryAnalysis` schemas gained `narrative_groups`, `inside_border_pct`, `outside_border_pct`. Legacy `state_pct` / `diaspora_pct` still populated for backwards compat.
+- `story_analysis.py` prompt rewritten: articles tagged by subgroup on input; output is a structured `narrative.{inside,outside}.{subgroup}` dict of 2–3 bullet lists each. Legacy `state_summary_fa` / `diaspora_summary_fa` synthesized by joining bullets.
+- Blindspot + silence-detection partition switched from `state_alignment` to `narrative_group`. Etemad-Online now correctly counts as inside-border.
+- `bias_scoring._call_openai` temperature fixed to 0 (was 0.3, breaking the prompt's determinism promise).
+
+### New sources
+- HRANA (هرانا) — human-rights news agency, `hra-news.org/feed/`.
+- Etemad Online (اعتماد آنلاین) — domestic reformist daily, `etemadonline.com/feeds/`. Slug deliberately `etemad-online` to avoid collision with an existing broken `etemad` source.
+
+### Admin dashboard
+- New Fetch Stats page at `/dashboard/fetch-stats` — per-source and per-channel totals / 24h / 7d / freshness, click-to-drill-down.
+- `is_active` toggle on every row (sources + channels).
+- `improvements/admin` now defaults to `include_bot=false` so the todo list is rater-only.
+- Run Maintenance progress modal rebuilt — minimize-to-corner pill, phase-grouped step history, readable step stats, summary metric cards at completion, prominent failed-step banner.
+
+### Frontend
+- `CoverageBar` rewrite — 4 stacked segments, 2px divider between sides, subgroup percentages as share-of-side (76% / 24%) instead of share-of-total (34% / 11%). Fixed invisible-bar bug.
+- `StoryAnalysisPanel` tabs renamed to درون‌مرزی / برون‌مرزی; renders subgroup bullets with colored dots when available, falls back to legacy flat summary.
+- Label sweep across ~28 files: محافظه‌کار → درون‌مرزی, اپوزیسیون → برون‌مرزی.
+- 3 dead components deleted.
+
+### Data quality
+- Blindspot threshold 10% → 20% minority share.
+- Small-cluster rule: stories <6 articles with a lone voice against ≥2 → blindspot.
+- Aged-orphan counter in clustering output (articles `story_id=NULL` older than 30 days).
+- Telegram analysis cache: `cached_at` in JSONB, 48h TTL, admin `?force_refresh=1`, new `POST /social/stories/{id}/telegram-analysis/invalidate`.
+
+### CI & tests
+- `.github/workflows/ci.yml` runs on every PR + push to main.
+- 59 tests passing: 32 narrative_groups, 16 blindspot, 11 route-registration + Persian normalization.
+
+**Active sources: 26** (was 24; added HRANA + Etemad Online).
+
+---
+
 ## April 15-16, 2026
 
 ### Niloofar Persona
