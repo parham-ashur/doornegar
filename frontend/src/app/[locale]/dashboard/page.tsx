@@ -388,15 +388,18 @@ export default function DashboardPage() {
   }, [authHeaders]);
 
   // Force re-summarize N stories with the current model.
-  // The backend endpoint is synchronous — it loops through the N stories
-  // one at a time and returns once all are done, so there's no server-side
-  // progress state to poll. We estimate progress from wall time: premium
-  // model + analyst factors takes roughly 25-35s per story. The progress
-  // bar advances on that assumption.
+  // The backend endpoint is now fire-and-forget: POST starts a background
+  // task and returns immediately with a job id. We poll
+  // /admin/force-resummarize/status every 3s to show real progress and
+  // pick up the final result. The old implementation blocked the HTTP
+  // request for the full duration, which got killed by Cloudflare's 100s
+  // edge timeout on anything over 3-4 stories.
   const [forceRunning, setForceRunning] = useState(false);
   const [forceLimit, setForceLimit] = useState<number | null>(null);
   const [forceStart, setForceStart] = useState<number | null>(null);
   const [forceElapsed, setForceElapsed] = useState(0);
+  const [forceProcessed, setForceProcessed] = useState(0);
+  const [forceCurrentStory, setForceCurrentStory] = useState<string | null>(null);
   const [forceResult, setForceResult] = useState<{ regenerated: number; failed: number; message: string } | null>(null);
 
   useEffect(() => {
@@ -407,17 +410,45 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, [forceStart, forceRunning]);
 
+  // Poll backend status every 3s while a job is running.
+  useEffect(() => {
+    if (!forceRunning) return;
+    const poll = async () => {
+      try {
+        const res = await fetch(`${API}/api/v1/admin/force-resummarize/status`, { headers: authHeaders() });
+        if (!res.ok) return;
+        const state = await res.json();
+        setForceProcessed(state.processed || 0);
+        setForceCurrentStory(state.current_story_title || null);
+        if (state.status === "success" || state.status === "error") {
+          setForceResult({
+            regenerated: state.regenerated || 0,
+            failed: state.failed || 0,
+            message: state.error || `Regenerated ${state.regenerated}/${state.total} stories.`,
+          });
+          setForceRunning(false);
+          fetchRecentSummaries();
+        }
+      } catch {}
+    };
+    poll();
+    const interval = setInterval(poll, 3000);
+    return () => clearInterval(interval);
+  }, [forceRunning, authHeaders, fetchRecentSummaries]);
+
   const forceResummarize = useCallback(async (limit: number) => {
     const ok = confirm(
       `Force re-summarize ${limit} most-recent stories using ${limit} LLM calls now?\n\n` +
       `Cost: roughly $${(limit * 0.03).toFixed(2)}-$${(limit * 0.06).toFixed(2)} on gpt-5-mini.\n` +
-      `Time: ~${Math.ceil(limit * 30 / 60)} minutes.`
+      `Time: ~${Math.ceil(limit * 30 / 60)} minutes. Runs in the background — closing this tab won't stop it.`
     );
     if (!ok) return;
     setForceRunning(true);
     setForceLimit(limit);
     setForceStart(Date.now());
     setForceElapsed(0);
+    setForceProcessed(0);
+    setForceCurrentStory(null);
     setForceResult(null);
     try {
       const res = await fetch(`${API}/api/v1/admin/force-resummarize?limit=${limit}&mode=immediate&order=trending`, {
@@ -425,19 +456,43 @@ export default function DashboardPage() {
         headers: authHeaders(),
       });
       const data = await res.json();
-      setForceResult({
-        regenerated: data.regenerated || 0,
-        failed: data.failed || 0,
-        message: data.message || "",
-      });
-      // Auto-reload the "Recently re-summarized" card so results show up
-      // without a manual click.
-      fetchRecentSummaries();
+      if (data.status === "busy") {
+        alert(data.message);
+        // Leave forceRunning=true so the poll effect attaches to the
+        // existing job.
+      } else if (data.status === "error" || (data.status !== "ok" && data.status !== "busy")) {
+        setForceResult({ regenerated: 0, failed: limit, message: data.message || "Backend error" });
+        setForceRunning(false);
+      }
+      // On "ok" the polling effect drives the UI from here.
     } catch (e: any) {
       setForceResult({ regenerated: 0, failed: limit, message: `Error: ${e.message}` });
+      setForceRunning(false);
     }
-    setForceRunning(false);
-  }, [authHeaders, fetchRecentSummaries]);
+  }, [authHeaders]);
+
+  // On mount, attach to any force-resummarize job already running on
+  // the server (so a page refresh doesn't orphan the progress bar).
+  useEffect(() => {
+    if (!authed) return;
+    (async () => {
+      try {
+        const res = await fetch(`${API}/api/v1/admin/force-resummarize/status`, { headers: authHeaders() });
+        if (!res.ok) return;
+        const state = await res.json();
+        if (state.status === "running" && state.total > 0) {
+          const started = typeof state.started_at === "number" ? state.started_at * 1000 : Date.now();
+          setForceRunning(true);
+          setForceLimit(state.total);
+          setForceStart(started);
+          setForceElapsed(Math.floor((Date.now() - started) / 1000));
+          setForceProcessed(state.processed || 0);
+          setForceCurrentStory(state.current_story_title || null);
+        }
+      } catch {}
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authed]);
 
   // Progress tracking for maintenance runs
   const [maintStart, setMaintStart] = useState<number | null>(null);
@@ -1296,21 +1351,21 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Progress bar while force-resummarize is in flight. The backend
-            endpoint is synchronous and doesn't report progress, so we
-            estimate from wall time at ~30s/story. Stays visible after
-            completion to show the final tally. */}
+        {/* Progress bar for the fire-and-forget force-resummarize job.
+            processed/total comes from the /admin/force-resummarize/status
+            poll, so the numbers are real (not wall-time estimates). */}
         {(forceRunning || forceResult) && forceLimit !== null && (() => {
-          const PER_STORY_SEC = 30;
-          const totalEst = forceLimit * PER_STORY_SEC;
+          const PER_STORY_SEC_EST = 30;
           const pct = forceRunning
-            ? Math.min(95, Math.round((forceElapsed / totalEst) * 100))
+            ? forceLimit > 0
+              ? Math.round((forceProcessed / forceLimit) * 100)
+              : 0
             : 100;
-          const storiesDoneEst = Math.min(forceLimit, Math.floor(forceElapsed / PER_STORY_SEC));
           const mm = Math.floor(forceElapsed / 60);
           const ss = forceElapsed % 60;
           const timeStr = `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
-          const etaSec = Math.max(0, totalEst - forceElapsed);
+          const remaining = Math.max(0, forceLimit - forceProcessed);
+          const etaSec = remaining * PER_STORY_SEC_EST;
           const etaMm = Math.floor(etaSec / 60);
           const etaSs = etaSec % 60;
           const etaStr = `${String(etaMm).padStart(2, "0")}:${String(etaSs).padStart(2, "0")}`;
@@ -1322,7 +1377,7 @@ export default function DashboardPage() {
                     <>
                       <RefreshCw className="h-3.5 w-3.5 animate-spin text-red-600" />
                       <span className="font-medium text-red-700 dark:text-red-300">
-                        Re-summarizing {forceLimit} stories with premium model + analyst factors
+                        Re-summarizing {forceProcessed}/{forceLimit} stories · premium model
                       </span>
                     </>
                   ) : forceResult && forceResult.failed === forceLimit ? (
@@ -1344,7 +1399,7 @@ export default function DashboardPage() {
                 </div>
                 <span className="text-[11px] font-mono text-slate-500" dir="ltr">
                   {timeStr}
-                  {forceRunning && ` · ETA ${etaStr}`}
+                  {forceRunning && remaining > 0 && ` · ETA ${etaStr}`}
                 </span>
               </div>
               <div className="h-1.5 w-full bg-red-100 dark:bg-red-900/20 overflow-hidden">
@@ -1354,13 +1409,22 @@ export default function DashboardPage() {
                 />
               </div>
               {forceRunning && (
-                <p className="text-[10px] text-slate-500 mt-1.5 leading-4" dir="ltr">
-                  ~{storiesDoneEst}/{forceLimit} processed (estimate — each story takes ~{PER_STORY_SEC}s). Closing this tab doesn't stop the backend; the request continues server-side.
+                <p className="text-[10px] text-slate-500 mt-1.5 leading-4 truncate" dir="rtl">
+                  {forceCurrentStory ? (
+                    <><span className="text-slate-400" dir="ltr">Current: </span>{forceCurrentStory}</>
+                  ) : (
+                    <span dir="ltr">Starting…</span>
+                  )}
+                </p>
+              )}
+              {forceRunning && (
+                <p className="text-[10px] text-slate-500 mt-1 leading-4" dir="ltr">
+                  Runs in the background. Closing this tab or refreshing the page is safe — progress picks up where it was.
                 </p>
               )}
               {!forceRunning && forceResult && (
                 <button
-                  onClick={() => { setForceResult(null); setForceLimit(null); setForceStart(null); }}
+                  onClick={() => { setForceResult(null); setForceLimit(null); setForceStart(null); setForceProcessed(0); setForceCurrentStory(null); }}
                   className="mt-2 text-[10px] text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
                   dir="ltr"
                 >

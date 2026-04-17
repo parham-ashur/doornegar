@@ -304,10 +304,15 @@ async def force_resummarize(
     """Force re-generation of summaries with the current model.
 
     Modes:
-      - "immediate" (default): clears summary_fa AND runs story_analysis
-        inline for each story, returning once done.
+      - "immediate" (default): kicks off a BACKGROUND task that clears
+        summary_fa and runs story_analysis inline for each story, then
+        returns immediately with a job id. Poll /admin/force-resummarize/status
+        for progress. Previously this blocked the HTTP request for the
+        full duration, which got killed by Cloudflare's 100s edge timeout
+        on runs longer than 3-4 stories.
       - "queue": just clears summary_fa on N stories so the next maintenance
-        run picks them up via step_summarize.
+        run picks them up via step_summarize. Fast response, no background
+        work.
 
     Order:
       - "trending" (default): same order as the homepage /trending endpoint
@@ -315,7 +320,9 @@ async def force_resummarize(
         to users get refreshed first.
       - "recent": most recently updated/published first.
 
-    Only picks visible stories (article_count >= 5).
+    Only picks visible, non-edited stories (article_count >= 5,
+    is_edited=False). is_edited stories stay untouched so Niloofar's
+    hand-curation isn't clobbered.
     """
     import json as _json
     from sqlalchemy.orm import selectinload
@@ -361,84 +368,144 @@ async def force_resummarize(
             "story_ids": [str(s.id) for s in stories],
         }
 
-    # Immediate mode: run story_analysis inline.
-    # Always use the PREMIUM model for force-refreshes — if Parham is
-    # manually regenerating, it's worth the cost for the best output.
-    from app.services.story_analysis import generate_story_analysis
+    # Immediate mode: kick off a BACKGROUND task and return right away.
+    # Always use the PREMIUM model — if Parham is manually regenerating,
+    # it's worth the cost for the best output.
+    from app.services import force_resummarize_state as _frs
+
+    # Refuse to start a second concurrent job — one LLM loop at a time.
+    if _frs.STATE.get("status") == "running":
+        return {
+            "status": "busy",
+            "message": f"A force-resummarize job is already running ({_frs.STATE.get('processed', 0)}/{_frs.STATE.get('total', 0)}). Wait for it to finish or poll /admin/force-resummarize/status.",
+            "job_id": _frs.STATE.get("job_id"),
+        }
 
     chosen_model = settings.story_analysis_premium_model
-    regenerated = 0
-    failed = 0
-    errors = []
-    for story in stories:
-        # Force-resummarize = premium tier: send full article content (6000 chars)
-        articles_info = [
-            {
-                "title": a.title_original or a.title_fa or a.title_en or "",
-                "content": (a.content_text or a.summary or "")[:6000],
-                "source_name_fa": a.source.name_fa if a.source else "نامشخص",
-                "state_alignment": a.source.state_alignment if a.source else "",
-                "published_at": a.published_at.isoformat() if a.published_at else "",
-            }
-            for a in story.articles
-        ]
-        try:
-            # Force-resummarize always uses premium model + analyst factors
-            analysis = await generate_story_analysis(
-                story, articles_info,
-                model=chosen_model,
-                include_analyst_factors=True,
-            )
-            story.summary_fa = analysis.get("summary_fa")
-            # Preserve any manual_image_url that Niloofar set via update_image —
-            # the rest of the blob is LLM-generated and safe to replace.
-            manual_image = None
-            if story.summary_en:
-                try:
-                    _prev = _json.loads(story.summary_en)
-                    manual_image = _prev.get("manual_image_url")
-                except Exception:
-                    pass
-            extras = {
-                # Legacy side-level fields (UI fallback when narrative is absent)
-                "state_summary_fa": analysis.get("state_summary_fa"),
-                "diaspora_summary_fa": analysis.get("diaspora_summary_fa"),
-                "independent_summary_fa": analysis.get("independent_summary_fa"),
-                "bias_explanation_fa": analysis.get("bias_explanation_fa"),
-                "scores": analysis.get("scores"),
-                # New 4-subgroup narrative and rich analysis fields emitted by
-                # the updated story_analysis prompt. Without these the UI
-                # can't render the subgroup bullets (principlist/reformist/
-                # moderate/radical) and the homepage widgets that read
-                # dispute_score / loaded_words lose their signal.
-                "narrative": analysis.get("narrative"),
-                "dispute_score": analysis.get("dispute_score"),
-                "loaded_words": analysis.get("loaded_words"),
-                "narrative_arc": analysis.get("narrative_arc"),
-                "source_neutrality": analysis.get("source_neutrality"),
-                "llm_model_used": chosen_model,
-            }
-            if manual_image:
-                extras["manual_image_url"] = manual_image
-            if analysis.get("analyst"):
-                extras["analyst"] = analysis["analyst"]
-            story.summary_en = _json.dumps(extras, ensure_ascii=False)
-            await db.commit()
-            regenerated += 1
-        except Exception as e:
-            failed += 1
-            errors.append(f"{str(story.id)[:8]}: {e}")
-            logger.warning(f"Force-resummarize failed for {story.id}: {e}")
+    story_ids = [str(s.id) for s in stories]
+    job_id = _frs.start_job(total=len(stories), story_ids=story_ids, model=chosen_model)
+
+    # Detach the stories from this request's session before handing them
+    # to the background task — the background task opens its own session
+    # so it doesn't inherit this one's lifecycle.
+    story_id_list = list(story_ids)
+
+    import asyncio
+    asyncio.create_task(_run_force_resummarize_job(story_id_list, chosen_model))
 
     return {
         "status": "ok",
+        "job_id": job_id,
         "cleared": len(stories),
-        "regenerated": regenerated,
-        "failed": failed,
-        "errors": errors[:10],
-        "message": f"Regenerated {regenerated}/{len(stories)} stories with {chosen_model}.",
-        "story_ids": [str(s.id) for s in stories],
+        "regenerated": 0,
+        "failed": 0,
+        "message": f"Started background resummarize of {len(stories)} stories with {chosen_model}. Poll /admin/force-resummarize/status for progress.",
+        "story_ids": story_ids,
     }
+
+
+async def _run_force_resummarize_job(story_ids: list[str], chosen_model: str) -> None:
+    """Background worker that re-runs story_analysis for each story id.
+
+    Opens its own DB session and updates the shared force_resummarize_state
+    dict as it processes. Survives HTTP-client timeouts (which is the whole
+    point). Dies if the backend restarts — next status poll returns idle.
+    """
+    import json as _json
+    from sqlalchemy.orm import selectinload
+    from app.database import async_session
+    from app.models.article import Article
+    from app.models.story import Story
+    from app.services import force_resummarize_state as _frs
+    from app.services.story_analysis import generate_story_analysis
+
+    try:
+        for sid in story_ids:
+            async with async_session() as db:
+                r = await db.execute(
+                    select(Story)
+                    .options(selectinload(Story.articles).selectinload(Article.source))
+                    .where(Story.id == sid)
+                )
+                story = r.scalars().first()
+                if not story:
+                    _frs.mark_story_done(success=False, error_msg=f"{sid[:8]}: story not found")
+                    continue
+
+                _frs.mark_story_start(story.title_fa or story.title_en or sid[:8])
+
+                articles_info = [
+                    {
+                        "title": a.title_original or a.title_fa or a.title_en or "",
+                        "content": (a.content_text or a.summary or "")[:6000],
+                        "source_name_fa": a.source.name_fa if a.source else "نامشخص",
+                        "state_alignment": a.source.state_alignment if a.source else "",
+                        "published_at": a.published_at.isoformat() if a.published_at else "",
+                    }
+                    for a in story.articles
+                ]
+                try:
+                    analysis = await generate_story_analysis(
+                        story, articles_info,
+                        model=chosen_model,
+                        include_analyst_factors=True,
+                    )
+                    story.summary_fa = analysis.get("summary_fa")
+                    # Preserve manual_image_url set via update_image
+                    manual_image = None
+                    if story.summary_en:
+                        try:
+                            _prev = _json.loads(story.summary_en)
+                            manual_image = _prev.get("manual_image_url")
+                        except Exception:
+                            pass
+                    extras = {
+                        "state_summary_fa": analysis.get("state_summary_fa"),
+                        "diaspora_summary_fa": analysis.get("diaspora_summary_fa"),
+                        "independent_summary_fa": analysis.get("independent_summary_fa"),
+                        "bias_explanation_fa": analysis.get("bias_explanation_fa"),
+                        "scores": analysis.get("scores"),
+                        "narrative": analysis.get("narrative"),
+                        "dispute_score": analysis.get("dispute_score"),
+                        "loaded_words": analysis.get("loaded_words"),
+                        "narrative_arc": analysis.get("narrative_arc"),
+                        "source_neutrality": analysis.get("source_neutrality"),
+                        "llm_model_used": chosen_model,
+                    }
+                    if manual_image:
+                        extras["manual_image_url"] = manual_image
+                    if analysis.get("analyst"):
+                        extras["analyst"] = analysis["analyst"]
+                    story.summary_en = _json.dumps(extras, ensure_ascii=False)
+                    await db.commit()
+                    _frs.mark_story_done(success=True)
+                except Exception as e:
+                    _frs.mark_story_done(success=False, error_msg=f"{sid[:8]}: {e}")
+                    logger.warning(f"Force-resummarize failed for {sid}: {e}")
+        _frs.finish_job()
+    except Exception as e:
+        logger.exception("Force-resummarize background job crashed")
+        _frs.finish_job(error=str(e))
+
+
+@router.get("/force-resummarize/status")
+async def force_resummarize_status():
+    """Current state of the /admin/force-resummarize background job.
+
+    Shape:
+    {
+      status: idle | running | success | error,
+      job_id: str | null,
+      started_at, started_at_iso, elapsed_s,
+      total, processed, regenerated, failed,
+      current_story_title: str | null,
+      model: str | null,
+      errors: [str, ...],
+      error: str | null,
+    }
+    """
+    from app.services import force_resummarize_state as _frs
+    return _frs.snapshot()
 
 
 @router.get("/recently-summarized")
