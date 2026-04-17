@@ -146,9 +146,30 @@ export default async function HomePage({
     );
   }
 
-  // Blind spots: one from each side
-  const conservativeBlind = blindspots.find(s => s.blindspot_type === "state_only");
-  const oppositionBlind = blindspots.find(s => s.blindspot_type === "diaspora_only");
+  // ── Freshness filter: rotate the hero/blindspot/Telegram slots daily ──
+  // Parham's rule: no story stays in a featured slot for more than a day
+  // unless a genuinely new article arrives. The proxy is `last_updated_at`,
+  // which the clustering layer bumps every time an article is matched or
+  // attached to the cluster. A story whose last_updated_at is within 24 hours
+  // is "fresh" and eligible for a featured slot; older stories get de-ranked
+  // and fall back to the standard trending/disputed sections below the fold.
+  const FRESH_WINDOW_MS = 24 * 60 * 60 * 1000;
+  const nowMs = Date.now();
+  const isFresh = (s: StoryBrief): boolean => {
+    if (!s.last_updated_at) return false;
+    const t = Date.parse(s.last_updated_at);
+    return Number.isFinite(t) && (nowMs - t) < FRESH_WINDOW_MS;
+  };
+
+  // Blind spots: prefer a FRESH blindspot from each side. If no fresh one
+  // exists (e.g. all state-only blindspots are 2+ days old), show nothing
+  // in that slot rather than re-surfacing yesterday's blindspot.
+  const conservativeBlind =
+    blindspots.find(s => s.blindspot_type === "state_only" && isFresh(s)) ||
+    undefined;
+  const oppositionBlind =
+    blindspots.find(s => s.blindspot_type === "diaspora_only" && isFresh(s)) ||
+    undefined;
 
   // ── Deduplication: track which stories are placed ──
   const usedIds = new Set<string>();
@@ -159,10 +180,20 @@ export default async function HomePage({
 
   const sorted = [...stories];
 
-  // Hero: prefer a story with genuine two-sided coverage (state + diaspora
-  // each ≥5%) so the bias comparison panel is meaningful. Fall back to the
-  // top trending story if no balanced candidate exists.
-  const hero = sorted.find(s => s.state_pct >= 5 && s.diaspora_pct >= 5) || sorted[0];
+  // Hero: among the top trending stories, prefer a fresh one with genuine
+  // two-sided coverage (state + diaspora each ≥5%) so the bias comparison
+  // panel is meaningful. Fallback chain:
+  //   1. fresh + balanced
+  //   2. fresh (any coverage mix)
+  //   3. balanced (any freshness)
+  //   4. top trending
+  // This guarantees the hero rotates at least once a day whenever new articles
+  // are arriving, while still degrading gracefully during quiet news days.
+  const hero =
+    sorted.find(s => isFresh(s) && s.state_pct >= 5 && s.diaspora_pct >= 5) ||
+    sorted.find(isFresh) ||
+    sorted.find(s => s.state_pct >= 5 && s.diaspora_pct >= 5) ||
+    sorted[0];
   if (hero) usedIds.add(hero.id);
 
   // Weekly briefing: next 4 not already used
@@ -244,7 +275,15 @@ export default async function HomePage({
   // All of these need story IDs from stage 1 but are independent of
   // each other. Running them in a single Promise.all cuts the critical
   // path from 4 sequential stages (~5s) to 2 (~3s).
-  const telegramAnalysisIds = sorted.slice(0, 5).map(s => s.id);
+  //
+  // Telegram source pool: take the top 5 trending stories that are FRESH
+  // (last_updated_at within 24h). If fewer than 3 fresh stories exist we
+  // fall back to top trending so the panel never goes completely empty,
+  // but on a normal news day this keeps stale predictions/claims off the
+  // homepage in line with the rotation rule applied to hero/blindspot.
+  const freshTopStories = sorted.filter(isFresh);
+  const telegramSourceStories = freshTopStories.length >= 3 ? freshTopStories : sorted;
+  const telegramAnalysisIds = telegramSourceStories.slice(0, 5).map(s => s.id);
   const [allAnalyses, heroTelegram, ...telegramResults] = await Promise.all([
     fetchAnalysesBatch(Array.from(allIds)),
     hero ? fetchTelegramAnalysis(hero.id) : Promise.resolve(null),

@@ -32,6 +32,12 @@ class StoryBrief(BaseModel):
     coverage_diversity_score: float | None = None
     topics: list[str]
     first_published_at: datetime | None = None
+    # `last_updated_at` is set by the clustering layer every time a new article
+    # joins the cluster — so it's the best stateless proxy for "when did this
+    # story last gain fresh content". Used by the homepage freshness filter
+    # (hero/blindspot rotation, Telegram predictions) to avoid surfacing the
+    # same story for more than a day unless new articles arrive.
+    last_updated_at: datetime | None = None
     updated_at: datetime | None = None
     trending_score: float
     view_count: int = 0

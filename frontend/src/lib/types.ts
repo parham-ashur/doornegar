@@ -83,6 +83,11 @@ export interface StoryBrief {
   coverage_diversity_score: number | null;
   topics: string[];
   first_published_at: string | null;
+  // Set by the clustering layer when a new article joins the cluster. Used
+  // as the freshness signal on the homepage (hero/blindspot rotation,
+  // Telegram predictions) — stories without a fresh last_updated_at are
+  // de-ranked so the homepage rotates instead of sticking on yesterday's news.
+  last_updated_at?: string | null;
   updated_at: string | null;
   trending_score: number;
   view_count: number;
