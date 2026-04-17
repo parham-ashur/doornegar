@@ -1355,7 +1355,15 @@ export default function DashboardPage() {
             processed/total comes from the /admin/force-resummarize/status
             poll, so the numbers are real (not wall-time estimates). */}
         {(forceRunning || forceResult) && forceLimit !== null && (() => {
-          const PER_STORY_SEC_EST = 30;
+          // Dynamic per-story estimate: once at least one story has been
+          // processed, use the actual elapsed/processed ratio so ETA
+          // reflects reality. Fall back to 150s/story (premium model with
+          // analyst factors + 6000 chars/article often lands at 2-3 min)
+          // for the first story.
+          const PER_STORY_SEC_DEFAULT = 150;
+          const perStorySec = forceProcessed > 0
+            ? Math.max(30, forceElapsed / forceProcessed)
+            : PER_STORY_SEC_DEFAULT;
           const pct = forceRunning
             ? forceLimit > 0
               ? Math.round((forceProcessed / forceLimit) * 100)
@@ -1365,7 +1373,7 @@ export default function DashboardPage() {
           const ss = forceElapsed % 60;
           const timeStr = `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
           const remaining = Math.max(0, forceLimit - forceProcessed);
-          const etaSec = remaining * PER_STORY_SEC_EST;
+          const etaSec = Math.round(remaining * perStorySec);
           const etaMm = Math.floor(etaSec / 60);
           const etaSs = etaSec % 60;
           const etaStr = `${String(etaMm).padStart(2, "0")}:${String(etaSs).padStart(2, "0")}`;

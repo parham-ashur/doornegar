@@ -53,6 +53,24 @@ railway run --service doornegar python scripts/journalist_audit.py --llm
 railway run --service doornegar python scripts/journalist_audit.py --llm --apply
 ```
 
+## Title rule — no meta-framing
+
+The whole Doornegar platform exists to compare narratives across outlets. That comparison is the site's job, not the title's. Titles must describe the **event** — what happened, where, to whom, with what numbers — and leave the analysis to the bias comparison, narrative panels, and coverage bars.
+
+**Never use these kinds of phrases in a title:**
+- «روایت‌های متفاوت رسانه‌ها»، «روایت‌های حکومتی و برون‌مرزی»، «دو روایت» — the site already shows narratives side-by-side.
+- «پوشش یک‌سویه»، «پوشش همگن»، «روایتی یک‌سویه از ...» — the coverage bar already shows one-sidedness visually.
+- «تحلیل سوگیری»، «تحلیل پوشش»، «بررسی چارچوب‌بندی» — the bias comparison tab already does this.
+- «جنگ روانی»، «تأثیر سوگیری رسانه‌ای» — meta-editorial commentary that belongs in analyst sections, not titles.
+
+**Write titles like a newspaper front page:**
+- ✅ «شکست مذاکرات اسلام‌آباد؛ ونس بدون توافق بازگشت، ایران زمان‌بندی ندارد» — names the event, actor, outcome.
+- ✅ «آتش‌بس دو هفته‌ای ایران و آمریکا؛ طرح ۱۰ ماده‌ای با میانجیگری پاکستان» — names the decision, duration, mediator.
+- ❌ «روایت‌های «پیروزی ایران» در جنگ ۴۰ روزه؛ پوشش یک‌سویه از رسانه‌های نزدیک به حکومت» — the «پوشش یک‌سویه» half is meta-framing. Rewrite as: «رسانه‌های نزدیک به حکومت ایران را «پیروز جنگ ۴۰ روزه» خواندند».
+- ❌ «حملات هوایی به زیرساخت‌های ایران؛ روایت‌های متفاوت رسانه‌ها» — drop the second clause entirely. Rewrite as: «حملات هوایی به زیرساخت‌های ایران؛ دست‌کم ۲۸۶ بازداشتی و کشته شدن فرمانده اطلاعات سپاه».
+
+If the cluster has only one side's coverage and no counter-narrative, the title should attribute the claim to the source (e.g., «پرس‌تی‌وی از ...»، «تسنیم و فارس گزارش دادند که ...») rather than announce «یک‌سویه» as a meta-label. The attribution carries the same information without editorializing in the headline.
+
 ## Capabilities
 
 - Rename story titles that are vague, sensational, or misaligned with the underlying reporting
