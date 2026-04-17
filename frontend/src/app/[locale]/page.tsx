@@ -170,16 +170,19 @@ export default async function HomePage({
   };
   const hasUpdate = (s: StoryBrief): boolean => !!s.update_signal?.has_update;
 
-  // Blind spots: prefer fresh + has_update first (story shifted so badge
-  // explains why it's still interesting), then fresh without update (new
-  // blindspot), then render empty rather than re-surfacing stale.
+  // Blind spots: prefer fresh + has_update (badge explains why it still
+  // deserves the slot), then fresh without update (new blindspot), then
+  // fall back to the most recent stale one rather than leave the slot
+  // empty — a one-sided story from yesterday is still informative.
   const conservativeBlind =
     blindspots.find(s => s.blindspot_type === "state_only" && isFresh(s) && hasUpdate(s)) ||
     blindspots.find(s => s.blindspot_type === "state_only" && isFresh(s)) ||
+    blindspots.find(s => s.blindspot_type === "state_only") ||
     undefined;
   const oppositionBlind =
     blindspots.find(s => s.blindspot_type === "diaspora_only" && isFresh(s) && hasUpdate(s)) ||
     blindspots.find(s => s.blindspot_type === "diaspora_only" && isFresh(s)) ||
+    blindspots.find(s => s.blindspot_type === "diaspora_only") ||
     undefined;
 
   // ── Deduplication: track which stories are placed ──

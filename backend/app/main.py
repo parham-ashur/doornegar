@@ -10,7 +10,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.staticfiles import StaticFiles
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 
 from app.api.v1.router import api_router
 from app.config import settings
@@ -39,6 +39,19 @@ async def lifespan(app: FastAPI):
     try:
         from app.services.seed import seed_sources
         async with async_session() as db:
+            # Self-healing schema: columns declared on models that are
+            # created lazily by maintenance steps. If the step hasn't run
+            # on a fresh deploy, every Story SELECT fails. Idempotent.
+            for ddl in (
+                "ALTER TABLE stories ADD COLUMN IF NOT EXISTS editorial_context_fa JSONB",
+                "ALTER TABLE stories ADD COLUMN IF NOT EXISTS analysis_snapshot_24h JSONB",
+            ):
+                try:
+                    await db.execute(text(ddl))
+                except Exception as e:
+                    logger.warning(f"Schema self-heal skipped: {ddl} — {e}")
+            await db.commit()
+
             count = await seed_sources(db)
             if count > 0:
                 logger.info(f"Seeded {count} news sources on startup")
