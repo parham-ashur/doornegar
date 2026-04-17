@@ -410,14 +410,25 @@ async def _run_force_resummarize_job(story_ids: list[str], chosen_model: str) ->
     Opens its own DB session and updates the shared force_resummarize_state
     dict as it processes. Survives HTTP-client timeouts (which is the whole
     point). Dies if the backend restarts — next status poll returns idle.
+    At the end, writes a durable row into maintenance_logs so the result
+    (including per-story failures) outlives a Railway redeploy.
     """
     import json as _json
+    from datetime import datetime, timezone
+    from sqlalchemy import text
     from sqlalchemy.orm import selectinload
     from app.database import async_session
     from app.models.article import Article
     from app.models.story import Story
     from app.services import force_resummarize_state as _frs
     from app.services.story_analysis import generate_story_analysis
+
+    # Collect detailed per-story outcomes so we can write them to
+    # maintenance_logs on completion. STATE only keeps the last 10 errors;
+    # this captures everything.
+    story_results: list[dict] = []
+    started_at = datetime.now(timezone.utc)
+    fatal_error: str | None = None
 
     try:
         for sid in story_ids:
@@ -430,14 +441,28 @@ async def _run_force_resummarize_job(story_ids: list[str], chosen_model: str) ->
                 story = r.scalars().first()
                 if not story:
                     _frs.mark_story_done(success=False, error_msg=f"{sid[:8]}: story not found")
+                    story_results.append({
+                        "story_id": sid,
+                        "title": None,
+                        "article_count": 0,
+                        "status": "not_found",
+                        "error": "story not found",
+                    })
                     continue
 
                 _frs.mark_story_start(story.title_fa or story.title_en or sid[:8])
 
+                # Per-article content cap: 3000 chars for premium runs. At
+                # 6000 the prompt was blowing past the model's comfortable
+                # token budget for 30+ article clusters, producing
+                # truncated JSON and silent failures. 3000 halves the input
+                # size and lets big clusters fit while still giving the
+                # LLM enough excerpt to read coverage nuance.
+                CONTENT_CAP = 3000
                 articles_info = [
                     {
                         "title": a.title_original or a.title_fa or a.title_en or "",
-                        "content": (a.content_text or a.summary or "")[:6000],
+                        "content": (a.content_text or a.summary or "")[:CONTENT_CAP],
                         "source_name_fa": a.source.name_fa if a.source else "نامشخص",
                         "state_alignment": a.source.state_alignment if a.source else "",
                         "published_at": a.published_at.isoformat() if a.published_at else "",
@@ -479,13 +504,67 @@ async def _run_force_resummarize_job(story_ids: list[str], chosen_model: str) ->
                     story.summary_en = _json.dumps(extras, ensure_ascii=False)
                     await db.commit()
                     _frs.mark_story_done(success=True)
+                    story_results.append({
+                        "story_id": sid,
+                        "title": story.title_fa,
+                        "article_count": story.article_count,
+                        "status": "ok",
+                        "error": None,
+                    })
                 except Exception as e:
-                    _frs.mark_story_done(success=False, error_msg=f"{sid[:8]}: {e}")
-                    logger.warning(f"Force-resummarize failed for {sid}: {e}")
+                    err_msg = str(e)
+                    err_type = type(e).__name__
+                    _frs.mark_story_done(success=False, error_msg=f"{sid[:8]}: {err_msg}")
+                    logger.warning(f"Force-resummarize failed for {sid} ({err_type}): {err_msg}")
+                    story_results.append({
+                        "story_id": sid,
+                        "title": story.title_fa,
+                        "article_count": story.article_count,
+                        "status": "failed",
+                        "error_type": err_type,
+                        "error": err_msg[:500],
+                    })
         _frs.finish_job()
     except Exception as e:
+        fatal_error = str(e)
         logger.exception("Force-resummarize background job crashed")
-        _frs.finish_job(error=str(e))
+        _frs.finish_job(error=fatal_error)
+
+    # Write a durable summary row to maintenance_logs. Survives Railway
+    # restart so we can diagnose failures after the fact.
+    try:
+        async with async_session() as db:
+            finished_at = datetime.now(timezone.utc)
+            elapsed_s = (finished_at - started_at).total_seconds()
+            total = len(story_ids)
+            regenerated = sum(1 for r in story_results if r.get("status") == "ok")
+            failed = sum(1 for r in story_results if r.get("status") in ("failed", "not_found"))
+            results_payload = {
+                "mode": "force_resummarize",
+                "model": chosen_model,
+                "total": total,
+                "regenerated": regenerated,
+                "failed": failed,
+                "stories": story_results,
+            }
+            await db.execute(
+                text(
+                    "INSERT INTO maintenance_logs (id, run_at, status, elapsed_s, results, error) "
+                    "VALUES (gen_random_uuid(), :run_at, :status, :elapsed_s, CAST(:results AS JSONB), :error)"
+                ),
+                {
+                    "run_at": started_at,
+                    "status": "force_resummarize_error" if fatal_error else (
+                        "force_resummarize_partial" if failed > 0 else "force_resummarize_ok"
+                    ),
+                    "elapsed_s": elapsed_s,
+                    "results": _json.dumps(results_payload, ensure_ascii=False),
+                    "error": fatal_error,
+                },
+            )
+            await db.commit()
+    except Exception as log_err:
+        logger.exception(f"Failed to persist force-resummarize log: {log_err}")
 
 
 @router.get("/force-resummarize/status")
