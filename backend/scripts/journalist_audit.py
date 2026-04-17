@@ -444,7 +444,21 @@ async def apply_fix(finding: dict) -> str:
             new_bias = fix_data.get("new_bias_explanation_fa")
             new_state = fix_data.get("new_state_summary_fa")
             new_diaspora = fix_data.get("new_diaspora_summary_fa")
-            if not any([new_bias, new_state, new_diaspora]):
+            # 4-subgroup bullets (new format). Each is an array of Farsi strings
+            # (2-3 bullets per subgroup). When provided, they replace the
+            # corresponding subgroup in `narrative.inside.*` / `narrative.outside.*`
+            # and the legacy side-level summaries are auto-synthesised from them.
+            new_inside_principlist = fix_data.get("new_inside_principlist")
+            new_inside_reformist = fix_data.get("new_inside_reformist")
+            new_outside_moderate = fix_data.get("new_outside_moderate")
+            new_outside_radical = fix_data.get("new_outside_radical")
+            has_subgroup = any([
+                new_inside_principlist is not None,
+                new_inside_reformist is not None,
+                new_outside_moderate is not None,
+                new_outside_radical is not None,
+            ])
+            if not any([new_bias, new_state, new_diaspora, has_subgroup]):
                 return "✗ هیچ روایتی برای به‌روزرسانی وجود ندارد"
             story = await db.get(Story, story_id)
             if not story:
@@ -457,12 +471,41 @@ async def apply_fix(finding: dict) -> str:
             if new_bias:
                 blob["bias_explanation_fa"] = new_bias
                 changed.append("سوگیری")
+            if has_subgroup:
+                narrative = blob.get("narrative") or {}
+                inside = narrative.get("inside") or {}
+                outside = narrative.get("outside") or {}
+                if new_inside_principlist is not None:
+                    inside["principlist"] = list(new_inside_principlist)
+                    changed.append("اصول‌گرا")
+                if new_inside_reformist is not None:
+                    inside["reformist"] = list(new_inside_reformist)
+                    changed.append("اصلاح‌طلب")
+                if new_outside_moderate is not None:
+                    outside["moderate"] = list(new_outside_moderate)
+                    changed.append("میانه‌رو")
+                if new_outside_radical is not None:
+                    outside["radical"] = list(new_outside_radical)
+                    changed.append("رادیکال")
+                narrative["inside"] = inside
+                narrative["outside"] = outside
+                blob["narrative"] = narrative
+                # Auto-synthesise legacy side-level summaries by joining bullets
+                # so the old fallback UI still has something to render.
+                inside_bullets = (inside.get("principlist") or []) + (inside.get("reformist") or [])
+                outside_bullets = (outside.get("moderate") or []) + (outside.get("radical") or [])
+                if inside_bullets and not new_state:
+                    blob["state_summary_fa"] = "؛ ".join(inside_bullets)
+                if outside_bullets and not new_diaspora:
+                    blob["diaspora_summary_fa"] = "؛ ".join(outside_bullets)
             if new_state:
                 blob["state_summary_fa"] = new_state
-                changed.append("روایت محافظه‌کار")
+                if "روایت محافظه‌کار" not in changed:
+                    changed.append("روایت محافظه‌کار")
             if new_diaspora:
                 blob["diaspora_summary_fa"] = new_diaspora
-                changed.append("روایت اپوزیسیون")
+                if "روایت اپوزیسیون" not in changed:
+                    changed.append("روایت اپوزیسیون")
             story.summary_en = _json.dumps(blob, ensure_ascii=False)
             if hasattr(story, "is_edited"):
                 story.is_edited = True

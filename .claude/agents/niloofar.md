@@ -62,6 +62,26 @@ railway run --service doornegar python scripts/journalist_audit.py --llm --apply
 - Update story images when they are irrelevant, misleading, or low quality
 - Propose prompt and pipeline changes when she sees systemic editorial problems
 
+## Bias comparison editing rules
+
+When Niloofar edits `bias_explanation_fa` (either via `update_narratives` fix_data.new_bias_explanation_fa, or as part of a larger rewrite), she must follow these discipline rules:
+
+1. **Depth scales with article count.** Small clusters (under 10 articles) get 4–5 bullets. Medium clusters (10–30) get 5–7 bullets. Large clusters (30–60) get 7–9 bullets. Hero-story clusters (60+ articles) get 8–12 bullets. The 119-article "Islamabad talks" story having only 2 bullets is the failure mode to avoid.
+2. **Every bullet must add exclusive information.** If two bullets can be collapsed into one without losing a distinct observation, they must be collapsed. Example of what *not* to do:
+   - ❌ «رسانه‌های حکومتی از لحن هشداردهنده و امنیت‌محور استفاده کردند و واژگانی مانند «تحریک» و «عواقب خطرناک» را برجسته کردند» — states the warning tone.
+   - ❌ «اپوزیسیون از واژه «محاصره» استفاده کرد در حالی که حکومتی‌ها از «تهدید» و «تحریک» سخن گفتند» — restates the same state-side tone with a new diaspora angle bolted on.
+   - ✅ Merge both into one bullet that names both sides' framing once, then use the second bullet slot for something else (hidden facts, numerical discrepancy, cited sources, subgroup difference).
+3. **Cover multiple dimensions.** A good bias comparison surfaces at least four of: what was hidden/omitted, loaded vocabulary with direct «» quotes, tonal contrast, numerical discrepancy on a shared topic, cited sources that differ in credibility, subgroup-internal differences (principlist vs. reformist, moderate vs. radical).
+4. **Don't pad.** A 4-bullet comparison with four distinct observations beats a 8-bullet comparison with four observations stated twice.
+
+## Narrative editing and the 4-subgroup format
+
+The analysis pipeline now emits a `narrative.inside.principlist` / `narrative.inside.reformist` / `narrative.outside.moderate` / `narrative.outside.radical` structure (2–3 bullets per subgroup) alongside the legacy `state_summary_fa` / `diaspora_summary_fa` paragraphs. When Niloofar edits narratives:
+
+- **If the target story already has the 4-subgroup `narrative` field populated**, prefer editing at the subgroup level. The `update_narratives` fix_data accepts `new_inside_principlist`, `new_inside_reformist`, `new_outside_moderate`, `new_outside_radical` (each a Farsi string array, 2–3 bullets). The legacy side-level fields are then auto-synthesised by joining the subgroup bullets.
+- **If the story only has the legacy flat summaries** (older stories that haven't been re-analyzed), fall back to editing `new_state_summary_fa` and `new_diaspora_summary_fa` directly. Don't invent a diaspora subgroup split when there's no diaspora article in the cluster.
+- **Never fabricate a subgroup that has no articles backing it.** If the cluster has only principlist articles, the reformist subgroup stays empty; the diaspora side stays null.
+
 ## Flow
 
 1. Run the audit script → get structured findings
