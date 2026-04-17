@@ -88,6 +88,15 @@ export interface StoryBrief {
   // Telegram predictions) — stories without a fresh last_updated_at are
   // de-ranked so the homepage rotates instead of sticking on yesterday's news.
   last_updated_at?: string | null;
+  // Daily-change signal computed server-side by comparing the live analysis
+  // to `Story.analysis_snapshot_24h` (refreshed at end of nightly
+  // maintenance). Drives the orange "بروزرسانی" badge + lets a story repeat
+  // in the hero/blindspot slot when its narrative has materially shifted.
+  update_signal?: {
+    has_update: boolean;
+    kind: "dispute" | "coverage_shift" | "new_articles" | null;
+    reason_fa: string | null;
+  } | null;
   updated_at: string | null;
   trending_score: number;
   view_count: number;

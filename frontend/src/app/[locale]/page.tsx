@@ -146,13 +146,21 @@ export default async function HomePage({
     );
   }
 
-  // ── Freshness filter: rotate the hero/blindspot/Telegram slots daily ──
-  // Parham's rule: no story stays in a featured slot for more than a day
-  // unless a genuinely new article arrives. The proxy is `last_updated_at`,
-  // which the clustering layer bumps every time an article is matched or
-  // attached to the cluster. A story whose last_updated_at is within 24 hours
-  // is "fresh" and eligible for a featured slot; older stories get de-ranked
-  // and fall back to the standard trending/disputed sections below the fold.
+  // ── Freshness filter + significant-update rule ──────────────────────
+  // Parham's rule: a story can stay in the hero or blindspot slot across
+  // days ONLY if its narrative has shifted meaningfully since yesterday
+  // — "gained new articles" is not enough. The server-side
+  // `update_signal.has_update` boolean captures this (dispute_score move
+  // ≥ 0.2, or subgroup pct move ≥ 15pp, or ≥3 new articles + rewritten
+  // bias comparison). When `has_update` is true, the story is both
+  // eligible to repeat AND shown with an orange "بروزرسانی" badge +
+  // the delta reason.
+  //
+  // Combined with the 24h freshness signal (`last_updated_at`), we get
+  // three states:
+  //   - Fresh + has_update  → prime candidate. Show badge.
+  //   - Fresh, no update    → new story in the cluster. Normal hero.
+  //   - Stale (>24h)        → not eligible; slot rotates.
   const FRESH_WINDOW_MS = 24 * 60 * 60 * 1000;
   const nowMs = Date.now();
   const isFresh = (s: StoryBrief): boolean => {
@@ -160,14 +168,17 @@ export default async function HomePage({
     const t = Date.parse(s.last_updated_at);
     return Number.isFinite(t) && (nowMs - t) < FRESH_WINDOW_MS;
   };
+  const hasUpdate = (s: StoryBrief): boolean => !!s.update_signal?.has_update;
 
-  // Blind spots: prefer a FRESH blindspot from each side. If no fresh one
-  // exists (e.g. all state-only blindspots are 2+ days old), show nothing
-  // in that slot rather than re-surfacing yesterday's blindspot.
+  // Blind spots: prefer fresh + has_update first (story shifted so badge
+  // explains why it's still interesting), then fresh without update (new
+  // blindspot), then render empty rather than re-surfacing stale.
   const conservativeBlind =
+    blindspots.find(s => s.blindspot_type === "state_only" && isFresh(s) && hasUpdate(s)) ||
     blindspots.find(s => s.blindspot_type === "state_only" && isFresh(s)) ||
     undefined;
   const oppositionBlind =
+    blindspots.find(s => s.blindspot_type === "diaspora_only" && isFresh(s) && hasUpdate(s)) ||
     blindspots.find(s => s.blindspot_type === "diaspora_only" && isFresh(s)) ||
     undefined;
 
@@ -180,17 +191,18 @@ export default async function HomePage({
 
   const sorted = [...stories];
 
-  // Hero: among the top trending stories, prefer a fresh one with genuine
-  // two-sided coverage (state + diaspora each ≥5%) so the bias comparison
-  // panel is meaningful. Fallback chain:
-  //   1. fresh + balanced
-  //   2. fresh (any coverage mix)
-  //   3. balanced (any freshness)
-  //   4. top trending
-  // This guarantees the hero rotates at least once a day whenever new articles
-  // are arriving, while still degrading gracefully during quiet news days.
+  // Hero picker fallback chain — most specific first so we surface the
+  // richest story that qualifies:
+  //   1. fresh + has_update + balanced  (the ideal — something changed today)
+  //   2. fresh + balanced               (first-time hero, no badge yet)
+  //   3. fresh + has_update             (update on a non-balanced story)
+  //   4. fresh                          (brand-new cluster)
+  //   5. balanced                       (quiet news day fallback)
+  //   6. top trending                   (ultimate fallback so hero never empty)
   const hero =
+    sorted.find(s => isFresh(s) && hasUpdate(s) && s.state_pct >= 5 && s.diaspora_pct >= 5) ||
     sorted.find(s => isFresh(s) && s.state_pct >= 5 && s.diaspora_pct >= 5) ||
+    sorted.find(s => isFresh(s) && hasUpdate(s)) ||
     sorted.find(isFresh) ||
     sorted.find(s => s.state_pct >= 5 && s.diaspora_pct >= 5) ||
     sorted[0];
@@ -374,6 +386,20 @@ export default async function HomePage({
                 {hero.title_fa}
               </h1>
             </Link>
+            {/* Orange "بروزرسانی" badge when the hero is a repeat story
+                with a meaningful daily change (dispute shift, coverage
+                shift, or rewritten bias comparison + new articles). */}
+            {hero.update_signal?.has_update && (
+              <div className="mt-2 inline-flex items-center gap-2 border border-orange-300 dark:border-orange-700 bg-orange-50 dark:bg-orange-900/20 px-2 py-1">
+                <span className="inline-block h-1.5 w-1.5 rounded-full bg-orange-500" />
+                <span className="text-[11px] font-bold text-orange-700 dark:text-orange-300">بروزرسانی</span>
+                {hero.update_signal.reason_fa && (
+                  <span className="text-[11px] text-orange-700/80 dark:text-orange-300/80">
+                    {hero.update_signal.reason_fa}
+                  </span>
+                )}
+              </div>
+            )}
             <Meta story={hero} />
             {/* Two-side bias comparison */}
             {(() => {
@@ -448,6 +474,11 @@ export default async function HomePage({
                 <h3 className="text-[18px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
                   {conservativeBlind.title_fa}
                 </h3>
+                {conservativeBlind.update_signal?.has_update && (
+                  <span className="mt-1.5 inline-block border border-orange-300 dark:border-orange-700 bg-orange-50 dark:bg-orange-900/20 px-1.5 py-0.5 text-[10px] font-bold text-orange-700 dark:text-orange-300">
+                    بروزرسانی{conservativeBlind.update_signal.reason_fa ? ` · ${conservativeBlind.update_signal.reason_fa}` : ""}
+                  </span>
+                )}
                 <p className="mt-1.5 text-[13px] text-slate-400">
                   فقط روایت درون‌مرزی · {conservativeBlind.article_count} مقاله
                 </p>
@@ -463,6 +494,11 @@ export default async function HomePage({
                 <h3 className="text-[18px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
                   {oppositionBlind.title_fa}
                 </h3>
+                {oppositionBlind.update_signal?.has_update && (
+                  <span className="mt-1.5 inline-block border border-orange-300 dark:border-orange-700 bg-orange-50 dark:bg-orange-900/20 px-1.5 py-0.5 text-[10px] font-bold text-orange-700 dark:text-orange-300">
+                    بروزرسانی{oppositionBlind.update_signal.reason_fa ? ` · ${oppositionBlind.update_signal.reason_fa}` : ""}
+                  </span>
+                )}
                 <p className="mt-1.5 text-[13px] text-orange-500">
                   فقط روایت برون‌مرزی · {oppositionBlind.article_count} مقاله
                 </p>

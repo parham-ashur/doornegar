@@ -51,6 +51,11 @@ class StoryBrief(BaseModel):
     narrative_groups: NarrativeGroupPercentages = NarrativeGroupPercentages()
     inside_border_pct: int = 0     # = principlist + reformist
     outside_border_pct: int = 0    # = moderate_diaspora + radical_diaspora
+    # Daily-change signal computed from Story.analysis_snapshot_24h.
+    # { has_update: bool, kind: "dispute"|"coverage_shift"|"new_articles"|null,
+    #   reason_fa: str | null }
+    # None when the column isn't populated yet (first-day behavior).
+    update_signal: dict | None = None
 
     model_config = {"from_attributes": True}
 

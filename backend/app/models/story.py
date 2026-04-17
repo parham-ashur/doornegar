@@ -66,6 +66,13 @@ class Story(Base):
     centroid_embedding: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     telegram_analysis: Mapped[dict | None] = mapped_column(JSONB, nullable=True, comment="Cached deep Telegram discourse analysis")
     editorial_context_fa: Mapped[dict | None] = mapped_column(JSONB, nullable=True, comment="Niloofar editorial background context in Farsi")
+    # Snapshot of the analysis axes (dispute_score, inside/outside pct, bias
+    # hash, article_count) captured at the end of every nightly maintenance
+    # run. Used by app/services/story_freshness.py to decide whether a
+    # story has changed meaningfully since ~20-24h ago. Powers the homepage
+    # "بروزرسانی" badge and the "hero can repeat only on significant change"
+    # rule. See step_snapshot_analyses in auto_maintenance.py.
+    analysis_snapshot_24h: Mapped[dict | None] = mapped_column(JSONB, nullable=True, comment="Nightly snapshot for daily-change detection")
 
     # Relationships
     articles: Mapped[list["Article"]] = relationship(back_populates="story")  # noqa: F821

@@ -760,6 +760,31 @@ def _story_brief_with_extras(story: Story) -> StoryBrief:
         brief.narrative_groups = NarrativeGroupPercentages(**pct)
         brief.inside_border_pct = pct["principlist"] + pct["reformist"]
         brief.outside_border_pct = pct["moderate_diaspora"] + pct["radical_diaspora"]
+
+    # Compute the daily-change signal by comparing the live state to the
+    # nightly snapshot in `analysis_snapshot_24h`. Returns a dict with
+    # has_update / kind / reason_fa — None-equivalent when the column is
+    # unpopulated (first 24h after deploy).
+    try:
+        from app.services.story_freshness import compute_update_signal
+
+        blob_for_signal = {}
+        if story.summary_en:
+            try:
+                blob_for_signal = _json.loads(story.summary_en)
+            except Exception:
+                blob_for_signal = {}
+        brief.update_signal = compute_update_signal(
+            current_article_count=story.article_count or 0,
+            current_dispute_score=blob_for_signal.get("dispute_score"),
+            current_inside_pct=brief.inside_border_pct,
+            current_outside_pct=brief.outside_border_pct,
+            current_bias_explanation_fa=blob_for_signal.get("bias_explanation_fa"),
+            snapshot=getattr(story, "analysis_snapshot_24h", None),
+        )
+    except Exception:
+        brief.update_signal = None
+
     return brief
 
 
