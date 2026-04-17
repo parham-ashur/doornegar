@@ -10,9 +10,9 @@ Runs every N hours:
 7. Logs everything
 
 Usage:
-  python auto_maintenance.py              # Run once
-  python auto_maintenance.py --loop 4     # Run every 4 hours
-  python auto_maintenance.py --loop 1     # Run every hour
+  python auto_maintenance.py                  # Run once, full pipeline
+  python auto_maintenance.py --loop 4         # Run every 4 hours
+  python auto_maintenance.py --mode ingest    # Ingest + NLP + cluster only (lightweight)
 """
 
 import argparse
@@ -32,6 +32,63 @@ logging.basicConfig(
     ],
 )
 logger = logging.getLogger("maintenance")
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Per-step timeouts (seconds). Anything not listed uses DEFAULT_STEP_TIMEOUT.
+# A step that blows past its budget is cancelled; the rest of the pipeline
+# continues. Tune by watching the maintenance log for TimeoutError.
+# ──────────────────────────────────────────────────────────────────────
+DEFAULT_STEP_TIMEOUT_SEC = 900  # 15 min — applies to the ~25 light steps
+STEP_TIMEOUTS_SEC = {
+    "ingest": 1800,                # RSS + Telegram for 20+ sources
+    "process": 1800,               # embeddings + translation over many articles
+    "cluster": 1200,               # LLM clustering batch
+    "centroids": 600,
+    "merge_similar": 600,
+    "summarize": 1800,
+    "bias_score": 3600,            # per-article LLM calls, heaviest step
+    "fix_images": 1200,
+    "telegram_analysis": 3600,     # per-story LLM analysis
+    "niloofar_editorial": 1200,
+    "quality_postprocess": 1800,
+    "weekly_digest": 900,
+}
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Redis lock so two maintenance runs (e.g. overlapping cron firings, or
+# the daily full run + the lightweight ingest-only cron) cannot race on
+# the same DB rows.
+# ──────────────────────────────────────────────────────────────────────
+LOCK_KEY = "doornegar:maintenance:lock"
+LOCK_TTL_SEC = 4 * 3600  # 4 hours — longer than any realistic run
+
+
+def _redis():
+    import redis as _redis_mod
+
+    from app.config import settings
+    return _redis_mod.Redis.from_url(settings.redis_url)
+
+
+def try_acquire_lock(label: str) -> bool:
+    """Set the maintenance lock to `label` if absent. Returns True on success."""
+    try:
+        return bool(_redis().set(LOCK_KEY, label, nx=True, ex=LOCK_TTL_SEC))
+    except Exception as e:
+        # If Redis is unreachable, fail OPEN (let the run proceed) — logging
+        # the concern rather than silently blocking all maintenance when
+        # Redis has an outage. Double-runs are a smaller cost than no runs.
+        logger.warning("Could not reach Redis for maintenance lock: %s — proceeding without lock", e)
+        return True
+
+
+def release_lock() -> None:
+    try:
+        _redis().delete(LOCK_KEY)
+    except Exception as e:
+        logger.warning("Could not release maintenance lock: %s", e)
 
 
 async def step_ingest():
@@ -2936,52 +2993,72 @@ async def step_niloofar_editorial():
     return stats
 
 
-async def run_maintenance():
-    """Run full maintenance cycle with per-step progress tracking."""
+FULL_PIPELINE = [
+    ("ingest", "Ingest RSS + Telegram (may take 10-20 min)", "step_ingest"),
+    ("process", "NLP process (embed, translate, extract)", "step_process"),
+    ("backfill_farsi_titles", "Backfill Farsi titles", "step_backfill_farsi_titles"),
+    ("cluster", "Cluster articles into stories", "step_cluster"),
+    ("centroids", "Recompute story centroid embeddings", "step_recompute_centroids"),
+    ("telegram_link", "Link Telegram posts to stories (embeddings)", "step_telegram_link_posts"),
+    ("merge_similar", "Merge similar visible stories", "step_merge_similar"),
+    ("summarize", "Summarize new stories", "step_summarize"),
+    ("bias_score", "Bias scoring", "step_bias_score"),
+    ("fix_images", "Fix broken images", "step_fix_images"),
+    ("story_quality", "Story quality checks", "step_story_quality"),
+    ("detect_silences", "Detect coverage silences", "step_detect_silences"),
+    ("detect_coordination", "Detect coordinated messaging", "step_detect_coordination"),
+    ("source_health", "Source health", "step_source_health"),
+    ("archive_stale", "Archive stale stories", "step_archive_stale"),
+    ("recalc_trending", "Recalculate trending", "step_recalculate_trending"),
+    ("dedup_articles", "Dedup articles", "step_deduplicate_articles"),
+    ("fixes", "Auto-fix common issues", "step_fix_issues"),
+    ("flag_unrelated", "Auto-flag unrelated articles", "step_flag_unrelated_articles"),
+    ("image_relevance", "Image relevance check", "step_image_relevance"),
+    ("analyst_takes", "Extract analyst takes from Telegram", "step_extract_analyst_takes"),
+    ("verify_predictions", "Verify analyst predictions", "step_verify_predictions"),
+    ("rater_feedback", "Apply rater feedback", "step_rater_feedback_apply"),
+    ("feedback_health", "Feedback system health", "step_feedback_health"),
+    ("telegram_analysis", "Deep Telegram discourse analysis (two-pass)", "step_telegram_deep_analysis"),
+    ("telegram_health", "Telegram session health", "step_telegram_health"),
+    ("visual", "Visual check", "step_visual_check"),
+    ("uptime", "Uptime check", "step_uptime_check"),
+    ("disk", "Disk monitoring", "step_disk_monitoring"),
+    ("cost_tracking", "LLM cost tracking", "step_cost_tracking"),
+    ("backup", "Database backup", "step_database_backup"),
+    ("quality_postprocess", "Quality post-processing (LLM review)", "step_quality_postprocess"),
+    ("niloofar_editorial", "Niloofar editorial context for top stories", "step_niloofar_editorial"),
+    ("weekly_digest", "Weekly digest", "step_weekly_digest"),
+]
+
+# Lightweight pipeline for the ingest-only cron — keeps the homepage fresh
+# between daily full runs without the heavy LLM-per-article work.
+INGEST_ONLY_PIPELINE = [
+    ("ingest", "Ingest RSS + Telegram", "step_ingest"),
+    ("process", "NLP process (embed, translate, extract)", "step_process"),
+    ("backfill_farsi_titles", "Backfill Farsi titles", "step_backfill_farsi_titles"),
+    ("cluster", "Cluster articles into stories", "step_cluster"),
+    ("centroids", "Recompute story centroid embeddings", "step_recompute_centroids"),
+    ("telegram_link", "Link Telegram posts to stories (embeddings)", "step_telegram_link_posts"),
+]
+
+
+async def run_maintenance(mode: str = "full"):
+    """Run maintenance pipeline.
+
+    mode="full"   → FULL_PIPELINE (~33 steps, daily at 04:00)
+    mode="ingest" → INGEST_ONLY_PIPELINE (~6 cheap steps, intended to run
+                    every 2-3 hours between the daily full run)
+    """
     from app.services import maintenance_state
 
     start = time.time()
-    logger.info("=" * 50)
-    logger.info(f"Maintenance started at {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    logger.info("=" * 50)
+    pipeline_spec = FULL_PIPELINE if mode == "full" else INGEST_ONLY_PIPELINE
+    # Resolve step callables by name (they're defined above in this module)
+    pipeline = [(key, display, globals()[func_name]) for key, display, func_name in pipeline_spec]
 
-    # Ordered pipeline of (result_key, display_name, async_callable)
-    pipeline = [
-        ("ingest", "Ingest RSS + Telegram (may take 10-20 min)", step_ingest),
-        ("process", "NLP process (embed, translate, extract)", step_process),
-        ("backfill_farsi_titles", "Backfill Farsi titles", step_backfill_farsi_titles),
-        ("cluster", "Cluster articles into stories", step_cluster),
-        ("centroids", "Recompute story centroid embeddings", step_recompute_centroids),
-        ("telegram_link", "Link Telegram posts to stories (embeddings)", step_telegram_link_posts),
-        ("merge_similar", "Merge similar visible stories", step_merge_similar),
-        ("summarize", "Summarize new stories", step_summarize),
-        ("bias_score", "Bias scoring", step_bias_score),
-        ("fix_images", "Fix broken images", step_fix_images),
-        ("story_quality", "Story quality checks", step_story_quality),
-        ("detect_silences", "Detect coverage silences", step_detect_silences),
-        ("detect_coordination", "Detect coordinated messaging", step_detect_coordination),
-        ("source_health", "Source health", step_source_health),
-        ("archive_stale", "Archive stale stories", step_archive_stale),
-        ("recalc_trending", "Recalculate trending", step_recalculate_trending),
-        ("dedup_articles", "Dedup articles", step_deduplicate_articles),
-        ("fixes", "Auto-fix common issues", step_fix_issues),
-        ("flag_unrelated", "Auto-flag unrelated articles", step_flag_unrelated_articles),
-        ("image_relevance", "Image relevance check", step_image_relevance),
-        ("analyst_takes", "Extract analyst takes from Telegram", step_extract_analyst_takes),
-        ("verify_predictions", "Verify analyst predictions", step_verify_predictions),
-        ("rater_feedback", "Apply rater feedback", step_rater_feedback_apply),
-        ("feedback_health", "Feedback system health", step_feedback_health),
-        ("telegram_analysis", "Deep Telegram discourse analysis (two-pass)", step_telegram_deep_analysis),
-        ("telegram_health", "Telegram session health", step_telegram_health),
-        ("visual", "Visual check", step_visual_check),
-        ("uptime", "Uptime check", step_uptime_check),
-        ("disk", "Disk monitoring", step_disk_monitoring),
-        ("cost_tracking", "LLM cost tracking", step_cost_tracking),
-        ("backup", "Database backup", step_database_backup),
-        ("quality_postprocess", "Quality post-processing (LLM review)", step_quality_postprocess),
-        ("niloofar_editorial", "Niloofar editorial context for top stories", step_niloofar_editorial),
-        ("weekly_digest", "Weekly digest", step_weekly_digest),
-    ]
+    logger.info("=" * 50)
+    logger.info(f"Maintenance started at {datetime.now().strftime('%Y-%m-%d %H:%M')} (mode={mode}, steps={len(pipeline)})")
+    logger.info("=" * 50)
 
     maintenance_state.start_run(total_steps=len(pipeline))
     results = {}
@@ -2989,26 +3066,41 @@ async def run_maintenance():
     try:
         for key, display, func in pipeline:
             maintenance_state.begin_step(display)
+            timeout = STEP_TIMEOUTS_SEC.get(key, DEFAULT_STEP_TIMEOUT_SEC)
             try:
-                result = await func()
+                result = await asyncio.wait_for(func(), timeout=timeout)
                 results[key] = result
                 maintenance_state.end_step(display, "ok", result)
+            except asyncio.TimeoutError:
+                logger.error(f"{display} timed out after {timeout}s — continuing")
+                err = {"error": f"timeout after {timeout}s"}
+                results[key] = err
+                maintenance_state.end_step(display, "error", err)
             except Exception as e:
                 logger.error(f"{display} failed: {e}")
                 err = {"error": str(e)}
                 results[key] = err
                 maintenance_state.end_step(display, "error", err)
 
-        # Doc update is last and depends on results
-        maintenance_state.begin_step("Update project docs")
-        try:
-            results["docs"] = await step_update_docs(results, start)
-            maintenance_state.end_step("Update project docs", "ok", results["docs"])
-        except Exception as e:
-            logger.error(f"Doc update failed: {e}")
-            err = {"error": str(e)}
-            results["docs"] = err
-            maintenance_state.end_step("Update project docs", "error", err)
+        # Doc update is full-pipeline-only; skip in ingest-only mode.
+        if mode == "full":
+            maintenance_state.begin_step("Update project docs")
+            try:
+                results["docs"] = await asyncio.wait_for(
+                    step_update_docs(results, start),
+                    timeout=DEFAULT_STEP_TIMEOUT_SEC,
+                )
+                maintenance_state.end_step("Update project docs", "ok", results["docs"])
+            except asyncio.TimeoutError:
+                logger.error("Doc update timed out — continuing")
+                err = {"error": f"timeout after {DEFAULT_STEP_TIMEOUT_SEC}s"}
+                results["docs"] = err
+                maintenance_state.end_step("Update project docs", "error", err)
+            except Exception as e:
+                logger.error(f"Doc update failed: {e}")
+                err = {"error": str(e)}
+                results["docs"] = err
+                maintenance_state.end_step("Update project docs", "error", err)
 
         elapsed = time.time() - start
         logger.info(f"Maintenance complete in {elapsed:.0f}s")
@@ -3072,20 +3164,43 @@ async def run_maintenance():
         raise
 
 
+def _run_once(mode: str) -> None:
+    """One maintenance invocation with lock semantics — both runtime paths
+    (single-shot CLI and --loop) go through this."""
+    label = f"{mode}@{datetime.now().strftime('%H:%M:%S')}"
+    if not try_acquire_lock(label):
+        logger.warning(
+            "Another maintenance run holds the lock — skipping this firing (mode=%s)",
+            mode,
+        )
+        return
+    try:
+        asyncio.run(run_maintenance(mode=mode))
+    finally:
+        release_lock()
+
+
 def main():
     parser = argparse.ArgumentParser(description="Doornegar Auto-Maintenance")
     parser.add_argument("--loop", type=float, help="Run every N hours (omit for single run)")
+    parser.add_argument(
+        "--mode",
+        choices=("full", "ingest"),
+        default="full",
+        help="full = complete 34-step pipeline (daily). ingest = lightweight "
+             "6-step pipeline to keep the homepage fresh between daily runs.",
+    )
     args = parser.parse_args()
 
     if args.loop:
         interval = args.loop * 3600
-        logger.info(f"Starting maintenance loop — every {args.loop}h")
+        logger.info(f"Starting maintenance loop — every {args.loop}h (mode={args.mode})")
         while True:
-            asyncio.run(run_maintenance())
+            _run_once(args.mode)
             logger.info(f"Next run in {args.loop}h...")
             time.sleep(interval)
     else:
-        asyncio.run(run_maintenance())
+        _run_once(args.mode)
 
 
 if __name__ == "__main__":

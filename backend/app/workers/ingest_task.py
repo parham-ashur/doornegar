@@ -6,7 +6,6 @@ import logging
 from app.database import async_session
 from app.services.ingestion import ingest_all_sources
 from app.workers.celery_app import celery_app
-from app.workers.task_lock import single_flight
 
 logger = logging.getLogger(__name__)
 
@@ -20,13 +19,14 @@ def run_async(coro):
         loop.close()
 
 
-@celery_app.task(
-    name="app.workers.ingest_task.ingest_all_feeds_task",
-    bind=True,
-    time_limit=900,        # 15 min hard kill
-    soft_time_limit=870,   # graceful at 14:30
-)
-@single_flight("ingest_all_feeds", timeout=960)
+# NOTE: these Celery tasks are DORMANT in the current Railway deployment
+# (only `web` + a scheduled `auto_maintenance.py` cron run). The safety
+# nets that used to live here (time_limit, single_flight lock) were moved
+# to auto_maintenance.py where they actually protect the pipeline.
+# Re-activate these decorators if you add `worker` + `beat` services.
+
+
+@celery_app.task(name="app.workers.ingest_task.ingest_all_feeds_task", bind=True)
 def ingest_all_feeds_task(self):
     """Periodic task to ingest RSS feeds from all active sources."""
     logger.info("Starting scheduled feed ingestion...")

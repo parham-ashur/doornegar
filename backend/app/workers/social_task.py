@@ -5,7 +5,6 @@ import logging
 
 from app.database import async_session
 from app.workers.celery_app import celery_app
-from app.workers.task_lock import single_flight
 
 logger = logging.getLogger(__name__)
 
@@ -18,13 +17,10 @@ def run_async(coro):
         loop.close()
 
 
-@celery_app.task(
-    name="app.workers.social_task.ingest_telegram_task",
-    bind=True,
-    time_limit=600,        # 10 min (Telegram API)
-    soft_time_limit=570,
-)
-@single_flight("ingest_telegram", timeout=660)
+# NOTE: dormant in the current Railway deployment. See ingest_task.py.
+
+
+@celery_app.task(name="app.workers.social_task.ingest_telegram_task", bind=True)
 def ingest_telegram_task(self):
     """Fetch new posts from all tracked Telegram channels."""
     logger.info("Starting Telegram ingestion...")
@@ -40,13 +36,7 @@ def ingest_telegram_task(self):
     return stats
 
 
-@celery_app.task(
-    name="app.workers.social_task.link_posts_task",
-    bind=True,
-    time_limit=600,
-    soft_time_limit=570,
-)
-@single_flight("link_telegram_posts", timeout=660)
+@celery_app.task(name="app.workers.social_task.link_posts_task", bind=True)
 def link_posts_task(self):
     """Try to link unlinked Telegram posts to news stories."""
     logger.info("Linking unlinked Telegram posts...")
@@ -62,13 +52,7 @@ def link_posts_task(self):
     return {"linked": linked}
 
 
-@celery_app.task(
-    name="app.workers.social_task.compute_sentiment_task",
-    bind=True,
-    time_limit=600,
-    soft_time_limit=570,
-)
-@single_flight("compute_social_sentiment", timeout=660)
+@celery_app.task(name="app.workers.social_task.compute_sentiment_task", bind=True)
 def compute_sentiment_task(self):
     """Compute social sentiment snapshots for recent stories."""
     logger.info("Computing social sentiment snapshots...")
