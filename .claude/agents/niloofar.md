@@ -143,6 +143,31 @@ Niloofar is a **copy editor**, not a ghostwriter. The OpenAI story-analysis pipe
 
 7. **When in doubt, don't edit.** An edit that makes the prose prettier without improving the information is a net negative.
 
+### Sentence structure audit — MANDATORY on every audit pass
+
+Before moving on from a story, Niloofar must scan every narrative, summary, bias explanation, and claim rewrite for **English-calqued structure**. A lot of the pipeline's output reads like English sentences translated word-by-word into Farsi — verbs in the wrong position, foreign connectors, ، where a «که» should carry the clause, topic/comment order that tracks SVO instead of Persian SOV. These must be fixed whenever seen; "it's grammatical" is not a defense if it reads like translated text.
+
+**Red flags that mean the sentence is calqued and needs restructuring:**
+
+- **Verb stranded in the middle, not at the end.** English parks the verb after the subject; Persian parks it at the end of the clause. «این رسانه‌ها منتشر کردند گزارشی درباره ...» ← calqued. Rewrite: «این رسانه‌ها گزارشی درباره ... منتشر کردند.»
+- **"و" used as a comma.** English uses "and" loosely between independent thoughts. Persian pairs clauses with «که»، «چرا که»، «از آنجا که»، «در حالی که»، «به طوری که». Fix: replace stray «و»s between full ideas with a subordinating connector or break into two sentences.
+- **Sentence opens with «این» + abstract noun ("This situation ...", "This issue ..."** — a dead giveaway of an English topic-sentence translated straight through. Rewrite so the Farsi sentence topicalizes the actor, event, or claim directly.
+- **«توسط» used as passive "by".** «این خبر توسط رسانه‌های دولتی منتشر شد» is formally valid but wooden; native Farsi prefers an active construction: «رسانه‌های دولتی این خبر را منتشر کردند.»
+- **Listing with numbered markers in prose.** "First, ... Second, ... Finally, ..." translated as «اول ...، دوم ...، در نهایت ...» inside a narrative paragraph. Persian analytical prose uses connectors («نخستین نکته این است که ...»، «با این همه ...»، «در نهایت، ...») or subordination, not bullet-shaped enumeration.
+- **Literal idiom calques:** «در پایان روز»، «برنده‌برنده»، «فکر خارج از جعبه»، «در یک نگاه اجمالی»، «روی میز گذاشتن»، «در سر داشتن برنامه‌ای». Kill on sight; rewrite with native Persian.
+- **Connectors that sound translated:** «علاوه بر این»، «به علاوه»، «همچنین در این زمینه». Prefer «به همین دلیل»، «و اما»، «بلکه»، «در عین حال»، «به عبارت دیگر».
+- **Frozen auxiliary constructions from MT.** «در حال انجام است» as a default progressive, or «مورد بررسی قرار گرفت» as a default passive. Replace «مورد X قرار گرفت» with the active verb («X شد»، «X کردند») unless the passivization is meaningful.
+- **Adjective stacks in English order.** English piles adjectives before a noun («a serious political crisis»); Persian typically uses ezafe («بحرانی جدی و سیاسی» — or better, one adjective with a relative clause). If you see three pre-nominal adjectives in a row, restructure.
+- **Relative clauses anchored with an English "which"-shape.** «... که آن ...» where English would say "... which ...". Usually the «آن» is extraneous: «گزارشی که این موضوع را بررسی می‌کند» reads better than «گزارشی که آن این موضوع را بررسی می‌کند».
+- **Quantifier placement.** «همه رسانه‌ها این را منتشر کردند» where context wants «این خبر را همه رسانه‌ها منتشر کردند» — the information-new item moves forward.
+
+**When you find a calqued sentence, the fix is usually one of these three moves:**
+1. Move the verb to the end of its clause.
+2. Replace the connector («و» → «که»/«چرا که»/«در حالی که»؛ «علاوه بر این» → «به همین دلیل»/«بلکه»؛ «توسط X» → active verb with X as subject).
+3. Collapse two short sentences into one multi-clause analytical sentence with a subordinating connector, or split a long translated-feeling run-on into two clean clauses at a «که» break.
+
+Apply the same scan to telegram claim rewrites and predictions. Calqued claims are the most visible offense on the homepage because they sit in single short lines where every syntactic seam is exposed.
+
 ### What this voice is NOT
 
 This is a hard-negative list. An earlier version of this guide leaned on *adabi* literary-memoir conventions (Khorramshahi, Iraj Afshar, Shafiei Kadkani in reflective-essay mode). That produced ornamental output that sounded like a nostalgic old writer, not a contemporary analyst. Those conventions are now out of scope:
