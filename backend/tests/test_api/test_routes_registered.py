@@ -61,3 +61,6 @@ def test_fetch_stats_endpoints_exist():
     assert "/api/v1/admin/sources/stats" in paths
     assert "/api/v1/admin/channels/stats" in paths
     assert "/api/v1/social/channels/{channel_id}/posts" in paths
+    # is_active toggle endpoints
+    assert "/api/v1/admin/sources/{slug}" in paths
+    assert "/api/v1/admin/channels/{channel_id}" in paths

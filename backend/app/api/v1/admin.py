@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import traceback
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -1182,18 +1183,22 @@ async def unclaim_story_articles(
     }
 
 
-@router.patch("/sources/{slug}")
+@router.patch("/sources/{slug}", dependencies=[Depends(require_admin)])
 async def patch_source(
     slug: str,
     body: dict,
     db: AsyncSession = Depends(get_db),
 ):
-    """Update editable fields on a source (logo_url, etc.)."""
+    """Update editable fields on a source (is_active, logo_url, etc.).
+
+    Setting is_active=false skips the source in the next ingest run —
+    useful for feeds that are persistently geo-blocked from the server.
+    """
     result = await db.execute(select(Source).where(Source.slug == slug))
     source = result.scalar_one_or_none()
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
-    allowed = {"logo_url", "name_fa", "name_en"}
+    allowed = {"logo_url", "name_fa", "name_en", "is_active"}
     changed = []
     for key in allowed:
         if key in body:
@@ -1202,7 +1207,33 @@ async def patch_source(
     if not changed:
         raise HTTPException(status_code=400, detail=f"No valid fields. Allowed: {allowed}")
     await db.commit()
-    return {"status": "ok", "slug": slug, "updated": changed}
+    return {"status": "ok", "slug": slug, "updated": changed, "is_active": source.is_active}
+
+
+@router.patch("/channels/{channel_id}", dependencies=[Depends(require_admin)])
+async def patch_channel(
+    channel_id: uuid.UUID,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """Update editable fields on a Telegram channel (is_active, etc.).
+
+    Setting is_active=false skips the channel on the next Telegram fetch.
+    """
+    result = await db.execute(select(TelegramChannel).where(TelegramChannel.id == channel_id))
+    channel = result.scalar_one_or_none()
+    if not channel:
+        raise HTTPException(status_code=404, detail="Channel not found")
+    allowed = {"is_active", "title", "channel_type"}
+    changed = []
+    for key in allowed:
+        if key in body:
+            setattr(channel, key, body[key])
+            changed.append(key)
+    if not changed:
+        raise HTTPException(status_code=400, detail=f"No valid fields. Allowed: {allowed}")
+    await db.commit()
+    return {"status": "ok", "channel_id": str(channel_id), "updated": changed, "is_active": channel.is_active}
 
 
 @router.post("/create-tables")

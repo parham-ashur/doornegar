@@ -78,6 +78,7 @@ export default function FetchStatsPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [drilldownItems, setDrilldownItems] = useState<(ArticleBrief | PostBrief)[]>([]);
   const [drilldownLoading, setDrilldownLoading] = useState(false);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -114,6 +115,32 @@ export default function FetchStatsPage() {
   useEffect(() => {
     fetchStats();
   }, [fetchStats]);
+
+  async function toggleActive(row: SourceStat | ChannelStat, e: React.MouseEvent) {
+    e.stopPropagation();
+    const next = !row.is_active;
+    setTogglingId(row.id);
+    try {
+      const url =
+        tab === "sources"
+          ? `${API}/api/v1/admin/sources/${(row as SourceStat).slug}`
+          : `${API}/api/v1/admin/channels/${row.id}`;
+      const res = await fetch(url, {
+        method: "PATCH",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ is_active: next }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (tab === "sources") {
+        setSources((prev) => prev.map((s) => (s.id === row.id ? { ...s, is_active: next } : s)));
+      } else {
+        setChannels((prev) => prev.map((c) => (c.id === row.id ? { ...c, is_active: next } : c)));
+      }
+    } catch (err: unknown) {
+      alert(`Failed to toggle: ${err instanceof Error ? err.message : "unknown"}`);
+    }
+    setTogglingId(null);
+  }
 
   async function toggleDrilldown(id: string) {
     if (expandedId === id) {
@@ -223,12 +250,13 @@ export default function FetchStatsPage() {
 
       {/* Table */}
       <div className="border border-slate-200 dark:border-slate-800">
-        <div className="grid grid-cols-[1fr_100px_80px_80px_120px_40px] gap-2 px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-slate-400 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50">
+        <div className="grid grid-cols-[1fr_100px_80px_80px_120px_60px_40px] gap-2 px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-slate-400 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50">
           <div>{tab === "sources" ? "Source" : "Channel"}</div>
           <div className="text-right">Total</div>
           <div className="text-right">24h</div>
           <div className="text-right">7d</div>
           <div className="text-right">Last seen</div>
+          <div className="text-center">Active</div>
           <div />
         </div>
 
@@ -247,17 +275,22 @@ export default function FetchStatsPage() {
 
           return (
             <div key={row.id} className="border-b border-slate-100 dark:border-slate-800 last:border-0">
-              <button
+              <div
                 onClick={() => toggleDrilldown(row.id)}
-                className="w-full grid grid-cols-[1fr_100px_80px_80px_120px_40px] gap-2 px-3 py-2.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-900/50 text-left items-center"
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    toggleDrilldown(row.id);
+                  }
+                }}
+                className={`w-full grid grid-cols-[1fr_100px_80px_80px_120px_60px_40px] gap-2 px-3 py-2.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-900/50 cursor-pointer items-center ${
+                  !row.is_active ? "opacity-50" : ""
+                }`}
               >
                 <div className="min-w-0">
-                  <div className="font-medium text-slate-900 dark:text-white truncate">
-                    {name}
-                    {!row.is_active && (
-                      <span className="ms-2 text-[11px] text-slate-400">(inactive)</span>
-                    )}
-                  </div>
+                  <div className="font-medium text-slate-900 dark:text-white truncate">{name}</div>
                   <div className="text-[12px] text-slate-400 truncate">{subtitle}</div>
                 </div>
                 <div className="text-right font-mono text-slate-700 dark:text-slate-300">{row.total}</div>
@@ -266,6 +299,22 @@ export default function FetchStatsPage() {
                 <div className={`text-right text-[12px] ${freshnessClass(row.hours_since_last, staleAfter)}`}>
                   {fmtHours(row.hours_since_last)}
                 </div>
+                <div className="flex justify-center">
+                  <button
+                    onClick={(e) => toggleActive(row, e)}
+                    disabled={togglingId === row.id}
+                    aria-label={row.is_active ? "Deactivate" : "Activate"}
+                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors disabled:opacity-50 ${
+                      row.is_active ? "bg-emerald-500" : "bg-slate-300 dark:bg-slate-700"
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                        row.is_active ? "translate-x-[18px]" : "translate-x-[3px]"
+                      }`}
+                    />
+                  </button>
+                </div>
                 <div className="flex justify-end">
                   {isExpanded ? (
                     <ChevronUp className="h-4 w-4 text-slate-400" />
@@ -273,7 +322,7 @@ export default function FetchStatsPage() {
                     <ChevronDown className="h-4 w-4 text-slate-400" />
                   )}
                 </div>
-              </button>
+              </div>
 
               {isExpanded && (
                 <div className="px-3 pb-3 bg-slate-50 dark:bg-slate-900/30">
