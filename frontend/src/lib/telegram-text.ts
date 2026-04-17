@@ -15,10 +15,10 @@ export function cleanPrediction(text: string): string {
   if (!text) return "";
   let t = text.trim();
   // "در آینده،" / "در آینده ،" / "در آینده " — redundant prefix
-  t = t.replace(/^در\s*آینده[،,]?\s*/u, "");
+  t = t.replace(/^در\s*آینده[،,]?\s*/, "");
   // Capitalize-like cleanup: if the next word is a connector that leaves
   // an awkward start ("، " / "و ")
-  t = t.replace(/^[،,]\s*/u, "");
+  t = t.replace(/^[،,]\s*/, "");
   return t.trim();
 }
 
@@ -28,7 +28,7 @@ export function cleanClaim(text: string): string {
   // "موضوع: X | رست claim" → "rest claim"
   // Label is any short (1–25 char) Persian word ending in a colon, followed
   // by the topic, a pipe, then the claim body.
-  t = t.replace(/^[\u0600-\u06FF\s]{1,25}:\s*[^|]+\|\s*/u, "");
+  t = t.replace(/^[\u0600-\u06FF\s]{1,25}:\s*[^|]+\|\s*/, "");
   return t.trim();
 }
 
