@@ -56,6 +56,37 @@
 - [x] `DEVLOG.md`, `CHANGELOG.md`, `PROJECT_STATUS.md`, `BACKLOG.md`, `ARCHITECTURE.md` updated with this session.
 - [x] `RISK_REGISTER.md` refreshed: R2 / R14 / R18 / R19 / R21 mitigated.
 
+## Done this session (2026-04-17 afternoon/evening)
+
+### Niloofar
+- [x] `/admin/niloofar/audit` + `/admin/niloofar/apply-fix` endpoints deleted. Dashboard Niloofar card removed; Niloofar moved into the Claude Persona Audits grid as a 6th card.
+- [x] English-conversation / Farsi-DB-output rule documented in `.claude/agents/niloofar.md` and in `project_personas.md` memory (all six personas).
+- [x] `update_narratives` fix_type accepts 4 new subgroup arrays (principlist/reformist/moderate/radical); legacy flat summaries auto-synthesized from bullets.
+- [x] **Pass 1** — 11 edits applied (8 renames, 2 narrative rewrites, 1 summary rewrite) via `--apply-from`.
+- [x] **Pass 2** — 3 deep rewrites with full 4-subgroup narratives on is_edited stories (Islamabad talks 119 articles, Hormuz blockade 18, Lebanon 2055 26).
+- [x] Niloofar persona — "Bias comparison editing rules" section (4-12 bullets scaling by article count + exclusivity), "Narrative editing and the 4-subgroup format" section, "Title rule — no meta-framing" section with banned phrase list.
+
+### Pipeline / prompt
+- [x] `story_analysis.py` prompt: bullet count scales with article count (5-7 to 9-12), explicit anti-redundancy rule with concrete failure-mode examples, two new bullet patterns (subgroup-internal differences + source credibility contrasts).
+- [x] `step_niloofar_editorial` expanded from top 15 to top 30 stories.
+- [ ] `story_analysis.py` title rule — no-meta-framing strengthening pass (queued — will push after next Refresh 16 completes to avoid killing it).
+
+### Force-resummarize
+- [x] Filters `is_edited=False` so Niloofar edits aren't overwritten.
+- [x] Writes `narrative`, `dispute_score`, `loaded_words`, `narrative_arc`, `source_neutrality` to `summary_en`.
+- [x] Preserves `manual_image_url` across rewrites.
+- [x] Refactored to fire-and-forget background task (`asyncio.create_task` + `force_resummarize_state.py`). `GET /admin/force-resummarize/status` for polling. Survives Cloudflare 100s edge timeout.
+- [x] Per-story outcomes persisted to `maintenance_logs` (survives Railway redeploy). Status values: `force_resummarize_ok`, `force_resummarize_partial`, `force_resummarize_error`.
+- [x] Per-article content cap: 6000 → 3000 chars. Halves input tokens, fits big clusters under budget.
+
+### Dashboard UX
+- [x] "Reopen progress window" button on the Last Maintenance card — attaches to running server-side jobs after a page refresh.
+- [x] Progress bar for Refresh 5 / Refresh 16 — dynamic ETA (converges to actual per-story time after first story), real processed/total count, current story title, auto-attach on page mount.
+- [x] `TelegramDiscussions` homepage card: 3 predictions → 2.
+
+### Animation
+- [x] `DoornegarAnimation.tsx` — new `triangleDown` shape type. Hourglass pattern fixed (apex-to-apex meeting at the pinch-point circle). Star pattern fixed (Star of David hexagram with interlocking up + down triangles).
+
 ## Done this session (2026-04-15/16)
 - [x] **Niloofar writing style** — defined, iterated 3 versions, agent file + output style + prompt all aligned
 - [x] **Niloofar Claude-driven workflow** — gather JSON → analyze in chat → apply findings. No OpenAI.
@@ -84,6 +115,11 @@
 ## Must Have (before public launch)
 
 ### Immediate (blocks launch)
+- [ ] **Railway watch-paths config** — auto-deploys on any push to `main` including frontend-only commits. Needs path filter to `backend/**` so Vercel-only deploys don't kill in-flight background tasks (Refresh 16 keeps getting interrupted). Parham-driven dashboard change.
+- [ ] **Fix 4 pass-1 Niloofar titles** that still have meta-framing («پوشش یک‌سویه», «روایت‌های حکومتی و برون‌مرزی») per the new no-meta-framing rule. IDs: 603d8621, e0e0a475, ba2ed5b7, d2491715.
+- [ ] **Story-analysis prompt title rule tightening** — already forbids «روایت» but LLM ignores it sometimes; needs stronger language + more examples. Requires Railway redeploy so hold until no active Refresh job.
+- [ ] **Retry-on-failure with exponential backoff** for force-resummarize background job — one retry after 5s would catch rate-limit transients.
+- [ ] **Failure-log viewer** for force-resummarize on the dashboard — `/admin/maintenance/logs` returns the new rows but there's no pretty UI for the per-story error breakdown.
 - [ ] **Set R2 env vars on Railway** (R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME, R2_PUBLIC_URL) — backend is 502 without these
 - [ ] **Set SECRET_KEY and ADMIN_TOKEN on Railway** (generate random 32+ char strings)
 - [ ] **Set OpenAI hard spending limit** ($30/month) on platform.openai.com/usage

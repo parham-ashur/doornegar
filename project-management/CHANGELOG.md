@@ -66,6 +66,48 @@ All notable changes to the Doornegar project are documented here, organized by w
 
 **Active sources: 26** (was 24; added HRANA + Etemad Online).
 
+### April 17, 2026 — afternoon/evening session
+
+#### Niloofar — removed from admin API, folded into persona grid
+- Deleted `POST /admin/niloofar/audit` and `POST /admin/niloofar/apply-fix` — both routed to the legacy `--llm` OpenAI path contradicting the Claude-in-chat-only workflow.
+- Removed the violet "Niloofar Editor Audit" dashboard card + all its state/effects/callbacks.
+- Added Niloofar as the first card in the Claude Persona Audits grid (now 6-wide) with a "How to Run" hint — symmetric with Dariush/Sara/Kamran/Mina/Reza.
+- `.claude/agents/niloofar.md` — new "Conversation language vs. output language" section: English to Parham, Farsi into the DB. Memory entry `project_personas.md` mirrors the rule for all six personas.
+- `scripts/journalist_audit.py --llm` flag preserved as legacy escape hatch; `step_niloofar_editorial` in nightly maintenance is a separate thing (nano-model editorial-context blurbs) and stays.
+
+#### Bias comparison depth + exclusivity
+- `story_analysis.py` prompt: bullet count now scales with article count (5-7 for <10, 7-9 for 10-30, 8-10 for 30-60, 9-12 for 60+). Explicit anti-overlap rule + concrete failure-mode example (two bullets restating "state-media warning tone"). Two new bullet patterns added: subgroup-internal differences, source-credibility contrasts.
+- Niloofar persona doc got matching "Bias comparison editing rules" section + "Narrative editing and the 4-subgroup format" section (edit at subgroup level when `narrative.inside.*` is populated; fall back to legacy summaries otherwise; never fabricate subgroups with no articles).
+
+#### `update_narratives` subgroup schema
+- `journalist_audit.py::apply_fix` accepts four new arrays: `new_inside_principlist`, `new_inside_reformist`, `new_outside_moderate`, `new_outside_radical` (each 2-3 Farsi bullets).
+- Writes to `narrative.inside.*` / `narrative.outside.*` and auto-synthesizes legacy `state_summary_fa` / `diaspora_summary_fa` by joining bullets.
+- Legacy flat-summary fields still work; when both are provided, the explicit values win.
+
+#### Niloofar sessions this day
+- **Pass 1** — 11 edits on the top 25 trending: 8 title renames (state-framing adopted, meta-titles, wrong Jalali year, unsupported "۱۰۰ کشته"), 2 narrative rewrites (Hormuz tankers, UN veto — replaced template "سرکوب / نقض حقوق بشر" lines with content grounded in the actual articles), 1 summary rewrite (Hezbollah siege — dropped unsupported casualty figure).
+- **Pass 2** — 3 deep rewrites on the worst is_edited stories: Islamabad talks (119 articles, 2 bullets → 9 bullets + 4 subgroup lists), Hormuz blockade (6 bullets with redundancy → 7 redundancy-free + 4 subgroup lists), Lebanon 2055 (5 bullets → 8 bullets + 3 subgroup lists).
+
+#### force-resummarize hardening (three commits)
+- **Skip is_edited stories + write new narrative fields** — the endpoint was previously overwriting Niloofar's curation on every click and dropping the new `narrative.inside.*` field entirely.
+- **Fire-and-forget refactor** — `asyncio.create_task` + new `app/services/force_resummarize_state.py` (shared state dict), `GET /admin/force-resummarize/status` for polling. Survives Cloudflare's 100s edge timeout (which was killing every Refresh 16 the old way). Frontend polls every 3s; auto-attaches to running job on page mount.
+- **Durable failure logs + 3000-char content cap** — job writes a row to `maintenance_logs` on completion with per-story status / error_type / error_message (survives Railway redeploy). Per-article content sent to LLM halved from 6000 to 3000 chars to keep big clusters under token budget (36-article clusters were silently truncating).
+
+#### Dashboard UX
+- **"Reopen progress window"** button on the Last Maintenance card — calls `/admin/maintenance/status`, syncs `maintStart` from server's `started_at`, resumes the modal after a page refresh.
+- **Progress bar for Refresh 5 / Refresh 16** — red banner with elapsed timer, dynamic ETA (converges to actual per-story time after the first story), real processed/total count, current story title. Auto-attach on page mount.
+- **`step_niloofar_editorial` expanded** from top 15 to top 30 stories (~6% coverage → ~11%).
+
+#### Niloofar title rule — no meta-framing
+- New "Title rule — no meta-framing" section in `.claude/agents/niloofar.md`: titles must describe the event (actor, action, numbers, location). Forbidden phrases: «روایت‌های متفاوت رسانه‌ها», «پوشش یک‌سویه», «تحلیل سوگیری», «جنگ روانی» etc. When a cluster is genuinely one-sided, attribute to the source rather than announce «یک‌سویه» as a meta-label.
+- `story_analysis.py` prompt already has a weaker version of this rule; strengthening pass queued (held to avoid Railway redeploy during Refresh 16 run).
+
+#### Animation fix
+- `DoornegarAnimation.tsx` gained a `triangleDown` shape type. Hourglass (ساعت شنی) pattern: top triangle now points apex-down, bottom apex-up — apexes meet at the pinch-point circle. Star pattern: two triangles sharing a center, one up and one down, forming a proper Star of David hexagram.
+
+#### Other
+- `TelegramDiscussions` homepage card predictions list: 3 → 2.
+
 ---
 
 ## April 15-16, 2026

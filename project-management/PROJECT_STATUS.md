@@ -1,8 +1,24 @@
 # Doornegar - Project Status
 
-**Last updated**: 2026-04-17 (Audit + security + narrative taxonomy + pipeline hardening + i18n plan)
+**Last updated**: 2026-04-17 (Niloofar editorial work + bias depth + force-resummarize hardening + afternoon session)
 
-## 2026-04-17 highlights
+## 2026-04-17 afternoon/evening highlights
+
+- **Niloofar admin endpoint removed.** `/admin/niloofar/audit` + `/admin/niloofar/apply-fix` + the purple dashboard card all gone — they routed to the legacy OpenAI path contradicting the Claude-in-chat-only workflow. Niloofar now lives as a sixth card in the Claude Persona Audits grid, symmetric with the other five personas.
+- **Language rule** documented across all six personas: they converse with Parham in English (plans, findings, reasoning) and write Farsi into the DB only (titles, summaries, bias comparisons, subgroup bullets).
+- **Bias-comparison depth scaling + anti-redundancy rule** in both the `story_analysis.py` prompt and the Niloofar persona doc. 5-7 bullets for <10 articles, 9-12 for 60+ articles. No two bullets may restate the same observation.
+- **`update_narratives` fix_type extended** with 4 subgroup bullet arrays (principlist / reformist / moderate / radical). Legacy flat summaries auto-synthesized from bullets. Niloofar can now edit at subgroup granularity without losing backwards compat.
+- **Niloofar pass 1 + pass 2 applied** to 14 stories total (8 title renames + 3 narrative rewrites + 3 deep subgroup rewrites on the worst is_edited stories including the 119-article hero which went from 2 bullets to 9 bullets + 4 subgroup lists).
+- **force-resummarize refactored** from HTTP-blocking to fire-and-forget background task. `GET /admin/force-resummarize/status` for polling. Survives Cloudflare's 100s edge timeout (was killing every Refresh 16 run). Also now skips is_edited stories (protects curation), writes the new `narrative`/`dispute_score`/`loaded_words` fields, persists per-story failure logs to `maintenance_logs` table (survives Railway redeploy), and caps per-article content at 3000 chars to keep big clusters under token budget.
+- **Niloofar title rule — no meta-framing.** Titles describe the event, not the comparison. Forbidden phrases: «روایت‌های متفاوت رسانه‌ها», «پوشش یک‌سویه», «تحلیل سوگیری», «جنگ روانی». The whole site exists to compare narratives — the title shouldn't duplicate what the coverage bar and bias tab already show.
+- **`step_niloofar_editorial` expanded** from top 15 to top 30 stories (~6% → ~11% context coverage). Extra cost ~$0.10/night on the nano model.
+- **Dashboard progress UX**: new "Reopen progress window" button for maintenance + Refresh 5/16 progress bar with dynamic ETA that converges after the first story + auto-attach on page mount so refreshes don't orphan the bar.
+- **Animation fix**: DoornegarAnimation's Hourglass (ساعت شنی) and Star (ستاره داود) patterns now render as apex-to-apex hourglass and interlocking hexagram instead of stacked up-triangles. New `triangleDown` shape type.
+- **Homepage trim**: `TelegramDiscussions` card shows top-2 predictions instead of top-3.
+
+**Known observations:** Railway auto-deploys on any push to `main` (no path filter), so frontend-only commits redeploy the backend and kill in-flight background tasks. Needs a Parham-driven Railway dashboard config change. First Refresh 16 after the fire-and-forget refactor: 6/16 succeeded, 9 failed — all successes were ≤9 articles, failures likely big clusters blowing the old 6000-char content budget. Content cap (3000) + persistent logs are the immediate mitigation.
+
+## 2026-04-17 morning highlights
 
 - **Full wide-shallow audit across 8 dimensions** shipped at `project-management/AUDIT_2026-04.md`. 36 findings tiered Blocker/Risk/Nice-to-have. Most Blockers closed in the same session.
 - **Security pass**: removed hardcoded client-side dashboard password (5 pages), tightened `.gitignore`, deleted orphan env files, gated `POST /social/channels` with `require_admin`, added `require_admin` to the previously-ungated `PATCH /sources/{slug}`. OpenAI monthly cap + Cloudflare Bot Fight + UptimeRobot all configured.

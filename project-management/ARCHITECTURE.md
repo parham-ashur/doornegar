@@ -303,8 +303,18 @@ doornegar/
 | POST | `/api/v1/admin/pipeline/run-all` | Run entire pipeline |
 | POST | `/api/v1/admin/ingest/trigger` | Trigger RSS ingestion only |
 | POST | `/api/v1/admin/nlp/trigger` | Trigger NLP processing only |
-| POST | `/api/v1/admin/cluster/trigger` | Trigger clustering only |
+| POST | `/api/v1/admin/cluster/trigger` | Trigger story clustering only |
 | POST | `/api/v1/admin/bias/trigger` | Trigger bias scoring only |
+| POST | `/api/v1/admin/force-resummarize` | **Fire-and-forget** background job to regenerate summaries/narratives/bias for top N visible non-is_edited stories with the premium model. Returns a job id; poll the status endpoint. Filters is_edited=False to protect curation. |
+| GET | `/api/v1/admin/force-resummarize/status` | Live state of the running/last force-resummarize job (total, processed, regenerated, failed, current_story_title, model). Frontend polls every 3s. |
+| GET | `/api/v1/admin/maintenance/logs` | Durable log rows from `maintenance_logs` table — includes both nightly-cron entries and force-resummarize completions with per-story failure breakdown. |
+
+### Background-job state modules
+
+In-memory state dicts shared between the route handler and background workers, mirrored by a status endpoint. Not durable — reset on backend restart; on job completion each writes a summary row to `maintenance_logs` so the history survives.
+
+- `app/services/maintenance_state.py` — state for the nightly / manual full maintenance run. Used by `auto_maintenance.run_maintenance()` + `GET /admin/maintenance/status`.
+- `app/services/force_resummarize_state.py` — state for manual "Refresh N" LLM regeneration jobs. Used by `_run_force_resummarize_job()` + `GET /admin/force-resummarize/status`. The background task is launched via `asyncio.create_task` so the HTTP response returns immediately (crucial — Cloudflare's edge timeout is 100s but a 16-story premium run takes 5-20 minutes).
 
 ### Social/Telegram endpoints
 

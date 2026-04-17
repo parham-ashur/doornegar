@@ -48,6 +48,42 @@
 
 ---
 
+## 2026-04-17 (afternoon/evening session) — Niloofar removal-as-endpoint, bias-comparison depth, force-resummarize hardening, animation fixes
+
+### Key outcomes
+
+- **Niloofar endpoint removed from the admin API.** `/admin/niloofar/audit` and `/admin/niloofar/apply-fix` were routing to the legacy OpenAI path (`journalist_audit.py --llm`), which contradicted the intended workflow (Claude-in-chat only). Endpoint + the purple "Run Audit" dashboard card are gone; Niloofar now lives as a sixth card in the Claude Persona Audits grid with a "How to Run" hint, symmetric with Dariush/Sara/Kamran/Mina/Reza. `step_niloofar_editorial` (separate nightly step that writes `editorial_context_fa` with the nano model) preserved.
+- **Niloofar persona language split** documented in `.claude/agents/niloofar.md`. Converses with Parham in English (plans, findings, reasoning) — writes Farsi into the DB (titles, summaries, bias comparisons, subgroup bullets). Same rule applied to the other five personas.
+- **Bias-comparison depth scaling.** `story_analysis.py` prompt now scales bullet count with article count: 5-7 for <10 articles, 7-9 for 10-30, 8-10 for 30-60, 9-12 for 60+. Explicit anti-redundancy rule ("no two bullets may restate the same observation") with concrete failure-mode examples. New bullet patterns added (subgroup-internal differences, source-credibility contrasts). Niloofar persona mirrors the same targets for her `update_narratives` edits.
+- **`update_narratives` fix_type extended** to accept `new_inside_principlist` / `new_inside_reformist` / `new_outside_moderate` / `new_outside_radical` — 2-3 Farsi bullets per subgroup. Legacy flat `state_summary_fa` / `diaspora_summary_fa` auto-synthesized from the subgroup bullets so the old fallback UI still renders. Tested on 3 stories (Islamabad talks, Hormuz blockade, Lebanon 2055) with all four subgroup slots populated.
+- **Niloofar pass 1**: 11 edits applied (8 rename_story + 2 update_narratives + 1 update_summary) — fixed meta-titles adopting state framing, generic bias templates with fabricated diaspora quotes, wrong Jalali year (۱۴۰۲ → dropped), unsupported "۱۰۰ کشته" figure in Hezbollah siege.
+- **Niloofar pass 2**: 3 deep rewrites on the worst is_edited stories — Islamabad talks (119 articles, 2 bullets → 9 bullets + 4 subgroup lists), Hormuz blockade (6 bullets with redundancy → 7 redundancy-free bullets + 4 subgroup lists), Lebanon 2055 (5 bullets → 8 bullets + 3 subgroup lists).
+- **force-resummarize hardened in three steps.** (a) Now filters `is_edited=False` so curated stories stay untouched; (b) writes the new `narrative`/`dispute_score`/`loaded_words`/`narrative_arc`/`source_neutrality` fields; (c) refactored to fire-and-forget: background `asyncio.create_task` with shared state module `force_resummarize_state.py`, `GET /admin/force-resummarize/status` for polling. Dashboard progress bar now shows real processed/total counts, the current story title, ETA that converges after the first story. On page refresh the dashboard auto-attaches to any job already running on the server.
+- **Durable failure logs + content cap.** Background job now writes a row to `maintenance_logs` on completion with per-story status/error_type/error_message (survives Railway redeploy). Per-article content cap dropped from 6000 to 3000 chars — 36-article clusters were blowing past token budgets and silently returning truncated JSON. Cost drops ~30-40% on input tokens too.
+- **`step_niloofar_editorial` expanded** from top 15 to top 30. Context coverage was only ~6% of all stories; now ~11%, spans the homepage-visible slice most nights. Extra cost ~$0.10/night.
+- **Niloofar title rule — no meta-framing.** New section in the persona doc bans phrases like «روایت‌های متفاوت رسانه‌ها», «پوشش یک‌سویه», «تحلیل سوگیری», «جنگ روانی» in titles. The platform's whole purpose is narrative comparison — the title shouldn't duplicate what the coverage bar and bias tab already show. When a cluster is genuinely one-sided, attribute to the source («پرس‌تی‌وی گزارش داد…») rather than label it «یک‌سویه». The story_analysis.py prompt equivalent rule is queued (holding to avoid another mid-run Railway redeploy).
+- **Progress UI polish**: new "Reopen progress window" button on the Last Maintenance card (attaches to in-flight server-side runs after a page refresh); elapsed timer + phase hint on the Niloofar card (since removed); progress bar for Refresh 5 / Refresh 16 with auto-attach to running jobs.
+- **Animation fix**: two-triangle Hourglass and Star figures in the footer's `DoornegarAnimation` were rendering as stacked up-triangles instead of apex-to-apex hourglass / interlocking Star of David. Added a `triangleDown` shape type and flipped the top triangle in both figures.
+- **Homepage trim**: `TelegramDiscussions` right-rail card now shows top-2 predictions instead of top-3.
+
+### Commits (in order)
+0e94bb3 · 96a5a99 · d3ba87a · 030b76c · 0ba518b · 656aa9e · 879b7ea · 40e73c5 · 5ffe35c · d4e1575 · 15d7b61 · 5e3d5b3 · dce2f86
+
+### Observations / known issues
+- **Railway auto-deploys on any push to `main`** (not path-filtered). My frontend-only pushes keep killing in-flight background tasks on the backend. Needs a Railway-dashboard config change — path filter to `backend/**` only. Parham-driven.
+- **Refresh 16 this session: 6/16 success, 9 failed.** Successes all ≤9 articles; failures likely the 36+ article clusters hitting context limits. Content cap (3000 chars) + persistent logs are the immediate fix; the next run will tell us whether the big-cluster failures are resolved.
+- **4 pass-1 titles still violate the new no-meta-framing rule** ("پوشش یک‌سویه", "روایتی یک‌سویه", "روایت‌های حکومتی و برون‌مرزی"). Cleanup pass queued.
+
+### Open items for next session
+- **Story-analysis prompt tightening** for the no-meta-framing title rule (queued — pushing requires Railway redeploy).
+- **Fix 4 pass-1 titles** that still have meta-framing per the new rule.
+- **Railway watch-paths config** — backend-only redeploys. Parham dashboard task.
+- **Retry-on-failure with exponential backoff** for the force-resummarize background job (one retry after 5s would catch rate-limit transients).
+- **Small failure-log viewer** on the dashboard (currently `/admin/maintenance/logs` returns the new rows but there's no pretty UI).
+- All prior open items from the morning entry still stand (R7 backup, R6 rotation, i18n Tier 1, B2 Pass 2).
+
+---
+
 ## 2026-04-15 / 16 — Niloofar persona, performance optimization, bug fix sweep (P1–P7)
 
 ### Key outcomes
