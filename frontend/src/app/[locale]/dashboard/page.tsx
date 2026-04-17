@@ -387,31 +387,57 @@ export default function DashboardPage() {
     setRepairRunning(null);
   }, [authHeaders]);
 
-  // Force re-summarize N stories with the current model
+  // Force re-summarize N stories with the current model.
+  // The backend endpoint is synchronous — it loops through the N stories
+  // one at a time and returns once all are done, so there's no server-side
+  // progress state to poll. We estimate progress from wall time: premium
+  // model + analyst factors takes roughly 25-35s per story. The progress
+  // bar advances on that assumption.
   const [forceRunning, setForceRunning] = useState(false);
+  const [forceLimit, setForceLimit] = useState<number | null>(null);
+  const [forceStart, setForceStart] = useState<number | null>(null);
+  const [forceElapsed, setForceElapsed] = useState(0);
+  const [forceResult, setForceResult] = useState<{ regenerated: number; failed: number; message: string } | null>(null);
+
+  useEffect(() => {
+    if (!forceStart || !forceRunning) return;
+    const interval = setInterval(() => {
+      setForceElapsed(Math.floor((Date.now() - forceStart) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [forceStart, forceRunning]);
+
   const forceResummarize = useCallback(async (limit: number) => {
     const ok = confirm(
       `Force re-summarize ${limit} most-recent stories using ${limit} LLM calls now?\n\n` +
       `Cost: roughly $${(limit * 0.03).toFixed(2)}-$${(limit * 0.06).toFixed(2)} on gpt-5-mini.\n` +
-      `Time: ~${Math.ceil(limit * 15 / 60)} minutes.`
+      `Time: ~${Math.ceil(limit * 30 / 60)} minutes.`
     );
     if (!ok) return;
     setForceRunning(true);
+    setForceLimit(limit);
+    setForceStart(Date.now());
+    setForceElapsed(0);
+    setForceResult(null);
     try {
       const res = await fetch(`${API}/api/v1/admin/force-resummarize?limit=${limit}&mode=immediate&order=trending`, {
         method: "POST",
         headers: authHeaders(),
       });
       const data = await res.json();
-      alert(
-        `${data.message}\n\nRegenerated: ${data.regenerated}\nFailed: ${data.failed || 0}\n\n` +
-        `Click "Reload" in the 'Recently re-summarized stories' card to see the updated output.`
-      );
+      setForceResult({
+        regenerated: data.regenerated || 0,
+        failed: data.failed || 0,
+        message: data.message || "",
+      });
+      // Auto-reload the "Recently re-summarized" card so results show up
+      // without a manual click.
+      fetchRecentSummaries();
     } catch (e: any) {
-      alert(`Error: ${e.message}`);
+      setForceResult({ regenerated: 0, failed: limit, message: `Error: ${e.message}` });
     }
     setForceRunning(false);
-  }, [authHeaders]);
+  }, [authHeaders, fetchRecentSummaries]);
 
   // Progress tracking for maintenance runs
   const [maintStart, setMaintStart] = useState<number | null>(null);
@@ -1269,6 +1295,81 @@ export default function DashboardPage() {
             </button>
           </div>
         </div>
+
+        {/* Progress bar while force-resummarize is in flight. The backend
+            endpoint is synchronous and doesn't report progress, so we
+            estimate from wall time at ~30s/story. Stays visible after
+            completion to show the final tally. */}
+        {(forceRunning || forceResult) && forceLimit !== null && (() => {
+          const PER_STORY_SEC = 30;
+          const totalEst = forceLimit * PER_STORY_SEC;
+          const pct = forceRunning
+            ? Math.min(95, Math.round((forceElapsed / totalEst) * 100))
+            : 100;
+          const storiesDoneEst = Math.min(forceLimit, Math.floor(forceElapsed / PER_STORY_SEC));
+          const mm = Math.floor(forceElapsed / 60);
+          const ss = forceElapsed % 60;
+          const timeStr = `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
+          const etaSec = Math.max(0, totalEst - forceElapsed);
+          const etaMm = Math.floor(etaSec / 60);
+          const etaSs = etaSec % 60;
+          const etaStr = `${String(etaMm).padStart(2, "0")}:${String(etaSs).padStart(2, "0")}`;
+          return (
+            <div className="mb-4 border border-red-200 dark:border-red-900/40 bg-red-50/30 dark:bg-red-950/10 p-3">
+              <div className="flex items-center justify-between gap-3 mb-2">
+                <div className="flex items-center gap-2 text-xs">
+                  {forceRunning ? (
+                    <>
+                      <RefreshCw className="h-3.5 w-3.5 animate-spin text-red-600" />
+                      <span className="font-medium text-red-700 dark:text-red-300">
+                        Re-summarizing {forceLimit} stories with premium model + analyst factors
+                      </span>
+                    </>
+                  ) : forceResult && forceResult.failed === forceLimit ? (
+                    <>
+                      <XCircle className="h-3.5 w-3.5 text-red-500" />
+                      <span className="font-medium text-red-700 dark:text-red-300">Failed</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle className="h-3.5 w-3.5 text-emerald-500" />
+                      <span className="font-medium text-emerald-700 dark:text-emerald-300">
+                        Done: {forceResult?.regenerated}/{forceLimit} regenerated
+                        {forceResult && forceResult.failed > 0 && (
+                          <span className="text-red-600 dark:text-red-400 ms-1">({forceResult.failed} failed)</span>
+                        )}
+                      </span>
+                    </>
+                  )}
+                </div>
+                <span className="text-[11px] font-mono text-slate-500" dir="ltr">
+                  {timeStr}
+                  {forceRunning && ` · ETA ${etaStr}`}
+                </span>
+              </div>
+              <div className="h-1.5 w-full bg-red-100 dark:bg-red-900/20 overflow-hidden">
+                <div
+                  className={`h-full transition-all duration-500 ${forceRunning ? "bg-red-500" : forceResult?.failed === forceLimit ? "bg-red-500" : "bg-emerald-500"}`}
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+              {forceRunning && (
+                <p className="text-[10px] text-slate-500 mt-1.5 leading-4" dir="ltr">
+                  ~{storiesDoneEst}/{forceLimit} processed (estimate — each story takes ~{PER_STORY_SEC}s). Closing this tab doesn't stop the backend; the request continues server-side.
+                </p>
+              )}
+              {!forceRunning && forceResult && (
+                <button
+                  onClick={() => { setForceResult(null); setForceLimit(null); setForceStart(null); }}
+                  className="mt-2 text-[10px] text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+                  dir="ltr"
+                >
+                  Dismiss
+                </button>
+              )}
+            </div>
+          );
+        })()}
 
         {!recentSummaries && !recentLoading && (
           <p className="text-xs text-slate-500 leading-6">
