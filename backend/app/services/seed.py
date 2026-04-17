@@ -280,7 +280,12 @@ INITIAL_SOURCES = [
     {
         "name_en": "Etemad Online",
         "name_fa": "اعتماد آنلاین",
-        "slug": "etemad",
+        # NOTE: slug deliberately `etemad-online` (not `etemad`). An existing
+        # broken Etemad source with slug `etemad` and URL etemadnewspaper.ir
+        # predates this seed entry; keeping distinct slugs avoids the
+        # idempotent-skip behaviour of seed_sources silently dropping this row.
+        # Deactivate the old `etemad` row in the Fetch Stats dashboard.
+        "slug": "etemad-online",
         "website_url": "https://www.etemadonline.com",
         "rss_urls": ["https://www.etemadonline.com/feeds/"],
         "state_alignment": "independent",
