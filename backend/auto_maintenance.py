@@ -2057,25 +2057,41 @@ async def step_uptime_check():
 
 
 async def step_flag_unrelated_articles():
-    """Auto-flag articles whose embedding is far from their story's centroid.
+    """Auto-detach articles whose embedding is far from their story's centroid.
 
     Computes cosine similarity between each article's embedding and its
-    story's centroid_embedding. Articles below the threshold are flagged
-    by submitting an improvement feedback entry (same as user "نامرتبط" votes).
-    Does NOT auto-remove — just flags for human review in the dashboard.
+    story's centroid_embedding. Articles below the threshold are
+    **detached from the story** (story_id set to NULL) so the next
+    clustering run re-places them. No human-review queue involved —
+    the dashboard's improvement list is for rater-submitted feedback only.
+
+    Legacy bot entries (device_info='maintenance-bot') in
+    ImprovementFeedback are deleted on every run so stale auto-flags
+    don't accumulate.
     """
-    from sqlalchemy import select
+    from sqlalchemy import delete, select, update
     from app.database import async_session
     from app.models.article import Article
+    from app.models.improvement import ImprovementFeedback
     from app.models.story import Story
     from app.nlp.embeddings import cosine_similarity
 
-    THRESHOLD = 0.25  # articles below this similarity are flagged
-    MAX_FLAGS_PER_RUN = 20  # don't flood the dashboard
+    THRESHOLD = 0.25                  # below this = almost-certainly misclustered
+    MAX_DETACH_PER_RUN = 50           # soft cap — prevents a bad centroid from emptying a whole story
 
-    stats = {"checked": 0, "flagged": 0, "skipped_no_centroid": 0}
+    stats = {"checked": 0, "detached": 0, "legacy_cleaned": 0, "skipped_no_centroid": 0}
 
     async with async_session() as db:
+        # One-time / idempotent cleanup: remove the obsolete bot-flagged
+        # improvement entries. They predate this auto-detach logic and
+        # clutter the admin todo list.
+        cleanup = await db.execute(
+            delete(ImprovementFeedback).where(
+                ImprovementFeedback.device_info == "maintenance-bot",
+            )
+        )
+        stats["legacy_cleaned"] = cleanup.rowcount or 0
+
         # Get visible stories with centroids
         result = await db.execute(
             select(Story).where(
@@ -2085,16 +2101,15 @@ async def step_flag_unrelated_articles():
         )
         stories = list(result.scalars().all())
 
-        flagged_count = 0
+        detached_ids: list = []
         for story in stories:
-            if flagged_count >= MAX_FLAGS_PER_RUN:
+            if len(detached_ids) >= MAX_DETACH_PER_RUN:
                 break
             centroid = story.centroid_embedding
             if not centroid:
                 stats["skipped_no_centroid"] += 1
                 continue
 
-            # Get articles with embeddings
             art_result = await db.execute(
                 select(Article).where(
                     Article.story_id == story.id,
@@ -2109,36 +2124,23 @@ async def step_flag_unrelated_articles():
                     continue
                 sim = cosine_similarity(article.embedding, centroid)
                 if sim < THRESHOLD:
-                    # Flag via improvement feedback
-                    try:
-                        from app.models.improvement import ImprovementFeedback
-                        # Check if already flagged
-                        existing = await db.execute(
-                            select(ImprovementFeedback).where(
-                                ImprovementFeedback.target_id == str(article.id),
-                                ImprovementFeedback.issue_type == "wrong_clustering",
-                                ImprovementFeedback.reason.like("%auto-flag%"),
-                            )
-                        )
-                        if existing.scalar_one_or_none():
-                            continue  # already flagged
-
-                        feedback = ImprovementFeedback(
-                            target_type="article",
-                            target_id=str(article.id),
-                            issue_type="wrong_clustering",
-                            reason=f"auto-flag: cosine similarity {sim:.2f} < {THRESHOLD} (story: {(story.title_fa or '')[:40]})",
-                            device_info="maintenance-bot",
-                        )
-                        db.add(feedback)
-                        flagged_count += 1
-                        stats["flagged"] += 1
-                        logger.info(f"  Flagged article {str(article.id)[:8]} (sim={sim:.2f}) in story '{(story.title_fa or '')[:30]}'")
-                    except Exception as e:
-                        logger.warning(f"  Failed to flag: {e}")
-
-                    if flagged_count >= MAX_FLAGS_PER_RUN:
+                    detached_ids.append(article.id)
+                    logger.info(
+                        "  Detaching article %s (sim=%.2f) from story '%s' — will be re-clustered on next run",
+                        str(article.id)[:8],
+                        sim,
+                        (story.title_fa or "")[:30],
+                    )
+                    if len(detached_ids) >= MAX_DETACH_PER_RUN:
                         break
+
+        if detached_ids:
+            await db.execute(
+                update(Article)
+                .where(Article.id.in_(detached_ids))
+                .values(story_id=None)
+            )
+            stats["detached"] = len(detached_ids)
 
         await db.commit()
 

@@ -124,39 +124,55 @@ async def list_feedback(
     status: str | None = Query(None),
     issue_type: str | None = Query(None),
     target_type: str | None = Query(None),
+    include_bot: bool = Query(False, description="Include entries from the maintenance bot (default: hide)"),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
-    """Admin todo list with filters."""
-    query = select(ImprovementFeedback).order_by(ImprovementFeedback.created_at.desc())
+    """Admin todo list with filters.
 
+    By default, hides entries where `device_info='maintenance-bot'` —
+    the maintenance pipeline auto-detaches low-similarity articles
+    rather than queueing them for human review, so this list should
+    show only rater-submitted issues. Pass include_bot=true to see
+    any residual bot entries (useful during migration).
+    """
+    base_filter = []
+    if not include_bot:
+        # Treat NULL device_info as non-bot (raters don't always send it)
+        base_filter.append(
+            (ImprovementFeedback.device_info != "maintenance-bot")
+            | (ImprovementFeedback.device_info.is_(None))
+        )
     if status:
-        query = query.where(ImprovementFeedback.status == status)
+        base_filter.append(ImprovementFeedback.status == status)
     if issue_type:
-        query = query.where(ImprovementFeedback.issue_type == issue_type)
+        base_filter.append(ImprovementFeedback.issue_type == issue_type)
     if target_type:
-        query = query.where(ImprovementFeedback.target_type == target_type)
+        base_filter.append(ImprovementFeedback.target_type == target_type)
 
+    query = select(ImprovementFeedback).order_by(ImprovementFeedback.created_at.desc())
+    for f in base_filter:
+        query = query.where(f)
     query = query.offset(offset).limit(limit)
     result = await db.execute(query)
     items = list(result.scalars().all())
 
-    total = (await db.execute(select(func.count(ImprovementFeedback.id)))).scalar() or 0
-    open_count = (
-        await db.execute(
-            select(func.count(ImprovementFeedback.id)).where(
-                ImprovementFeedback.status == "open"
+    # Totals also exclude bot entries so the header counters match the visible list.
+    def _count(extra_filter=None):
+        q = select(func.count(ImprovementFeedback.id))
+        if not include_bot:
+            q = q.where(
+                (ImprovementFeedback.device_info != "maintenance-bot")
+                | (ImprovementFeedback.device_info.is_(None))
             )
-        )
-    ).scalar() or 0
-    in_progress = (
-        await db.execute(
-            select(func.count(ImprovementFeedback.id)).where(
-                ImprovementFeedback.status == "in_progress"
-            )
-        )
-    ).scalar() or 0
+        if extra_filter is not None:
+            q = q.where(extra_filter)
+        return q
+
+    total = (await db.execute(_count())).scalar() or 0
+    open_count = (await db.execute(_count(ImprovementFeedback.status == "open"))).scalar() or 0
+    in_progress = (await db.execute(_count(ImprovementFeedback.status == "in_progress"))).scalar() or 0
 
     return ImprovementListResponse(
         items=[ImprovementDetail.model_validate(i) for i in items],
