@@ -42,6 +42,7 @@ logger = logging.getLogger("maintenance")
 DEFAULT_STEP_TIMEOUT_SEC = 900  # 15 min — applies to the ~25 light steps
 STEP_TIMEOUTS_SEC = {
     "ingest": 1800,                # RSS + Telegram for 20+ sources
+    "prune_noise": 180,            # single UPDATE/DELETE batch, no LLM
     "process": 1800,               # embeddings + translation over many articles
     "cluster": 1200,               # LLM clustering batch
     "centroids": 600,
@@ -143,6 +144,109 @@ async def step_ingest():
         "converted": convert_stats.get("created", 0),
         "aggregator_articles": aggregator_stats.get("articles_created", 0),
     }
+
+
+async def step_prune_noise():
+    """Drop near-zero-value ingested rows before they hit any LLM.
+
+    Runs right after step_ingest and before step_process. We delete posts
+    and telegram-originated articles that are so short they'll never
+    contribute useful signal — single-word reactions, emoji-only posts,
+    URL-only forwards — instead of paying to embed/translate/cluster
+    them. NLP (`step_process`) embeds every unprocessed article, so even
+    a 3-character "👍" pays for the call; trimming here saves tokens
+    and shortens the downstream pipeline.
+
+    Only targets rows that have not yet been analyzed downstream:
+    - telegram_posts where sentiment_score IS NULL and story_id IS NULL
+      (so we don't nuke a post that already got linked to a story).
+    - articles where embedding IS NULL AND source is a Telegram channel
+      and the text is below the same threshold. RSS articles are never
+      short enough to trip this.
+
+    Thresholds are conservative on purpose: something "like a tweet"
+    (roughly ≥5 whitespace tokens and ≥30 chars after URL-stripping) is
+    kept. Tune by editing MIN_TOKENS / MIN_CHARS / KEEP_IF_URLS below.
+    """
+    import re as _re
+    from sqlalchemy import delete, select, text as _text
+
+    from app.database import async_session
+    from app.models.article import Article
+    from app.models.social import TelegramPost
+
+    # Tunable thresholds ────────────────────────────────────────────
+    MIN_TOKENS = 5            # whitespace-separated tokens after URL strip
+    MIN_CHARS = 30            # character count after URL + whitespace strip
+    KEEP_IF_URLS = True       # keep URL-only posts if they carry ≥1 URL
+    #                           (matters for aggregator channels whose job
+    #                            is to forward news links)
+    # ───────────────────────────────────────────────────────────────
+
+    url_re = _re.compile(r"https?://\S+")
+
+    def is_noise(text_val: str | None, urls: list | None) -> bool:
+        if not text_val:
+            return True
+        stripped = url_re.sub(" ", text_val).strip()
+        tokens = [t for t in stripped.split() if t]
+        if len(tokens) >= MIN_TOKENS and len(stripped) >= MIN_CHARS:
+            return False
+        # Short. Last chance: aggregator-style "link only with label".
+        if KEEP_IF_URLS and urls:
+            return False
+        return True
+
+    stats = {"tg_checked": 0, "tg_deleted": 0, "articles_checked": 0, "articles_deleted": 0}
+
+    async with async_session() as db:
+        # Candidates: un-analyzed, unlinked Telegram posts
+        tg_rows = (await db.execute(
+            select(TelegramPost.id, TelegramPost.text, TelegramPost.urls)
+            .where(
+                TelegramPost.story_id.is_(None),
+                TelegramPost.sentiment_score.is_(None),
+            )
+        )).all()
+        stats["tg_checked"] = len(tg_rows)
+        tg_to_delete = [row.id for row in tg_rows if is_noise(row.text, row.urls or [])]
+        if tg_to_delete:
+            await db.execute(delete(TelegramPost).where(TelegramPost.id.in_(tg_to_delete)))
+            stats["tg_deleted"] = len(tg_to_delete)
+
+        # Candidates: un-embedded Telegram-originated articles. We
+        # identify these by url prefix — convert_telegram_posts_to_articles
+        # stamps them with `https://t.me/{channel}/{msg}`. RSS articles
+        # virtually never fail the threshold so we don't touch them.
+        art_rows = (await db.execute(
+            _text("""
+                SELECT id, title_fa, title_original, content_text
+                FROM articles
+                WHERE embedding IS NULL
+                  AND story_id IS NULL
+                  AND url LIKE 'https://t.me/%'
+            """)
+        )).all()
+        stats["articles_checked"] = len(art_rows)
+        art_to_delete = []
+        for row in art_rows:
+            # Combine whatever text we have; any of these can be the meat
+            body = " ".join(
+                p for p in (row.title_fa, row.title_original, row.content_text) if p
+            )
+            if is_noise(body, []):
+                art_to_delete.append(row.id)
+        if art_to_delete:
+            await db.execute(delete(Article).where(Article.id.in_(art_to_delete)))
+            stats["articles_deleted"] = len(art_to_delete)
+
+        await db.commit()
+
+    logger.info(
+        f"Prune noise: tg {stats['tg_deleted']}/{stats['tg_checked']}, "
+        f"articles {stats['articles_deleted']}/{stats['articles_checked']}"
+    )
+    return stats
 
 
 async def step_process():
@@ -3292,6 +3396,7 @@ JSON با این ساختار:
 
 FULL_PIPELINE = [
     ("ingest", "Ingest RSS + Telegram (may take 10-20 min)", "step_ingest"),
+    ("prune_noise", "Drop too-short Telegram posts/articles before NLP", "step_prune_noise"),
     ("process", "NLP process (embed, translate, extract)", "step_process"),
     ("backfill_farsi_titles", "Backfill Farsi titles", "step_backfill_farsi_titles"),
     ("cluster", "Cluster articles into stories", "step_cluster"),
@@ -3333,6 +3438,7 @@ FULL_PIPELINE = [
 # between daily full runs without the heavy LLM-per-article work.
 INGEST_ONLY_PIPELINE = [
     ("ingest", "Ingest RSS + Telegram", "step_ingest"),
+    ("prune_noise", "Drop too-short Telegram posts/articles before NLP", "step_prune_noise"),
     ("process", "NLP process (embed, translate, extract)", "step_process"),
     ("backfill_farsi_titles", "Backfill Farsi titles", "step_backfill_farsi_titles"),
     ("cluster", "Cluster articles into stories", "step_cluster"),
