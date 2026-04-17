@@ -3,11 +3,140 @@
 import { useEffect, useState, useCallback } from "react";
 import {
   Activity, AlertTriangle, ArrowRight, CheckCircle, Circle, Clock, CreditCard,
-  Database, Inbox, ListChecks, MessageSquare, Newspaper, RefreshCw,
-  Settings, Wrench, XCircle, BarChart3,
+  Database, Inbox, ListChecks, MessageSquare, Minimize2, Newspaper, RefreshCw,
+  Settings, Wrench, X, XCircle, BarChart3,
 } from "lucide-react";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+// ──────────────────────────────────────────────────────────────────────
+// Maintenance progress — helpers
+// ──────────────────────────────────────────────────────────────────────
+
+/** Group step keys into a small number of phases so the run log reads
+ * like a narrative instead of 34 anonymous lines. Every known step
+ * maps to exactly one phase; unknown keys fall into "Other". */
+const STEP_PHASE: Record<string, "Data" | "Cluster" | "Analysis" | "Ops"> = {
+  ingest: "Data",
+  process: "Data",
+  backfill_farsi_titles: "Data",
+  dedup_articles: "Data",
+  fix_images: "Data",
+  cluster: "Cluster",
+  centroids: "Cluster",
+  merge_similar: "Cluster",
+  telegram_link: "Cluster",
+  flag_unrelated: "Cluster",
+  summarize: "Analysis",
+  bias_score: "Analysis",
+  detect_silences: "Analysis",
+  detect_coordination: "Analysis",
+  story_quality: "Analysis",
+  image_relevance: "Analysis",
+  quality_postprocess: "Analysis",
+  niloofar_editorial: "Analysis",
+  telegram_analysis: "Analysis",
+  analyst_takes: "Analysis",
+  verify_predictions: "Analysis",
+  source_health: "Ops",
+  telegram_health: "Ops",
+  archive_stale: "Ops",
+  recalc_trending: "Ops",
+  fixes: "Ops",
+  rater_feedback: "Ops",
+  feedback_health: "Ops",
+  visual: "Ops",
+  uptime: "Ops",
+  disk: "Ops",
+  cost_tracking: "Ops",
+  backup: "Ops",
+  weekly_digest: "Ops",
+  docs: "Ops",
+};
+
+/** Turn a step's stats object into a short human-readable summary.
+ * We show at most 3 non-zero numeric fields in "count label" form so
+ * the reader sees "33 new · 25 sources · 15 errors" instead of
+ * "found:273 new:33 errors:15". */
+function formatStepStats(stats: unknown): string {
+  if (!stats || typeof stats !== "object") return "";
+  const obj = stats as Record<string, unknown>;
+  const pairs: Array<[string, number]> = [];
+  for (const [k, v] of Object.entries(obj)) {
+    if (k === "error" || k === "status") continue;
+    if (typeof v === "number" && v !== 0) pairs.push([k, v]);
+  }
+  // Heuristic ordering: "new/created/scored/generated" first, then "failed/errors" last.
+  const rank = (k: string) => {
+    if (/^(new|created|new_stories|generated|scored|linked|detached|published)/.test(k)) return 0;
+    if (/^(found|total|checked|sources|processed|matched|merged)/.test(k)) return 1;
+    if (/^(skipped|aged|hidden)/.test(k)) return 2;
+    return 3;
+  };
+  pairs.sort((a, b) => rank(a[0]) - rank(b[0]));
+  return pairs.slice(0, 3).map(([k, v]) => `${v.toLocaleString()} ${k.replace(/_/g, " ")}`).join(" · ");
+}
+
+/** Pick out a handful of high-signal metrics from the final result JSON
+ * so the completion card reads like an executive summary instead of a
+ * pile of raw dicts. Silently skips keys that aren't numbers. */
+function summaryMetrics(result: Record<string, unknown> | null): Array<{
+  label: string;
+  value: number;
+  sub?: string;
+}> {
+  if (!result) return [];
+  const getNum = (path: string[]): number | null => {
+    let cur: unknown = result;
+    for (const k of path) {
+      if (!cur || typeof cur !== "object") return null;
+      cur = (cur as Record<string, unknown>)[k];
+    }
+    return typeof cur === "number" ? cur : null;
+  };
+  const ingestNew = getNum(["ingest", "new"]) ?? 0;
+  const ingestSources = getNum(["ingest", "sources"]) ?? 0;
+  const newStories = getNum(["cluster", "new_stories_created"]) ?? 0;
+  const matched = getNum(["cluster", "matched_to_existing"]) ?? 0;
+  const orphans = getNum(["cluster", "aged_orphans"]) ?? 0;
+  const biasScored = getNum(["bias_score", "scored"]) ?? 0;
+  const biasFailed = getNum(["bias_score", "failed"]) ?? 0;
+  const niloofar = getNum(["niloofar_editorial", "generated"]) ?? 0;
+  const telegramAnalyzed = getNum(["telegram_analysis", "analyzed"]) ?? 0;
+
+  const out: Array<{ label: string; value: number; sub?: string }> = [];
+  if (ingestNew > 0 || ingestSources > 0) {
+    out.push({ label: "Articles ingested", value: ingestNew, sub: `from ${ingestSources} sources` });
+  }
+  if (newStories > 0 || matched > 0) {
+    out.push({ label: "Stories", value: newStories, sub: `${matched} matched to existing` });
+  }
+  if (biasScored > 0 || biasFailed > 0) {
+    out.push({
+      label: "Bias scored",
+      value: biasScored,
+      sub: biasFailed > 0 ? `${biasFailed} failed` : undefined,
+    });
+  }
+  if (niloofar > 0) {
+    out.push({ label: "Niloofar context", value: niloofar, sub: "editorial summaries" });
+  }
+  if (telegramAnalyzed > 0) {
+    out.push({ label: "Telegram analyses", value: telegramAnalyzed });
+  }
+  if (orphans > 0) {
+    out.push({ label: "Aged orphans", value: orphans, sub: ">30 days unclustered" });
+  }
+  return out;
+}
+
+/** Format an elapsed-seconds count as a compact "Xm Ys" or "Ys". */
+function fmtDuration(sec: number): string {
+  if (sec < 60) return `${sec}s`;
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return s === 0 ? `${m}m` : `${m}m ${s}s`;
+}
 
 interface Diagnostics {
   articles: {
@@ -290,6 +419,10 @@ export default function DashboardPage() {
   const [maintResult, setMaintResult] = useState<any>(null);
   // Live per-step status from the backend, updated by the polling effect
   const [maintLive, setMaintLive] = useState<any>(null);
+  // Allow the admin to collapse the modal to a corner pill while the run
+  // continues in the background. Closing the tab also works; this is
+  // "keep the dashboard usable while you wait" UX.
+  const [maintMinimized, setMaintMinimized] = useState(false);
 
   // Tick elapsed time every second while running
   useEffect(() => {
@@ -577,122 +710,120 @@ export default function DashboardPage() {
   if (!dashboard) return null;
   const d = dashboard.data;
 
-  // Progress modal shown while maintenance is running or just finished
-  const maintModal = (running === "maintenance" || maintResult) && (
+  // Progress modal shown while maintenance is running or just finished.
+  // Collapses to a small bottom-right pill when `maintMinimized` is true.
+  const isMaintVisible = running === "maintenance" || maintResult;
+  const totalSteps = maintLive?.total_steps || 14;
+  const doneSteps = (maintLive?.steps || []).length;
+  const pct = Math.min(100, Math.round((doneSteps / totalSteps) * 100));
+  const failedSteps = (maintLive?.steps || []).filter((s: any) => s.status !== "ok");
+  const resultMetrics = summaryMetrics(maintResult && !maintResult.error ? maintResult : null);
+
+  // Corner pill when minimized — keeps the dashboard fully usable.
+  const minimizedPill = isMaintVisible && maintMinimized && (
+    <button
+      onClick={() => setMaintMinimized(false)}
+      className="fixed bottom-4 right-4 z-[100] inline-flex items-center gap-3 bg-white dark:bg-[#0a0e1a] border border-slate-300 dark:border-slate-700 shadow-lg px-4 py-2.5 hover:border-blue-500"
+      title="Expand maintenance progress"
+    >
+      {running === "maintenance" ? (
+        <RefreshCw className="h-4 w-4 animate-spin text-blue-600 dark:text-blue-400" />
+      ) : maintResult?.error ? (
+        <XCircle className="h-4 w-4 text-red-500" />
+      ) : (
+        <CheckCircle className="h-4 w-4 text-emerald-500" />
+      )}
+      <div className="text-left">
+        <p className="text-[11px] font-semibold text-slate-900 dark:text-white">
+          {running === "maintenance" ? `Maintenance ${pct}%` : maintResult?.error ? "Failed" : "Complete"}
+        </p>
+        <p className="text-[10px] text-slate-500">
+          {fmtDuration(maintElapsed)}
+          {running === "maintenance" && ` · step ${doneSteps + 1}/${totalSteps}`}
+        </p>
+      </div>
+    </button>
+  );
+
+  const maintModal = isMaintVisible && !maintMinimized && (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm">
-      <div className="w-full max-w-xl bg-white dark:bg-[#0a0e1a] border border-slate-200 dark:border-slate-800 shadow-2xl">
-        <div className="px-6 py-5 border-b border-slate-200 dark:border-slate-800">
-          <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
-            {running === "maintenance" ? (
-              <>
-                <RefreshCw className="h-4 w-4 animate-spin text-blue-600" />
-                Running maintenance...
-              </>
-            ) : maintResult?.error ? (
-              <>
-                <XCircle className="h-4 w-4 text-red-500" />
-                Maintenance failed
-              </>
-            ) : (
-              <>
-                <CheckCircle className="h-4 w-4 text-emerald-500" />
-                Maintenance complete
-              </>
+      <div className="w-full max-w-2xl bg-white dark:bg-[#0a0e1a] border border-slate-200 dark:border-slate-800 shadow-2xl max-h-[90vh] flex flex-col">
+        {/* Header */}
+        <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-start justify-between gap-3">
+          <div className="flex-1 min-w-0">
+            <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              {running === "maintenance" ? (
+                <>
+                  <RefreshCw className="h-4 w-4 animate-spin text-blue-600" />
+                  Running maintenance
+                </>
+              ) : maintResult?.error ? (
+                <>
+                  <XCircle className="h-4 w-4 text-red-500" />
+                  Maintenance failed
+                </>
+              ) : (
+                <>
+                  <CheckCircle className="h-4 w-4 text-emerald-500" />
+                  Maintenance complete
+                </>
+              )}
+            </h2>
+            <p className="text-xs text-slate-500 mt-1">
+              {running === "maintenance" ? (
+                <>
+                  Elapsed <span className="font-mono">{fmtDuration(maintElapsed)}</span>
+                  {" · "}Step {doneSteps + 1} of {totalSteps}
+                  {failedSteps.length > 0 && (
+                    <> · <span className="text-red-600 dark:text-red-400">{failedSteps.length} failed</span></>
+                  )}
+                </>
+              ) : (
+                <>
+                  Finished in <span className="font-mono">{fmtDuration(maintElapsed)}</span>
+                  {maintLive && (
+                    <>
+                      {" · "}
+                      {doneSteps - failedSteps.length}/{doneSteps} steps OK
+                      {failedSteps.length > 0 && (
+                        <> · <span className="text-red-600 dark:text-red-400">{failedSteps.length} failed</span></>
+                      )}
+                    </>
+                  )}
+                </>
+              )}
+            </p>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            {running === "maintenance" && (
+              <button
+                onClick={() => setMaintMinimized(true)}
+                className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                title="Minimize — run continues in the background"
+                aria-label="Minimize"
+              >
+                <Minimize2 className="h-4 w-4" />
+              </button>
             )}
-          </h2>
-          <p className="text-xs text-slate-500 mt-1">
-            Elapsed: <span className="font-mono">{Math.floor(maintElapsed / 60)}:{String(maintElapsed % 60).padStart(2, "0")}</span>
-            {running === "maintenance" && " · full run with backlog can take 30-60 min (gpt-5-mini is slow but accurate)"}
-          </p>
+            {running !== "maintenance" && (
+              <button
+                onClick={() => {
+                  setMaintResult(null);
+                  setMaintStart(null);
+                  setMaintLive(null);
+                  setMaintMinimized(false);
+                }}
+                className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                title="Close"
+                aria-label="Close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
         </div>
 
-        <div className="px-6 py-5 space-y-4">
-          {running === "maintenance" && maintLive && (
-            <>
-              {/* Progress bar based on # completed steps */}
-              {(() => {
-                const total = maintLive.total_steps || 14;
-                const done = (maintLive.steps || []).length;
-                const pct = Math.min(100, Math.round((done / total) * 100));
-                const currentStepTime = maintLive.current_step_elapsed_s || 0;
-                return (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between text-[10px] text-slate-500">
-                      <span>Step {done + 1} of {total}</span>
-                      <span>{pct}%</span>
-                    </div>
-                    <div className="h-2 w-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
-                      <div className="h-full bg-blue-500 transition-all duration-500" style={{ width: `${pct}%` }} />
-                    </div>
-                    {currentStepTime > 60 && (
-                      <p className="text-[10px] text-amber-600 dark:text-amber-400">
-                        Current step running for {Math.floor(currentStepTime / 60)}min — long steps (ingest, cluster, summarize) can take 10-30 min each
-                      </p>
-                    )}
-                  </div>
-                );
-              })()}
-
-              {/* Currently running step */}
-              {maintLive.current_step && (
-                <div className="flex items-center gap-2 text-xs text-slate-900 dark:text-white py-2 px-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900/50">
-                  <RefreshCw className="h-3.5 w-3.5 animate-spin text-blue-600 dark:text-blue-400 shrink-0" />
-                  <span className="font-semibold flex-1">{maintLive.current_step}</span>
-                  {maintLive.current_step_elapsed_s !== undefined && (
-                    <span className="font-mono text-[10px] text-slate-500">
-                      {maintLive.current_step_elapsed_s}s
-                    </span>
-                  )}
-                </div>
-              )}
-
-              {/* Scrollable list of steps completed so far (most recent first) */}
-              {(maintLive.steps || []).length > 0 && (
-                <div className="border border-slate-200 dark:border-slate-800 max-h-64 overflow-y-auto" dir="ltr">
-                  {[...maintLive.steps].reverse().map((step: any, idx: number) => {
-                    const isError = step.status !== "ok";
-                    const errorMsg = isError && step.stats && typeof step.stats === "object"
-                      ? (step.stats.error as string | undefined)
-                      : null;
-                    return (
-                      <div
-                        key={`${step.name}-${idx}`}
-                        className={`px-3 py-1.5 text-[11px] border-b border-slate-100 dark:border-slate-800/50 last:border-b-0 ${
-                          isError ? "bg-red-50 dark:bg-red-950/20" : ""
-                        }`}
-                      >
-                        <div className="flex items-start gap-2">
-                          {step.status === "ok" ? (
-                            <CheckCircle className="h-3 w-3 mt-0.5 shrink-0 text-emerald-500" />
-                          ) : (
-                            <XCircle className="h-3 w-3 mt-0.5 shrink-0 text-red-500" />
-                          )}
-                          <span className="flex-1 text-slate-700 dark:text-slate-300">{step.name}</span>
-                          <span className="font-mono text-slate-400 text-[10px]">{step.elapsed_s}s</span>
-                          {!isError && step.stats && typeof step.stats === "object" && (
-                            <span className="text-slate-500 text-[10px] max-w-[50%] truncate">
-                              {Object.entries(step.stats as Record<string, any>)
-                                .filter(([k, v]) => typeof v === "number" && v > 0 && k !== "error")
-                                .slice(0, 3)
-                                .map(([k, v]) => `${k}:${v}`)
-                                .join(" ") || ""}
-                            </span>
-                          )}
-                        </div>
-                        {/* Show error message for failed steps */}
-                        {errorMsg && (
-                          <div className="mt-1 pl-5 text-[10px] font-mono text-red-600 dark:text-red-400 break-all">
-                            {errorMsg}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </>
-          )}
-
+        <div className="px-6 py-5 space-y-4 overflow-y-auto">
           {/* Before the first status poll lands */}
           {running === "maintenance" && !maintLive && (
             <div className="flex items-center gap-2 text-xs text-slate-500">
@@ -701,11 +832,144 @@ export default function DashboardPage() {
             </div>
           )}
 
-          {/* Live counters — refreshes every 5s while running */}
+          {/* Progress bar + current step */}
+          {running === "maintenance" && maintLive && (
+            <>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-[11px] text-slate-500">
+                  <span>Step {doneSteps + 1} of {totalSteps}</span>
+                  <span>{pct}%</span>
+                </div>
+                <div className="h-2 w-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
+                  <div className="h-full bg-blue-500 transition-all duration-500" style={{ width: `${pct}%` }} />
+                </div>
+                {maintLive.current_step_elapsed_s > 60 && (
+                  <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                    Current step running for {fmtDuration(maintLive.current_step_elapsed_s)} — ingest / cluster / bias scoring steps are each expected to take 10–30 min on a full backlog.
+                  </p>
+                )}
+              </div>
+
+              {maintLive.current_step && (
+                <div className="flex items-center gap-2 text-xs text-slate-900 dark:text-white py-2 px-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900/50">
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin text-blue-600 dark:text-blue-400 shrink-0" />
+                  <span className="font-semibold flex-1">{maintLive.current_step}</span>
+                  {maintLive.current_step_elapsed_s !== undefined && (
+                    <span className="font-mono text-[10px] text-slate-500">
+                      {fmtDuration(maintLive.current_step_elapsed_s)}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {/* Failed-steps banner — stands out while the run is still going */}
+              {failedSteps.length > 0 && (
+                <div className="flex items-start gap-2 text-xs py-2 px-3 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/40">
+                  <AlertTriangle className="h-3.5 w-3.5 text-red-500 mt-0.5 shrink-0" />
+                  <div className="flex-1">
+                    <p className="font-semibold text-red-700 dark:text-red-300">
+                      {failedSteps.length} step{failedSteps.length > 1 ? "s" : ""} failed
+                    </p>
+                    <p className="text-red-600 dark:text-red-400 mt-0.5 text-[11px]">
+                      {failedSteps.map((s: any) => s.name).slice(0, 4).join(" · ")}
+                      {failedSteps.length > 4 && ` + ${failedSteps.length - 4} more`}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Completion summary cards — only when finished successfully */}
+          {maintResult && !maintResult.error && resultMetrics.length > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pb-1">
+              {resultMetrics.map((m) => (
+                <div key={m.label} className="border border-slate-200 dark:border-slate-800 p-3">
+                  <p className="text-[10px] uppercase tracking-wide text-slate-400">{m.label}</p>
+                  <p className="text-lg font-bold text-slate-900 dark:text-white mt-0.5">
+                    {m.value.toLocaleString()}
+                  </p>
+                  {m.sub && <p className="text-[10px] text-slate-500 mt-0.5">{m.sub}</p>}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Fatal-error card (whole run crashed) */}
+          {maintResult?.error && (
+            <div className="py-3 px-4 border border-red-200 dark:border-red-900/40 bg-red-50 dark:bg-red-950/20">
+              <p className="text-xs font-bold text-red-700 dark:text-red-300 mb-1">Maintenance crashed</p>
+              <p className="text-[11px] text-red-600 dark:text-red-400 font-mono break-all">{maintResult.error}</p>
+            </div>
+          )}
+
+          {/* Steps grouped by phase */}
+          {(maintLive?.steps || []).length > 0 && (
+            <div className="border border-slate-200 dark:border-slate-800" dir="ltr">
+              {(() => {
+                const steps: any[] = maintLive.steps;
+                const byPhase: Record<string, any[]> = {};
+                for (const s of steps) {
+                  const phase = STEP_PHASE[s.name as string] || "Other";
+                  (byPhase[phase] = byPhase[phase] || []).push(s);
+                }
+                const order = ["Data", "Cluster", "Analysis", "Ops", "Other"];
+                return order
+                  .filter((p) => byPhase[p]?.length)
+                  .map((phase) => (
+                    <div key={phase}>
+                      <div className="px-3 py-1.5 bg-slate-50 dark:bg-slate-900/50 text-[10px] font-bold uppercase tracking-wide text-slate-500 border-b border-slate-200 dark:border-slate-800">
+                        {phase}
+                      </div>
+                      {byPhase[phase].map((step: any, idx: number) => {
+                        const isError = step.status !== "ok";
+                        const errorMsg =
+                          isError && step.stats && typeof step.stats === "object"
+                            ? (step.stats.error as string | undefined)
+                            : null;
+                        const summary = !isError ? formatStepStats(step.stats) : "";
+                        return (
+                          <div
+                            key={`${step.name}-${idx}`}
+                            className={`px-3 py-1.5 text-[11px] border-b border-slate-100 dark:border-slate-800/50 last:border-b-0 ${
+                              isError ? "bg-red-50 dark:bg-red-950/20" : ""
+                            }`}
+                          >
+                            <div className="flex items-start gap-2">
+                              {step.status === "ok" ? (
+                                <CheckCircle className="h-3 w-3 mt-0.5 shrink-0 text-emerald-500" />
+                              ) : (
+                                <XCircle className="h-3 w-3 mt-0.5 shrink-0 text-red-500" />
+                              )}
+                              <span className="flex-1 text-slate-700 dark:text-slate-300 font-medium">
+                                {step.name}
+                              </span>
+                              <span className="font-mono text-slate-400 text-[10px]">
+                                {fmtDuration(step.elapsed_s || 0)}
+                              </span>
+                            </div>
+                            {summary && (
+                              <p className="pl-5 mt-0.5 text-[10px] text-slate-500 dark:text-slate-500">{summary}</p>
+                            )}
+                            {errorMsg && (
+                              <p className="pl-5 mt-0.5 text-[10px] font-mono text-red-600 dark:text-red-400 break-all">
+                                {errorMsg}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ));
+              })()}
+            </div>
+          )}
+
+          {/* Dashboard counters — handy reference during the run */}
           {dashboard && (
-            <div className="grid grid-cols-3 gap-3 pt-2 border-t border-slate-200 dark:border-slate-800">
+            <div className="grid grid-cols-3 gap-3 pt-3 border-t border-slate-200 dark:border-slate-800">
               <div>
-                <p className="text-[10px] uppercase tracking-wide text-slate-400">Articles</p>
+                <p className="text-[10px] uppercase tracking-wide text-slate-400">Articles total</p>
                 <p className="text-base font-bold text-slate-900 dark:text-white">
                   {dashboard.data.articles.total.toLocaleString()}
                 </p>
@@ -725,36 +989,38 @@ export default function DashboardPage() {
               </div>
             </div>
           )}
-
-          {/* Final result */}
-          {maintResult && !maintResult.error && (
-            <div className="pt-3 border-t border-slate-200 dark:border-slate-800">
-              <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 mb-2">Result summary</p>
-              <pre className="text-[10px] bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 p-3 overflow-auto max-h-48 text-slate-700 dark:text-slate-300" dir="ltr">
-                {JSON.stringify(maintResult, null, 2)}
-              </pre>
-            </div>
-          )}
-          {maintResult?.error && (
-            <div className="pt-3 border-t border-slate-200 dark:border-slate-800">
-              <p className="text-xs font-semibold text-red-600 dark:text-red-400 mb-2">Error</p>
-              <p className="text-xs text-slate-700 dark:text-slate-300">{maintResult.error}</p>
-            </div>
-          )}
         </div>
 
-        <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-800 flex justify-end gap-2">
+        {/* Footer */}
+        <div className="px-6 py-3 border-t border-slate-200 dark:border-slate-800 flex justify-between items-center gap-2 shrink-0">
           {running === "maintenance" ? (
-            <p className="text-xs text-slate-500 italic">
-              You can close this tab — the run continues on the server.
-            </p>
+            <>
+              <p className="text-[11px] text-slate-500">
+                Run continues on the server. You can close this tab or minimize.
+              </p>
+              <button
+                onClick={() => setMaintMinimized(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
+              >
+                <Minimize2 className="h-3.5 w-3.5" />
+                Minimize
+              </button>
+            </>
           ) : (
-            <button
-              onClick={() => { setMaintResult(null); setMaintStart(null); setMaintLive(null); }}
-              className="px-4 py-2 text-xs font-bold text-white bg-slate-900 dark:bg-white dark:text-slate-900 hover:opacity-90"
-            >
-              Close
-            </button>
+            <>
+              <span />
+              <button
+                onClick={() => {
+                  setMaintResult(null);
+                  setMaintStart(null);
+                  setMaintLive(null);
+                  setMaintMinimized(false);
+                }}
+                className="px-4 py-1.5 text-xs font-bold text-white bg-slate-900 dark:bg-white dark:text-slate-900 hover:opacity-90"
+              >
+                Close
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -764,6 +1030,7 @@ export default function DashboardPage() {
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
       {maintModal}
+      {minimizedPill}
       {/* Header */}
       <div className="mb-8 flex items-center justify-between">
         <div>
