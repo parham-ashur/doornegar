@@ -102,6 +102,14 @@ async def step_ingest():
     )
 
     async with async_session() as db:
+        # Seed any new RSS sources from seed.py that aren't in the DB yet.
+        # Idempotent — existing slugs are skipped. Lets a new source land via
+        # `git push` without requiring a manual `python manage.py seed`.
+        from app.services.seed import seed_sources
+        new_sources = await seed_sources(db)
+        if new_sources:
+            logger.info(f"Seeded {new_sources} new RSS sources from seed.py")
+
         # Seed any new Telegram channels
         from app.services.seed_telegram import seed_telegram_channels
         seeded = await seed_telegram_channels(db)
