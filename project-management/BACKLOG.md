@@ -94,6 +94,14 @@
 - [x] Blindspots: prefer fresh per side; empty slot if no fresh blindspot rather than re-surfacing stale.
 - [x] Telegram predictions/claims source pool prefers fresh stories with a ≥3-fresh safety threshold.
 
+### Significant-update detection + بروزرسانی badge (commit 5388a30)
+- [x] `backend/app/services/story_freshness.py` — `build_snapshot()` + `compute_update_signal()`.
+- [x] `Story.analysis_snapshot_24h` JSONB column (self-creating via `ALTER TABLE IF NOT EXISTS`).
+- [x] `step_snapshot_analyses` nightly maintenance step.
+- [x] `StoryBrief.update_signal` exposed (has_update, kind, reason_fa).
+- [x] Hero + blindspot pickers prefer stories with `has_update=true` when repeating.
+- [x] Orange "بروزرسانی" badge with delta phrase rendered next to hero title and on blindspot cards.
+
 ## Done this session (2026-04-15/16)
 - [x] **Niloofar writing style** — defined, iterated 3 versions, agent file + output style + prompt all aligned
 - [x] **Niloofar Claude-driven workflow** — gather JSON → analyze in chat → apply findings. No OpenAI.

@@ -113,6 +113,15 @@ All notable changes to the Doornegar project are documented here, organized by w
 - Backend: `StoryBrief` schema exposes `last_updated_at`. Picked up automatically by `_story_brief_with_extras()` through `model_validate`.
 - Frontend: `isFresh(s)` helper on `lib/types.ts` type. Hero uses a 4-step fallback (fresh+balanced → fresh → balanced → top trending) so the slot never goes empty. Blindspot slots render empty rather than re-showing yesterday's — slot *rotates*, not just the story. Telegram source pool filters to fresh stories with a "≥3 fresh" threshold to keep predictions/claims populated on quiet news days.
 
+#### Significant-update detection + بروزرسانی badge (commit 5388a30)
+- **Upgrade to the rotation rule**: new articles alone aren't enough to keep a story in the hero/blindspot slot across days — the narrative has to have shifted. When it has, we surface that as an orange «بروزرسانی» badge with a short delta reason.
+- New `backend/app/services/story_freshness.py` with `build_snapshot()` and `compute_update_signal()`. Three thresholds: dispute_score Δ ≥ 0.2, inside/outside pct Δ ≥ 15pp, or ≥3 new articles + rewritten bias_explanation_fa hash.
+- New `Story.analysis_snapshot_24h` JSONB column self-creates via `ALTER TABLE IF NOT EXISTS` (same idiom as `editorial_context_fa`) — no Alembic migration.
+- New `step_snapshot_analyses` maintenance step runs between `niloofar_editorial` and `weekly_digest` every nightly run; writes a ~200-byte snapshot per visible story.
+- `StoryBrief.update_signal` = `{has_update, kind: "dispute"|"coverage_shift"|"new_articles"|null, reason_fa}`. Computed in `_story_brief_with_extras()`.
+- Frontend hero picker: 6-step fallback starting with fresh+has_update+balanced. Blindspot picker similarly prefers fresh+has_update. Orange badge renders next to hero title + on blindspot cards with the delta phrase ("اختلاف روایت‌ها افزایش یافت 0.3 → 0.7", "پوشش برون‌مرزی تقویت شد 40٪ → 62٪", etc.).
+- First-day behavior: `analysis_snapshot_24h` is null until tonight's 4am UTC maintenance, so update_signal.has_update is false and UI falls back to freshness-only rotation. Badges start appearing tomorrow.
+
 ---
 
 ## April 15-16, 2026
