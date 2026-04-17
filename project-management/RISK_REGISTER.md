@@ -1,11 +1,11 @@
 # Risk Register
 
-**Last updated**: 2026-04-10
+**Last updated**: 2026-04-17
 
 | ID | Risk | Likelihood | Impact | Mitigation | Owner | Status |
 |----|------|-----------|--------|------------|-------|--------|
 | R1 | **Iranian state blocks Telegram API** | Medium | High | Maintain RSS fallback, use proxy/VPN for Telegram | Parham | Monitor |
-| R2 | **OpenAI/Anthropic API costs exceed budget** | Medium | High | `max_tokens=4096` cap, LLM endpoints admin-only with 10/hour limit, **hard monthly cap on OpenAI dashboard (TODO)** | Parham | **Partial — need hard cap** |
+| R2 | **OpenAI/Anthropic API costs exceed budget** | Medium | High | `max_tokens=4096` cap, LLM endpoints admin-only with 10/hour limit, hard monthly cap on OpenAI dashboard (set 2026-04-17) | Parham | Mitigated |
 | R3 | **Source websites geo-block our server** | High | Medium | Telegram as backup for state media; 16 channels cover the gap | Claude | Mitigated |
 | R4 | **Raters don't engage** | Medium | Medium | Start with close contacts, frictionless rating UX | Parham | Not started |
 | R5 | **LLM clustering merges unrelated events** | Medium | Low | Stricter prompts, dedup after clustering, human review | Claude | Mitigated |
@@ -17,14 +17,14 @@
 | R11 | **Railway/Vercel free tier limits** | Medium | Medium | Migrate to OVHcloud when needed | Parham | In progress |
 | R12 | **Single point of failure: one developer (Claude)** | Medium | High | Document everything, use standard tools | Both | Mitigated |
 | R13 | **Image URLs expire (Telegram CDN)** | High | Medium | All images now stored in Cloudflare R2 with stable URLs | Claude | **Mitigated (2026-04-10)** |
-| R14 | **Volumetric DDoS on backend** | Medium | High | Rate limiting at app layer. **Edge protection via Cloudflare TODO** | Both | **Partial** |
+| R14 | **Volumetric DDoS on backend** | Medium | High | Rate limiting at app layer; Cloudflare Bot Fight Mode on (2026-04-17); WAF managed ruleset deferred (requires paid tier) | Both | Partial (WAF deferred) |
 | R15 | **Application-layer DoS (spamming expensive endpoints)** | Medium | Medium | slowapi: 200/min default, 10/hour on LLM endpoints | Claude | Mitigated |
 | R16 | **LLM cost abuse via public endpoint** | Low | High | `POST /summarize` and lab LLM endpoints now admin-only + rate limited | Claude | Mitigated |
 | R17 | **Mass assignment attacks** | Low | High | Allowed field whitelists in admin/lab PUT endpoints | Claude | Mitigated |
-| R18 | **Bot scraping / content theft** | Medium | Medium | Rate limiting. **Cloudflare Bot Fight Mode TODO** | Both | Partial |
-| R19 | **No outage detection** | High | Medium | **UptimeRobot TODO** | Parham | **Open** |
+| R18 | **Bot scraping / content theft** | Medium | Medium | Rate limiting + Cloudflare Bot Fight Mode on (2026-04-17) | Both | Mitigated |
+| R19 | **No outage detection** | High | Medium | UptimeRobot monitor on `/health` added 2026-04-17 | Parham | Mitigated |
 | R20 | **Backend memory exhaustion via large request body** | Low | Medium | 1 MB request size limit middleware | Claude | Mitigated |
-| R21 | **Deployment failure on dependency change** | Medium | Medium | New deps (slowapi, aioboto3) added to pyproject.toml; Railway should rebuild. **Railway currently 502 — needs R2 env vars** | Claude | **Open** |
+| R21 | **Deployment failure on dependency change** | Medium | Medium | R2 env vars set on Railway; backend live; CI typecheck + unit tests added 2026-04-17 to catch regressions earlier | Claude | Mitigated |
 
 ## Risk Response Plans
 

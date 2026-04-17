@@ -22,6 +22,58 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 
+# Stories with fewer than this many articles use an absolute-count blindspot
+# rule instead of a percentage threshold — because a single voice out of 3
+# is clearly one-sided even though 33% > 10%.
+_SMALL_CLUSTER_THRESHOLD = 6
+
+
+def _compute_blindspot(
+    *,
+    state_count: int,
+    diaspora_count: int,
+    covered_by_state: bool,
+    covered_by_diaspora: bool,
+) -> tuple[bool, str | None]:
+    """Decide whether a story is a blindspot and, if so, which side.
+
+    Returns (is_blindspot, blindspot_type). `blindspot_type` is:
+      - "diaspora_only" → diaspora covers, state is silent/near-silent
+      - "state_only"    → state covers, diaspora is silent/near-silent
+      - None            → balanced
+
+    Rules, in order:
+      1. One side completely missing → blindspot for the present side.
+      2. Small cluster (total < _SMALL_CLUSTER_THRESHOLD): a lone voice on
+         one side against ≥2 on the other is a blindspot. A 2-1 story
+         reads one-sided even at 33%.
+      3. Otherwise, percentage rule: minority share < 10% → blindspot.
+    """
+    total = state_count + diaspora_count
+    if total == 0:
+        return False, None
+
+    if covered_by_diaspora and not covered_by_state:
+        return True, "diaspora_only"
+    if covered_by_state and not covered_by_diaspora:
+        return True, "state_only"
+
+    if total < _SMALL_CLUSTER_THRESHOLD:
+        if state_count == 1 and diaspora_count >= 2:
+            return True, "diaspora_only"
+        if diaspora_count == 1 and state_count >= 2:
+            return True, "state_only"
+
+    state_pct = state_count / total * 100
+    diaspora_pct = diaspora_count / total * 100
+    if state_pct < 10 and covered_by_diaspora:
+        return True, "diaspora_only"
+    if diaspora_pct < 10 and covered_by_state:
+        return True, "state_only"
+
+    return False, None
+
+
 async def _keepalive(db: AsyncSession) -> None:
     """Ping the DB connection with SELECT 1 to reset Neon's idle timer.
 
@@ -563,20 +615,15 @@ async def _refresh_story_metadata(db: AsyncSession, story_id: uuid.UUID) -> None
     align_counts = {row[0]: row[1] for row in count_result.all()}
     state_count = align_counts.get("state", 0) + align_counts.get("semi_state", 0)
     diaspora_count = align_counts.get("diaspora", 0) + align_counts.get("independent", 0)
-    total_count = state_count + diaspora_count
-    state_pct = (state_count / total_count * 100) if total_count > 0 else 0
-    diaspora_pct = (diaspora_count / total_count * 100) if total_count > 0 else 0
 
-    # Blindspot: one side is 0% OR less than 10%
-    if not story.covered_by_state or (story.covered_by_diaspora and state_pct < 10):
-        story.is_blindspot = True
-        story.blindspot_type = "diaspora_only"
-    elif not story.covered_by_diaspora or (story.covered_by_state and diaspora_pct < 10):
-        story.is_blindspot = True
-        story.blindspot_type = "state_only"
-    else:
-        story.is_blindspot = False
-        story.blindspot_type = None
+    is_blindspot, blindspot_type = _compute_blindspot(
+        state_count=state_count,
+        diaspora_count=diaspora_count,
+        covered_by_state=story.covered_by_state,
+        covered_by_diaspora=story.covered_by_diaspora,
+    )
+    story.is_blindspot = is_blindspot
+    story.blindspot_type = blindspot_type
 
     story.coverage_diversity_score = len(alignments) / 4.0
     story.last_updated_at = datetime.now(timezone.utc)
@@ -653,23 +700,15 @@ async def _refresh_stories_metadata_batch(
         story.covered_by_state = bool(alignments & {"state", "semi_state"})
         story.covered_by_diaspora = bool(alignments & {"diaspora", "independent"})
 
-        # Percentage-based blindspot: <10% from one side = blindspot
         ac = article_align_counts.get(sid, {})
         s_cnt = ac.get("state", 0) + ac.get("semi_state", 0)
         d_cnt = ac.get("diaspora", 0) + ac.get("independent", 0)
-        t_cnt = s_cnt + d_cnt
-        s_pct = (s_cnt / t_cnt * 100) if t_cnt > 0 else 0
-        d_pct = (d_cnt / t_cnt * 100) if t_cnt > 0 else 0
-
-        if not story.covered_by_state or (story.covered_by_diaspora and s_pct < 10):
-            story.is_blindspot = True
-            story.blindspot_type = "diaspora_only"
-        elif not story.covered_by_diaspora or (story.covered_by_state and d_pct < 10):
-            story.is_blindspot = True
-            story.blindspot_type = "state_only"
-        else:
-            story.is_blindspot = False
-            story.blindspot_type = None
+        story.is_blindspot, story.blindspot_type = _compute_blindspot(
+            state_count=s_cnt,
+            diaspora_count=d_cnt,
+            covered_by_state=story.covered_by_state,
+            covered_by_diaspora=story.covered_by_diaspora,
+        )
         story.coverage_diversity_score = len(alignments) / 4.0
         story.last_updated_at = now
         story.trending_score = _compute_trending_score(
@@ -1041,22 +1080,14 @@ async def _create_story(
     covered_by_state = bool(source_alignments & {"state", "semi_state"})
     covered_by_diaspora = bool(source_alignments & {"diaspora", "independent"})
 
-    # Count per side for percentage-based blindspot
     state_n = sum(1 for a in articles if (source_alignments_map or {}).get(str(a.id)) in ("state", "semi_state"))
     diaspora_n = sum(1 for a in articles if (source_alignments_map or {}).get(str(a.id)) in ("diaspora", "independent"))
-    total_n = state_n + diaspora_n
-    state_pct = (state_n / total_n * 100) if total_n > 0 else 0
-    diaspora_pct = (diaspora_n / total_n * 100) if total_n > 0 else 0
-
-    blindspot_type = None
-    if not covered_by_state or (covered_by_diaspora and state_pct < 10):
-        is_blindspot = True
-        blindspot_type = "diaspora_only"
-    elif not covered_by_diaspora or (covered_by_state and diaspora_pct < 10):
-        is_blindspot = True
-        blindspot_type = "state_only"
-    else:
-        is_blindspot = False
+    is_blindspot, blindspot_type = _compute_blindspot(
+        state_count=state_n,
+        diaspora_count=diaspora_n,
+        covered_by_state=covered_by_state,
+        covered_by_diaspora=covered_by_diaspora,
+    )
 
     # Coverage diversity
     all_alignments = {"state", "semi_state", "independent", "diaspora"}
