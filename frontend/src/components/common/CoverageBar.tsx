@@ -1,5 +1,6 @@
 "use client";
 
+import { Fragment } from "react";
 import { cn } from "@/lib/utils";
 import {
   GROUP_COLORS,
@@ -8,7 +9,6 @@ import {
   NARRATIVE_GROUP_ORDER,
   SIDE_LABELS_FA,
   narrativeGroupsFrom,
-  sidePercentages,
 } from "@/lib/narrativeGroups";
 import type { NarrativeGroup, NarrativeGroups, StoryBrief } from "@/lib/types";
 
@@ -78,38 +78,81 @@ export default function CoverageBar({
           // are present — makes the 2-side grouping visually obvious.
           const isSideBoundary = i === 2 && inside > 0 && outside > 0;
           return (
-            <div key={group} className="flex">
+            <Fragment key={group}>
               {isSideBoundary && <div className="w-[2px] bg-white dark:bg-slate-950 shrink-0" />}
               <div
                 className="transition-all"
                 style={{ width: `${width}%`, backgroundColor: GROUP_COLORS[group] }}
               />
-            </div>
+            </Fragment>
           );
         })}
       </div>
 
       {showSubgroupLabels && (
         <div className="mt-2 grid grid-cols-2 gap-x-4 text-[11px]">
-          {(["inside", "outside"] as const).map((side) => (
-            <div key={side} className="flex flex-col gap-0.5">
-              <div className="font-bold text-slate-700 dark:text-slate-300">
-                {SIDE_LABELS_FA[side]}{" "}
-                <span className="font-normal text-slate-400">
-                  ({side === "inside" ? inside : outside}٪)
-                </span>
-              </div>
-              {GROUPS_BY_SIDE[side].map((g: NarrativeGroup) => (
-                <div key={g} className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400">
-                  <span className="inline-block h-1.5 w-1.5" style={{ backgroundColor: GROUP_COLORS[g] }} />
-                  <span>{GROUP_LABELS_FA[g]}</span>
-                  <span className="text-slate-400">{pct[g]}٪</span>
+          {(["inside", "outside"] as const).map((side) => {
+            const sideTotal = side === "inside" ? inside : outside;
+            return (
+              <div key={side} className="flex flex-col gap-0.5">
+                <div className="font-bold text-slate-700 dark:text-slate-300">
+                  {SIDE_LABELS_FA[side]}{" "}
+                  <span className="font-normal text-slate-400">({sideTotal}٪)</span>
                 </div>
-              ))}
-            </div>
-          ))}
+                {withinSidePercentages(GROUPS_BY_SIDE[side], pct, sideTotal).map(
+                  ([g, withinPct]) => (
+                    <div
+                      key={g}
+                      className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400"
+                    >
+                      <span
+                        className="inline-block h-1.5 w-1.5"
+                        style={{ backgroundColor: GROUP_COLORS[g] }}
+                      />
+                      <span>{GROUP_LABELS_FA[g]}</span>
+                      <span className="text-slate-400">{withinPct}٪</span>
+                    </div>
+                  ),
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
   );
+}
+
+/**
+ * Convert per-side subgroup percentages from "share of total story" to
+ * "share of this side", so the two numbers read "76%" + "24%" summing to
+ * 100 within the side rather than "34%" + "11%" summing to 45.
+ *
+ * Rounds with largest-remainder so both always sum to exactly 100 (or 0
+ * when the side is empty).
+ */
+function withinSidePercentages(
+  groups: NarrativeGroup[],
+  pctOfTotal: NarrativeGroups,
+  sideTotal: number,
+): [NarrativeGroup, number][] {
+  if (sideTotal <= 0) {
+    return groups.map((g) => [g, 0]);
+  }
+  const raw = groups.map<[NarrativeGroup, number]>((g) => [
+    g,
+    (pctOfTotal[g] / sideTotal) * 100,
+  ]);
+  const floored = raw.map<[NarrativeGroup, number]>(([g, r]) => [g, Math.floor(r)]);
+  let deficit = 100 - floored.reduce((s, [, v]) => s + v, 0);
+  // Hand out the remaining 1's to groups with the largest fractional remainder.
+  const order = raw
+    .map(([g, r], i) => ({ g, i, rem: r - Math.floor(r) }))
+    .sort((a, b) => b.rem - a.rem || a.i - b.i);
+  for (const { i } of order) {
+    if (deficit <= 0) break;
+    floored[i][1] += 1;
+    deficit -= 1;
+  }
+  return floored;
 }
