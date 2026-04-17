@@ -520,82 +520,6 @@ export default function DashboardPage() {
     }
   }, [authHeaders]);
 
-  // Niloofar audit
-  const [niloofarRunning, setNiloofarRunning] = useState(false);
-  const [niloofarResult, setNiloofarResult] = useState<any>(null);
-  const [niloofarOpen, setNiloofarOpen] = useState(false);
-  // Elapsed ticker for the Niloofar audit. The backend endpoint is fully
-  // synchronous — no progress state is written server-side — so we
-  // estimate the phase from wall time based on typical run shape
-  // (fetch 1-5s → LLM 30-90s → apply 0-30s).
-  const [niloofarStart, setNiloofarStart] = useState<number | null>(null);
-  const [niloofarElapsed, setNiloofarElapsed] = useState(0);
-
-  useEffect(() => {
-    if (!niloofarStart || !niloofarRunning) return;
-    const interval = setInterval(() => {
-      setNiloofarElapsed(Math.floor((Date.now() - niloofarStart) / 1000));
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [niloofarStart, niloofarRunning]);
-
-  const [niloofarApplying, setNiloofarApplying] = useState<Record<number, string>>({});
-
-  const triggerNiloofarAudit = useCallback(async () => {
-    setNiloofarRunning(true);
-    setNiloofarResult(null);
-    setNiloofarApplying({});
-    setNiloofarOpen(true);
-    setNiloofarStart(Date.now());
-    setNiloofarElapsed(0);
-    try {
-      const res = await fetch(`${API}/api/v1/admin/niloofar/audit`, {
-        method: "POST",
-        headers: authHeaders(),
-      });
-      const data = await res.json();
-      setNiloofarResult(data);
-    } catch (e: any) {
-      setNiloofarResult({ error: e.message || "Unknown error" });
-    }
-    setNiloofarRunning(false);
-  }, [authHeaders]);
-
-  const applyNiloofarFix = useCallback(async (findingIndex: number) => {
-    setNiloofarApplying(prev => ({ ...prev, [findingIndex]: "applying" }));
-    try {
-      const res = await fetch(`${API}/api/v1/admin/niloofar/apply-fix?fix_index=${findingIndex}`, {
-        method: "POST",
-        headers: authHeaders(),
-      });
-      const data = await res.json();
-      setNiloofarApplying(prev => ({ ...prev, [findingIndex]: data.status === "ok" ? "done" : "error" }));
-    } catch {
-      setNiloofarApplying(prev => ({ ...prev, [findingIndex]: "error" }));
-    }
-  }, [authHeaders]);
-
-  const applyAllNiloofarFixes = useCallback(async () => {
-    setNiloofarRunning(true);
-    setNiloofarStart(Date.now());
-    setNiloofarElapsed(0);
-    try {
-      const res = await fetch(`${API}/api/v1/admin/niloofar/audit?apply=true`, {
-        method: "POST",
-        headers: authHeaders(),
-      });
-      const data = await res.json();
-      setNiloofarResult(data);
-      // Mark all as done
-      const allDone: Record<number, string> = {};
-      (data?.report?.findings || []).forEach((_: any, i: number) => { allDone[i] = "done"; });
-      setNiloofarApplying(allDone);
-    } catch (e: any) {
-      setNiloofarResult({ error: e.message });
-    }
-    setNiloofarRunning(false);
-  }, [authHeaders]);
-
   // Feedback & Suggestions
   const [feedback, setFeedback] = useState<FeedbackItem[]>([]);
   const [feedbackLoading, setFeedbackLoading] = useState(false);
@@ -1582,164 +1506,18 @@ export default function DashboardPage() {
         </p>
       </div>
 
-      {/* Niloofar Editor Audit */}
-      <div className="mb-6 border border-violet-200 dark:border-violet-900/50 bg-violet-50/30 dark:bg-violet-950/10 p-5">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
-            <Activity className="h-4 w-4 text-violet-500" /> Niloofar Editor Audit
-            <span className="text-xs font-normal text-slate-500" dir="rtl">نیلوفر — ویراستار</span>
-          </h2>
-          <button
-            onClick={triggerNiloofarAudit}
-            disabled={niloofarRunning}
-            className="flex items-center gap-2 border border-violet-300 dark:border-violet-700 bg-violet-100 dark:bg-violet-900/20 px-4 py-2 text-sm font-medium text-violet-700 dark:text-violet-300 hover:bg-violet-200 dark:hover:bg-violet-900/30 disabled:opacity-50"
-          >
-            {niloofarRunning && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
-            {niloofarRunning ? "در حال بررسی..." : "Run Audit"}
-          </button>
-        </div>
-
-        {niloofarOpen && (
-          <div className="mt-3">
-            {niloofarRunning && !niloofarResult && (() => {
-              // Phase estimate from wall time — the backend doesn't report
-              // progress, so we infer where we are from typical timings.
-              const phase =
-                niloofarElapsed < 5 ? { fa: "دریافت موضوعات از پایگاه داده", pct: 10 } :
-                niloofarElapsed < 25 ? { fa: "تحلیل محتوا با مدل زبانی (معمولاً ۳۰–۹۰ ثانیه)", pct: 35 } :
-                niloofarElapsed < 60 ? { fa: "تحلیل محتوا با مدل زبانی (در حال ادامه)", pct: 60 } :
-                niloofarElapsed < 120 ? { fa: "تحلیل محتوا با مدل زبانی — ممکن است تا ۲ دقیقه طول بکشد", pct: 80 } :
-                { fa: "تحلیل طولانی‌تر از حد معمول — در حال اجرا", pct: 90 };
-              return (
-                <div className="py-3" dir="rtl">
-                  <div className="flex items-center justify-between gap-3 mb-2">
-                    <div className="flex items-center gap-2 text-xs text-violet-700 dark:text-violet-300">
-                      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                      <span className="font-medium">نیلوفر در حال بررسی محتوا</span>
-                    </div>
-                    <span className="text-[11px] font-mono text-slate-500">{fmtDuration(niloofarElapsed)}</span>
-                  </div>
-                  <div className="h-1.5 w-full bg-violet-100 dark:bg-violet-900/20 overflow-hidden">
-                    <div
-                      className="h-full bg-violet-500 transition-all duration-500"
-                      style={{ width: `${phase.pct}%` }}
-                    />
-                  </div>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-2 leading-5">{phase.fa}</p>
-                  <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1 leading-4">
-                    درخواست به سرور ارسال شده و تا دریافت پاسخ منتظر می‌ماند. بستن این پنجره جلوی اجرای پشت‌صحنه را نمی‌گیرد، ولی نتیجه نمایش داده نخواهد شد.
-                  </p>
-                </div>
-              );
-            })()}
-            {niloofarResult && niloofarResult.error && (
-              <div className="border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-900/10 p-3 text-xs text-red-700 dark:text-red-400">
-                Error: {niloofarResult.error}
-              </div>
-            )}
-            {niloofarResult?.report && (
-              <div dir="rtl">
-                {/* Grade + summary */}
-                <div className="flex items-center gap-3 mb-3">
-                  <span className={`text-2xl font-black ${
-                    niloofarResult.report.overall_grade === "A" ? "text-emerald-500" :
-                    niloofarResult.report.overall_grade === "B" ? "text-blue-500" :
-                    niloofarResult.report.overall_grade === "C" ? "text-amber-500" : "text-red-500"
-                  }`}>{niloofarResult.report.overall_grade}</span>
-                  <p className="text-[12px] text-slate-600 dark:text-slate-400 leading-5">{niloofarResult.report.summary}</p>
-                </div>
-
-                {/* Apply all button */}
-                <button
-                  onClick={applyAllNiloofarFixes}
-                  disabled={niloofarRunning}
-                  className="mb-4 flex items-center gap-2 border border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/20 px-4 py-2 text-sm font-medium text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 disabled:opacity-50"
-                >
-                  {niloofarRunning ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle className="h-3.5 w-3.5" />}
-                  اعمال همه اصلاحات
-                </button>
-
-                {/* Findings list */}
-                <div className="space-y-3">
-                  {(niloofarResult.report.findings || []).map((f: any, i: number) => {
-                    const sevColor = f.severity === "critical" ? "border-red-400 bg-red-50/50 dark:bg-red-900/10" :
-                      f.severity === "high" ? "border-orange-400 bg-orange-50/50 dark:bg-orange-900/10" :
-                      f.severity === "medium" ? "border-amber-300 bg-amber-50/50 dark:bg-amber-900/10" :
-                      "border-slate-200 bg-slate-50/50 dark:bg-slate-800/30";
-                    const applyState = niloofarApplying[i];
-                    return (
-                      <div key={i} className={`border-r-4 ${sevColor} p-3`}>
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex-1 min-w-0">
-                            <p className="text-[12px] font-bold text-slate-800 dark:text-slate-200 mb-1">
-                              {f.type === "bad_title" ? "عنوان نادرست" :
-                               f.type === "irrelevant_article" ? "مقاله نامرتبط" :
-                               f.type === "merge_stories" ? "ادغام موضوعات" :
-                               f.type === "bad_summary" ? "خلاصه ضعیف" :
-                               f.type === "stale_story" ? "موضوع کهنه" :
-                               f.type === "source_silence" ? "سکوت منابع" :
-                               f.type === "pipeline_suggestion" ? "پیشنهاد سیستمی" :
-                               f.type || "سایر"}
-                            </p>
-                            <p className="text-[11px] text-slate-500 mb-1 truncate">{f.story_title}</p>
-                            <p className="text-[12px] text-slate-700 dark:text-slate-300 leading-5">{f.description_fa}</p>
-                            <p className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-1">← {f.proposed_fix}</p>
-                          </div>
-                          <div className="shrink-0">
-                            {applyState === "done" ? (
-                              <span className="text-[11px] text-emerald-500 font-medium flex items-center gap-1">
-                                <CheckCircle className="h-3.5 w-3.5" /> اعمال شد
-                              </span>
-                            ) : applyState === "applying" ? (
-                              <RefreshCw className="h-3.5 w-3.5 text-blue-500 animate-spin" />
-                            ) : applyState === "error" ? (
-                              <span className="text-[11px] text-red-500">خطا</span>
-                            ) : f.fix_type !== "pipeline_change" ? (
-                              <button
-                                onClick={() => applyNiloofarFix(i)}
-                                className="text-[11px] border border-violet-300 dark:border-violet-700 px-3 py-1 text-violet-600 dark:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-900/20"
-                              >
-                                اعمال
-                              </button>
-                            ) : (
-                              <span className="text-[10px] text-slate-400">سیستمی</span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Applied results */}
-                {niloofarResult.applied && (
-                  <div className="mt-3 border-t border-slate-200 dark:border-slate-800 pt-3">
-                    <p className="text-[11px] font-bold text-slate-500 mb-2">نتایج اعمال:</p>
-                    {niloofarResult.applied.map((r: string, i: number) => (
-                      <p key={i} className="text-[11px] text-slate-600 dark:text-slate-400">{r}</p>
-                    ))}
-                  </div>
-                )}
-
-                <button
-                  onClick={() => { setNiloofarOpen(false); setNiloofarResult(null); setNiloofarApplying({}); }}
-                  className="mt-3 text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
-                >
-                  بستن
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
       {/* Claude Persona Audits */}
       <div className="mb-6 border border-slate-200 dark:border-slate-800 p-5">
         <h2 className="mb-4 text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
           <ListChecks className="h-4 w-4 text-slate-400" /> Claude Persona Audits
         </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
           {([
+            { key: "niloofar", name: "Niloofar", nameFa: "نیلوفر", role: "Editorial Audit",
+              desc: "Senior geopolitics editor. Reviews story titles, summaries, narratives, and merges. Rewrites in adabi literary voice.",
+              border: "border-violet-200 dark:border-violet-900/50", bg: "bg-violet-50/30 dark:bg-violet-950/10",
+              accent: "text-violet-600 dark:text-violet-400",
+              btnClass: "border-violet-300 dark:border-violet-700 bg-violet-100 dark:bg-violet-900/20 text-violet-700 dark:text-violet-300 hover:bg-violet-200 dark:hover:bg-violet-900/30" },
             { key: "dariush", name: "Dariush", nameFa: "داریوش", role: "Data Health Check",
               desc: "Checks pipeline data quality, missing fields, stale articles, and embedding coverage.",
               border: "border-emerald-200 dark:border-emerald-900/50", bg: "bg-emerald-50/30 dark:bg-emerald-950/10",
