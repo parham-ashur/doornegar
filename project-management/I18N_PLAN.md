@@ -63,6 +63,86 @@ looks identical today after this commit.
    automatically). Audit the homepage hero grid (`grid-cols-2` narrative
    cards) and story detail layout (`grid-cols-1 lg:grid-cols-2` two-column).
 
+### The layouts that MUST mirror correctly (sanity checklist)
+
+These are the places where the column swap is user-visible. When LTR
+looks right here, the whole Tier 1 pass is done.
+
+#### Story detail page — `app/[locale]/stories/[id]/page.tsx`
+
+```
+Farsi (RTL) today:                         English/French (LTR) target:
+
+┌──────────────────┬──────────────────┐    ┌──────────────────┬──────────────────┐
+│   Stats sidebar  │  Bias narratives │    │  Bias narratives │   Stats sidebar  │
+│                  │                  │    │                  │                  │
+│  • Telegram      │  • مقایسه tab    │    │  • Comparison    │  • Telegram      │
+│    analysis      │  • درون‌مرزی tab  │    │    tab           │    analysis      │
+│  • Dispute       │  • برون‌مرزی tab  │    │  • Inside tab    │  • Dispute       │
+│    score         │                  │    │  • Outside tab   │    score         │
+│  • Silence       │  Articles list   │    │                  │  • Silence       │
+│    detection     │  (filtered)      │    │  Articles list   │    detection     │
+│  • Coordinated   │                  │    │                  │  • Coordinated   │
+│    messaging     │                  │    │                  │    messaging     │
+│  • Stats         │                  │    │                  │  • Stats         │
+│  • Political     │                  │    │                  │  • Political     │
+│    spectrum      │                  │    │                  │    spectrum      │
+└──────────────────┴──────────────────┘    └──────────────────┴──────────────────┘
+        left col            right col               left col            right col
+        (second DOM child)  (first DOM child)       (first DOM child)   (second DOM child)
+```
+
+The DOM order stays the same. The browser swaps which column renders
+on which side based on `<html dir>`. Tier 1 commit 1 just has to change
+the physical padding/border classes on each column so the divider line
+sits between them (not on an outer edge).
+
+Specifically in the story detail page:
+
+| Element | Today | Becomes |
+|---|---|---|
+| Narratives column wrapper | `lg:pl-6 lg:border-l` | `lg:ps-6 lg:border-s` |
+| Stats sidebar wrapper | `lg:pr-6 lg:sticky lg:top-4` | `lg:pe-6 lg:sticky lg:top-4` |
+| Coverage-bar max-width | `max-w-md` | unchanged — symmetric |
+| Mobile-only StatsPanel | renders below narratives | unchanged — mobile is single-column |
+
+#### Homepage hero — `app/[locale]/page.tsx`
+
+```
+Farsi (RTL) today:                         English/French (LTR) target:
+
+┌────────────────────┬────────────────────┐    ┌────────────────────┬────────────────────┐
+│ روایت برون‌مرزی   │  روایت درون‌مرزی   │    │ درون‌مرزی narrative│ برون‌مرزی narrative│
+│ (outside/orange)   │  (inside/navy)     │    │  (inside/navy)     │  (outside/orange)  │
+│                    │                    │    │                    │                    │
+│ brief summary      │  brief summary     │    │  brief summary     │  brief summary     │
+│ of what outside    │  of what inside    │    │  of what inside    │  of what outside   │
+│ media said         │  media said        │    │  media said        │  media said        │
+└────────────────────┴────────────────────┘    └────────────────────┴────────────────────┘
+```
+
+The inside/outside labels stay anchored to their color family
+(navy=inside, orange=outside). What flips is which side renders first.
+
+#### Homepage "most disputed" section
+
+Each row: title on the outer edge, percentages on the inner edge. Same
+grid-cols-2 pattern — flips automatically.
+
+#### Mobile carousel layouts — `components/stories/*`
+
+Six layouts (BlindspotLayout, MaxDisagreementLayout, TelegramLayout,
+StoryLayout, StoryContentPanel, StoryBackground). On mobile RTL these
+read right-to-left for the split screens. In LTR they should read
+left-to-right. SplitScreen is the reusable base; fix it once, every
+layout inherits.
+
+#### Admin dashboard fetch-stats table — `app/[locale]/dashboard/fetch-stats/page.tsx`
+
+This one is LTR already (admin tool), so no flip needed. But any
+`text-right` for numeric columns should become `text-end` for
+consistency.
+
 **Files of concern** (from the prior audit — search these first):
 - `frontend/src/app/[locale]/page.tsx` — homepage
 - `frontend/src/app/[locale]/stories/[id]/page.tsx` — story detail
