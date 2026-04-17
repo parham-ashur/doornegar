@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import type { StoryAnalysis } from "@/lib/types";
+import { GROUP_COLORS, GROUP_LABELS_FA } from "@/lib/narrativeGroups";
+import type { NarrativeGroup, StoryAnalysis } from "@/lib/types";
 
 type TabKey = "bias" | "inside" | "outside";
 
@@ -22,6 +23,36 @@ function FramingTags({ framing }: { framing: string | string[] | null }) {
           {f}
         </span>
       ))}
+    </div>
+  );
+}
+
+function SubgroupBullets({
+  group,
+  bullets,
+}: {
+  group: NarrativeGroup;
+  bullets: string[];
+}) {
+  if (!bullets || bullets.length === 0) return null;
+  return (
+    <div className="mb-4">
+      <div className="flex items-center gap-2 mb-2">
+        <span
+          className="inline-block h-2.5 w-2.5"
+          style={{ backgroundColor: GROUP_COLORS[group] }}
+        />
+        <h5 className="text-[13px] font-bold text-slate-700 dark:text-slate-300">
+          {GROUP_LABELS_FA[group]}
+        </h5>
+      </div>
+      <ul className="space-y-1.5 pr-4">
+        {bullets.map((b, i) => (
+          <li key={i} className="text-[13px] leading-6 text-slate-600 dark:text-slate-400 list-disc">
+            {b}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -72,7 +103,19 @@ export default function StoryAnalysisPanel({ analysis }: { analysis: StoryAnalys
 
         {activeTab === "inside" && (
           <div>
-            {analysis?.state_summary_fa ? (
+            {analysis?.narrative?.inside ? (
+              <>
+                <SubgroupBullets
+                  group="principlist"
+                  bullets={analysis.narrative.inside.principlist || []}
+                />
+                <SubgroupBullets
+                  group="reformist"
+                  bullets={analysis.narrative.inside.reformist || []}
+                />
+                <FramingTags framing={analysis.scores?.state?.framing || null} />
+              </>
+            ) : analysis?.state_summary_fa ? (
               <>
                 <p className="text-[13px] leading-7 text-slate-600 dark:text-slate-400">{analysis.state_summary_fa}</p>
                 <FramingTags framing={analysis.scores?.state?.framing || null} />
@@ -85,7 +128,19 @@ export default function StoryAnalysisPanel({ analysis }: { analysis: StoryAnalys
 
         {activeTab === "outside" && (
           <div>
-            {analysis?.diaspora_summary_fa ? (
+            {analysis?.narrative?.outside ? (
+              <>
+                <SubgroupBullets
+                  group="moderate_diaspora"
+                  bullets={analysis.narrative.outside.moderate || []}
+                />
+                <SubgroupBullets
+                  group="radical_diaspora"
+                  bullets={analysis.narrative.outside.radical || []}
+                />
+                <FramingTags framing={analysis.scores?.diaspora?.framing || null} />
+              </>
+            ) : analysis?.diaspora_summary_fa ? (
               <>
                 <p className="text-[13px] leading-7 text-slate-600 dark:text-slate-400">{analysis.diaspora_summary_fa}</p>
                 <FramingTags framing={analysis.scores?.diaspora?.framing || null} />

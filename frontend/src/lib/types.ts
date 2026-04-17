@@ -148,8 +148,24 @@ export interface NarrativeArc {
   direction: "escalating" | "de-escalating" | "shifting" | "stable" | null;
 }
 
+/** New bullet-per-subgroup narrative shape emitted by the LLM after commit 3.
+ * Older cached analyses won't have this — consumers should fall back to
+ * state_summary_fa / diaspora_summary_fa which are synthesized aliases. */
+export interface NarrativeBullets {
+  inside: {
+    principlist: string[];
+    reformist: string[];
+  };
+  outside: {
+    moderate: string[];
+    radical: string[];
+  };
+}
+
 export interface StoryAnalysis {
   summary_fa: string | null;
+  /** 4-subgroup bullets. Optional — only present on freshly analyzed stories. */
+  narrative?: NarrativeBullets | null;
   state_summary_fa: string | null;
   diaspora_summary_fa: string | null;
   independent_summary_fa: string | null;

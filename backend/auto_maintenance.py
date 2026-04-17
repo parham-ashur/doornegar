@@ -468,12 +468,16 @@ async def step_summarize():
             # Baseline: 1500 chars (~375 tokens) — just enough for a summary
             content_cap = 6000 if is_premium else 1500
 
+            from app.services.narrative_groups import narrative_group as _ng
             articles_info = [
                 {
                     "title": a.title_original or a.title_fa or a.title_en or "",
                     "content": (a.content_text or a.summary or "")[:content_cap],
                     "source_name_fa": a.source.name_fa if a.source else "نامشخص",
                     "state_alignment": a.source.state_alignment if a.source else "",
+                    "production_location": a.source.production_location if a.source else None,
+                    "factional_alignment": a.source.factional_alignment if a.source else None,
+                    "narrative_group": _ng(a.source) if a.source else "moderate_diaspora",
                     "published_at": a.published_at.isoformat() if a.published_at else "",
                 }
                 for a in top_articles
@@ -511,20 +515,20 @@ async def step_summarize():
                                 if len(related) >= 3:
                                     break
 
-                # Source track records: average neutrality from past analyses
+                # Source track records: narrative-subgroup heuristic
+                from app.services.narrative_groups import narrative_group as _ng_tr
                 source_records = {}
                 source_slugs = {a.source.slug for a in top_articles if a.source}
+                _TRACK = {
+                    "principlist": "اصول‌گرا — تمایل به بزرگ‌نمایی دستاوردها و کوچک‌نمایی تلفات",
+                    "reformist": "اصلاح‌طلب — نسبتاً محتاط داخل ایران، گاهی انتقادی",
+                    "moderate_diaspora": "میانه‌رو — پوشش گزارش‌گونه بین‌المللی",
+                    "radical_diaspora": "رادیکال — تمایل به تأکید بر سرکوب و نقض حقوق بشر",
+                }
                 for slug in list(source_slugs)[:6]:
-                    # Simple track record from source alignment
                     src = next((a.source for a in top_articles if a.source and a.source.slug == slug), None)
                     if src:
-                        align = src.state_alignment
-                        if align in ("state",):
-                            source_records[slug] = "محافظه‌کار — تمایل به بزرگ‌نمایی دستاوردها و کوچک‌نمایی تلفات"
-                        elif align == "semi_state":
-                            source_records[slug] = "نیمه‌محافظه‌کار — نسبتاً محتاط، گاهی انتقادی"
-                        elif align == "diaspora":
-                            source_records[slug] = "اپوزیسیون — تمایل به تأکید بر سرکوب و نقض حقوق بشر"
+                        source_records[slug] = _TRACK.get(_ng_tr(src), "")
 
                 # Save old summary for delta detection before overwriting
                 _old_summary = story.summary_fa
@@ -779,12 +783,16 @@ async def step_story_quality():
         from app.config import settings
         if settings.openai_api_key:
             for story in result.scalars().all():
+                from app.services.narrative_groups import narrative_group as _ng2
                 articles_info = [
                     {
                         "title": a.title_original or a.title_fa or a.title_en or "",
                         "content": (a.content_text or a.summary or "")[:1500],
                         "source_name_fa": a.source.name_fa if a.source else "نامشخص",
                         "state_alignment": a.source.state_alignment if a.source else "",
+                        "production_location": a.source.production_location if a.source else None,
+                        "factional_alignment": a.source.factional_alignment if a.source else None,
+                        "narrative_group": _ng2(a.source) if a.source else "moderate_diaspora",
                         "published_at": a.published_at.isoformat() if a.published_at else "",
                     }
                     for a in story.articles
@@ -2227,9 +2235,14 @@ async def step_detect_silences():
 
     stats = {"checked": 0, "silences_found": 0, "hypotheses_generated": 0, "failed": 0}
 
-    # Define the two opposing sides
-    STATE_SIDE = {"state", "semi_state"}
-    DIASPORA_SIDE = {"diaspora", "independent"}
+    # Partition by the 4-subgroup narrative taxonomy, collapsed to 2 sides:
+    # inside-border (principlist + reformist) vs outside-border
+    # (moderate_diaspora + radical_diaspora). Etemad-Online and any future
+    # inside-reformist source correctly count toward inside-border here,
+    # whereas the old state_alignment-based partition put it in diaspora.
+    from app.services.narrative_groups import narrative_group as _ng_silence, side_of as _side_of
+    INSIDE = "inside"
+    OUTSIDE = "outside"
 
     async with async_session() as db:
         result = await db.execute(
@@ -2246,8 +2259,8 @@ async def step_detect_silences():
         for story in stories:
             stats["checked"] += 1
 
-            # Count articles per alignment side
-            state_count = 0
+            # Count articles per side (inside vs outside)
+            state_count = 0   # variable name retained for minimal blast radius downstream
             diaspora_count = 0
             state_sources: list[str] = []
             diaspora_sources: list[str] = []
@@ -2255,13 +2268,13 @@ async def step_detect_silences():
             for a in story.articles:
                 if not a.source:
                     continue
-                align = a.source.state_alignment
-                if align in STATE_SIDE:
+                side = _side_of(_ng_silence(a.source))
+                if side == INSIDE:
                     state_count += 1
                     slug = a.source.slug
                     if slug not in state_sources:
                         state_sources.append(slug)
-                elif align in DIASPORA_SIDE:
+                elif side == OUTSIDE:
                     diaspora_count += 1
                     slug = a.source.slug
                     if slug not in diaspora_sources:

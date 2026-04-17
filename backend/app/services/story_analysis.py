@@ -2,8 +2,12 @@
 
 Generates rich Farsi analysis for stories including:
 - Overall summary based on full article content
-- Per-side summaries (state vs diaspora vs independent)
-- Structured bias scores (tone, framing, factuality per side)
+- Structured per-subgroup bullet narratives (principlist / reformist /
+  moderate-diaspora / radical-diaspora)
+- Legacy flat side summaries (state_summary_fa / diaspora_summary_fa)
+  synthesised by joining bullets — kept during the transition window
+  so any unmigrated consumer renders something.
+- Structured bias scores (framing per side)
 """
 
 import json
@@ -12,19 +16,50 @@ import logging
 import openai
 
 from app.config import settings
+from app.services.narrative_groups import narrative_group as _narrative_group
 
 logger = logging.getLogger(__name__)
 
-ALIGNMENT_LABELS_FA = {
-    "state": "حکومتی",
-    "semi_state": "نیمه‌حکومتی",
-    "independent": "مستقل",
-    "diaspora": "برون‌مرزی",
+# Subgroup labels for prompt presentation. The LLM sees articles tagged
+# with these Farsi strings and is asked to cluster its bullet output by
+# the same labels.
+SUBGROUP_LABELS_FA = {
+    "principlist": "اصول‌گرا",
+    "reformist": "اصلاح‌طلب",
+    "moderate_diaspora": "میانه‌رو",
+    "radical_diaspora": "رادیکال",
 }
+
+
+def _narrative_group_from_dict(art: dict) -> str:
+    """Derive a narrative subgroup from a plain article dict.
+
+    Used when callers pass articles as dicts without a pre-populated
+    `narrative_group` key. Uses the same rule as
+    app.services.narrative_groups.narrative_group, fed with whatever
+    fields the caller provided.
+    """
+    from types import SimpleNamespace
+    shim = SimpleNamespace(
+        production_location=art.get("production_location"),
+        factional_alignment=art.get("factional_alignment"),
+        state_alignment=art.get("state_alignment"),
+    )
+    return _narrative_group(shim)
 
 STORY_ANALYSIS_PROMPT = """\
 شما یک تحلیلگر ارشد رسانه‌ای هستید که برای پلتفرم شفافیت رسانه‌ای «دورنگر» کار می‌کنید. \
-هدف: نشان دادن تفاوت‌های چارچوب‌بندی بین رسانه‌های حکومتی و اپوزیسیون — تا خواننده خودش قضاوت کند.
+هدف: نشان دادن تفاوت‌های چارچوب‌بندی بین چهار زیرگروه رسانه‌های ایرانی — تا خواننده خودش قضاوت کند.
+
+# تقسیم‌بندی رسانه‌ها (چهار زیرگروه در دو سمت)
+
+درون‌مرزی (ایران):
+  • اصول‌گرا — رسانه‌های حکومتی، سپاهی، یا مواضع اصول‌گرای جناحی
+  • اصلاح‌طلب — رسانه‌های داخل کشور با گرایش اصلاحات یا جامعه مدنی
+
+برون‌مرزی (دیاسپورا/خارج از ایران):
+  • میانه‌رو — رسانه‌های عمومی بین‌المللی و مستقل (بی‌بی‌سی، دویچه‌وله، ایران‌وایر، هرانا…)
+  • رادیکال — رسانه‌های تند اپوزیسیون یا سلطنت‌طلب (ایران اینترنشنال، کیهان لندن…)
 
 # سبک نوشتار
 
@@ -33,11 +68,12 @@ STORY_ANALYSIS_PROMPT = """\
 - واژگان بارگذاری‌شده را فقط با گیومه «» نقل کنید.
 - به شواهد عینی توجه کنید: ارقام، آمار، نام افراد، تاریخ‌ها، اسناد. این جزئیات را در عنوان و تحلیل بگنجانید.
 
-# واژگان رسانه‌ای ایرانی
+# واژگان هر زیرگروه (نمونه، برای تشخیص لحن)
 
-حکومتی: فتنه، اغتشاش، شهید، مقاومت، دشمن، عوامل بیگانه، ضدانقلاب، تحریم ظالمانه
-اپوزیسیون: قیام، سرکوب، کشتار، زندانی سیاسی، حقوق بشر، رژیم ایران، جان‌باخته
-مستقل: معترضان، کشته‌شدگان، نیروهای امنیتی (واژگان خنثی)
+اصول‌گرا: فتنه، اغتشاش، شهید، مقاومت، دشمن، عوامل بیگانه، ضدانقلاب، تحریم ظالمانه
+اصلاح‌طلب: اصلاحات، گفت‌وگو، جامعه مدنی، حقوق شهروندی، مسئولیت‌پذیری دولت، راه‌حل سیاسی
+میانه‌رو: معترضان، کشته‌شدگان، نیروهای امنیتی، گزارش‌گونه، حقوق بشر، شفافیت
+رادیکال: قیام، سرکوب، کشتار، رژیم ایران، براندازی، زندانی سیاسی
 
 # مقالات
 
@@ -91,10 +127,20 @@ bias_explanation_fa باید عمیق و مشخص باشد. ۵ تا ۷ نکته 
   "title_fa": "<تیتر خبری ۸-۱۲ کلمه — فقط جوهره رویداد: چه اتفاقی افتاد، کجا، چه ارقامی. هرگز از این واژه‌ها استفاده نکن: تحلیل، سوگیری، پوشش رسانه‌ای، روایت، بررسی، مقایسه، نقش عوامل خارجی. تیتر باید مثل روزنامه باشد نه عنوان پژوهش>",
   "title_en": "<English translation>",
   "summary_fa": "<۱-۲ جمله، ۲۰-۳۰ کلمه — فقط حقایق اصلی برای کارت صفحه اصلی>",
-  "state_summary_fa": "<روایت حکومتی ۳-۴ جمله: چه گفتند، چه واژگانی به‌کار بردند، چه چیزی را پنهان کردند. یا null>",
-  "diaspora_summary_fa": "<روایت اپوزیسیون ۳-۴ جمله: چه گفتند، چه واژگانی به‌کار بردند، بر چه تأکید کردند. یا null>",
-  "independent_summary_fa": "<روایت مستقل ۲-۳ جمله، یا null>",
-  "bias_explanation_fa": "<۵-۷ نکته مجزا با نقطه‌ویرگول (؛) — تحلیل عمیق سوگیری با نقل مستقیم واژگان و ارقام>",
+  "narrative": {{
+    "inside": {{
+      "principlist": ["<۲ تا ۳ بولت فارسی. هر بولت یک جمله کوتاه: رسانه‌های اصول‌گرا چه گفتند، چه واژگانی به‌کار بردند، چه چیزی را برجسته یا پنهان کردند>"],
+      "reformist":   ["<۲ تا ۳ بولت فارسی برای رسانه‌های اصلاح‌طلب داخل ایران>"]
+    }},
+    "outside": {{
+      "moderate":    ["<۲ تا ۳ بولت فارسی برای رسانه‌های میانه‌روی برون‌مرزی>"],
+      "radical":     ["<۲ تا ۳ بولت فارسی برای رسانه‌های رادیکال برون‌مرزی>"]
+    }}
+  }},
+  "state_summary_fa": "<روایت درون‌مرزی ۳-۴ جمله — ترکیب مختصر اصول‌گرا + اصلاح‌طلب. یا null اگر هیچ رسانه‌ای از این سمت نباشد>",
+  "diaspora_summary_fa": "<روایت برون‌مرزی ۳-۴ جمله — ترکیب مختصر میانه‌رو + رادیکال. یا null>",
+  "independent_summary_fa": null,
+  "bias_explanation_fa": "<۵-۷ نکته مجزا با نقطه‌ویرگول (؛) — تحلیل عمیق سوگیری با نقل مستقیم واژگان و ارقام، نه فقط بین دو سمت بلکه بین زیرگروه‌ها هم>",
   "scores": {{
     "state": {{"framing": ["حداکثر ۳ از: مقاومت، پیروزی، قربانی، تهدید، بحران، امنیت، حقوق بشر، اقتصادی، دخالت خارجی، خنثی"]}},
     "diaspora": {{"framing": ["حداکثر ۳"]}},
@@ -176,7 +222,7 @@ FACT_EXTRACTION_PROMPT = """\
   "facts": [
     {{
       "source": "<نام رسانه>",
-      "alignment": "<محافظه‌کار یا اپوزیسیون>",
+      "subgroup": "<یکی از: اصول‌گرا | اصلاح‌طلب | میانه‌رو | رادیکال>",
       "claims": ["<ادعای مشخص ۱>", "<ادعای ۲>"],
       "numbers": ["<عدد یا آمار ذکر شده>"],
       "evidence_type": "<رسمی | ناشناس | شاهد عینی | بدون منبع>",
@@ -197,7 +243,8 @@ async def _pass1_extract_facts(
     lines = []
     for i, art in enumerate(articles_with_sources, 1):
         lines.append(f"--- مقاله {i} ---")
-        lines.append(f"منبع: {art.get('source_name_fa', '?')} ({art.get('state_alignment', '?')})")
+        _gr = art.get("narrative_group") or _narrative_group_from_dict(art)
+        lines.append(f"منبع: {art.get('source_name_fa', '?')} — {SUBGROUP_LABELS_FA.get(_gr, 'نامشخص')}")
         lines.append(f"عنوان: {art.get('title', '')}")
         # Shorter content for nano — just first 800 chars
         content = (art.get("content", "") or "")[:800]
@@ -269,7 +316,9 @@ async def generate_story_analysis(
         lines.append("# حقایق استخراج‌شده (از تحلیل اولیه)")
         for i, fact in enumerate(facts, 1):
             src = fact.get("source", "?")
-            align = fact.get("alignment", "?")
+            # New prompt emits `subgroup` but older cached facts might still
+            # have `alignment`; accept either.
+            align = fact.get("subgroup") or fact.get("alignment", "?")
             claims = fact.get("claims", [])
             numbers = fact.get("numbers", [])
             evidence = fact.get("evidence_type", "?")
@@ -330,9 +379,8 @@ async def generate_story_analysis(
 
     # Add raw articles (shorter since facts are already extracted)
     for i, art in enumerate(articles_with_sources, 1):
-        alignment_fa = ALIGNMENT_LABELS_FA.get(
-            art.get("state_alignment", ""), "نامشخص"
-        )
+        group = art.get("narrative_group") or _narrative_group_from_dict(art)
+        subgroup_label = SUBGROUP_LABELS_FA.get(group, "نامشخص")
         source_name = art.get("source_name_fa", "نامشخص")
         title = art.get("title", "بدون عنوان")
         content = art.get("content", "")
@@ -340,7 +388,7 @@ async def generate_story_analysis(
 
         lines.append(f"--- مقاله {i} ---")
         lines.append(f"عنوان: {title}")
-        lines.append(f"منبع: {source_name} (جهت‌گیری: {alignment_fa})")
+        lines.append(f"منبع: {source_name} — زیرگروه: {subgroup_label}")
         if published:
             lines.append(f"تاریخ انتشار: {published}")
         if content:
@@ -397,6 +445,7 @@ def _parse_analysis_response(response_text: str) -> dict:
         "title_fa": None,
         "title_en": None,
         "summary_fa": None,
+        "narrative": None,
         "state_summary_fa": None,
         "diaspora_summary_fa": None,
         "independent_summary_fa": None,
@@ -412,4 +461,31 @@ def _parse_analysis_response(response_text: str) -> dict:
         if key not in result:
             result[key] = default
 
+    # If the LLM emitted structured bullets but forgot to synthesise the
+    # legacy side summaries, build them ourselves by joining bullets.
+    # This keeps any unmigrated frontend caller rendering content while
+    # the migration rolls out.
+    narr = result.get("narrative")
+    if isinstance(narr, dict):
+        if not result.get("state_summary_fa"):
+            result["state_summary_fa"] = _join_side_bullets(narr.get("inside"))
+        if not result.get("diaspora_summary_fa"):
+            result["diaspora_summary_fa"] = _join_side_bullets(narr.get("outside"))
+
     return result
+
+
+def _join_side_bullets(side: object) -> str | None:
+    """Flatten `{subgroup: [bullets, ...], ...}` into a single Farsi paragraph."""
+    if not isinstance(side, dict):
+        return None
+    parts: list[str] = []
+    for _subgroup, bullets in side.items():
+        if not isinstance(bullets, list):
+            continue
+        for b in bullets:
+            if isinstance(b, str) and b.strip():
+                parts.append(b.strip())
+    if not parts:
+        return None
+    return " ".join(parts)

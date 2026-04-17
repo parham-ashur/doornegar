@@ -601,28 +601,37 @@ async def _refresh_story_metadata(db: AsyncSession, story_id: uuid.UUID) -> None
     )
     story.source_count = source_result.scalar() or 0
 
-    # Update coverage flags
-    alignment_result = await db.execute(
-        select(Source.state_alignment)
+    # Partition articles by the 4-subgroup narrative taxonomy.
+    from app.services.narrative_groups import narrative_group as _ng_ref, side_of as _side_of_ref
+    per_source_result = await db.execute(
+        select(
+            Source.production_location,
+            Source.factional_alignment,
+            Source.state_alignment,
+            func.count(Article.id),
+        )
         .join(Article, Article.source_id == Source.id)
         .where(Article.story_id == story_id)
-        .distinct()
+        .group_by(Source.id)
     )
-    alignments = {row[0] for row in alignment_result.all()}
+    state_count = 0
+    diaspora_count = 0
+    groups_present: set[str] = set()
+    for prod_loc, fa_align, st_align, cnt in per_source_result.all():
+        shim = type("S", (), {
+            "production_location": prod_loc,
+            "factional_alignment": fa_align,
+            "state_alignment": st_align,
+        })()
+        grp = _ng_ref(shim)
+        groups_present.add(grp)
+        if _side_of_ref(grp) == "inside":
+            state_count += cnt
+        else:
+            diaspora_count += cnt
 
-    story.covered_by_state = bool(alignments & {"state", "semi_state"})
-    story.covered_by_diaspora = bool(alignments & {"diaspora", "independent"})
-
-    # Count articles per side for percentage-based blindspot detection
-    count_result = await db.execute(
-        select(Source.state_alignment, func.count(Article.id))
-        .join(Article, Article.source_id == Source.id)
-        .where(Article.story_id == story_id)
-        .group_by(Source.state_alignment)
-    )
-    align_counts = {row[0]: row[1] for row in count_result.all()}
-    state_count = align_counts.get("state", 0) + align_counts.get("semi_state", 0)
-    diaspora_count = align_counts.get("diaspora", 0) + align_counts.get("independent", 0)
+    story.covered_by_state = state_count > 0
+    story.covered_by_diaspora = diaspora_count > 0
 
     is_blindspot, blindspot_type = _compute_blindspot(
         state_count=state_count,
@@ -633,7 +642,8 @@ async def _refresh_story_metadata(db: AsyncSession, story_id: uuid.UUID) -> None
     story.is_blindspot = is_blindspot
     story.blindspot_type = blindspot_type
 
-    story.coverage_diversity_score = len(alignments) / 4.0
+    # coverage_diversity_score is now (subgroups observed) / 4 total subgroups
+    story.coverage_diversity_score = len(groups_present) / 4.0
     story.last_updated_at = datetime.now(timezone.utc)
     story.trending_score = _compute_trending_score(
         story.article_count, story.first_published_at
@@ -684,40 +694,55 @@ async def _refresh_stories_metadata_batch(
     )
     article_counts = {row[0]: row[1] for row in count_result.all()}
 
-    # 3. Distinct source_id per story → source_count + alignments (one join + GROUP BY)
+    # 3. Distinct source per story + subgroup counts. We pull full Source
+    # classification columns and apply the narrative_group() helper.
+    from app.services.narrative_groups import narrative_group as _ng_bulk, side_of as _side_of_bulk
     source_result = await db.execute(
-        select(Article.story_id, Source.state_alignment, func.count(func.distinct(Source.id)))
+        select(
+            Article.story_id,
+            Source.id,
+            Source.production_location,
+            Source.factional_alignment,
+            Source.state_alignment,
+            func.count(Article.id),
+        )
         .join(Source, Source.id == Article.source_id)
         .where(Article.story_id.in_(id_list))
-        .group_by(Article.story_id, Source.state_alignment)
+        .group_by(Article.story_id, Source.id)
     )
-    alignments_by_story: dict = {}
+    groups_by_story: dict = {}
     source_counts_by_story: dict = {}
-    article_align_counts: dict = {}  # {story_id: {alignment: count}}
-    for sid, alignment, cnt in source_result.all():
-        alignments_by_story.setdefault(sid, set()).add(alignment)
-        source_counts_by_story[sid] = source_counts_by_story.get(sid, 0) + cnt
-        article_align_counts.setdefault(sid, {})[alignment] = cnt
+    side_counts_by_story: dict = {}  # {story_id: {"inside": int, "outside": int}}
+    for sid, _src_id, prod_loc, fa_align, st_align, cnt in source_result.all():
+        shim = type("S", (), {
+            "production_location": prod_loc,
+            "factional_alignment": fa_align,
+            "state_alignment": st_align,
+        })()
+        grp = _ng_bulk(shim)
+        groups_by_story.setdefault(sid, set()).add(grp)
+        source_counts_by_story[sid] = source_counts_by_story.get(sid, 0) + 1
+        side = _side_of_bulk(grp)
+        bucket = side_counts_by_story.setdefault(sid, {"inside": 0, "outside": 0})
+        bucket[side] = bucket[side] + cnt
 
     # 4. Apply updates in memory
     now = datetime.now(timezone.utc)
     for sid, story in stories_by_id.items():
         story.article_count = article_counts.get(sid, 0)
         story.source_count = source_counts_by_story.get(sid, 0)
-        alignments = alignments_by_story.get(sid, set())
-        story.covered_by_state = bool(alignments & {"state", "semi_state"})
-        story.covered_by_diaspora = bool(alignments & {"diaspora", "independent"})
+        groups_present = groups_by_story.get(sid, set())
+        sides = side_counts_by_story.get(sid, {"inside": 0, "outside": 0})
+        story.covered_by_state = sides["inside"] > 0
+        story.covered_by_diaspora = sides["outside"] > 0
 
-        ac = article_align_counts.get(sid, {})
-        s_cnt = ac.get("state", 0) + ac.get("semi_state", 0)
-        d_cnt = ac.get("diaspora", 0) + ac.get("independent", 0)
         story.is_blindspot, story.blindspot_type = _compute_blindspot(
-            state_count=s_cnt,
-            diaspora_count=d_cnt,
+            state_count=sides["inside"],
+            diaspora_count=sides["outside"],
             covered_by_state=story.covered_by_state,
             covered_by_diaspora=story.covered_by_diaspora,
         )
-        story.coverage_diversity_score = len(alignments) / 4.0
+        story.coverage_diversity_score = len(groups_present) / 4.0
         story.last_updated_at = now
         story.trending_score = _compute_trending_score(
             story.article_count, story.first_published_at
@@ -1078,18 +1103,29 @@ async def _create_story(
         primary = sorted(articles, key=lambda a: a.published_at or a.ingested_at)[-1]
         title_en = primary.title_en or title_fa
 
-    # Determine coverage flags
-    source_alignments = set()
+    # Partition articles by the 4-subgroup narrative taxonomy.
+    from app.services.narrative_groups import narrative_group as _ng_c, side_of as _side_of_c
+    groups_present: set[str] = set()
+    state_n = 0
+    diaspora_n = 0
     for article in articles:
-        align = source_alignments_map.get(str(article.id)) if source_alignments_map else None
-        if align:
-            source_alignments.add(align)
+        src = getattr(article, "source", None)
+        if src is None:
+            # Treat sourceless articles as moderate_diaspora (outside) so
+            # they still contribute to a side and aren't mis-clustered.
+            diaspora_n += 1
+            groups_present.add("moderate_diaspora")
+            continue
+        grp = _ng_c(src)
+        groups_present.add(grp)
+        if _side_of_c(grp) == "inside":
+            state_n += 1
+        else:
+            diaspora_n += 1
 
-    covered_by_state = bool(source_alignments & {"state", "semi_state"})
-    covered_by_diaspora = bool(source_alignments & {"diaspora", "independent"})
+    covered_by_state = state_n > 0
+    covered_by_diaspora = diaspora_n > 0
 
-    state_n = sum(1 for a in articles if (source_alignments_map or {}).get(str(a.id)) in ("state", "semi_state"))
-    diaspora_n = sum(1 for a in articles if (source_alignments_map or {}).get(str(a.id)) in ("diaspora", "independent"))
     is_blindspot, blindspot_type = _compute_blindspot(
         state_count=state_n,
         diaspora_count=diaspora_n,
@@ -1097,9 +1133,8 @@ async def _create_story(
         covered_by_diaspora=covered_by_diaspora,
     )
 
-    # Coverage diversity
-    all_alignments = {"state", "semi_state", "independent", "diaspora"}
-    coverage_diversity = len(source_alignments) / len(all_alignments)
+    # Coverage diversity: fraction of the 4 narrative subgroups present
+    coverage_diversity = len(groups_present) / 4.0
 
     # Earliest published date
     published_dates = [a.published_at for a in articles if a.published_at]
