@@ -123,20 +123,42 @@ function Meta({ story }: { story: StoryBrief }) {
   );
 }
 
-// Compact "بروزرسانی" pill for secondary story lists. The hero still
-// uses the fuller dot-and-label chip next to its title; this version is
-// optimized for dense 4–5-item grids. Shows the reason_fa inline when
-// available so users can see *what* changed without clicking through.
+// Compact update pill for homepage story cards. Two variants:
+//   - Orange "بروزرسانی · <reason>"  — a trigger fired (side flip,
+//     coverage shift, burst, or the 24h-snapshot signal). Significant.
+//   - Green "مقالهٔ جدید · <time ago>" — a new article was clustered
+//     into the story within the last 2 hours but no trigger was
+//     significant enough to flag orange. Tells the user the story just
+//     got fresh coverage without claiming something major happened.
+// If neither condition holds, renders nothing.
 function UpdateBadge({ story, className = "mt-1.5" }: { story: StoryBrief; className?: string }) {
-  if (!story.update_signal?.has_update) return null;
-  const reason = story.update_signal.reason_fa;
-  return (
-    <span
-      className={`${className} inline-block border border-orange-300 dark:border-orange-700 bg-orange-50 dark:bg-orange-900/20 px-1.5 py-0.5 text-[10px] font-bold text-orange-700 dark:text-orange-300`}
-    >
-      بروزرسانی{reason ? ` · ${reason}` : ""}
-    </span>
-  );
+  // Orange — significant update
+  if (story.update_signal?.has_update) {
+    const reason = story.update_signal.reason_fa;
+    return (
+      <span
+        className={`${className} inline-block border border-orange-300 dark:border-orange-700 bg-orange-50 dark:bg-orange-900/20 px-1.5 py-0.5 text-[10px] font-bold text-orange-700 dark:text-orange-300`}
+      >
+        بروزرسانی{reason ? ` · ${reason}` : ""}
+      </span>
+    );
+  }
+  // Green — new article within last 2h, no trigger. `last_updated_at`
+  // ticks in step_cluster whenever an article is assigned to the story.
+  const lu = story.last_updated_at;
+  if (lu) {
+    const age = Date.now() - new Date(lu).getTime();
+    if (age > 0 && age < 2 * 3600 * 1000) {
+      return (
+        <span
+          className={`${className} inline-block border border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/20 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-300`}
+        >
+          مقالهٔ جدید · {formatRelativeTime(lu, "fa")}
+        </span>
+      );
+    }
+  }
+  return null;
 }
 
 // ─── Main page ─────────────────────────────────────────────────
@@ -414,10 +436,13 @@ export default async function HomePage({
                 {hero.title_fa}
               </h1>
             </Link>
-            {/* Orange "بروزرسانی" badge when the hero is a repeat story
-                with a meaningful daily change (dispute shift, coverage
-                shift, or rewritten bias comparison + new articles). */}
-            {hero.update_signal?.has_update && (
+            {/* Two-tier hero update chip. Orange "بروزرسانی" fires when
+                a trigger is flagged (side flip, coverage shift, burst,
+                or a rewritten bias comparison). Green "مقالهٔ جدید"
+                fires when new articles arrived within the last 2h but
+                no trigger qualified — still useful to show the hero is
+                actively gaining coverage. */}
+            {hero.update_signal?.has_update ? (
               <div className="mt-2 inline-flex items-center gap-2 border border-orange-300 dark:border-orange-700 bg-orange-50 dark:bg-orange-900/20 px-2 py-1">
                 <span className="inline-block h-1.5 w-1.5 rounded-full bg-orange-500" />
                 <span className="text-[11px] font-bold text-orange-700 dark:text-orange-300">بروزرسانی</span>
@@ -427,6 +452,17 @@ export default async function HomePage({
                   </span>
                 )}
               </div>
+            ) : (
+              hero.last_updated_at &&
+              Date.now() - new Date(hero.last_updated_at).getTime() < 2 * 3600 * 1000 && (
+                <div className="mt-2 inline-flex items-center gap-2 border border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/20 px-2 py-1">
+                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                  <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300">مقالهٔ جدید</span>
+                  <span className="text-[11px] text-emerald-700/80 dark:text-emerald-300/80">
+                    {formatRelativeTime(hero.last_updated_at, "fa")}
+                  </span>
+                </div>
+              )
             )}
             <Meta story={hero} />
             {/* Two-side bias comparison */}
