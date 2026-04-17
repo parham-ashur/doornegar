@@ -108,6 +108,11 @@ All notable changes to the Doornegar project are documented here, organized by w
 #### Other
 - `TelegramDiscussions` homepage card predictions list: 3 → 2.
 
+#### Homepage slot rotation (commit b74ec4c)
+- **Daily rotation rule**: no story stays in hero / blindspot / Telegram slot for more than a day unless a new article arrives. Stateless — uses `Story.last_updated_at` (set by clustering layer every time an article joins the cluster).
+- Backend: `StoryBrief` schema exposes `last_updated_at`. Picked up automatically by `_story_brief_with_extras()` through `model_validate`.
+- Frontend: `isFresh(s)` helper on `lib/types.ts` type. Hero uses a 4-step fallback (fresh+balanced → fresh → balanced → top trending) so the slot never goes empty. Blindspot slots render empty rather than re-showing yesterday's — slot *rotates*, not just the story. Telegram source pool filters to fresh stories with a "≥3 fresh" threshold to keep predictions/claims populated on quiet news days.
+
 ---
 
 ## April 15-16, 2026

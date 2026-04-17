@@ -87,6 +87,13 @@
 ### Animation
 - [x] `DoornegarAnimation.tsx` — new `triangleDown` shape type. Hourglass pattern fixed (apex-to-apex meeting at the pinch-point circle). Star pattern fixed (Star of David hexagram with interlocking up + down triangles).
 
+### Homepage slot rotation (commit b74ec4c)
+- [x] `Story.last_updated_at` exposed on `StoryBrief` schema + TS type.
+- [x] `isFresh(s)` stateless helper = `last_updated_at` within 24h.
+- [x] Hero picker: 4-step fallback (fresh+balanced → fresh → balanced → top trending).
+- [x] Blindspots: prefer fresh per side; empty slot if no fresh blindspot rather than re-surfacing stale.
+- [x] Telegram predictions/claims source pool prefers fresh stories with a ≥3-fresh safety threshold.
+
 ## Done this session (2026-04-15/16)
 - [x] **Niloofar writing style** — defined, iterated 3 versions, agent file + output style + prompt all aligned
 - [x] **Niloofar Claude-driven workflow** — gather JSON → analyze in chat → apply findings. No OpenAI.

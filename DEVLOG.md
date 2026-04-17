@@ -65,9 +65,10 @@
 - **Progress UI polish**: new "Reopen progress window" button on the Last Maintenance card (attaches to in-flight server-side runs after a page refresh); elapsed timer + phase hint on the Niloofar card (since removed); progress bar for Refresh 5 / Refresh 16 with auto-attach to running jobs.
 - **Animation fix**: two-triangle Hourglass and Star figures in the footer's `DoornegarAnimation` were rendering as stacked up-triangles instead of apex-to-apex hourglass / interlocking Star of David. Added a `triangleDown` shape type and flipped the top triangle in both figures.
 - **Homepage trim**: `TelegramDiscussions` right-rail card now shows top-2 predictions instead of top-3.
+- **Daily freshness rotation**: hero / blindspot / Telegram-summary slots now rotate every 24h unless new articles arrive. Stateless `isFresh(story)` filter based on `last_updated_at` (already set by clustering when an article joins). Hero picker uses a 4-step fallback (fresh+balanced → fresh → balanced → top trending) so it never goes empty; blindspot slots render empty rather than re-surfacing yesterday's story; Telegram source pool prefers fresh stories with a "≥3 fresh" guard to keep the panel populated on quiet news days. `StoryBrief` schema + TS type gained `last_updated_at`.
 
 ### Commits (in order)
-0e94bb3 · 96a5a99 · d3ba87a · 030b76c · 0ba518b · 656aa9e · 879b7ea · 40e73c5 · 5ffe35c · d4e1575 · 15d7b61 · 5e3d5b3 · dce2f86
+0e94bb3 · 96a5a99 · d3ba87a · 030b76c · 0ba518b · 656aa9e · 879b7ea · 40e73c5 · 5ffe35c · d4e1575 · 15d7b61 · 5e3d5b3 · dce2f86 · 743b903 (docs) · b74ec4c (rotation)
 
 ### Observations / known issues
 - **Railway auto-deploys on any push to `main`** (not path-filtered). My frontend-only pushes keep killing in-flight background tasks on the backend. Needs a Railway-dashboard config change — path filter to `backend/**` only. Parham-driven.
