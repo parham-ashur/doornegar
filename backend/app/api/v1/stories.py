@@ -761,27 +761,48 @@ def _story_brief_with_extras(story: Story) -> StoryBrief:
         brief.inside_border_pct = pct["principlist"] + pct["reformist"]
         brief.outside_border_pct = pct["moderate_diaspora"] + pct["radical_diaspora"]
 
-    # Compute the daily-change signal by comparing the live state to the
-    # nightly snapshot in `analysis_snapshot_24h`. Returns a dict with
-    # has_update / kind / reason_fa — None-equivalent when the column is
-    # unpopulated (first 24h after deploy).
+    # Update signal: two layers.
+    # 1) Hourly layer — written by step_detect_hourly_updates when a story
+    #    gains articles in the last hour AND a trigger fires. Fresher but
+    #    narrower in what it catches (side flip, coverage ≥15pp, ≥5-article
+    #    burst). We prefer it when its detected_at is within the last 2h.
+    # 2) 24h snapshot layer — compares live analysis state to the nightly
+    #    snapshot. Catches slower signals (dispute_score shifted, bias
+    #    rewrite) that hourly can't see.
+    brief.update_signal = None
     try:
-        from app.services.story_freshness import compute_update_signal
+        hourly = getattr(story, "hourly_update_signal", None)
+        use_hourly = False
+        if hourly and isinstance(hourly, dict) and hourly.get("has_update"):
+            detected_at = hourly.get("detected_at")
+            if detected_at:
+                try:
+                    from datetime import datetime as _dt, timezone as _tz
+                    dt = _dt.fromisoformat(detected_at.replace("Z", "+00:00"))
+                    age_s = (_dt.now(_tz.utc) - dt).total_seconds()
+                    if 0 <= age_s <= 2 * 3600:
+                        use_hourly = True
+                except Exception:
+                    pass
+        if use_hourly:
+            brief.update_signal = hourly
+        else:
+            from app.services.story_freshness import compute_update_signal
 
-        blob_for_signal = {}
-        if story.summary_en:
-            try:
-                blob_for_signal = _json.loads(story.summary_en)
-            except Exception:
-                blob_for_signal = {}
-        brief.update_signal = compute_update_signal(
-            current_article_count=story.article_count or 0,
-            current_dispute_score=blob_for_signal.get("dispute_score"),
-            current_inside_pct=brief.inside_border_pct,
-            current_outside_pct=brief.outside_border_pct,
-            current_bias_explanation_fa=blob_for_signal.get("bias_explanation_fa"),
-            snapshot=getattr(story, "analysis_snapshot_24h", None),
-        )
+            blob_for_signal = {}
+            if story.summary_en:
+                try:
+                    blob_for_signal = _json.loads(story.summary_en)
+                except Exception:
+                    blob_for_signal = {}
+            brief.update_signal = compute_update_signal(
+                current_article_count=story.article_count or 0,
+                current_dispute_score=blob_for_signal.get("dispute_score"),
+                current_inside_pct=brief.inside_border_pct,
+                current_outside_pct=brief.outside_border_pct,
+                current_bias_explanation_fa=blob_for_signal.get("bias_explanation_fa"),
+                snapshot=getattr(story, "analysis_snapshot_24h", None),
+            )
     except Exception:
         brief.update_signal = None
 

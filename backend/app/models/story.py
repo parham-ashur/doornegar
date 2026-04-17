@@ -73,6 +73,16 @@ class Story(Base):
     # "بروزرسانی" badge and the "hero can repeat only on significant change"
     # rule. See step_snapshot_analyses in auto_maintenance.py.
     analysis_snapshot_24h: Mapped[dict | None] = mapped_column(JSONB, nullable=True, comment="Nightly snapshot for daily-change detection")
+    # Hourly update signal — written by step_detect_hourly_updates when
+    # a story gains articles in the last hour AND a trigger fires
+    # (side flip, coverage shift ≥15pp, burst of ≥5 articles). Shape:
+    #   {"has_update": bool, "kind": "side_flip"|"coverage_shift"|"burst",
+    #    "reason_fa": str, "detected_at": ISO8601}
+    # The API prefers this over the 24h-snapshot-derived signal when
+    # detected_at is within the last 2 hours, falling back to the
+    # snapshot afterwards. Powers the same "بروزرسانی" badge but with
+    # intra-day granularity.
+    hourly_update_signal: Mapped[dict | None] = mapped_column(JSONB, nullable=True, comment="Hourly detected-update signal (2h TTL on UI)")
 
     # Relationships
     articles: Mapped[list["Article"]] = relationship(back_populates="story")  # noqa: F821

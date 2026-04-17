@@ -42,7 +42,9 @@ logger = logging.getLogger("maintenance")
 DEFAULT_STEP_TIMEOUT_SEC = 900  # 15 min — applies to the ~25 light steps
 STEP_TIMEOUTS_SEC = {
     "ingest": 1800,                # RSS + Telegram for 20+ sources
+    "ingest_rss": 900,             # RSS only — hourly mode, stricter budget
     "prune_noise": 180,            # single UPDATE/DELETE batch, no LLM
+    "detect_hourly_updates": 120,  # pure SQL aggregate, no LLM
     "process": 1800,               # embeddings + translation over many articles
     "cluster": 1200,               # LLM clustering batch
     "centroids": 600,
@@ -144,6 +146,180 @@ async def step_ingest():
         "converted": convert_stats.get("created", 0),
         "aggregator_articles": aggregator_stats.get("articles_created", 0),
     }
+
+
+async def step_ingest_rss():
+    """RSS-only ingest. Used by the hourly cron so we refresh news coverage
+    fast without paying for Telegram polling (which is the slow part of
+    the full ingest step).
+
+    Does NOT touch telegram_channels, telegram_posts, aggregators, or the
+    telegram→article conversion. Those stay in the 6h ingest-cron.
+    """
+    from app.database import async_session
+    from app.services.ingestion import ingest_all_sources
+    from app.services.seed import seed_sources
+
+    async with async_session() as db:
+        new_sources = await seed_sources(db)
+        if new_sources:
+            logger.info(f"Seeded {new_sources} new RSS sources from seed.py")
+
+        logger.info("Ingesting RSS feeds (hourly mode)...")
+        rss_stats = await ingest_all_sources(db)
+        logger.info(f"RSS: {rss_stats}")
+
+    return {"rss_new": rss_stats.get("new", 0)}
+
+
+async def step_detect_hourly_updates():
+    """Deterministic per-story update detection for the hourly cron.
+
+    Runs after step_cluster + step_recompute_centroids. For every story
+    that gained articles in the last hour, compare the source-side
+    distribution "before the hour" vs "now". Writes story.hourly_update_signal
+    when any of these triggers fire:
+
+      - Side flip: story was state-only, first diaspora article arrived
+        (or vice versa). Strongest signal — a whole half of the coverage
+        just joined.
+      - Coverage shift: state/diaspora ratio moved ≥ 15pp in an hour.
+        "پوشش درون‌مرزی تقویت شد (۴۰٪ → ۵۵٪)"
+      - Burst: ≥5 articles attached to one story within the hour. Means
+        a major event is unfolding, not routine drip.
+
+    Stories that gained articles but tripped no trigger get
+    hourly_update_signal = {"has_update": False, ...} — the API then
+    falls back to the 24h snapshot signal for the badge. Either way,
+    Story.last_updated_at is already ticked by the article-cluster step,
+    so the "updated X minutes ago" timestamp stays accurate.
+
+    Pure SQL aggregates, no LLM, ~<2s on the full stories table.
+    """
+    from sqlalchemy import text as _text
+
+    from app.database import async_session
+
+    # Minimum delta used for the coverage-shift trigger. Matches the 24h
+    # snapshot's threshold so the two signal layers stay consistent.
+    PCT_SHIFT = 15
+    BURST_ARTICLES = 5
+
+    stats = {"stories_seen": 0, "side_flip": 0, "coverage_shift": 0, "burst": 0, "quiet": 0}
+
+    # Single aggregate query: every story that gained at least one article
+    # in the last hour, with state/diaspora counts before vs after.
+    # `state_alignment` values: state, semi_state, independent, diaspora.
+    # We collapse into two buckets — inside (state+semi_state) and
+    # outside (diaspora+independent) — same as the coverage bar does.
+    sql = _text("""
+        WITH touched AS (
+            SELECT DISTINCT story_id
+            FROM articles
+            WHERE created_at >= NOW() - INTERVAL '1 hour'
+              AND story_id IS NOT NULL
+        )
+        SELECT
+            a.story_id,
+            COUNT(*) FILTER (WHERE a.created_at >= NOW() - INTERVAL '1 hour') AS new_count,
+            COUNT(*) FILTER (
+                WHERE a.created_at < NOW() - INTERVAL '1 hour'
+                  AND s.state_alignment IN ('state','semi_state')
+            ) AS inside_before,
+            COUNT(*) FILTER (
+                WHERE a.created_at < NOW() - INTERVAL '1 hour'
+                  AND s.state_alignment IN ('diaspora','independent')
+            ) AS outside_before,
+            COUNT(*) FILTER (WHERE s.state_alignment IN ('state','semi_state')) AS inside_after,
+            COUNT(*) FILTER (WHERE s.state_alignment IN ('diaspora','independent')) AS outside_after
+        FROM articles a
+        JOIN sources s ON s.id = a.source_id
+        WHERE a.story_id IN (SELECT story_id FROM touched)
+        GROUP BY a.story_id
+    """)
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    async with async_session() as db:
+        rows = (await db.execute(sql)).all()
+        stats["stories_seen"] = len(rows)
+
+        for row in rows:
+            story_id = row.story_id
+            new_count = int(row.new_count or 0)
+            inside_before = int(row.inside_before or 0)
+            outside_before = int(row.outside_before or 0)
+            inside_after = int(row.inside_after or 0)
+            outside_after = int(row.outside_after or 0)
+            total_before = inside_before + outside_before
+            total_after = inside_after + outside_after
+
+            signal = {"has_update": False, "kind": None, "reason_fa": None, "detected_at": now_iso}
+
+            # Trigger 1: side flip. "Was state-only" means total_before > 0
+            # and outside_before == 0, and now outside_after > 0.
+            if total_before > 0 and outside_before == 0 and outside_after > 0:
+                signal = {
+                    "has_update": True, "kind": "side_flip",
+                    "reason_fa": "رسانه‌های برون‌مرزی به پوشش پیوستند",
+                    "detected_at": now_iso,
+                }
+                stats["side_flip"] += 1
+            elif total_before > 0 and inside_before == 0 and inside_after > 0:
+                signal = {
+                    "has_update": True, "kind": "side_flip",
+                    "reason_fa": "رسانه‌های درون‌مرزی به پوشش پیوستند",
+                    "detected_at": now_iso,
+                }
+                stats["side_flip"] += 1
+            # Trigger 2: coverage shift ≥ 15pp. Only evaluate when both
+            # before and after have enough rows to compute a meaningful
+            # percentage — a jump from 0 articles to 3 isn't a "shift".
+            elif total_before >= 3 and total_after >= 3:
+                pct_inside_before = round(100 * inside_before / total_before)
+                pct_inside_after = round(100 * inside_after / total_after)
+                delta = pct_inside_after - pct_inside_before
+                if abs(delta) >= PCT_SHIFT:
+                    if delta > 0:
+                        reason = f"پوشش درون‌مرزی تقویت شد ({pct_inside_before}٪ → {pct_inside_after}٪)"
+                    else:
+                        pct_outside_before = 100 - pct_inside_before
+                        pct_outside_after = 100 - pct_inside_after
+                        reason = f"پوشش برون‌مرزی تقویت شد ({pct_outside_before}٪ → {pct_outside_after}٪)"
+                    signal = {
+                        "has_update": True, "kind": "coverage_shift",
+                        "reason_fa": reason, "detected_at": now_iso,
+                    }
+                    stats["coverage_shift"] += 1
+            # Trigger 3: burst. Only if no earlier trigger fired.
+            if not signal["has_update"] and new_count >= BURST_ARTICLES:
+                # Persian digits
+                digit_map = str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹")
+                n_fa = str(new_count).translate(digit_map)
+                signal = {
+                    "has_update": True, "kind": "burst",
+                    "reason_fa": f"{n_fa} مقاله جدید در ساعت گذشته",
+                    "detected_at": now_iso,
+                }
+                stats["burst"] += 1
+            if not signal["has_update"]:
+                stats["quiet"] += 1
+
+            await db.execute(
+                _text("UPDATE stories SET hourly_update_signal = :sig WHERE id = :sid"),
+                {"sig": _json_dumps(signal), "sid": story_id},
+            )
+        await db.commit()
+
+    logger.info(f"Hourly updates: {stats}")
+    return stats
+
+
+# Tiny helper — JSON encode with ensure_ascii=False so Farsi lands readable
+# in the JSONB column rather than \u-escaped.
+def _json_dumps(obj):
+    import json as _j
+    return _j.dumps(obj, ensure_ascii=False)
 
 
 async def step_prune_noise():
@@ -3446,6 +3622,18 @@ INGEST_ONLY_PIPELINE = [
     ("telegram_link", "Link Telegram posts to stories (embeddings)", "step_telegram_link_posts"),
 ]
 
+# Hourly pipeline — RSS-only. Designed to run every hour from 6am to
+# midnight Paris time (04:00–21:00 UTC). Skips Telegram (slow) and
+# everything LLM-heavy; focuses on getting new articles clustered and
+# detecting intra-day story updates for the "بروزرسانی" badge.
+HOURLY_PIPELINE = [
+    ("ingest_rss", "RSS-only ingest (no Telegram)", "step_ingest_rss"),
+    ("process", "NLP process (embed, translate, extract)", "step_process"),
+    ("cluster", "Cluster new articles into stories", "step_cluster"),
+    ("centroids", "Recompute story centroid embeddings", "step_recompute_centroids"),
+    ("detect_hourly_updates", "Flag significant intra-day story updates", "step_detect_hourly_updates"),
+]
+
 
 async def run_maintenance(mode: str = "full"):
     """Run maintenance pipeline.
@@ -3453,11 +3641,18 @@ async def run_maintenance(mode: str = "full"):
     mode="full"   → FULL_PIPELINE (~33 steps, daily at 04:00)
     mode="ingest" → INGEST_ONLY_PIPELINE (~6 cheap steps, intended to run
                     every 2-3 hours between the daily full run)
+    mode="hourly" → HOURLY_PIPELINE (RSS-only, 5 steps, runs hourly 6am–
+                    midnight Paris for intra-day update detection)
     """
     from app.services import maintenance_state
 
     start = time.time()
-    pipeline_spec = FULL_PIPELINE if mode == "full" else INGEST_ONLY_PIPELINE
+    if mode == "full":
+        pipeline_spec = FULL_PIPELINE
+    elif mode == "hourly":
+        pipeline_spec = HOURLY_PIPELINE
+    else:
+        pipeline_spec = INGEST_ONLY_PIPELINE
     # Resolve step callables by name (they're defined above in this module)
     pipeline = [(key, display, globals()[func_name]) for key, display, func_name in pipeline_spec]
 
@@ -3590,10 +3785,11 @@ def main():
     parser.add_argument("--loop", type=float, help="Run every N hours (omit for single run)")
     parser.add_argument(
         "--mode",
-        choices=("full", "ingest"),
+        choices=("full", "ingest", "hourly"),
         default="full",
         help="full = complete 34-step pipeline (daily). ingest = lightweight "
-             "6-step pipeline to keep the homepage fresh between daily runs.",
+             "6-step pipeline (every 6h). hourly = RSS-only 5-step pipeline "
+             "for intra-day updates (every hour 6am–midnight Paris).",
     )
     args = parser.parse_args()
 
