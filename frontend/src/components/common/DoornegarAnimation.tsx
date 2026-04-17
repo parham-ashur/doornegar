@@ -32,7 +32,10 @@ const PALETTES = [
 ];
 
 // ─── Figures ───────────────────────────────────────────
-type ShapeType = "triangle" | "square" | "circle" | "diamond" | "line";
+// "triangle" points apex-up (base on bottom), "triangleDown" points apex-down
+// (base on top). The two together are what you need for hexagrams and
+// hourglasses — pairing two apex-up triangles just stacks them.
+type ShapeType = "triangle" | "triangleDown" | "square" | "circle" | "diamond" | "line";
 interface ShapeDef {
   type: ShapeType;
   cx: number; cy: number;
@@ -99,11 +102,13 @@ const FIGURES: ShapeDef[][] = [
     { type: "triangle", cx: 0.75, cy: 0.5, s: 0.35, colorIdx: 2 },
     { type: "circle", cx: 0.25, cy: 0.25, s: 0.1, colorIdx: 0 },
   ],
-  // Star
+  // Star — two equal triangles sharing a center form a hexagram (Star of
+  // David / ستاره داود). Before, both pointed up so the result was two
+  // stacked triangles, not a star.
   [
-    { type: "triangle", cx: 0.5, cy: 0.3, s: 0.35, colorIdx: 0 },
-    { type: "triangle", cx: 0.5, cy: 0.55, s: 0.35, colorIdx: 0 },
-    { type: "circle", cx: 0.5, cy: 0.42, s: 0.08, colorIdx: 2 },
+    { type: "triangle", cx: 0.5, cy: 0.5, s: 0.3, colorIdx: 0 },
+    { type: "triangleDown", cx: 0.5, cy: 0.5, s: 0.3, colorIdx: 0 },
+    { type: "circle", cx: 0.5, cy: 0.5, s: 0.07, colorIdx: 2 },
   ],
   // Flower
   [
@@ -143,11 +148,12 @@ const FIGURES: ShapeDef[][] = [
     { type: "triangle", cx: 0.75, cy: 0.5, s: 0.2, colorIdx: 2 },
     { type: "circle", cx: 0.35, cy: 0.45, s: 0.05, colorIdx: 0 },
   ],
-  // Hourglass
+  // Hourglass (ساعت شنی): top triangle apex-down, bottom apex-up, meeting
+  // at the pinch point in the middle so the shape reads as a real hourglass.
   [
-    { type: "triangle", cx: 0.5, cy: 0.3, s: 0.3, colorIdx: 0 },
-    { type: "triangle", cx: 0.5, cy: 0.7, s: 0.3, colorIdx: 2 },
-    { type: "circle", cx: 0.5, cy: 0.5, s: 0.06, colorIdx: 1 },
+    { type: "triangleDown", cx: 0.5, cy: 0.3, s: 0.22, colorIdx: 0 },
+    { type: "triangle", cx: 0.5, cy: 0.7, s: 0.22, colorIdx: 2 },
+    { type: "circle", cx: 0.5, cy: 0.5, s: 0.04, colorIdx: 1 },
   ],
   // Key
   [
@@ -232,6 +238,11 @@ function shapeToSegments(
       addSeg(cx, cy - s, cx - s, cy + s);
       addSeg(cx - s, cy + s, cx + s, cy + s);
       addSeg(cx + s, cy + s, cx, cy - s);
+      break;
+    case "triangleDown":
+      addSeg(cx, cy + s, cx - s, cy - s);
+      addSeg(cx - s, cy - s, cx + s, cy - s);
+      addSeg(cx + s, cy - s, cx, cy + s);
       break;
     case "square":
       addSeg(cx - s, cy - s, cx + s, cy - s);
