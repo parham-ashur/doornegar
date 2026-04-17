@@ -51,6 +51,7 @@ STEP_TIMEOUTS_SEC = {
     "fix_images": 1200,
     "telegram_analysis": 3600,     # per-story LLM analysis
     "niloofar_editorial": 1200,
+    "niloofar_polish_telegram": 900,
     "quality_postprocess": 1800,
     "weekly_digest": 900,
 }
@@ -3102,6 +3103,193 @@ async def step_niloofar_editorial():
     return stats
 
 
+async def step_niloofar_polish_telegram():
+    """Niloofar polishes Telegram predictions + claims for homepage display.
+
+    Pass-2 of the Telegram analysis is asked to prefix each claim with
+    "موضوع: <topic> | ..." so competing claims about the same subject group
+    together. That's useful on the story detail page, but on the homepage
+    hero strip the label prefix buries the actual content. Predictions
+    often leak an "در آینده،" prefix too, which is redundant once the
+    section is already titled "پیش‌بینی‌ها".
+
+    Niloofar rewrites each item:
+      - Drops label prefixes ("موضوع: X |", "تعداد تلفات: N |", etc.)
+      - Drops "در آینده،" from predictions (the section implies future)
+      - Keeps channel attribution and credibility cue ("مشکوک",
+        "معتبر", "نیازمند تأیید")
+      - Tightens wording to one punchy sentence
+
+    Results go in story.telegram_analysis.predictions_display and
+    key_claims_display. Raw fields stay untouched so the detail page's
+    topic-grouping still works.
+    """
+    import json as _json
+    from sqlalchemy import select, update
+    from sqlalchemy.orm import selectinload
+
+    from app.config import settings
+    from app.database import async_session
+    from app.models.story import Story
+
+    stats = {"polished": 0, "skipped": 0, "failed": 0, "no_analysis": 0}
+
+    async with async_session() as db:
+        result = await db.execute(
+            select(Story)
+            .where(Story.article_count >= 2)
+            .order_by(Story.trending_score.desc())
+            .limit(30)
+        )
+        stories = list(result.scalars().all())
+
+    if not stories:
+        logger.info("Niloofar polish telegram: no stories found")
+        return stats
+
+    import openai
+    from app.services.llm_helper import build_openai_params
+
+    client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
+
+    polish_prompt = """تو نیلوفر هستی، سردبیر ارشد خبری.
+
+وظیفه: تمیزکاری ادعاها و پیش‌بینی‌های تلگرامی برای نمایش در صفحه اصلی. متن اصلی توسط مدل دیگری تولید شده و شامل برچسب‌های اضافی است که باید حذف شوند.
+
+═══ قواعد تمیزکاری ═══
+
+برای پیش‌بینی‌ها:
+- حذف پیشوند «در آینده،» یا «در آینده » (عنوان بخش خودش «پیش‌بینی‌ها» است — تکرار است)
+- نگه داشتن قطعیت («احتمالاً»، «به احتمال زیاد») اگر در متن اصلی هست
+- یک جمله کوتاه و مستقیم
+
+برای ادعاها:
+- حذف پیشوند برچسبی مثل «موضوع: X |» یا «تعداد تلفات: N |» — این‌ها فقط برای دسته‌بندی داخلی بودند
+- حفظ نام کانال و ارزیابی اعتبار («معتبر»، «مشکوک»، «نیازمند تأیید»، «تبلیغاتی»)
+- یک جمله فشرده: کانال + ادعا + ارزیابی
+
+قوانین کلی:
+- بدون افزودن معنای جدید — فقط تمیز کن
+- اگر متن اصلی خالی یا نامفهوم است، همان متن اصلی را برگردان
+- خروجی فقط JSON، بدون توضیح
+
+═══ ورودی ═══
+عنوان موضوع: {title_fa}
+
+پیش‌بینی‌های خام:
+{predictions_json}
+
+ادعاهای خام:
+{claims_json}
+
+═══ خروجی ═══
+JSON با این ساختار:
+{{
+  "predictions": ["متن تمیز شده ۱", "متن تمیز شده ۲", ...],
+  "key_claims": ["متن تمیز شده ۱", "متن تمیز شده ۲", ...]
+}}
+
+تعداد آیتم‌های خروجی باید دقیقاً با تعداد ورودی برابر باشد، به همان ترتیب."""
+
+    for story in stories:
+        analysis = story.telegram_analysis
+        if not analysis or not isinstance(analysis, dict):
+            stats["no_analysis"] += 1
+            continue
+
+        raw_preds = analysis.get("predictions") or []
+        raw_claims = analysis.get("key_claims") or []
+
+        if not raw_preds and not raw_claims:
+            stats["no_analysis"] += 1
+            continue
+
+        # Skip if already polished against these exact raw items. We hash
+        # the raw texts so a new Pass-2 result triggers a re-polish.
+        def _digest(items):
+            texts = [i if isinstance(i, str) else (i.get("text") or "") for i in items]
+            return "|".join(t[:40] for t in texts)
+
+        raw_digest = _digest(raw_preds) + "::" + _digest(raw_claims)
+        if analysis.get("display_digest") == raw_digest and analysis.get("predictions_display") is not None:
+            stats["skipped"] += 1
+            continue
+
+        # Extract plain text for the LLM; keep metadata (pct, supporters) to
+        # merge back after polish.
+        def _text_of(it):
+            return it if isinstance(it, str) else (it.get("text") or "")
+
+        pred_texts = [_text_of(p) for p in raw_preds]
+        claim_texts = [_text_of(c) for c in raw_claims]
+
+        prompt = polish_prompt.format(
+            title_fa=story.title_fa or "",
+            predictions_json=_json.dumps(pred_texts, ensure_ascii=False),
+            claims_json=_json.dumps(claim_texts, ensure_ascii=False),
+        )
+
+        params = build_openai_params(
+            model=settings.translation_model,  # gpt-4.1-nano — cheap
+            prompt=prompt,
+            max_tokens=1500,
+            temperature=0.2,
+        )
+        # Force JSON output
+        params["response_format"] = {"type": "json_object"}
+
+        try:
+            response = await client.chat.completions.create(**params)
+            content = response.choices[0].message.content.strip()
+            parsed = _json.loads(content)
+            polished_preds = parsed.get("predictions") or []
+            polished_claims = parsed.get("key_claims") or []
+
+            # If the model returned the wrong count, skip rather than mix
+            # polished and raw items in unpredictable ways.
+            if len(polished_preds) != len(pred_texts) or len(polished_claims) != len(claim_texts):
+                stats["failed"] += 1
+                logger.warning(
+                    f"Niloofar polish: count mismatch for {story.id} "
+                    f"({len(polished_preds)}/{len(pred_texts)}, {len(polished_claims)}/{len(claim_texts)})"
+                )
+                continue
+
+            # Merge polished text back into original shape (object with
+            # pct/supporters/text, or plain string).
+            def _merge(raw, polished_text):
+                if isinstance(raw, str):
+                    return polished_text
+                merged = dict(raw)
+                merged["text"] = polished_text
+                return merged
+
+            predictions_display = [_merge(raw_preds[i], polished_preds[i]) for i in range(len(raw_preds))]
+            key_claims_display = [_merge(raw_claims[i], polished_claims[i]) for i in range(len(raw_claims))]
+
+            new_analysis = dict(analysis)
+            new_analysis["predictions_display"] = predictions_display
+            new_analysis["key_claims_display"] = key_claims_display
+            new_analysis["display_digest"] = raw_digest
+            new_analysis["display_generated_at"] = datetime.now(timezone.utc).isoformat()
+
+            async with async_session() as db:
+                await db.execute(
+                    update(Story)
+                    .where(Story.id == story.id)
+                    .values(telegram_analysis=new_analysis)
+                )
+                await db.commit()
+            stats["polished"] += 1
+            logger.info(f"Niloofar polish: '{(story.title_fa or '')[:40]}'")
+        except Exception as e:
+            stats["failed"] += 1
+            logger.warning(f"Niloofar polish failed for story {story.id}: {e}")
+
+    logger.info(f"Niloofar polish telegram: {stats}")
+    return stats
+
+
 FULL_PIPELINE = [
     ("ingest", "Ingest RSS + Telegram (may take 10-20 min)", "step_ingest"),
     ("process", "NLP process (embed, translate, extract)", "step_process"),
@@ -3136,6 +3324,7 @@ FULL_PIPELINE = [
     ("backup", "Database backup", "step_database_backup"),
     ("quality_postprocess", "Quality post-processing (LLM review)", "step_quality_postprocess"),
     ("niloofar_editorial", "Niloofar editorial context for top stories", "step_niloofar_editorial"),
+    ("niloofar_polish_telegram", "Niloofar polishes Telegram predictions/claims for homepage", "step_niloofar_polish_telegram"),
     ("snapshot_analyses", "Snapshot analysis axes for daily-change detection", "step_snapshot_analyses"),
     ("weekly_digest", "Weekly digest", "step_weekly_digest"),
 ]

@@ -4,13 +4,19 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import TelegramAnalyzingAnimation from "@/components/common/TelegramAnalyzingAnimation";
 import { toFa } from "@/lib/utils";
+import { cleanPrediction, cleanClaim } from "@/lib/telegram-text";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 interface TelegramAnalysis {
   discourse_summary: string;
-  predictions?: string[];
-  key_claims?: string[];
+  predictions?: any[];
+  key_claims?: any[];
+  // Niloofar-polished versions for homepage display. When present, these
+  // replace `predictions` / `key_claims` in UI. Raw fields stay intact for
+  // the full story page, which keeps the "موضوع: X |" grouping intact.
+  predictions_display?: any[];
+  key_claims_display?: any[];
 }
 
 interface AnalysisItem {
@@ -87,7 +93,11 @@ export default function TelegramDiscussions({
   const seenClaim = new Set<string>();
 
   for (const item of items) {
-    for (const p of item.analysis.predictions || []) {
+    // Prefer Niloofar-polished versions when available. Raw fields still
+    // feed the story page where the "موضوع: X |" grouping stays useful.
+    const preds = item.analysis.predictions_display || item.analysis.predictions || [];
+    const kclaims = item.analysis.key_claims_display || item.analysis.key_claims || [];
+    for (const p of preds) {
       const text = typeof p === "string" ? p : (p as any).text || "";
       const pct = typeof p === "object" ? (p as any).pct : undefined;
       const key = text.slice(0, 30);
@@ -96,7 +106,7 @@ export default function TelegramDiscussions({
         predictions.push({ text, pct, storyId: item.storyId });
       }
     }
-    for (const c of item.analysis.key_claims || []) {
+    for (const c of kclaims) {
       const text = typeof c === "string" ? c : (c as any).text || String(c);
       const key = text.slice(0, 30);
       if (text && !seenClaim.has(key)) {
@@ -106,8 +116,10 @@ export default function TelegramDiscussions({
     }
   }
 
-  // Strip leading numbers, bullets, LLM prefixes, and channel attribution
-  const clean = (t: string) => t
+  // Strip "در آینده،" (predictions) and "موضوع: X |" (claims) first — those
+  // are LLM label-boilerplate the Pass-2 prompt explicitly requests.
+  // Then strip numbering, bullets, and channel attribution.
+  const clean = (t: string) => cleanClaim(cleanPrediction(t))
     .replace(/^[\s۰-۹0-9]+[).\-–]\s*/, "")
     .replace(/^[•·]\s*/, "")
     .replace(/^با توجه به [^،]+،\s*/, "")

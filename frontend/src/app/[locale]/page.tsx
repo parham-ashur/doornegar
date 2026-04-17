@@ -6,6 +6,7 @@ import WordsOfWeek from "@/components/home/WordsOfWeek";
 import TelegramDiscussions from "@/components/home/TelegramDiscussions";
 import WeeklyDigest from "@/components/home/WeeklyDigest";
 import { formatRelativeTime, toFa } from "@/lib/utils";
+import { predictionText, claimText } from "@/lib/telegram-text";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -70,7 +71,7 @@ async function fetchAnalysesBatch(storyIds: string[]): Promise<Record<string, { 
   }
 }
 
-async function fetchTelegramAnalysis(storyId: string): Promise<{ discourse_summary?: string; predictions?: string[]; key_claims?: string[]; worldviews?: { pro_regime?: string; opposition?: string } } | null> {
+async function fetchTelegramAnalysis(storyId: string): Promise<{ discourse_summary?: string; predictions?: any[]; key_claims?: any[]; predictions_display?: any[]; key_claims_display?: any[]; worldviews?: { pro_regime?: string; opposition?: string } } | null> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 8000);
@@ -78,7 +79,15 @@ async function fetchTelegramAnalysis(storyId: string): Promise<{ discourse_summa
     clearTimeout(timeout);
     if (!res.ok) return null;
     const data = await res.json();
-    return data.status === "ok" ? data.analysis : null;
+    if (data.status !== "ok" || !data.analysis) return null;
+    // Homepage prefers Niloofar-polished versions. Raw fields stay for the
+    // story detail page where "موضوع: X |" grouping is still useful.
+    const a = data.analysis;
+    return {
+      ...a,
+      predictions: a.predictions_display || a.predictions,
+      key_claims: a.key_claims_display || a.key_claims,
+    };
   } catch {
     return null;
   }
@@ -448,12 +457,12 @@ export default async function HomePage({
                 </p>
                 {heroTelegram.predictions && heroTelegram.predictions.length > 0 && (
                   <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-1">
-                    <span className="font-bold text-blue-500">پیش‌بینی:</span> {typeof heroTelegram.predictions[0] === "string" ? heroTelegram.predictions[0] : (heroTelegram.predictions[0] as any).text || ""}
+                    <span className="font-bold text-blue-500">پیش‌بینی:</span> {predictionText(heroTelegram.predictions[0])}
                   </p>
                 )}
                 {heroTelegram.key_claims && heroTelegram.key_claims.length > 0 && (
                   <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-1">
-                    <span className="font-bold text-amber-500">ادعا:</span> {typeof heroTelegram.key_claims[0] === "string" ? heroTelegram.key_claims[0] : (heroTelegram.key_claims[0] as any).text || ""}
+                    <span className="font-bold text-amber-500">ادعا:</span> {claimText(heroTelegram.key_claims[0])}
                   </p>
                 )}
               </div>
@@ -801,12 +810,8 @@ function MobileHome({
   // Extract first prediction and key_claim from telegram analysis (same logic as desktop hero)
   const firstPrediction = heroTelegram?.predictions?.[0];
   const firstClaim = heroTelegram?.key_claims?.[0];
-  const predictionText = typeof firstPrediction === "string"
-    ? firstPrediction
-    : (firstPrediction as any)?.text || "";
-  const claimText = typeof firstClaim === "string"
-    ? firstClaim
-    : (firstClaim as any)?.text || "";
+  const firstPredictionText = predictionText(firstPrediction);
+  const firstClaimText = claimText(firstClaim);
 
   return (
     <div className="md:hidden">
@@ -872,14 +877,14 @@ function MobileHome({
               <span className="font-bold text-slate-700 dark:text-slate-200">تحلیل روایت‌های تلگرام.</span>
               {" "}{heroTelegram.discourse_summary}
             </p>
-            {predictionText && (
+            {firstPredictionText && (
               <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-500 mt-1.5 line-clamp-2">
-                <span className="font-bold text-blue-500">پیش‌بینی:</span> {predictionText}
+                <span className="font-bold text-blue-500">پیش‌بینی:</span> {firstPredictionText}
               </p>
             )}
-            {claimText && (
+            {firstClaimText && (
               <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-500 mt-1 line-clamp-2">
-                <span className="font-bold text-amber-500">ادعا:</span> {claimText}
+                <span className="font-bold text-amber-500">ادعا:</span> {firstClaimText}
               </p>
             )}
           </div>

@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 WEEKLY_PROMPT = """تو نیلوفر هستی، سردبیر ارشد با ۲۰ سال تجربه در ژئوپلیتیک خاورمیانه.
 وظیفه تو نوشتن گزارش هفتگی دورنگر به زبان فارسی است.
 
-═══ موضوعات مهم هفته ═══
+═══ موضوعات مهم هفته (هر موضوع دارای یک شناسه است) ═══
 {stories_block}
 
 ═══ آمار منابع ═══
@@ -41,7 +41,10 @@ WEEKLY_PROMPT = """تو نیلوفر هستی، سردبیر ارشد با ۲۰ 
 برای هر خبر: عنوان، چرا مهم است، و تفاوت پوشش رسانه‌ها (۲-۳ جمله)
 
 ## ۲. روندهای کلیدی
-الگوهای تکراری که در پوشش خبری هفته دیده شد (۳-۵ مورد)
+الگوهای تکراری که در پوشش خبری هفته دیده شد (۳-۵ مورد).
+هر مورد باید دقیقاً این قالب را داشته باشد:
+- **عنوان روند**: توضیح کوتاه {{story_ids: id1|id2}}
+جایی که id1 و id2 شناسه‌های موضوعاتی هستند که این روند را نشان می‌دهند (۲ تا ۳ شناسه از لیست بالا، جدا شده با |). فقط شناسه‌های واقعی از لیست بالا را بیاور.
 
 ## ۳. نقاط کور رسانه‌ای
 موضوعاتی که فقط یک طرف پوشش داد و طرف دیگر سکوت کرد
@@ -50,11 +53,16 @@ WEEKLY_PROMPT = """تو نیلوفر هستی، سردبیر ارشد با ۲۰ 
 کدام منابع بهتر عمل کردند و کدام ضعیف‌تر بودند (بر اساس داده‌ها)
 
 ## ۵. چشم‌انداز هفته آینده
-بر اساس روندهای فعلی، چه اتفاقاتی محتمل است (۲-۳ پیش‌بینی)
+بر اساس روندهای فعلی، چه اتفاقاتی محتمل است (۲-۳ پیش‌بینی).
+هر پیش‌بینی باید دقیقاً این قالب را داشته باشد:
+- **عنوان پیش‌بینی**: توضیح کوتاه {{story_ids: id1|id2}}
+با شناسه‌های موضوعاتی که این پیش‌بینی بر اساس آنها است.
 
+قواعد:
 - لحن حرفه‌ای و تحلیلی
 - بدون قضاوت ارزشی — فقط تحلیل بر اساس داده
-- به فارسی بنویس"""
+- به فارسی بنویس
+- {{story_ids: ...}} را دقیقاً همین‌طور بنویس (با آکولاد)"""
 
 
 async def fetch_weekly_data(days: int):
@@ -109,10 +117,15 @@ async def fetch_weekly_data(days: int):
 
 
 def build_weekly_stories_block(stories) -> str:
-    """Build text block for top stories."""
+    """Build text block for top stories.
+
+    Each story is labeled with its UUID so Niloofar can tag trends/outlook
+    items with `{story_ids: ...}` back-references that the frontend turns
+    into per-topic links.
+    """
     lines = []
     for i, story in enumerate(stories[:10], 1):
-        lines.append(f"{i}. {story.title_fa}")
+        lines.append(f"{i}. [{story.id}] {story.title_fa}")
         lines.append(f"   مقالات: {story.article_count} | منابع: {story.source_count}")
         lines.append(f"   امتیاز: {story.trending_score:.1f}")
         if story.summary_fa:
@@ -234,6 +247,23 @@ top_stories:
 
     with open(output_path, "w", encoding="utf-8") as fp:
         fp.write(full_report)
+
+    # Persist to maintenance_logs with status='weekly_digest' so the
+    # /api/v1/stories/weekly-digest endpoint picks it up. The endpoint
+    # orders by run_at DESC, so we just insert a new row each run.
+    try:
+        import uuid as _uuid
+        from app.database import async_session
+        from sqlalchemy import text as _text
+        async with async_session() as db:
+            await db.execute(_text(
+                "INSERT INTO maintenance_logs (id, run_at, status, results) "
+                "VALUES (:id, NOW(), 'weekly_digest', :results)"
+            ), {"id": _uuid.uuid4(), "results": full_report})
+            await db.commit()
+        print("  ✓ گزارش در دیتابیس ذخیره شد")
+    except Exception as e:
+        print(f"  ⚠ خطا در ذخیره گزارش در دیتابیس: {e}")
 
     print(f"\n{'=' * 50}")
     print(f"گزارش هفتگی ذخیره شد: {output_path}")
