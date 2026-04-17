@@ -61,10 +61,23 @@ STEP_TIMEOUTS_SEC = {
 
 
 # ──────────────────────────────────────────────────────────────────────
-# Redis lock so two maintenance runs (e.g. overlapping cron firings, or
-# the daily full run + the lightweight ingest-only cron) cannot race on
-# the same DB rows.
+# Cron coordination
 # ──────────────────────────────────────────────────────────────────────
+# Primary defense: schedule deconfliction. The three Railway cron
+# services are scheduled to never fire at the same minute:
+#
+#   maintenance-cron   0 4 * * *                      (full, daily)
+#   ingest-cron        0 */6 * * *                    (6h, 00/06/12/18 UTC)
+#   rss-cron           0 5,7-11,13-17,19-21 * * *     (hourly, skips
+#                                                      04/06/12/18 UTC)
+#
+# Any new cron MUST avoid these 4 slots or the three existing ones will
+# need to be restaggered.
+#
+# Secondary defense: Redis lock below. Fails open if Redis is
+# unreachable, so it's a belt-and-braces layer, not the primary. As of
+# 2026-04-17 no Redis service exists in the Railway project — the lock
+# warns and proceeds. Schedule deconfliction is doing all the real work.
 LOCK_KEY = "doornegar:maintenance:lock"
 LOCK_TTL_SEC = 4 * 3600  # 4 hours — longer than any realistic run
 
@@ -3607,6 +3620,10 @@ FULL_PIPELINE = [
     ("niloofar_editorial", "Niloofar editorial context for top stories", "step_niloofar_editorial"),
     ("niloofar_polish_telegram", "Niloofar polishes Telegram predictions/claims for homepage", "step_niloofar_polish_telegram"),
     ("snapshot_analyses", "Snapshot analysis axes for daily-change detection", "step_snapshot_analyses"),
+    # Same hourly detection the rss-cron runs. The daily full run lands at
+    # 04:00 UTC which the rss-cron skips on purpose (collision slot), so
+    # including it here keeps the signal fresh at that hour too.
+    ("detect_hourly_updates", "Flag significant intra-day story updates", "step_detect_hourly_updates"),
     ("weekly_digest", "Weekly digest", "step_weekly_digest"),
 ]
 
@@ -3620,6 +3637,10 @@ INGEST_ONLY_PIPELINE = [
     ("cluster", "Cluster articles into stories", "step_cluster"),
     ("centroids", "Recompute story centroid embeddings", "step_recompute_centroids"),
     ("telegram_link", "Link Telegram posts to stories (embeddings)", "step_telegram_link_posts"),
+    # Same hourly update detection the rss-cron runs. Keeping it here too
+    # means the signal refreshes on the 4 hours rss-cron skips by design
+    # (00/06/12/18 UTC — the ingest-cron collision slots).
+    ("detect_hourly_updates", "Flag significant intra-day story updates", "step_detect_hourly_updates"),
 ]
 
 # Hourly pipeline — RSS-only. Designed to run every hour from 6am to
