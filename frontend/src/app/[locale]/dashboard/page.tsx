@@ -483,6 +483,43 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, [running, authHeaders, fetchDashboard]);
 
+  // Re-attach to a maintenance run already in progress on the server.
+  // Used when the admin refreshed the page or closed the modal before
+  // the run finished — we pull started_at from the status endpoint so
+  // the elapsed timer is correct, then let the existing polling effect
+  // take over by setting `running = "maintenance"`.
+  const reopenMaintenanceProgress = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}/api/v1/admin/maintenance/status`, { headers: authHeaders() });
+      if (!res.ok) {
+        alert(`Can't reach maintenance status endpoint (HTTP ${res.status}).`);
+        return;
+      }
+      const state = await res.json();
+      if (state.status === "running") {
+        // Align the local elapsed counter with the server's start time
+        const started = typeof state.started_at === "number"
+          ? state.started_at * 1000
+          : Date.now();
+        setMaintStart(started);
+        setMaintElapsed(Math.floor((Date.now() - started) / 1000));
+        setMaintResult(null);
+        setMaintLive(state);
+        setMaintMinimized(false);
+        setRunning("maintenance");
+      } else if (state.status === "success" || state.status === "error") {
+        // Run already finished — show the result card instead of polling
+        setMaintResult(state);
+        setMaintLive(state);
+        setMaintMinimized(false);
+      } else {
+        alert("No maintenance run is currently active.");
+      }
+    } catch (e: any) {
+      alert(`Failed to check maintenance status: ${e.message || e}`);
+    }
+  }, [authHeaders]);
+
   // Niloofar audit
   const [niloofarRunning, setNiloofarRunning] = useState(false);
   const [niloofarResult, setNiloofarResult] = useState<any>(null);
@@ -1070,6 +1107,15 @@ export default function DashboardPage() {
             <div className="flex justify-between"><span className="text-slate-500">Last run</span><span className="text-slate-900 dark:text-slate-200">{formatDate(dashboard.maintenance.last_run)}</span></div>
             <div className="flex justify-between"><span className="text-slate-500">Result</span><span className={resultColor(dashboard.maintenance.last_result)}>{resultLabel(dashboard.maintenance.last_result)}</span></div>
             <div className="flex justify-between"><span className="text-slate-500">Next run (approx)</span><span className="text-slate-900 dark:text-slate-200">{formatDate(dashboard.maintenance.next_run_approx)}</span></div>
+            {(dashboard.maintenance.last_result === "in_progress_or_incomplete" || running === "maintenance") && (
+              <button
+                onClick={reopenMaintenanceProgress}
+                className="mt-2 w-full inline-flex items-center justify-center gap-2 border border-blue-500 text-blue-600 dark:text-blue-400 px-3 py-2 text-xs font-medium hover:bg-blue-50 dark:hover:bg-blue-900/20"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                Reopen progress window
+              </button>
+            )}
           </div>
         </div>
 
