@@ -43,7 +43,11 @@ jobs:
       - name: Install deps
         run: |
           pip install --upgrade pip
-          pip install -e ".[dev]"
+          # [llm] is needed because openai/anthropic are imported at module
+          # load time by clustering/story_analysis/telegram_analysis services.
+          # [nlp] stays out — hazm / sentence-transformers / torch are heavy
+          # and guarded with try/except in app.nlp.persian.
+          pip install -e ".[dev,llm]"
       - name: Import smoke test
         run: python -c "import app.main"
       - name: Run unit tests

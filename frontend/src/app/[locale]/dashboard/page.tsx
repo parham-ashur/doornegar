@@ -1488,6 +1488,17 @@ export default function DashboardPage() {
         </a>
       </div>
 
+      {/* Fetch stats link */}
+      <div className="mt-6 border border-slate-200 dark:border-slate-800 p-5 flex items-center justify-between">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Fetch stats</h2>
+          <p className="text-xs text-slate-500 mt-1">Per-source article counts and per-channel Telegram post counts — drill down to see the latest items</p>
+        </div>
+        <a href="./dashboard/fetch-stats" className="border border-cyan-300 dark:border-cyan-700 bg-cyan-50 dark:bg-cyan-900/10 px-4 py-2 text-sm text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 dark:hover:bg-cyan-900/20">
+          View Fetch Stats →
+        </a>
+      </div>
+
       {/* Source Suggestions link */}
       <div className="mt-6 border border-slate-200 dark:border-slate-800 p-5 flex items-center justify-between">
         <div>

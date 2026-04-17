@@ -124,6 +124,27 @@ async def get_story_social_data(
     )
 
 
+@router.get(
+    "/channels/{channel_id}/posts",
+    response_model=list[TelegramPostResponse],
+)
+async def list_channel_posts(
+    channel_id: uuid.UUID,
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+):
+    """Latest posts from one channel (for admin drill-down in the fetch dashboard)."""
+    result = await db.execute(
+        select(TelegramPost)
+        .options(selectinload(TelegramPost.channel))
+        .where(TelegramPost.channel_id == channel_id)
+        .order_by(TelegramPost.date.desc())
+        .limit(limit)
+    )
+    posts = result.scalars().all()
+    return [TelegramPostResponse.model_validate(p) for p in posts]
+
+
 @router.get("/recent", response_model=list[TelegramPostResponse])
 async def get_recent_posts(
     limit: int = Query(10, ge=1, le=50),

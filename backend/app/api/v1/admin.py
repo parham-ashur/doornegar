@@ -699,6 +699,102 @@ async def trigger_bias_scoring(
         return {"status": "error", "error": str(e), "detail": "Check server logs"}
 
 
+@router.get("/sources/stats", dependencies=[Depends(require_admin)])
+async def sources_stats(db: AsyncSession = Depends(get_db)):
+    """Per-source article counts + freshness for the admin fetch dashboard.
+
+    Returns one row per source with total / 24h / 7d counts and the
+    timestamp of the last ingested article.
+    """
+    now = datetime.now(timezone.utc)
+    day_ago = now - timedelta(hours=24)
+    week_ago = now - timedelta(days=7)
+
+    result = await db.execute(
+        select(
+            Source.id,
+            Source.slug,
+            Source.name_fa,
+            Source.name_en,
+            Source.state_alignment,
+            Source.is_active,
+            func.count(Article.id).label("total"),
+            func.count(Article.id).filter(Article.ingested_at >= day_ago).label("last_24h"),
+            func.count(Article.id).filter(Article.ingested_at >= week_ago).label("last_7d"),
+            func.max(Article.ingested_at).label("last_ingested_at"),
+        )
+        .outerjoin(Article, Article.source_id == Source.id)
+        .group_by(Source.id)
+        .order_by(Source.name_en)
+    )
+
+    rows = []
+    for r in result.all():
+        last_seen = r.last_ingested_at
+        hours_since = None
+        if last_seen:
+            hours_since = round((now - last_seen).total_seconds() / 3600, 1)
+        rows.append({
+            "id": str(r.id),
+            "slug": r.slug,
+            "name_fa": r.name_fa,
+            "name_en": r.name_en,
+            "state_alignment": r.state_alignment,
+            "is_active": r.is_active,
+            "total": r.total,
+            "last_24h": r.last_24h,
+            "last_7d": r.last_7d,
+            "last_ingested_at": last_seen.isoformat() if last_seen else None,
+            "hours_since_last": hours_since,
+        })
+    return {"sources": rows, "generated_at": now.isoformat()}
+
+
+@router.get("/channels/stats", dependencies=[Depends(require_admin)])
+async def channels_stats(db: AsyncSession = Depends(get_db)):
+    """Per-channel Telegram post counts + freshness for the admin fetch dashboard."""
+    now = datetime.now(timezone.utc)
+    day_ago = now - timedelta(hours=24)
+    week_ago = now - timedelta(days=7)
+
+    result = await db.execute(
+        select(
+            TelegramChannel.id,
+            TelegramChannel.username,
+            TelegramChannel.title,
+            TelegramChannel.channel_type,
+            TelegramChannel.is_active,
+            func.count(TelegramPost.id).label("total"),
+            func.count(TelegramPost.id).filter(TelegramPost.date >= day_ago).label("last_24h"),
+            func.count(TelegramPost.id).filter(TelegramPost.date >= week_ago).label("last_7d"),
+            func.max(TelegramPost.date).label("last_post_at"),
+        )
+        .outerjoin(TelegramPost, TelegramPost.channel_id == TelegramChannel.id)
+        .group_by(TelegramChannel.id)
+        .order_by(TelegramChannel.username)
+    )
+
+    rows = []
+    for r in result.all():
+        last_seen = r.last_post_at
+        hours_since = None
+        if last_seen:
+            hours_since = round((now - last_seen).total_seconds() / 3600, 1)
+        rows.append({
+            "id": str(r.id),
+            "username": r.username,
+            "title": r.title,
+            "channel_type": r.channel_type,
+            "is_active": r.is_active,
+            "total": r.total,
+            "last_24h": r.last_24h,
+            "last_7d": r.last_7d,
+            "last_post_at": last_seen.isoformat() if last_seen else None,
+            "hours_since_last": hours_since,
+        })
+    return {"channels": rows, "generated_at": now.isoformat()}
+
+
 @router.get("/ingest/log")
 async def get_ingestion_log(
     limit: int = Query(50, ge=1, le=200),

@@ -24,8 +24,15 @@ from sqlalchemy.orm import joinedload
 
 # Stories with fewer than this many articles use an absolute-count blindspot
 # rule instead of a percentage threshold — because a single voice out of 3
-# is clearly one-sided even though 33% > 10%.
+# is clearly one-sided even though 33% > 20%.
 _SMALL_CLUSTER_THRESHOLD = 6
+
+# Minority-share threshold for large clusters. Bumped from 10% → 20% so that
+# stories like "10 state + 2 diaspora" (17% minority) are flagged. The higher
+# threshold is intentionally conservative — if we're wrong about a story
+# being balanced, we'd rather err toward "we may have missed diaspora
+# coverage" than confidently claim balance we don't have.
+_MINORITY_PCT_THRESHOLD = 20
 
 
 def _compute_blindspot(
@@ -47,7 +54,8 @@ def _compute_blindspot(
       2. Small cluster (total < _SMALL_CLUSTER_THRESHOLD): a lone voice on
          one side against ≥2 on the other is a blindspot. A 2-1 story
          reads one-sided even at 33%.
-      3. Otherwise, percentage rule: minority share < 10% → blindspot.
+      3. Otherwise, percentage rule: minority share < _MINORITY_PCT_THRESHOLD
+         → blindspot.
     """
     total = state_count + diaspora_count
     if total == 0:
@@ -66,9 +74,9 @@ def _compute_blindspot(
 
     state_pct = state_count / total * 100
     diaspora_pct = diaspora_count / total * 100
-    if state_pct < 10 and covered_by_diaspora:
+    if state_pct < _MINORITY_PCT_THRESHOLD and covered_by_diaspora:
         return True, "diaspora_only"
-    if diaspora_pct < 10 and covered_by_state:
+    if diaspora_pct < _MINORITY_PCT_THRESHOLD and covered_by_state:
         return True, "state_only"
 
     return False, None

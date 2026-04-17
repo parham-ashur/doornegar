@@ -53,3 +53,11 @@ def test_telegram_analysis_cache_endpoints_exist():
     paths = _registered_paths()
     assert "/api/v1/social/stories/{story_id}/telegram-analysis" in paths
     assert "/api/v1/social/stories/{story_id}/telegram-analysis/invalidate" in paths
+
+
+def test_fetch_stats_endpoints_exist():
+    """Admin dashboard fetch-stats + per-channel drilldown must stay wired."""
+    paths = _registered_paths()
+    assert "/api/v1/admin/sources/stats" in paths
+    assert "/api/v1/admin/channels/stats" in paths
+    assert "/api/v1/social/channels/{channel_id}/posts" in paths
