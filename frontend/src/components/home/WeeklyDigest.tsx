@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { TrendingUp, Compass } from "lucide-react";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -173,25 +172,11 @@ export default function WeeklyDigest({ prefetchedContent }: { prefetchedContent?
           </div>
         )}
 
-        {/* Fallback footer: only shown when no item has per-topic links (old
-            digests that predate the {story_ids: ...} format). Once Niloofar
-            regenerates, every trend/outlook carries its own links inline. */}
-        {storyRefs.length > 0 && ![...trends, ...outlook].some(t => t.storyIds.length > 0) && (
-          <div className="md:col-span-2 pt-2 border-t border-slate-200 dark:border-slate-700">
-            <p className="text-[12px] text-slate-400 dark:text-slate-500 mb-1.5">موضوعات این هفته:</p>
-            <div className="flex flex-wrap gap-x-3 gap-y-1">
-              {storyRefs.slice(0, 8).map((ref) => (
-                <Link
-                  key={ref.id}
-                  href={`/fa/stories/${ref.id}`}
-                  className="text-[12px] text-slate-400 dark:text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
-                >
-                  {ref.title.slice(0, 40)}{ref.title.length > 40 ? "…" : ""}
-                </Link>
-              ))}
-            </div>
-          </div>
-        )}
+        {/* Per-Parham 2026-04-17: sources (per-topic inline links + the flat
+            footer) are removed for now. Keep descriptions only. We'll bring
+            sources back when the source-attribution feature is designed
+            properly. Parser and storyIds state stay in place so re-enabling
+            is a one-line change. */}
       </div>
     </div>
   );
@@ -199,22 +184,16 @@ export default function WeeklyDigest({ prefetchedContent }: { prefetchedContent?
 
 function TopicItem({
   item,
-  storyRefs,
-  accent,
+  storyRefs: _storyRefs,
+  accent: _accent,
 }: {
   item: DigestItem;
   storyRefs: StoryRef[];
   accent: "blue" | "emerald";
 }) {
-  const linkHover =
-    accent === "blue"
-      ? "hover:text-blue-600 dark:hover:text-blue-400"
-      : "hover:text-emerald-600 dark:hover:text-emerald-400";
-  // Resolve IDs to {id, title}. Unknown IDs drop silently.
-  const related = item.storyIds
-    .map(id => storyRefs.find(r => r.id === id))
-    .filter((r): r is StoryRef => Boolean(r));
-
+  // Links intentionally suppressed for now — see the comment where the flat
+  // footer used to be. When sources come back, restore the related-stories
+  // rendering by resolving item.storyIds against storyRefs.
   return (
     <div>
       <p className="text-[14px] leading-5 text-slate-700 dark:text-slate-300">
@@ -223,19 +202,6 @@ function TopicItem({
           <span className="text-slate-500 dark:text-slate-400"> — {item.description}</span>
         )}
       </p>
-      {related.length > 0 && (
-        <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1">
-          {related.map(ref => (
-            <Link
-              key={ref.id}
-              href={`/fa/stories/${ref.id}`}
-              className={`text-[12px] text-slate-400 dark:text-slate-500 transition-colors ${linkHover}`}
-            >
-              ← {ref.title.slice(0, 32)}{ref.title.length > 32 ? "…" : ""}
-            </Link>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
