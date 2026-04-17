@@ -146,6 +146,10 @@
 - [ ] **Latin → Farsi digit consistency** — some story titles still use Latin digits (2055 vs ۲۰۵۵). Should be caught by Niloofar audits going forward
 
 ### Security & Operations
+- [ ] **Restore Redis service** on Railway (removed/never re-provisioned; single-flight maintenance lock currently fails open at every cron fire — "Could not reach Redis for maintenance lock: giving-mallard-72820.up:6379. Name or service not known"). Schedule deconfliction in `auto_maintenance.py` is doing the real coordination work today (see the block comment at LOCK_KEY), so the Redis lock is belt-and-braces, not critical. Steps:
+  1. Railway → "+ New" → Database → Redis.
+  2. Update `REDIS_URL` on `doornegar`, `ingest-cron`, `maintenance-cron`, and `rss-cron` to a reference variable `${{Redis.REDIS_URL}}` (so future renames don't break it).
+  3. Confirm next cron fire has no "Could not reach Redis" warning in its deploy log.
 - [ ] **Cloudflare CDN/WAF in front of Railway** — single biggest security win
   - Requires a custom domain (~$10/year)
   - Gives: DDoS protection, bot detection, WAF, rate limiting at edge, analytics
