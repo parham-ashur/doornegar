@@ -68,6 +68,12 @@ class UserSubmission(Base):
     # Display language of the content (for downstream NLP routing)
     language: Mapped[str] = mapped_column(String(5), default="fa")
 
+    # Optional enrichment fields (populated when the submitter has them)
+    image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     # Submitter info (all optional — anonymous submissions allowed)
     submitter_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     submitter_contact: Mapped[str | None] = mapped_column(String(200), nullable=True)

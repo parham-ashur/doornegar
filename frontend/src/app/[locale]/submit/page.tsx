@@ -32,8 +32,8 @@ export default function SubmitPage() {
   const [channelUsername, setChannelUsername] = useState("");
   const [isAnalyst, setIsAnalyst] = useState<"yes" | "no" | "unsure">("unsure");
   const [language, setLanguage] = useState<"fa" | "en">("fa");
-  const [submitterName, setSubmitterName] = useState("");
-  const [submitterContact, setSubmitterContact] = useState("");
+  const [imageUrl, setImageUrl] = useState("");
+  const [publishedAt, setPublishedAt] = useState("");
   const [submitterNote, setSubmitterNote] = useState("");
 
   const [submitting, setSubmitting] = useState(false);
@@ -63,8 +63,8 @@ export default function SubmitPage() {
     if (title.trim()) payload.title = title.trim();
     if (sourceName.trim()) payload.source_name = sourceName.trim();
     if (sourceUrl.trim()) payload.source_url = sourceUrl.trim();
-    if (submitterName.trim()) payload.submitter_name = submitterName.trim();
-    if (submitterContact.trim()) payload.submitter_contact = submitterContact.trim();
+    if (imageUrl.trim()) payload.image_url = imageUrl.trim();
+    if (publishedAt.trim()) payload.published_at = publishedAt.trim();
     if (submitterNote.trim()) payload.submitter_note = submitterNote.trim();
 
     if (type === "telegram_post") {
@@ -85,6 +85,7 @@ export default function SubmitPage() {
         setTitle(""); setContent(""); setSourceName(""); setSourceUrl("");
         setChannelUsername(""); setIsAnalyst("unsure");
         setSuggestedStoryId(""); setSubmitterNote("");
+        setImageUrl(""); setPublishedAt("");
       } else {
         setResult({ ok: false, message: data.detail || "خطا در ارسال" });
       }
@@ -252,6 +253,38 @@ export default function SubmitPage() {
           </div>
         )}
 
+        {/* Image + published date — both optional, high-signal */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-[13px] font-bold text-slate-700 dark:text-slate-300 mb-2">
+              لینک تصویر (اختیاری)
+            </label>
+            <input
+              type="url"
+              value={imageUrl}
+              onChange={(e) => setImageUrl(e.target.value)}
+              placeholder="https://…/image.jpg"
+              dir="ltr"
+              className="w-full px-3 py-2 text-[13px] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 focus:border-blue-500 outline-none"
+            />
+            <p className="text-[12px] text-slate-400 mt-1">
+              اگر این محتوا تصویر دارد، لینک آن را بگذارید تا در صفحه خبر استفاده شود.
+            </p>
+          </div>
+          <div>
+            <label className="block text-[13px] font-bold text-slate-700 dark:text-slate-300 mb-2">
+              تاریخ انتشار (اختیاری)
+            </label>
+            <input
+              type="datetime-local"
+              value={publishedAt}
+              onChange={(e) => setPublishedAt(e.target.value)}
+              dir="ltr"
+              className="w-full px-3 py-2 text-[13px] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 focus:border-blue-500 outline-none"
+            />
+          </div>
+        </div>
+
         {/* Language */}
         <div>
           <label className="block text-[13px] font-bold text-slate-700 dark:text-slate-300 mb-2">
@@ -275,33 +308,16 @@ export default function SubmitPage() {
           </div>
         </div>
 
-        {/* Submitter */}
-        <div className="border-t border-slate-200 dark:border-slate-800 pt-4 space-y-4">
-          <p className="text-[13px] text-slate-500 dark:text-slate-400">
-            اطلاعات شما (اختیاری — اگر می‌خواهید از پیگیری مطلع شوید)
-          </p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <input
-              type="text"
-              value={submitterName}
-              onChange={(e) => setSubmitterName(e.target.value)}
-              placeholder="نام شما"
-              className="w-full px-3 py-2 text-[13px] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 focus:border-blue-500 outline-none"
-            />
-            <input
-              type="text"
-              value={submitterContact}
-              onChange={(e) => setSubmitterContact(e.target.value)}
-              placeholder="ایمیل یا تلگرام (اختیاری)"
-              dir="ltr"
-              className="w-full px-3 py-2 text-[13px] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 focus:border-blue-500 outline-none"
-            />
-          </div>
+        {/* Note */}
+        <div>
+          <label className="block text-[13px] font-bold text-slate-700 dark:text-slate-300 mb-2">
+            یادداشت برای تیم بررسی (اختیاری)
+          </label>
           <textarea
             value={submitterNote}
             onChange={(e) => setSubmitterNote(e.target.value)}
             rows={2}
-            placeholder="یادداشت (چرا این محتوا مهم است؟ کجا پیدا کردید؟)"
+            placeholder="چرا این محتوا مهم است؟ کجا پیدا کردید؟ اگر یک پست تلگرام است، منبع اصلی کیست؟"
             className="w-full px-3 py-2 text-[13px] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 focus:border-blue-500 outline-none"
           />
         </div>

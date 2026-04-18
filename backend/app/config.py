@@ -98,6 +98,9 @@ class Settings(BaseSettings):
     r2_bucket_name: str = "doornegar-images"
     r2_public_url: str = ""  # e.g. https://pub-xxx.r2.dev
 
+    # Unsplash API (stock-image picker in admin dashboard)
+    unsplash_access_key: str = ""  # get one free at unsplash.com/developers
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
     @property

@@ -43,8 +43,8 @@ class SubmissionCreate(BaseModel):
     channel_username: str | None = Field(default=None, max_length=100)
     is_analyst: bool | None = None
     language: Literal["fa", "en"] = "fa"
-    submitter_name: str | None = Field(default=None, max_length=100)
-    submitter_contact: str | None = Field(default=None, max_length=200)
+    image_url: str | None = None
+    published_at: str | None = None  # ISO-8601
     submitter_note: str | None = Field(default=None, max_length=2000)
 
 
@@ -65,8 +65,8 @@ class SubmissionItem(BaseModel):
     channel_username: str | None
     is_analyst: bool | None
     language: str
-    submitter_name: str | None
-    submitter_contact: str | None
+    image_url: str | None
+    published_at: datetime | None
     submitter_note: str | None
     status: str
     admin_notes: str | None
@@ -111,6 +111,16 @@ async def create_submission(
 
     ip = request.client.host if request.client else None
 
+    # Parse optional published_at (accept HTML datetime-local "YYYY-MM-DDTHH:MM"
+    # as well as ISO-8601 with timezone)
+    parsed_published = None
+    if body.published_at:
+        try:
+            from datetime import datetime as _dt
+            parsed_published = _dt.fromisoformat(body.published_at.replace("Z", "+00:00"))
+        except Exception:
+            parsed_published = None  # silent drop — not worth rejecting the whole submission
+
     item = UserSubmission(
         submission_type=body.submission_type,
         suggested_story_id=body.suggested_story_id,
@@ -121,8 +131,8 @@ async def create_submission(
         channel_username=(body.channel_username or "").lstrip("@") or None,
         is_analyst=body.is_analyst,
         language=body.language,
-        submitter_name=body.submitter_name,
-        submitter_contact=body.submitter_contact,
+        image_url=body.image_url,
+        published_at=parsed_published,
         submitter_note=body.submitter_note,
         submitter_ip=ip,
     )
@@ -175,13 +185,114 @@ async def update_submission(
     body: SubmissionUpdate,
     db: AsyncSession = Depends(get_db),
 ):
+    """Review a submission.
+
+    What happens on each status:
+      - `accepted_article`: creates an Article row (or updates existing
+        if URL matches) and attaches it to `suggested_story_id` when set.
+        If no story_id, the article enters the unlinked pool and the
+        next clustering step picks it up.
+      - `accepted_post`: creates a TelegramChannel if channel_username
+        is new, then inserts a TelegramPost linked to `suggested_story_id`.
+        Invalidates that story's cached telegram_analysis so the next
+        homepage render regenerates with the new post included.
+      - `rejected` / `duplicate` / `pending`: status-only change.
+
+    The original submission row stays in place for audit — status, admin
+    notes, and reviewed_at are stamped but the content isn't deleted.
+    """
     item = await db.get(UserSubmission, submission_id)
     if not item:
         raise HTTPException(status_code=404, detail="Submission not found")
+
+    now = datetime.now(timezone.utc)
+
+    if body.status == "accepted_article":
+        from app.models.source import Source
+        from app.models.article import Article
+        from sqlalchemy.dialects.postgresql import insert as _pg_insert
+        from sqlalchemy import select as _sel
+
+        # Find or create a synthetic "user-submitted" source so the article
+        # has a valid source_id FK. One row per locale is plenty.
+        slug = f"user-submitted-{item.language}"
+        src = (await db.execute(_sel(Source).where(Source.slug == slug))).scalar_one_or_none()
+        if not src:
+            src = Source(
+                name_en="User submitted" if item.language == "en" else "ارسال‌های کاربران",
+                name_fa="ارسال‌های کاربران",
+                slug=slug,
+                website_url="https://doornegar.org/submit",
+                state_alignment="independent",
+                production_location="outside_iran",
+                language=item.language,
+                is_active=True,
+            )
+            db.add(src)
+            await db.flush()
+
+        synthetic_url = f"https://doornegar.org/submissions/{item.id}"
+        stmt = (
+            _pg_insert(Article)
+            .values(
+                source_id=src.id,
+                title_original=item.title or (item.content[:80] + "…"),
+                title_fa=item.title if item.language == "fa" else None,
+                title_en=item.title if item.language == "en" else None,
+                url=synthetic_url,
+                content_text=item.content,
+                image_url=item.image_url,
+                language=item.language,
+                published_at=item.published_at or now,
+                story_id=uuid.UUID(item.suggested_story_id) if item.suggested_story_id else None,
+            )
+            .on_conflict_do_nothing(index_elements=["url"])
+        )
+        await db.execute(stmt)
+
+    elif body.status == "accepted_post":
+        from sqlalchemy import select as _sel
+
+        if not item.channel_username:
+            raise HTTPException(status_code=400, detail="channel_username required to accept as post")
+
+        from app.models.social import TelegramChannel, TelegramPost
+
+        ch = (
+            await db.execute(_sel(TelegramChannel).where(TelegramChannel.username == item.channel_username))
+        ).scalar_one_or_none()
+        if not ch:
+            ch = TelegramChannel(
+                username=item.channel_username,
+                title=item.source_name or item.channel_username,
+                channel_type="commentary" if item.is_analyst else "news",
+                is_active=True,
+            )
+            db.add(ch)
+            await db.flush()
+
+        tp = TelegramPost(
+            channel_id=ch.id,
+            text=item.content,
+            date=item.published_at or now,
+            story_id=uuid.UUID(item.suggested_story_id) if item.suggested_story_id else None,
+        )
+        db.add(tp)
+        # Invalidate the linked story's analysis so next read regenerates
+        if item.suggested_story_id:
+            from app.models.story import Story as _Story
+            from sqlalchemy import update as _upd
+
+            await db.execute(
+                _upd(_Story)
+                .where(_Story.id == uuid.UUID(item.suggested_story_id))
+                .values(telegram_analysis=None)
+            )
+
     item.status = body.status
     if body.admin_notes is not None:
         item.admin_notes = body.admin_notes
-    item.reviewed_at = datetime.now(timezone.utc)
+    item.reviewed_at = now
     await db.commit()
     await db.refresh(item)
     return SubmissionItem.model_validate(item)
