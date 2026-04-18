@@ -1,6 +1,54 @@
 "use client";
 
+import { useState } from "react";
 import type { Source } from "@/lib/types";
+
+// Derive a favicon URL from a source's website when the DB has no
+// logo_url. Google's S2 service caches favicons for every domain we
+// track (including Iranian-hosted sites) at sz=64 which is sharper
+// than the bare `/favicon.ico` at our 32×32 render size. Cheap and
+// requires no DB backfill — frontend-only fallback.
+function faviconFromWebsite(websiteUrl: string | null | undefined): string | null {
+  if (!websiteUrl) return null;
+  try {
+    const host = new URL(websiteUrl).hostname.replace(/^www\./, "");
+    return `https://www.google.com/s2/favicons?domain=${host}&sz=64`;
+  } catch {
+    return null;
+  }
+}
+
+function SourceBadge({
+  source,
+  borderColor,
+}: {
+  source: Source;
+  borderColor: string;
+}) {
+  const [imgFailed, setImgFailed] = useState(false);
+  const resolved = source.logo_url || faviconFromWebsite(source.website_url);
+  const showImage = resolved && !imgFailed;
+
+  if (showImage) {
+    return (
+      <div className={`w-8 h-8 rounded-full overflow-hidden bg-white dark:bg-slate-800 border-2 ${borderColor} shadow-sm transition-transform group-hover:scale-125`}>
+        <img
+          src={resolved}
+          alt={source.name_fa || ""}
+          className="w-full h-full object-cover"
+          loading="lazy"
+          onError={() => setImgFailed(true)}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className={`w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-[13px] font-bold text-slate-500 dark:text-slate-300 border-2 ${borderColor} shadow-sm transition-transform group-hover:scale-125`}>
+      {(source.name_fa || source.name_en || "?").charAt(0)}
+    </div>
+  );
+}
 
 function getSpectrumScore(source: Source): number {
   const align = source.state_alignment;
@@ -137,15 +185,7 @@ export default function PoliticalSpectrum({ sources, sourceNeutrality }: Props) 
                   transform: "translate(-50%, -50%)",
                 }}
               >
-                {s.logo_url ? (
-                  <div className={`w-8 h-8 rounded-full overflow-hidden bg-white dark:bg-slate-800 border-2 ${borderColor} shadow-sm transition-transform group-hover:scale-125`}>
-                    <img src={s.logo_url} alt={s.name_fa || ""} className="w-full h-full object-cover" loading="lazy" />
-                  </div>
-                ) : (
-                  <div className={`w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-[13px] font-bold text-slate-500 dark:text-slate-300 border-2 ${borderColor} shadow-sm transition-transform group-hover:scale-125`}>
-                    {(s.name_fa || s.name_en || "?").charAt(0)}
-                  </div>
-                )}
+                <SourceBadge source={s} borderColor={borderColor} />
                 <div className="hidden md:block absolute -bottom-5 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-800 dark:bg-white text-white dark:text-slate-900 text-[13px] px-2 py-0.5 whitespace-nowrap pointer-events-none z-20 shadow-lg">
                   {s.name_fa || s.name_en}
                   {hasNeutrality && n !== 0 && <span className="mr-1 font-mono text-[13px]">({n > 0 ? "+" : ""}{n.toFixed(1)})</span>}
