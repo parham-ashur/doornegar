@@ -104,7 +104,13 @@ export default function TelegramDiscussions({
       const pct = typeof p === "object" ? (p as any).pct : undefined;
       const supporterCount = typeof p === "object" ? (p as any).supporter_count : undefined;
       const analystsTotal = typeof p === "object" ? (p as any).analysts_total : undefined;
-      const key = text.slice(0, 30);
+      // Dedup by full text (was first-30-chars which collapsed every
+      // prediction starting with «احتمال ادامه …» into one, squashing
+      // 18 raw items down to 2). Full-text exact match still catches
+      // true dupes (same Niloofar-polished phrasing across merged
+      // stories) without eating near-duplicates that actually differ
+      // past the first clause.
+      const key = text.trim();
       if (text && !seenPred.has(key)) {
         seenPred.add(key);
         predictions.push({ text, pct, supporterCount, analystsTotal, storyId: item.storyId });
@@ -112,7 +118,7 @@ export default function TelegramDiscussions({
     }
     for (const c of kclaims) {
       const text = typeof c === "string" ? c : (c as any).text || String(c);
-      const key = text.slice(0, 30);
+      const key = text.trim();
       if (text && !seenClaim.has(key)) {
         seenClaim.add(key);
         claims.push({ text, storyId: item.storyId });
