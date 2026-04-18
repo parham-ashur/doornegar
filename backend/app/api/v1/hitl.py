@@ -50,6 +50,10 @@ class TriagePost(BaseModel):
 class TriageResponse(BaseModel):
     items: list[TriagePost]
     total_scanned: int
+    # Stats: score-band counts over the sample so the dashboard can show
+    # "0 borderline, but scanned N and here's the distribution" instead
+    # of a bare empty state that looks like it's broken.
+    band_counts: dict[str, int] = Field(default_factory=dict)
 
 
 def _clean_vec(v) -> list[float] | None:
@@ -63,22 +67,31 @@ def _clean_vec(v) -> list[float] | None:
 @router.get("/telegram-triage", response_model=TriageResponse)
 async def telegram_triage(
     limit: int = Query(default=30, le=100),
-    min_score: float = Query(default=0.30),
-    max_score: float = Query(default=0.40),
+    min_score: float = Query(
+        default=0.25,
+        description="Lower bound of the band to surface. Default 0.25 catches weak-match posts that might have gone to the wrong story.",
+    ),
+    max_score: float = Query(
+        default=0.45,
+        description="Upper bound of the band. Default 0.45 catches posts the linker was moderately confident about but worth double-checking.",
+    ),
+    days: int = Query(default=21, le=60),
+    scan: int = Query(default=150, le=500),
     db: AsyncSession = Depends(get_db),
 ):
     """Show orphan/borderline posts with their top-3 candidate stories.
-    Scans the N most recent posts with text that either:
-      - have story_id=NULL (never linked), OR
-      - scored in the borderline band (their best story match is between
-        min_score and max_score, so the linker was unsure)
-    Returns top-3 candidate stories per post with similarity scores so
-    the admin can one-click approve/move/reject.
+
+    Scans the `scan` most recent posts (default 150) from the last `days`
+    days (default 21), scores each against every story, and returns posts
+    whose best match falls inside [min_score, max_score] — the band where
+    the automatic linker had to guess. Defaults 0.25-0.45 deliberately
+    wider than the link threshold (0.35) so you can both audit close
+    decisions and rescue posts that scored too weak to link at all.
     """
     from app.nlp.embeddings import generate_embeddings_batch, cosine_similarity
 
     # Pull recent posts (orphan OR with text, limited window)
-    cutoff = datetime.now(timezone.utc) - timedelta(days=14)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     result = await db.execute(
         select(TelegramPost)
         .options(selectinload(TelegramPost.channel))
@@ -88,7 +101,7 @@ async def telegram_triage(
             TelegramPost.date >= cutoff,
         )
         .order_by(desc(TelegramPost.date))
-        .limit(limit * 3)  # oversample; we'll filter to the borderline band
+        .limit(scan)
     )
     posts = list(result.scalars().all())
     if not posts:
@@ -126,6 +139,10 @@ async def telegram_triage(
     embeddings = generate_embeddings_batch(post_texts, batch_size=100)
 
     items: list[TriagePost] = []
+    band_counts = {
+        "<0.25": 0, "0.25-0.30": 0, "0.30-0.35": 0,
+        "0.35-0.40": 0, "0.40-0.45": 0, "0.45-0.50": 0, ">=0.50": 0,
+    }
     for post, emb in zip(posts, embeddings):
         if not emb:
             continue
@@ -149,10 +166,19 @@ async def telegram_triage(
         if not top:
             continue
         best_score = top[0][1]
-        # Keep borderline (0.30-0.40) OR orphans still below 0.35 needing admin
+
+        # Tally the whole sample for the distribution display
+        if best_score < 0.25: band_counts["<0.25"] += 1
+        elif best_score < 0.30: band_counts["0.25-0.30"] += 1
+        elif best_score < 0.35: band_counts["0.30-0.35"] += 1
+        elif best_score < 0.40: band_counts["0.35-0.40"] += 1
+        elif best_score < 0.45: band_counts["0.40-0.45"] += 1
+        elif best_score < 0.50: band_counts["0.45-0.50"] += 1
+        else: band_counts[">=0.50"] += 1
+
         is_orphan = post.story_id is None
-        borderline = min_score <= best_score <= max_score
-        if not (borderline or (is_orphan and best_score < max_score)):
+        in_band = min_score <= best_score <= max_score
+        if not (in_band or (is_orphan and best_score < max_score)):
             continue
         items.append(
             TriagePost(
@@ -176,7 +202,9 @@ async def telegram_triage(
         if len(items) >= limit:
             break
 
-    return TriageResponse(items=items, total_scanned=len(posts))
+    return TriageResponse(
+        items=items, total_scanned=len(posts), band_counts=band_counts
+    )
 
 
 class TriageAction(BaseModel):

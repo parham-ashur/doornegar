@@ -26,7 +26,13 @@ export default function TelegramTriagePage() {
   const [authed, setAuthed] = useState(false);
   const [token, setToken] = useState("");
   const [items, setItems] = useState<TriagePost[]>([]);
+  const [bandCounts, setBandCounts] = useState<Record<string, number>>({});
+  const [totalScanned, setTotalScanned] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [minScore, setMinScore] = useState(0.25);
+  const [maxScore, setMaxScore] = useState(0.45);
+  const [days, setDays] = useState(21);
+  const [scan, setScan] = useState(150);
 
   useEffect(() => {
     setAuthed(hasAdminToken());
@@ -36,18 +42,27 @@ export default function TelegramTriagePage() {
     if (!authed) return;
     setLoading(true);
     try {
-      const res = await fetch(`${API}/api/v1/admin/hitl/telegram-triage?limit=30`, {
+      const q = new URLSearchParams({
+        limit: "50",
+        min_score: String(minScore),
+        max_score: String(maxScore),
+        days: String(days),
+        scan: String(scan),
+      });
+      const res = await fetch(`${API}/api/v1/admin/hitl/telegram-triage?${q}`, {
         headers: adminHeaders(),
       });
       if (!res.ok) throw new Error("fetch failed");
       const data = await res.json();
       setItems(data.items || []);
+      setBandCounts(data.band_counts || {});
+      setTotalScanned(data.total_scanned || 0);
     } catch (e) {
       console.error(e);
     } finally {
       setLoading(false);
     }
-  }, [authed]);
+  }, [authed, minScore, maxScore, days, scan]);
 
   useEffect(() => {
     load();
@@ -125,12 +140,93 @@ export default function TelegramTriagePage() {
         </div>
       </div>
       <p className="text-[13px] text-slate-500 mb-4 leading-6">
-        پست‌های زیر نمره ۰.۳۰ تا ۰.۴۰ به بهترین خبر گرفته‌اند (مرز تصمیم‌گیری خودکار).
-        برای هر پست، بهترین خبر کاندید را انتخاب یا پست را بی‌ارتباط اعلام کنید.
+        پست‌های با نمرهٔ «{minScore.toFixed(2)}» تا «{maxScore.toFixed(2)}» را می‌بینید.
+        دامنه را باز‌تر کنید تا پست‌های بیشتری برای بررسی ببینید.
       </p>
 
+      {/* Band controls */}
+      <div className="flex flex-wrap items-center gap-3 mb-4 text-[13px] bg-slate-50 dark:bg-slate-900/50 p-3 border border-slate-200 dark:border-slate-800">
+        <label className="flex items-center gap-2">
+          حداقل:
+          <input
+            type="number"
+            step={0.05}
+            min={0}
+            max={1}
+            value={minScore}
+            onChange={(e) => setMinScore(parseFloat(e.target.value))}
+            className="w-20 px-2 py-1 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+            dir="ltr"
+          />
+        </label>
+        <label className="flex items-center gap-2">
+          حداکثر:
+          <input
+            type="number"
+            step={0.05}
+            min={0}
+            max={1}
+            value={maxScore}
+            onChange={(e) => setMaxScore(parseFloat(e.target.value))}
+            className="w-20 px-2 py-1 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+            dir="ltr"
+          />
+        </label>
+        <label className="flex items-center gap-2">
+          روزهای اخیر:
+          <input
+            type="number"
+            min={1}
+            max={60}
+            value={days}
+            onChange={(e) => setDays(parseInt(e.target.value))}
+            className="w-20 px-2 py-1 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+            dir="ltr"
+          />
+        </label>
+        <label className="flex items-center gap-2">
+          تعداد اسکن:
+          <input
+            type="number"
+            min={10}
+            max={500}
+            value={scan}
+            onChange={(e) => setScan(parseInt(e.target.value))}
+            className="w-24 px-2 py-1 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+            dir="ltr"
+          />
+        </label>
+        <button
+          type="button"
+          onClick={load}
+          disabled={loading}
+          className="px-4 py-1 bg-blue-600 text-white"
+        >
+          اعمال
+        </button>
+      </div>
+
+      {/* Distribution */}
+      {Object.keys(bandCounts).length > 0 && (
+        <div className="mb-5 p-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800">
+          <p className="text-[12px] text-slate-500 mb-2">
+            توزیع نمرهٔ {totalScanned} پست اسکن‌شده:
+          </p>
+          <div className="flex flex-wrap gap-3 text-[12px]" dir="ltr">
+            {Object.entries(bandCounts).map(([band, count]) => (
+              <span key={band} className={`font-mono ${count === 0 ? "text-slate-400" : "text-slate-700 dark:text-slate-300"}`}>
+                {band}: <span className="font-bold">{count}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
       {!loading && items.length === 0 && (
-        <p className="text-[13px] text-slate-500">موردی برای بررسی نیست.</p>
+        <p className="text-[13px] text-slate-500">
+          موردی در این دامنه نیست. لینک‌کنندهٔ خودکار دقیقاً کار کرده — اکثر پست‌ها نمرهٔ بالای ۰.۵۰ می‌گیرند.
+          برای بازبینی تصمیم‌های مرزی، «حداکثر» را به مثلاً ۰.۶۰ بالا ببرید تا اتصال‌های ضعیف‌تر نیز ظاهر شوند.
+        </p>
       )}
 
       <div className="space-y-4">
