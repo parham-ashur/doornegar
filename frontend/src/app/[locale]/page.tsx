@@ -394,18 +394,23 @@ export default async function HomePage({
   const freshTopStories = sorted.filter(isFresh);
   const telegramSourceStories = freshTopStories.length >= 3 ? freshTopStories : sorted;
   const telegramAnalysisIds = telegramSourceStories.slice(0, 5).map(s => s.id);
-  // leftTextStories also get a telegram strip each now (hero-style
-  // card without image). Fetch those in parallel with everything else
-  // so there's no extra serial round-trip.
-  const [allAnalyses, heroTelegram, telegramResults, leftTextTelegramResults] = await Promise.all([
+  // leftTextStories AND mostViewed both get telegram strips now, so
+  // fetch their analyses in parallel with everything else. Each group
+  // goes into its own lookup map indexed by story id.
+  const [allAnalyses, heroTelegram, telegramResults, leftTextTelegramResults, mostViewedTelegramResults] = await Promise.all([
     fetchAnalysesBatch(Array.from(allIds)),
     hero ? fetchTelegramAnalysis(hero.id) : Promise.resolve(null),
     Promise.all(telegramAnalysisIds.map(id => fetchTelegramAnalysis(id))),
     Promise.all(leftTextStories.map(s => fetchTelegramAnalysis(s.id))),
+    Promise.all(mostViewed.map(s => fetchTelegramAnalysis(s.id))),
   ]);
   const leftTextTelegramById: Record<string, any> = {};
   leftTextStories.forEach((s, i) => {
     if (leftTextTelegramResults[i]) leftTextTelegramById[s.id] = leftTextTelegramResults[i];
+  });
+  const mostViewedTelegramById: Record<string, any> = {};
+  mostViewed.forEach((s, i) => {
+    if (mostViewedTelegramResults[i]) mostViewedTelegramById[s.id] = mostViewedTelegramResults[i];
   });
 
   const allSummaries: Record<string, string | null> = {};
@@ -722,6 +727,7 @@ export default async function HomePage({
                 const analysis = allAnalyses[s.id];
                 const stateS = analysis?.state_summary_fa;
                 const diasporaS = analysis?.diaspora_summary_fa;
+                const tg = mostViewedTelegramById[s.id];
                 // Fallback to splitting bias_explanation_fa when the
                 // story doesn't have side-specific summaries yet.
                 let fallbackBullets: string[] = [];
@@ -762,6 +768,19 @@ export default async function HomePage({
                       {!stateS && !diasporaS && fallbackBullets.map((b, j) => (
                         <p key={j} className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-2">• {b}</p>
                       ))}
+                      {/* Telegram first prediction + first claim, 2-line
+                          clamps. Uses Niloofar-polished text when the
+                          backend polish step has run. */}
+                      {tg?.predictions && tg.predictions.length > 0 && (
+                        <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-2">
+                          <span className="font-bold text-blue-500">پیش‌بینی:</span> {predictionText(tg.predictions[0])}
+                        </p>
+                      )}
+                      {tg?.key_claims && tg.key_claims.length > 0 && (
+                        <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-2">
+                          <span className="font-bold text-amber-500">ادعا:</span> {claimText(tg.key_claims[0])}
+                        </p>
+                      )}
                     </div>
                   </Link>
                 );
