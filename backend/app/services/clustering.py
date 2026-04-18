@@ -120,7 +120,12 @@ below, or whether it is a SEPARATE story that needs its own entry.
 Only match when you are highly confident that the new article is reporting the \
 EXACT SAME specific event/announcement/development as the existing story.
 
-Existing stories (story titles only — assume the story is tightly scoped to that headline):
+Existing stories — each entry shows the headline plus (when available) the \
+most recent article titles in that cluster and a short summary. Match against \
+the cluster as a whole, not just the original headline, because a mature \
+cluster often covers the event from multiple angles. You may still reject if \
+the new article covers a DIFFERENT specific event, even when the topic overlaps:
+
 {stories_block}
 
 New articles (title + source):
@@ -361,6 +366,61 @@ async def _call_openai(prompt: str, max_tokens: int = 4096) -> dict:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Phase-1/2 helpers: multi-signal match gating
+# ---------------------------------------------------------------------------
+
+_STOPWORDS_FA = {
+    "از", "در", "به", "با", "و", "که", "را", "این", "آن", "های", "یک",
+    "برای", "بر", "تا", "هم", "اما", "نیز", "یا", "چه", "همه", "باید",
+    "شد", "است", "شود", "کرد", "می", "پس", "بین", "طی",
+}
+
+
+def _title_tokens(text: str | None) -> set[str]:
+    """Extract comparable tokens from a Persian title. Drops stopwords,
+    punctuation, short tokens, and ZWNJ noise. Used for the Jaccard
+    overlap signal in multi-signal match gating.
+    """
+    if not text:
+        return set()
+    import re as _re
+
+    t = text.replace("\u200c", " ")
+    t = _re.sub(r"[،؛.؟!«»()\[\]\-—–:/\\\"'`]", " ", t)
+    tokens = {w for w in t.split() if len(w) >= 3 and w not in _STOPWORDS_FA}
+    return tokens
+
+
+def _quoted_phrases(text: str | None) -> set[str]:
+    """Return the set of phrases inside «…» — these are almost always
+    entities, claims, or loaded words worth matching on."""
+    if not text:
+        return set()
+    import re as _re
+
+    return {m.strip() for m in _re.findall(r"«([^«»]+)»", text) if m.strip()}
+
+
+def _number_tokens(text: str | None) -> set[str]:
+    """Extract Latin + Persian digit runs (≥ 2 chars) from text. Same
+    event usually shares casualty counts, dates, monetary figures —
+    these are strong identity signals independent of wording."""
+    if not text:
+        return set()
+    import re as _re
+
+    latin = _re.findall(r"\d{2,}", text)
+    fa = _re.findall(r"[۰-۹]{2,}", text)
+    return set(latin) | set(fa)
+
+
+def _jaccard(a: set, b: set) -> float:
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
+
+
 async def _match_to_existing_stories(
     db: AsyncSession,
     articles: list[Article],
@@ -368,16 +428,31 @@ async def _match_to_existing_stories(
 ) -> list[Article]:
     """Try to match new articles to existing visible stories.
 
-    Two-phase matching:
-    1. EMBEDDING PRE-FILTER: compute cosine similarity between each
-       article's embedding and each story's centroid embedding. Only
-       pairs with sim > 0.3 are sent to the LLM. This dramatically
-       reduces LLM calls (e.g. 30 articles × 200 stories → only ~5
-       articles × ~3 stories each get LLM-checked).
-    2. LLM CONFIRMATION: for each (article, candidate_stories) pair
-       that passed the pre-filter, ask the LLM to confirm the match.
+    Multi-signal matching (Phases 1 + 2 of the clustering upgrade):
 
-    Safety constraints:
+    1. EMBEDDING PRE-FILTER: cosine against the story centroid.
+    2. SIGNAL GATING BEFORE THE LLM. For each (article, candidate_story)
+       pair we compute:
+          - cosine: embedding sim (already computed)
+          - token_jaccard: Jaccard overlap of Persian title tokens
+            between the article and the story's title + most recent
+            article titles
+          - quote_overlap: shared «…» phrases
+          - number_overlap: shared numeric tokens (casualty counts,
+            dates, $ figures)
+          - time_delta_days
+       Two fast-paths around the LLM:
+          AUTO-MATCH  when cosine ≥ 0.85 AND (token_jaccard ≥ 0.35 OR
+                      quote_overlap ≥ 1 OR number_overlap ≥ 1) AND
+                      time_delta ≤ 2. Deterministic — no LLM call.
+          AUTO-REJECT when cosine < 0.60 OR time_delta > 7. No LLM.
+       Only the ambiguous middle band lands at the LLM.
+    3. LLM CONFIRMATION. The prompt now sees a richer story block
+       (title + top-3 article titles + short summary) so matching
+       against mature clusters doesn't hinge on a single 8-word
+       headline.
+
+    Safety constraints (unchanged):
     - Story must have article_count < settings.max_cluster_size
     - Story must have been active within clustering_time_window_days
     - article_count must be >= 5 (visibility threshold)
@@ -388,12 +463,22 @@ async def _match_to_existing_stories(
     from app.nlp.embeddings import cosine_similarity as _cosine_sim
 
     EMBEDDING_SIM_THRESHOLD = 0.30  # loose — let the LLM reject false positives
+    AUTO_MATCH_COSINE = 0.85
+    AUTO_REJECT_COSINE = 0.60
+    AUTO_MATCH_JACCARD = 0.35
+    AUTO_MATCH_MAX_AGE_DAYS = 2
+    AUTO_REJECT_MAX_AGE_DAYS = 7
 
     time_cutoff = datetime.now(timezone.utc) - _timedelta(days=settings.clustering_time_window_days)
 
-    # Get existing visible stories with their centroid embeddings
+    # Get existing visible stories with their centroid embeddings +
+    # last_updated_at (for time-delta gating) and summary_fa (for the
+    # Phase-2 richer story block).
     result = await db.execute(
-        select(Story.id, Story.title_fa, Story.title_en, Story.article_count, Story.centroid_embedding)
+        select(
+            Story.id, Story.title_fa, Story.title_en, Story.article_count,
+            Story.centroid_embedding, Story.last_updated_at, Story.summary_fa,
+        )
         .where(
             Story.article_count >= 5,
             Story.article_count < settings.max_cluster_size,
@@ -401,7 +486,7 @@ async def _match_to_existing_stories(
         )
         .order_by(Story.last_updated_at.desc().nullslast())
     )
-    existing_stories = result.all()  # (id, title_fa, title_en, article_count, centroid_embedding)
+    existing_stories = result.all()  # (id, title_fa, title_en, article_count, centroid, last_updated_at, summary_fa)
     logger.info(
         f"Matching against {len(existing_stories)} open stories "
         f"(article_count 5 .. {settings.max_cluster_size - 1}, "
@@ -413,52 +498,125 @@ async def _match_to_existing_stories(
         return articles
 
     # ── Phase 1: Embedding pre-filter ─────────────────────────────
-    # For each article, find which stories are plausible matches based
-    # on embedding similarity. Articles or stories without embeddings
-    # fall through to the LLM without pre-filtering (conservative).
+    story_by_id = {row[0]: row for row in existing_stories}
     stories_with_centroids = {
         row[0]: row[4]  # story_id → centroid_embedding
         for row in existing_stories
-        if row[4]  # has a centroid
+        if row[4]
     }
 
-    # Build per-article candidate story sets
-    # article_id → set of story_ids that passed the embedding threshold
+    # Preload the 3 most-recent article titles per candidate story once,
+    # so we can compute token/quote/number signals against a story's
+    # actual vocabulary (not just the original headline). Also seeds the
+    # Phase-2 richer story block sent to the LLM.
+    story_recent_titles: dict[uuid.UUID, list[str]] = {}
+    if story_by_id:
+        recent_q = await db.execute(
+            select(Article.story_id, Article.title_fa, Article.published_at)
+            .where(Article.story_id.in_(list(story_by_id.keys())))
+            .order_by(Article.published_at.desc().nullslast())
+        )
+        for sid, t_fa, _ in recent_q.all():
+            if not t_fa:
+                continue
+            story_recent_titles.setdefault(sid, [])
+            if len(story_recent_titles[sid]) < 3:
+                story_recent_titles[sid].append(t_fa)
+
+    # Per-story token/quote/number sets (story title + top-3 titles + summary).
+    story_sig: dict[uuid.UUID, dict[str, set]] = {}
+    for sid, row in story_by_id.items():
+        title_fa = row[1]
+        summary_fa = row[6]
+        titles = [title_fa or ""] + story_recent_titles.get(sid, [])
+        corpus = " ".join([t for t in titles if t] + ([summary_fa] if summary_fa else []))
+        story_sig[sid] = {
+            "tokens": _title_tokens(corpus),
+            "quotes": _quoted_phrases(corpus),
+            "numbers": _number_tokens(corpus),
+            "last_updated_at": row[5],
+        }
+
+    # Build per-article candidate story sets + auto-match / auto-reject
     article_candidates: dict[uuid.UUID, set[uuid.UUID]] = {}
     articles_without_embedding: list[Article] = []
+    auto_match_pairs: list[tuple[Article, uuid.UUID]] = []
+
+    auto_match_count = 0
+    auto_reject_count = 0
+
+    now_utc = datetime.now(timezone.utc)
 
     for article in articles:
         if not article.embedding or not any(v != 0.0 for v in (article.embedding or [])[:5]):
             articles_without_embedding.append(article)
             continue
 
+        a_title = article.title_fa or article.title_original or ""
+        a_tokens = _title_tokens(a_title)
+        a_quotes = _quoted_phrases(a_title)
+        a_numbers = _number_tokens(a_title)
+
         candidates = set()
         for story_id, centroid in stories_with_centroids.items():
             sim = _cosine_sim(article.embedding, centroid)
+            sig = story_sig.get(story_id, {})
+            last_upd = sig.get("last_updated_at")
+            age_days = 0.0
+            if last_upd:
+                age_days = abs((now_utc - last_upd).total_seconds()) / 86400.0
+
+            # AUTO-REJECT: low cosine OR too old. Skip this pair entirely.
+            if sim < AUTO_REJECT_COSINE or age_days > AUTO_REJECT_MAX_AGE_DAYS:
+                auto_reject_count += 1
+                continue
+
+            # AUTO-MATCH: very high cosine AND a concrete shared signal
+            # (token overlap, shared quote, or shared number) AND fresh.
+            if (
+                sim >= AUTO_MATCH_COSINE
+                and age_days <= AUTO_MATCH_MAX_AGE_DAYS
+                and (
+                    _jaccard(a_tokens, sig.get("tokens") or set()) >= AUTO_MATCH_JACCARD
+                    or bool(a_quotes & (sig.get("quotes") or set()))
+                    or bool(a_numbers & (sig.get("numbers") or set()))
+                )
+            ):
+                auto_match_pairs.append((article, story_id))
+                auto_match_count += 1
+                break  # one story is enough; stop scanning
+
+            # Otherwise — ambiguous middle band, send to LLM.
             if sim >= EMBEDDING_SIM_THRESHOLD:
                 candidates.add(story_id)
 
-        if candidates:
+        # Record LLM candidates only for articles NOT auto-matched
+        if candidates and not any(a is article for a, _ in auto_match_pairs):
             article_candidates[article.id] = candidates
-        # else: no candidates → article won't be sent to LLM for matching
-        #       (it'll fall through to new-cluster creation in step 3)
 
     # Stats
     pre_filtered_articles = len(article_candidates) + len(articles_without_embedding)
     total_candidate_pairs = sum(len(c) for c in article_candidates.values())
     logger.info(
-        f"Embedding pre-filter: {len(article_candidates)} articles have candidates "
-        f"({total_candidate_pairs} pairs), {len(articles_without_embedding)} articles "
-        f"have no embedding (sent to LLM unfiltered), "
-        f"{len(articles) - pre_filtered_articles} articles have no candidate stories"
+        f"Match gating — auto-match: {auto_match_count}, auto-reject: {auto_reject_count}, "
+        f"to LLM: {len(article_candidates)} articles × {total_candidate_pairs} pairs "
+        f"(+{len(articles_without_embedding)} without embedding), "
+        f"{len(articles) - pre_filtered_articles - auto_match_count} articles → new cluster"
     )
 
-    # ── Phase 2: LLM confirmation ─────────────────────────────────
-    # Build a combined set of articles to LLM-check: those with embedding
-    # candidates + those without embeddings (conservative fallback).
+    # Apply deterministic auto-matches first.
+    matched_article_ids: set[uuid.UUID] = set()
+    for article, story_id in auto_match_pairs:
+        if article.story_id is not None:
+            continue
+        article.story_id = story_id
+        matched_article_ids.add(article.id)
+
+    # ── Phase 2: LLM confirmation for the ambiguous middle band ───
     articles_to_check = [
         a for a in articles
-        if a.id in article_candidates or a in articles_without_embedding
+        if (a.id in article_candidates or a in articles_without_embedding)
+        and a.id not in matched_article_ids
     ]
 
     if not articles_to_check:
@@ -480,17 +638,27 @@ async def _match_to_existing_stories(
         f"Sending {len(articles_to_check)} articles × {len(filtered_stories)} candidate stories to LLM"
     )
 
-    matched_article_ids: set[uuid.UUID] = set()
-
     for story_batch_start in range(0, len(filtered_stories), STORY_BATCH_SIZE):
         story_batch = filtered_stories[story_batch_start: story_batch_start + STORY_BATCH_SIZE]
 
-        # Build stories block
+        # Phase-2 richer story block: title + top-3 recent article titles
+        # + short summary (first ~200 chars). Matching against mature
+        # clusters now hinges on the cluster's actual vocabulary, not
+        # the single-sentence headline frozen at creation time.
         stories_lines = []
         for i, row in enumerate(story_batch, 1):
             sid, title_fa, title_en = row[0], row[1], row[2]
+            summary_fa = row[6]
             display = title_fa or title_en or "(no title)"
-            stories_lines.append(f"S{i}. {display}")
+            line = f"S{i}. {display}"
+            recent = story_recent_titles.get(sid) or []
+            # Drop the original title from the recent list if duplicated
+            recent_unique = [t for t in recent if t and t != title_fa][:2]
+            if recent_unique:
+                line += "\n    recent titles: " + " / ".join(t[:80] for t in recent_unique)
+            if summary_fa:
+                line += "\n    summary: " + summary_fa[:200]
+            stories_lines.append(line)
         stories_block = "\n".join(stories_lines)
 
         # Only send unmatched articles that have candidates in THIS batch
@@ -1306,3 +1474,186 @@ async def cluster_articles(db: AsyncSession) -> dict:
     }
     logger.info(f"Incremental clustering complete: {stats}")
     return stats
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: cluster health audit
+# ---------------------------------------------------------------------------
+
+
+async def audit_cluster_coherence(
+    db: AsyncSession,
+    *,
+    min_articles: int = 10,
+    sample_size: int = 4,
+    pair_cosine_floor: float = 0.50,
+) -> dict:
+    """For every cluster of ≥ min_articles, sample a handful of articles
+    and compute pairwise cosine similarity between their embeddings. If
+    any pair falls below pair_cosine_floor the cluster is flagged as
+    likely heterogeneous — mixed events slipped in, or topic drifted
+    without splitting.
+
+    Output rows are appended to Story.audit_notes (self-creating JSONB
+    column) as {kind: "drift", detected_at, min_pair_cosine, reason}
+    so Niloofar can surface them in the next audit and decide whether
+    to split / prune / rename. We don't split automatically here —
+    wrong splits are worse than silent drift.
+
+    Pure-Python, no LLM calls. O(Σ stories × sample_size²) which is
+    trivially fast at a few hundred stories.
+    """
+    from sqlalchemy import text as _text
+    from app.nlp.embeddings import cosine_similarity as _cosine_sim
+
+    # Self-heal the notes column in case a fresh environment hasn't run
+    # the alembic migration yet. Idempotent.
+    async with db.begin_nested() if db.in_transaction() else _nullctx():
+        await db.execute(_text(
+            "ALTER TABLE stories ADD COLUMN IF NOT EXISTS audit_notes JSONB"
+        ))
+
+    q = await db.execute(
+        select(Story.id, Story.title_fa, Story.article_count)
+        .where(Story.article_count >= min_articles)
+    )
+    rows = q.all()
+
+    flagged = 0
+    checked = 0
+    for sid, title_fa, _ac in rows:
+        art_q = await db.execute(
+            select(Article.id, Article.embedding, Article.title_fa)
+            .where(Article.story_id == sid, Article.embedding.isnot(None))
+            .order_by(Article.published_at.desc().nullslast())
+            .limit(sample_size)
+        )
+        sample = [r for r in art_q.all() if r[1]]
+        if len(sample) < 3:
+            continue
+        checked += 1
+
+        pairs_below: list[tuple[float, str, str]] = []
+        min_pair = 1.0
+        for i in range(len(sample)):
+            for j in range(i + 1, len(sample)):
+                s = _cosine_sim(sample[i][1], sample[j][1])
+                if s < min_pair:
+                    min_pair = s
+                if s < pair_cosine_floor:
+                    pairs_below.append((s, sample[i][2] or "", sample[j][2] or ""))
+
+        if pairs_below:
+            flagged += 1
+            note = {
+                "kind": "drift",
+                "detected_at": datetime.now(timezone.utc).isoformat(),
+                "min_pair_cosine": round(min_pair, 3),
+                "pairs_below_floor": [
+                    {"cosine": round(s, 3), "a": a[:80], "b": b[:80]}
+                    for s, a, b in pairs_below[:3]
+                ],
+            }
+            await db.execute(
+                _text(
+                    "UPDATE stories SET audit_notes = "
+                    "COALESCE(audit_notes, '{}'::jsonb) || jsonb_build_object('cluster_drift', :note::jsonb) "
+                    "WHERE id = :sid"
+                ),
+                {"note": __import__("json").dumps(note, ensure_ascii=False), "sid": sid},
+            )
+    await db.commit()
+    return {"checked": checked, "flagged": flagged}
+
+
+# Tiny helper for the ALTER TABLE guard above.
+from contextlib import asynccontextmanager as _asynccontextmanager  # noqa: E402
+
+
+@_asynccontextmanager
+async def _nullctx():
+    yield
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: agglomerative-clustering experimental path
+# ---------------------------------------------------------------------------
+
+
+async def agglomerative_cluster_articles(
+    db: AsyncSession,
+    articles: list[Article],
+    *,
+    cosine_threshold: float = 0.75,
+    max_time_gap_days: int = 5,
+) -> list[set[uuid.UUID]]:
+    """Build a similarity graph over `articles` and return connected
+    components as candidate clusters. Two articles are linked when:
+      cosine(embedding) ≥ cosine_threshold
+      AND |published_at delta| ≤ max_time_gap_days
+      AND (share ≥ 2 title tokens OR share a «…» quote OR share a number)
+
+    Returns list of sets of article IDs. Each set is a candidate
+    cluster — LLM is expected to verify and name them in a follow-up.
+
+    This path is NOT wired into cluster_articles() by default. It's
+    here as a building block that can be switched on via settings.clustering_mode
+    = "agglomerative" once we've validated it offline against the
+    current LLM-first pipeline. Rewriting the top-down matching flow
+    end-to-end was out of scope for this commit; the function is the
+    core primitive needed for that swap.
+    """
+    from app.nlp.embeddings import cosine_similarity as _cosine_sim
+
+    items = [a for a in articles if a.embedding and any(v != 0.0 for v in (a.embedding or [])[:5])]
+
+    # Precompute signals per article
+    sigs: dict[uuid.UUID, dict] = {}
+    for a in items:
+        title = a.title_fa or a.title_original or ""
+        sigs[a.id] = {
+            "tokens": _title_tokens(title),
+            "quotes": _quoted_phrases(title),
+            "numbers": _number_tokens(title),
+            "published_at": a.published_at,
+        }
+
+    # Union-find
+    parent: dict[uuid.UUID, uuid.UUID] = {a.id: a.id for a in items}
+
+    def find(x: uuid.UUID) -> uuid.UUID:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(x: uuid.UUID, y: uuid.UUID) -> None:
+        rx, ry = find(x), find(y)
+        if rx != ry:
+            parent[rx] = ry
+
+    for i, a in enumerate(items):
+        for b in items[i + 1:]:
+            sim = _cosine_sim(a.embedding, b.embedding)
+            if sim < cosine_threshold:
+                continue
+            pa, pb = sigs[a.id], sigs[b.id]
+            # Time gap
+            if pa["published_at"] and pb["published_at"]:
+                gap = abs((pa["published_at"] - pb["published_at"]).total_seconds()) / 86400.0
+                if gap > max_time_gap_days:
+                    continue
+            # Shared-signal gate
+            shared_tokens = len(pa["tokens"] & pb["tokens"])
+            shares_quote = bool(pa["quotes"] & pb["quotes"])
+            shares_number = bool(pa["numbers"] & pb["numbers"])
+            if shared_tokens >= 2 or shares_quote or shares_number:
+                union(a.id, b.id)
+
+    groups: dict[uuid.UUID, set[uuid.UUID]] = {}
+    for aid in parent:
+        root = find(aid)
+        groups.setdefault(root, set()).add(aid)
+
+    # Drop singletons — by definition not a cluster
+    return [g for g in groups.values() if len(g) >= 2]

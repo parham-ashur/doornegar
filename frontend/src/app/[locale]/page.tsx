@@ -308,10 +308,10 @@ export default async function HomePage({
   const leftTextStories = sorted.filter(s => !usedIds.has(s.id)).slice(0, 3);
   leftTextStories.forEach(s => usedIds.add(s.id));
 
-  // Most viewed: blended score = views + trending + recency bonus
-  // When views are sparse, trending score dominates; as views grow, real popularity takes over.
-  // Cap at 4 stories — each card now carries two-side bullets (2 lines each)
-  // so five was pushing the right column too tall.
+  // Most viewed: blended score = views + trending + recency bonus.
+  // 5 stories to balance visual height against the left column's 3
+  // hero-style cards (each left card ≈ 1.6× a right card in vertical
+  // space because of the two-side narrative grid + telegram strip).
   const now = Date.now();
   const mostViewed = [...sorted]
     .filter(s => !usedIds.has(s.id))
@@ -323,7 +323,7 @@ export default async function HomePage({
       return { ...s, _popScore: score };
     })
     .sort((a, b) => b._popScore - a._popScore)
-    .slice(0, 4);
+    .slice(0, 5);
   mostViewed.forEach(s => usedIds.add(s.id));
 
   // Most disputed: not already used

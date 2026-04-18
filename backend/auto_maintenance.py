@@ -46,6 +46,7 @@ STEP_TIMEOUTS_SEC = {
     "prune_noise": 180,            # single UPDATE/DELETE batch, no LLM
     "recount": 60,                 # two UPDATE…FROM (GROUP BY) queries, no LLM
     "detect_hourly_updates": 120,  # pure SQL aggregate, no LLM
+    "audit_clusters": 300,         # sample + cosine, no LLM
     "process": 1800,               # embeddings + translation over many articles
     "cluster": 1200,               # LLM clustering batch
     "centroids": 600,
@@ -3374,6 +3375,25 @@ async def step_snapshot_analyses():
     return stats
 
 
+async def step_audit_cluster_coherence():
+    """Phase 3 of the clustering upgrade. For every cluster of ≥10
+    articles, sample a handful and check pairwise cosine similarity.
+    Flag stories where any sampled pair is below threshold — those
+    are candidates for Niloofar to split / prune / rename.
+
+    No LLM, no edits to bias or summaries — just writes
+    stories.audit_notes.cluster_drift with evidence. Niloofar surfaces
+    the flagged ones in the next audit.
+    """
+    from app.database import async_session
+    from app.services.clustering import audit_cluster_coherence
+
+    async with async_session() as db:
+        stats = await audit_cluster_coherence(db)
+    logger.info(f"Cluster coherence audit: {stats}")
+    return stats
+
+
 async def step_niloofar_editorial():
     """Generate editorial context for top 30 trending stories.
 
@@ -3727,6 +3747,7 @@ FULL_PIPELINE = [
     ("niloofar_editorial", "Niloofar editorial context for top stories", "step_niloofar_editorial"),
     ("niloofar_polish_telegram", "Niloofar polishes Telegram predictions/claims for homepage", "step_niloofar_polish_telegram"),
     ("snapshot_analyses", "Snapshot analysis axes for daily-change detection", "step_snapshot_analyses"),
+    ("audit_clusters", "Cluster coherence audit (flag drift for Niloofar review)", "step_audit_cluster_coherence"),
     # Same hourly detection the rss-cron runs. The daily full run lands at
     # 04:00 UTC which the rss-cron skips on purpose (collision slot), so
     # including it here keeps the signal fresh at that hour too.

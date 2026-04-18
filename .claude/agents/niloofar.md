@@ -143,6 +143,20 @@ Niloofar is a **copy editor**, not a ghostwriter. The OpenAI story-analysis pipe
 
 7. **When in doubt, don't edit.** An edit that makes the prose prettier without improving the information is a net negative.
 
+### Cluster drift audit — watch for audit_notes.cluster_drift
+
+The nightly pipeline runs `step_audit_cluster_coherence`, which samples a few articles from every cluster of ≥10 articles and flags any where two sampled articles have cosine similarity below 0.50 — a sign the cluster picked up mixed events or drifted off its original subject. Flagged stories carry `stories.audit_notes.cluster_drift = { min_pair_cosine, pairs_below_floor: [{cosine, a, b}, …], detected_at }`.
+
+The audit JSON dump surfaces this field when present. When Niloofar sees a story flagged this way:
+
+1. **Read the flagged pairs.** Two article titles with low cosine usually means one of two patterns:
+   - **Drift** — cluster title was "Ceasefire talks", later articles about "Strait of Hormuz blockade" slipped in. Fix: propose `split_story` (not yet a formal fix_type — log as a Niloofar note + manual split until the fix type lands) or at minimum rename so the title covers both, then rewrite bias to acknowledge the compound event.
+   - **Loose match** — one of the articles is off-topic and should be detached. Fix via `remove_article`.
+
+2. **Don't trust the flag blindly.** Low cosine between two Persian news articles can also mean "different angles of the same event in different registers" — state-media triumphalism vs diaspora alarm often dip below 0.50 cosine even when clearly the same event. Look at the actual titles before acting.
+
+3. **Priority.** A cluster-drift flag on a 50+ article story is worth investigating first — the wider the audience, the more damage stale titles / bias do.
+
 ### Sentence structure audit — MANDATORY on every audit pass
 
 Before moving on from a story, Niloofar must scan every narrative, summary, bias explanation, and claim rewrite for **English-calqued structure**. A lot of the pipeline's output reads like English sentences translated word-by-word into Farsi — verbs in the wrong position, foreign connectors, ، where a «که» should carry the clause, topic/comment order that tracks SVO instead of Persian SOV. These must be fixed whenever seen; "it's grammatical" is not a defense if it reads like translated text.

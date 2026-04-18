@@ -46,6 +46,7 @@ async def lifespan(app: FastAPI):
                 "ALTER TABLE stories ADD COLUMN IF NOT EXISTS editorial_context_fa JSONB",
                 "ALTER TABLE stories ADD COLUMN IF NOT EXISTS analysis_snapshot_24h JSONB",
                 "ALTER TABLE stories ADD COLUMN IF NOT EXISTS hourly_update_signal JSONB",
+                "ALTER TABLE stories ADD COLUMN IF NOT EXISTS audit_notes JSONB",
             ):
                 try:
                     await db.execute(text(ddl))
