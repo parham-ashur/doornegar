@@ -714,15 +714,23 @@ export default async function HomePage({
             </div>
           </div>
 
-          {/* Most read (5 cols) */}
-          <div className="col-span-5 pr-6">
-            <div className="flex items-center gap-3 mb-4">
+          {/* Most read (5 cols). The parent grid row stretches this
+              column to match the hero-style leftTextStories height
+              (CSS grid default align-stretch). We use flex-col + h-full
+              here so the story list fills that height instead of
+              leaving whitespace at the bottom — and justify-between
+              pushes the leftover slack between cards rather than at
+              the end. Inside each card, flex-1 on the content region
+              makes the vertical spacer between "meta" and the optional
+              telegram strip dynamic. */}
+          <div className="col-span-5 pr-6 flex flex-col h-full">
+            <div className="flex items-center gap-3 mb-4 shrink-0">
               <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
               <span className="text-[13px] font-black text-slate-900 dark:text-white shrink-0">پرمخاطب‌ترین</span>
               <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
             </div>
 
-            <div className="space-y-0">
+            <div className="flex-1 flex flex-col justify-between">
               {mostViewed.map((s, i) => {
                 const analysis = allAnalyses[s.id];
                 const stateS = analysis?.state_summary_fa;
@@ -751,21 +759,23 @@ export default async function HomePage({
                         {s.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300"> · درون‌مرزی {toFa(s.state_pct)}٪</span>}
                         {s.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400"> · برون‌مرزی {toFa(s.diaspora_pct)}٪</span>}
                       </p>
-                      {/* Two-side bullets, 1 line each — Parham asked
-                          for single-line bullets in mostViewed to keep
-                          the column compact and the row balanced. */}
+                      {/* Two-side bullets wrap naturally (no line-clamp).
+                          Their length varies per story, which is how the
+                          column adapts to match the left side's height
+                          without JS measurement. Parent card is flex-col
+                          so it absorbs the variation cleanly. */}
                       {stateS && (
-                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 mt-1 line-clamp-1">
+                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 mt-1">
                           <span className="text-[#1e3a5f] dark:text-blue-300 font-bold">• </span>{stateS}
                         </p>
                       )}
                       {diasporaS && (
-                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 mt-1 line-clamp-1">
+                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 mt-1">
                           <span className="text-[#ea580c] dark:text-orange-400 font-bold">• </span>{diasporaS}
                         </p>
                       )}
                       {!stateS && !diasporaS && fallbackBullets.map((b, j) => (
-                        <p key={j} className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-1">• {b}</p>
+                        <p key={j} className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1">• {b}</p>
                       ))}
                       {/* Telegram first prediction + first claim, 1-line
                           clamp each. */}
