@@ -13,9 +13,14 @@ const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 // minute. Every miss is a round trip from Vercel (US or EU) to Railway in the
 // US, so bumping these from 30/60/120 to 300/600/600 cuts origin pressure
 // dramatically without noticeably aging the content.
-const TRENDING_TTL = 1800;       // 30 min — pipeline runs daily, stories don't change faster
-const ANALYSIS_TTL = 3600;       // 1 hour — narratives/bias are stable once generated
-const TELEGRAM_TTL = 3600;       // 1 hour — telegram analysis is stable once generated
+// TTLs intentionally short: our SSR fetches swallow errors and return
+// `{}` / `null` as fallback (so the page still renders partial data when
+// the API is slow). Next.js ISR caches those fallback values as if they
+// were real, which can leave the homepage stuck on empty-state for up
+// to the TTL window. Short TTLs heal that within a few minutes.
+const TRENDING_TTL = 300;        // 5 min
+const ANALYSIS_TTL = 300;        // 5 min
+const TELEGRAM_TTL = 300;        // 5 min
 
 async function fetchAPI<T>(path: string): Promise<T | null> {
   try {
