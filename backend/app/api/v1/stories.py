@@ -811,8 +811,10 @@ def _story_brief_with_extras(story: Story) -> StoryBrief:
                 try:
                     brief.update_signal["delta"] = diff_narratives(
                         current_bias=blob_for_signal.get("bias_explanation_fa"),
-                        current_state=getattr(story, "state_summary_fa", None),
-                        current_diaspora=getattr(story, "diaspora_summary_fa", None),
+                        # state_summary_fa / diaspora_summary_fa live in
+                        # the summary_en JSONB blob, not Story columns.
+                        current_state=blob_for_signal.get("state_summary_fa"),
+                        current_diaspora=blob_for_signal.get("diaspora_summary_fa"),
                         snapshot=getattr(story, "analysis_snapshot_24h", None),
                     )
                 except Exception:
