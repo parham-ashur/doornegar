@@ -56,6 +56,7 @@ STEP_TIMEOUTS_SEC = {
     "fix_images": 1200,
     "migrate_images_r2": 1800,   # download + upload per article, capped 300/run
     "telegram_analysis": 3600,     # per-story LLM analysis
+    "telegram_reassign": 1200,     # re-embed 3K posts, pure math, no LLM
     "backfill_analyst_counts": 300,  # no LLM — just resolves supporter names
     "niloofar_editorial": 1200,
     "niloofar_polish_telegram": 900,
@@ -1940,6 +1941,18 @@ async def step_telegram_link_posts():
 
     async with async_session() as db:
         stats = await link_posts_by_embedding(db, threshold=0.35)
+
+    return stats
+
+
+async def step_telegram_reassign_posts():
+    """Revisit already-linked posts and move any whose best-match story
+    has drifted since they were first attached."""
+    from app.database import async_session
+    from app.services.telegram_analysis import reassign_posts_by_embedding
+
+    async with async_session() as db:
+        stats = await reassign_posts_by_embedding(db)
 
     return stats
 
@@ -3919,6 +3932,12 @@ FULL_PIPELINE = [
     ("cluster", "Cluster articles into stories", "step_cluster"),
     ("centroids", "Recompute story centroid embeddings", "step_recompute_centroids"),
     ("telegram_link", "Link Telegram posts to stories (embeddings)", "step_telegram_link_posts"),
+    # Fix stale mis-links: posts whose best-match story has drifted
+    # since they were first attached get moved to where they actually
+    # belong now. Runs after new posts are linked so reassignment
+    # considers the freshest centroids. Invalidates affected stories'
+    # telegram_analysis cache so the next read regenerates cleanly.
+    ("telegram_reassign", "Reassign drifted Telegram posts to better-matching stories", "step_telegram_reassign_posts"),
     ("merge_similar", "Merge similar visible stories", "step_merge_similar"),
     ("summarize", "Summarize new stories", "step_summarize"),
     ("bias_score", "Bias scoring", "step_bias_score"),

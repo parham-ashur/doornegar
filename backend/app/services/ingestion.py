@@ -5,6 +5,7 @@ extracts article content, and stores them in the database.
 """
 
 import logging
+import re
 from datetime import datetime, timezone
 
 import feedparser
@@ -21,6 +22,28 @@ from app.models.ingestion_log import IngestionLog
 from app.models.source import Source
 
 logger = logging.getLogger(__name__)
+
+# URL patterns for favicons, PWA icons, and other non-article thumbnails
+# that RSS feeds sometimes expose as media_content when no real article
+# image exists. Matches the frontend SafeImage filter so rejected URLs
+# never enter the DB in the first place — the frontend filter stays as
+# a safety net for URLs already stored from earlier ingests.
+_ICON_URL_PATTERNS = [
+    re.compile(r"/ico-\d+x\d+\.(png|jpg|webp|svg)(\?|$)", re.I),
+    re.compile(r"/favicon[.\-]", re.I),
+    re.compile(r"/icon[.\-]\d+", re.I),
+    re.compile(r"/apple-touch-icon", re.I),
+    re.compile(r"/webApp/ico-", re.I),
+    re.compile(r"/manifest-icon", re.I),
+]
+
+
+def _is_icon_like(url: str | None) -> bool:
+    """Return True when a URL is almost certainly a site icon, not an
+    article image. Used at ingest time to reject before the DB write."""
+    if not url:
+        return False
+    return any(p.search(url) for p in _ICON_URL_PATTERNS)
 
 
 async def fetch_feed(feed_url: str) -> feedparser.FeedParserDict | None:
@@ -144,6 +167,12 @@ async def ingest_source(source: Source, db: AsyncSession) -> dict:
                         entry.get("summary", ""),
                         entry.get("content", []),
                     )
+                # Reject favicons / app-icons captured from feeds that expose
+                # the site's web-app icon as media_content. Better to store
+                # NULL and render the newspaper placeholder than to show a
+                # stretched 192×192 logo on a 16:9 card.
+                if _is_icon_like(image_url):
+                    image_url = None
 
                 language = detect_language(title)
                 published_at = parse_published_date(entry)

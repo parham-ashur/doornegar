@@ -616,3 +616,159 @@ async def link_posts_by_embedding(db: AsyncSession, threshold: float = 0.35) -> 
     await db.commit()
     logger.info(f"Embedding-linked {linked} telegram posts to stories")
     return {"linked": linked, "total_posts": len(posts), "threshold": threshold}
+
+
+async def reassign_posts_by_embedding(
+    db: AsyncSession,
+    *,
+    sample_limit: int = 3000,
+    drift_gap: float = 0.08,
+    min_score: float = 0.40,
+) -> dict:
+    """Re-examine already-linked Telegram posts and move any whose best
+    current-story match is no longer their best match overall.
+
+    Why: link_posts_by_embedding only runs on posts with story_id=NULL,
+    so a post's initial attachment is permanent even when its original
+    story fragments, merges with another, or ages out while a better
+    cluster forms nearby. Over weeks that produces stale mis-links —
+    posts show up as "commentary" on a story they stopped matching.
+
+    Rules:
+      - Only consider posts whose alternative story scores `drift_gap`
+        HIGHER than their current story (default 0.08). Prevents
+        thrashing around borderline matches.
+      - Require the alternative to clear `min_score` (default 0.40) —
+        slightly stricter than the link threshold 0.35, because
+        reassignment is a stronger claim than initial attachment.
+      - Cap at `sample_limit` posts per run to stay within step
+        timeout; orders by most recently posted first so freshest
+        discourse corrects first.
+
+    Returns per-run stats including the story IDs whose post count
+    shifted — caller can invalidate their telegram_analysis cache so
+    the next read regenerates.
+    """
+    from sqlalchemy import desc, update
+
+    from app.nlp.embeddings import cosine_similarity
+
+    # Load stories with valid centroids (same guard as the linker)
+    result = await db.execute(
+        select(Story).where(
+            Story.centroid_embedding.isnot(None),
+            Story.article_count >= 3,
+        )
+    )
+    stories = list(result.scalars().all())
+    story_data: dict[str, list[float]] = {}
+    for s in stories:
+        c = s.centroid_embedding
+        if not isinstance(c, list) or len(c) == 0:
+            continue
+        if any(v is None or not isinstance(v, (int, float)) for v in c):
+            continue
+        story_data[str(s.id)] = c
+
+    if not story_data:
+        return {"reassigned": 0, "reason": "no stories with centroids"}
+
+    # Pull a recent sample of linked posts. Posts older than ~60 days
+    # rarely benefit from reassignment (their topic has moved on) and
+    # walking the full table takes minutes, so window by recency.
+    from datetime import datetime, timedelta, timezone
+    cutoff = datetime.now(timezone.utc) - timedelta(days=60)
+
+    result = await db.execute(
+        select(TelegramPost)
+        .where(
+            TelegramPost.story_id.isnot(None),
+            TelegramPost.text.isnot(None),
+            TelegramPost.text != "",
+            TelegramPost.date >= cutoff,
+        )
+        .order_by(desc(TelegramPost.date))
+        .limit(sample_limit)
+    )
+    posts = list(result.scalars().all())
+    if not posts:
+        return {"reassigned": 0, "examined": 0}
+
+    # Re-embed post texts. Using the same batched embedder the linker
+    # uses so the vector space matches story centroids exactly.
+    from app.nlp.embeddings import generate_embeddings_batch
+    post_texts = [(p.text or "")[:500] for p in posts]
+    embeddings = generate_embeddings_batch(post_texts, batch_size=100)
+
+    moves: dict[str, int] = {}  # story_id -> net delta
+    reassigned = 0
+    below_gap = 0
+    unchanged = 0
+
+    for post, emb in zip(posts, embeddings):
+        if not emb or all(v == 0 for v in emb) or any(v is None for v in emb):
+            continue
+
+        current_story = str(post.story_id)
+        current_score = 0.0
+        best_story_id = current_story
+        best_score = 0.0
+
+        for sid, centroid in story_data.items():
+            try:
+                score = cosine_similarity(emb, centroid)
+            except Exception:
+                continue
+            if sid == current_story:
+                current_score = score
+            if score > best_score:
+                best_score = score
+                best_story_id = sid
+
+        if best_story_id == current_story:
+            unchanged += 1
+            continue
+
+        if best_score < min_score:
+            below_gap += 1
+            continue
+
+        if (best_score - current_score) < drift_gap:
+            below_gap += 1
+            continue
+
+        await db.execute(
+            update(TelegramPost)
+            .where(TelegramPost.id == post.id)
+            .values(story_id=best_story_id)
+        )
+        reassigned += 1
+        moves[current_story] = moves.get(current_story, 0) - 1
+        moves[best_story_id] = moves.get(best_story_id, 0) + 1
+
+    # Invalidate cached telegram_analysis on every story whose post
+    # count changed — the next API read will regenerate with the
+    # corrected post set instead of returning stale predictions.
+    affected_story_ids = {sid for sid, delta in moves.items() if delta != 0}
+    if affected_story_ids:
+        await db.execute(
+            update(Story)
+            .where(Story.id.in_(affected_story_ids))
+            .values(telegram_analysis=None)
+        )
+
+    await db.commit()
+    logger.info(
+        f"Reassigned {reassigned} telegram posts across {len(affected_story_ids)} "
+        f"stories (examined={len(posts)}, unchanged={unchanged}, below_gap={below_gap}, "
+        f"drift_gap={drift_gap}, min_score={min_score})"
+    )
+    return {
+        "reassigned": reassigned,
+        "examined": len(posts),
+        "unchanged": unchanged,
+        "below_gap": below_gap,
+        "stories_touched": len(affected_story_ids),
+        "drift_gap": drift_gap,
+        "min_score": min_score,
+    }
