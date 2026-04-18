@@ -8,6 +8,7 @@ import Footer from "@/components/layout/Footer";
 import ChromeGate from "@/components/layout/ChromeGate";
 import PageAtmosphere from "@/components/common/PageAtmosphere";
 import WelcomeModal from "@/components/common/WelcomeModal";
+import UmamiTracker from "@/components/common/UmamiTracker";
 import "@/styles/globals.css";
 
 // metadataBase lets Next resolve all relative OG/Twitter image URLs and
@@ -111,6 +112,7 @@ export default async function LocaleLayout({
             </ChromeGate>
           </div>
         </NextIntlClientProvider>
+        <UmamiTracker />
       </body>
     </html>
   );
