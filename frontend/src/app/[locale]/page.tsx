@@ -309,9 +309,11 @@ export default async function HomePage({
   leftTextStories.forEach(s => usedIds.add(s.id));
 
   // Most viewed: blended score = views + trending + recency bonus.
-  // 4 stories — the 3 hero-style leftTextStories set the visual height
-  // of the row and a 5th card on the right pushes the columns out of
-  // balance (empty space appears under "در روزهای گذشته").
+  // Render 10 stories instead of 4 — the box is now a fixed-height
+  // scrollable pane matching the leftTextStories column height, so we
+  // WANT more content than fits on screen so the scroll always has
+  // somewhere to go. The box never leaves whitespace at the bottom
+  // because it's capped at the parent grid row height.
   const now = Date.now();
   const mostViewed = [...sorted]
     .filter(s => !usedIds.has(s.id))
@@ -323,7 +325,7 @@ export default async function HomePage({
       return { ...s, _popScore: score };
     })
     .sort((a, b) => b._popScore - a._popScore)
-    .slice(0, 4);
+    .slice(0, 10);
   mostViewed.forEach(s => usedIds.add(s.id));
 
   // Most disputed: not already used
@@ -714,19 +716,16 @@ export default async function HomePage({
             </div>
           </div>
 
-          {/* Most read (5 cols). The parent grid row stretches this
-              column to match the hero-style leftTextStories height
-              (CSS grid default align-stretch). Below, we use an inner
-              CSS grid with auto-rows-fr so the 4 cards each occupy an
-              equal share of the available height — when the column
-              stretches to match the tall left side, every card
-              stretches with it instead of piling up at the top and
-              leaving whitespace below. Each card is `items-stretch`
-              (instead of items-start) so its numbered rank + content
-              fill the row vertically; the content block inside uses
-              justify-center to park the text in the middle of its
-              stretched cell, which reads naturally even on quiet news
-              days when the left column is very tall. */}
+          {/* Most read (5 cols). Fixed-height scrollable pane — the
+              parent grid row stretches this column to match the
+              hero-style leftTextStories height, and the inner list
+              scrolls within that cap. Rendering more stories than
+              fit guarantees the scroll always has somewhere to go,
+              so there's no whitespace at the bottom regardless of
+              how tall the left column is. Mirrors the article-list
+              scrollable pattern on story pages Parham referenced.
+              scrollbar-thin + thin-colored track keeps the scroll
+              visible without being obtrusive. */}
           <div className="col-span-5 pr-6 flex flex-col h-full">
             <div className="flex items-center gap-3 mb-4 shrink-0">
               <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
@@ -734,7 +733,7 @@ export default async function HomePage({
               <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
             </div>
 
-            <div className="flex-1 grid auto-rows-fr gap-0 min-h-0">
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-slate-300 dark:[&::-webkit-scrollbar-thumb]:bg-slate-700 [&::-webkit-scrollbar-thumb]:rounded-full">
               {mostViewed.map((s, i) => {
                 const analysis = allAnalyses[s.id];
                 const stateS = analysis?.state_summary_fa;
@@ -751,9 +750,9 @@ export default async function HomePage({
                 }
                 return (
                   <Link key={s.id} href={`/${locale}/stories/${s.id}`}
-                    className={`group flex items-stretch gap-3 py-4 ${i > 0 ? "border-t border-slate-100 dark:border-slate-800/60" : ""}`}>
-                    <span className="text-[24px] font-black text-slate-200 dark:text-slate-700 shrink-0 w-8 text-center self-start mt-0.5">{toFa(i + 1)}</span>
-                    <div className="flex-1 min-w-0 flex flex-col justify-center">
+                    className={`group flex items-start gap-3 py-4 ${i > 0 ? "border-t border-slate-100 dark:border-slate-800/60" : ""}`}>
+                    <span className="text-[24px] font-black text-slate-200 dark:text-slate-700 shrink-0 w-8 text-center mt-0.5">{toFa(i + 1)}</span>
+                    <div className="flex-1 min-w-0">
                       <h3 className="text-[18px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
                         {s.title_fa}
                       </h3>
@@ -763,23 +762,22 @@ export default async function HomePage({
                         {s.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300"> · درون‌مرزی {toFa(s.state_pct)}٪</span>}
                         {s.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400"> · برون‌مرزی {toFa(s.diaspora_pct)}٪</span>}
                       </p>
-                      {/* Two-side bullets wrap naturally (no line-clamp).
-                          Their length varies per story, which is how the
-                          column adapts to match the left side's height
-                          without JS measurement. Parent card is flex-col
-                          so it absorbs the variation cleanly. */}
+                      {/* Bullets clamp to 1 line each — each card stays
+                          compact, and the list handles variable content
+                          length by scrolling within the fixed-height
+                          pane rather than stretching cards. */}
                       {stateS && (
-                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 mt-1">
+                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 mt-1 line-clamp-1">
                           <span className="text-[#1e3a5f] dark:text-blue-300 font-bold">• </span>{stateS}
                         </p>
                       )}
                       {diasporaS && (
-                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 mt-1">
+                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 mt-1 line-clamp-1">
                           <span className="text-[#ea580c] dark:text-orange-400 font-bold">• </span>{diasporaS}
                         </p>
                       )}
                       {!stateS && !diasporaS && fallbackBullets.map((b, j) => (
-                        <p key={j} className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1">• {b}</p>
+                        <p key={j} className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-1">• {b}</p>
                       ))}
                       {/* Telegram first prediction + first claim, 1-line
                           clamp each. */}
