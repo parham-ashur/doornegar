@@ -540,11 +540,21 @@ async def analyze_story_telegram(
 async def link_posts_by_embedding(db: AsyncSession, threshold: float = 0.35) -> dict:
     """Link unlinked Telegram posts to stories via embedding similarity.
 
+    Scoring: for each story, take the MAX of (story centroid score,
+    best per-article score). Broad umbrella stories have diluted
+    centroids — averaging 100+ articles spanning ceasefire + Hormuz +
+    talks produces a blurry vector no specific post matches strongly.
+    Adding per-article best-match rescues those cases: a post quoting
+    an IRGC statement scores near 1.0 against the specific IRGC
+    article, even if it scores 0.3 against the story centroid.
+
     Replaces URL-based matching with semantic matching.
     """
+    from app.models.article import Article
     from app.nlp.embeddings import generate_embeddings_batch, cosine_similarity
 
-    # Load stories with centroids
+    # Load stories + their article embeddings. Grouping happens
+    # in-process — two queries beats N+1 per-story selects.
     result = await db.execute(
         select(Story).where(
             Story.centroid_embedding.isnot(None),
@@ -552,21 +562,42 @@ async def link_posts_by_embedding(db: AsyncSession, threshold: float = 0.35) -> 
         )
     )
     stories = list(result.scalars().all())
+
     # Validate centroids — some rows have dicts, lists with None values, or
     # partially-initialized vectors from older code. Skip anything that
-    # isn't a clean list of finite numbers so cosine_similarity can't raise
-    # "unsupported operand type(s) for *: 'float' and 'NoneType'".
-    story_data = []
-    for s in stories:
-        c = s.centroid_embedding
-        if not isinstance(c, list) or len(c) == 0:
-            continue
-        if any(v is None or not isinstance(v, (int, float)) for v in c):
-            continue
-        story_data.append((str(s.id), c))
+    # isn't a clean list of finite numbers so cosine_similarity can't raise.
+    def _clean_vec(v) -> list[float] | None:
+        if not isinstance(v, list) or len(v) == 0:
+            return None
+        if any(x is None or not isinstance(x, (int, float)) for x in v):
+            return None
+        return v
 
-    if not story_data:
+    story_centroids: dict[str, list[float]] = {}
+    for s in stories:
+        c = _clean_vec(s.centroid_embedding)
+        if c is not None:
+            story_centroids[str(s.id)] = c
+
+    if not story_centroids:
         return {"linked": 0, "reason": "no stories with centroids"}
+
+    # Pull article embeddings for every story we're considering.
+    # 200 stories × ~6 articles average = ~1200 vectors, cheap.
+    eligible_ids = list(story_centroids.keys())
+    article_result = await db.execute(
+        select(Article.story_id, Article.embedding)
+        .where(
+            Article.story_id.in_(eligible_ids),
+            Article.embedding.isnot(None),
+        )
+    )
+    story_article_embs: dict[str, list[list[float]]] = {}
+    for sid, emb in article_result.all():
+        cleaned = _clean_vec(emb)
+        if cleaned is None:
+            continue
+        story_article_embs.setdefault(str(sid), []).append(cleaned)
 
     # Get unlinked posts
     result = await db.execute(
@@ -588,22 +619,39 @@ async def link_posts_by_embedding(db: AsyncSession, threshold: float = 0.35) -> 
     # Match
     from sqlalchemy import update
     linked = 0
+    via_article = 0
     for post, emb in zip(posts, embeddings):
         if not emb or all(v == 0 for v in emb) or any(v is None for v in emb):
             continue
 
-        best_score = 0
-        best_story_id = None
-        for story_id, centroid in story_data:
+        best_score = 0.0
+        best_story_id: str | None = None
+        best_via_article = False
+
+        for sid, centroid in story_centroids.items():
             try:
-                score = cosine_similarity(emb, centroid)
+                centroid_score = cosine_similarity(emb, centroid)
             except Exception:
-                # Defensive: any shape/type mismatch between emb and centroid
-                # (dimension mismatch, null inside) should skip, not crash
-                continue
+                centroid_score = 0.0
+
+            # Per-article best match for this story (rescues broad clusters
+            # whose centroid is blurred by too many heterogeneous articles).
+            article_best = 0.0
+            for art_emb in story_article_embs.get(sid, []):
+                try:
+                    s = cosine_similarity(emb, art_emb)
+                except Exception:
+                    continue
+                if s > article_best:
+                    article_best = s
+
+            used_article = article_best > centroid_score
+            score = max(centroid_score, article_best)
+
             if score > best_score:
                 best_score = score
-                best_story_id = story_id
+                best_story_id = sid
+                best_via_article = used_article
 
         if best_score >= threshold and best_story_id:
             await db.execute(
@@ -612,10 +660,20 @@ async def link_posts_by_embedding(db: AsyncSession, threshold: float = 0.35) -> 
                 .values(story_id=best_story_id)
             )
             linked += 1
+            if best_via_article:
+                via_article += 1
 
     await db.commit()
-    logger.info(f"Embedding-linked {linked} telegram posts to stories")
-    return {"linked": linked, "total_posts": len(posts), "threshold": threshold}
+    logger.info(
+        f"Embedding-linked {linked} telegram posts to stories "
+        f"(via_article_rescue={via_article}, threshold={threshold})"
+    )
+    return {
+        "linked": linked,
+        "total_posts": len(posts),
+        "threshold": threshold,
+        "via_article_rescue": via_article,
+    }
 
 
 async def reassign_posts_by_embedding(
@@ -651,7 +709,15 @@ async def reassign_posts_by_embedding(
     """
     from sqlalchemy import desc, update
 
+    from app.models.article import Article
     from app.nlp.embeddings import cosine_similarity
+
+    def _clean_vec(v) -> list[float] | None:
+        if not isinstance(v, list) or len(v) == 0:
+            return None
+        if any(x is None or not isinstance(x, (int, float)) for x in v):
+            return None
+        return v
 
     # Load stories with valid centroids (same guard as the linker)
     result = await db.execute(
@@ -663,15 +729,30 @@ async def reassign_posts_by_embedding(
     stories = list(result.scalars().all())
     story_data: dict[str, list[float]] = {}
     for s in stories:
-        c = s.centroid_embedding
-        if not isinstance(c, list) or len(c) == 0:
-            continue
-        if any(v is None or not isinstance(v, (int, float)) for v in c):
-            continue
-        story_data[str(s.id)] = c
+        c = _clean_vec(s.centroid_embedding)
+        if c is not None:
+            story_data[str(s.id)] = c
 
     if not story_data:
         return {"reassigned": 0, "reason": "no stories with centroids"}
+
+    # Per-article embeddings give reassignment the same rescue path as
+    # initial linking: a post that matches one specific article in a
+    # broad cluster stays (or moves) where that article lives, not
+    # where a diluted centroid accidentally wins.
+    art_result = await db.execute(
+        select(Article.story_id, Article.embedding)
+        .where(
+            Article.story_id.in_(list(story_data.keys())),
+            Article.embedding.isnot(None),
+        )
+    )
+    story_article_embs: dict[str, list[list[float]]] = {}
+    for sid, emb in art_result.all():
+        cleaned = _clean_vec(emb)
+        if cleaned is None:
+            continue
+        story_article_embs.setdefault(str(sid), []).append(cleaned)
 
     # Pull a recent sample of linked posts. Posts older than ~60 days
     # rarely benefit from reassignment (their topic has moved on) and
@@ -716,9 +797,19 @@ async def reassign_posts_by_embedding(
 
         for sid, centroid in story_data.items():
             try:
-                score = cosine_similarity(emb, centroid)
+                centroid_score = cosine_similarity(emb, centroid)
             except Exception:
-                continue
+                centroid_score = 0.0
+            article_best = 0.0
+            for art_emb in story_article_embs.get(sid, []):
+                try:
+                    s = cosine_similarity(emb, art_emb)
+                except Exception:
+                    continue
+                if s > article_best:
+                    article_best = s
+            score = max(centroid_score, article_best)
+
             if sid == current_story:
                 current_score = score
             if score > best_score:

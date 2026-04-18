@@ -27,6 +27,26 @@ function isLikelyIcon(src: string): boolean {
   return ICON_URL_PATTERNS.some((re) => re.test(src));
 }
 
+// Iran International's Sanity CDN returns 400 "Invalid filename" when
+// the bare image hash is requested without a transform+extension
+// suffix like `-800x531.jpg`. Our ingester currently captures both the
+// valid (hash-WxH.ext) and the invalid (bare hash, or hash-WxH without
+// extension) variants depending on which tag in the article HTML
+// wins. Valid looks like: …/production/<hash>-800x531.jpg. Invalid
+// looks like: …/production/<hash> or …/production/<hash>-2979x1986
+// (no extension). Detect and reject the invalid shape up front so we
+// don't send a request we know will fail.
+function isBrokenIranInternationalUrl(src: string): boolean {
+  try {
+    const u = new URL(src);
+    if (u.hostname !== "i.iranintl.com") return false;
+    // Valid form ends with -{w}x{h}.{ext} — any of jpg/jpeg/png/webp
+    return !/-\d+x\d+\.(jpg|jpeg|png|webp)(\?|$)/i.test(u.pathname);
+  } catch {
+    return false;
+  }
+}
+
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 // Iran-hosted media that geo-block Vercel's US/EU edge IPs. Vercel's
@@ -103,7 +123,7 @@ export default function SafeImage({
     }
   }, []);
 
-  if (!src || failed || isLikelyIcon(src)) {
+  if (!src || failed || isLikelyIcon(src) || isBrokenIranInternationalUrl(src)) {
     return (
       <div className={placeholderClass || "flex h-full w-full items-center justify-center bg-slate-100 dark:bg-slate-800"}>
         <Newspaper className="h-10 w-10 text-slate-300 dark:text-slate-700" />
