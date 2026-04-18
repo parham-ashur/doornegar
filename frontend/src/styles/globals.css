@@ -64,6 +64,15 @@
     @apply bg-white text-slate-900;
   }
 
+  /* Widow/orphan avoidance on headings. `text-wrap: pretty` is a
+     purpose-built browser rule for headings: it rebalances line
+     breaks so a single word doesn't dangle on the last line. Falls
+     back silently to normal wrapping in older browsers. Covered
+     Chrome 117+, Safari 17.5+, Firefox 124+ — fine for 2026 traffic. */
+  h1, h2, h3, h4 {
+    text-wrap: pretty;
+  }
+
   @media (prefers-color-scheme: dark) {
     html {
       color-scheme: dark;
