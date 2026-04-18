@@ -3230,10 +3230,19 @@ async def step_snapshot_analyses():
         await db.commit()
 
     async with async_session() as db:
-        # Only visible stories — hidden / trending_score < 0 clusters
-        # would just noise up the daily-change detection.
+        # Eager-load both articles AND their sources. The pct calculation
+        # below reads `a.source.production_location` / factional_alignment
+        # / state_alignment, and in async SQLAlchemy a lazy-loaded
+        # relationship access blows up with MissingGreenlet — which the
+        # except block below silently caught, zeroing every snapshot
+        # (and later making every story falsely flag "پوشش ... آغاز شد"
+        # on the homepage).
+        from sqlalchemy.orm import selectinload
+        from app.models.article import Article
         result = await db.execute(
-            select(Story).where(Story.article_count >= 2)
+            select(Story)
+            .options(selectinload(Story.articles).selectinload(Article.source))
+            .where(Story.article_count >= 2)
         )
         stories = list(result.scalars().all())
 
@@ -3243,13 +3252,10 @@ async def step_snapshot_analyses():
             except Exception:
                 blob = {}
 
-            # Derive inside/outside border pct the same way the API does
-            # (via narrative_group counts from the attached articles).
-            # Cheaper: use stored subgroup counts on the Story row if the
-            # clustering layer populated them. For now, compute inline from
-            # the article list.
+            # Derive inside/outside border pct from the narrative-group
+            # counts of the story's articles. Wrapped so a single bad
+            # source row doesn't zero the whole snapshot.
             try:
-                await db.refresh(story, ["articles"])
                 counts: dict[str, int] = {}
                 for a in story.articles or []:
                     grp = narrative_group(a.source) if a.source else None
@@ -3258,7 +3264,8 @@ async def step_snapshot_analyses():
                 pct = counts_to_percentages(counts)
                 inside_pct = (pct.get("principlist", 0) or 0) + (pct.get("reformist", 0) or 0)
                 outside_pct = (pct.get("moderate_diaspora", 0) or 0) + (pct.get("radical_diaspora", 0) or 0)
-            except Exception:
+            except Exception as _e:
+                logger.warning(f"snapshot pct calc failed for {story.id}: {_e}")
                 inside_pct = 0
                 outside_pct = 0
 
