@@ -150,6 +150,14 @@
   1. Railway → "+ New" → Database → Redis.
   2. Update `REDIS_URL` on `doornegar`, `ingest-cron`, `maintenance-cron`, and `rss-cron` to a reference variable `${{Redis.REDIS_URL}}` (so future renames don't break it).
   3. Confirm next cron fire has no "Could not reach Redis" warning in its deploy log.
+- [ ] **SEO follow-ups** (base pass shipped 2026-04-18 in commit `a750498` — sitemap.xml, canonical, hreflang, NewsArticle JSON-LD on story pages, robots.txt fixed to doornegar.org). Remaining items:
+  - [ ] `/[locale]/sources/[slug]` — add `generateMetadata` + `Organization` JSON-LD for each outlet (title, description, logo, url).
+  - [ ] `/blindspots`, `/stories`, `/sources` listing pages — each gets its own canonical + OG + meta description so the index pages rank as navigational landing pages.
+  - [ ] Breadcrumb JSON-LD on story pages (Home → Stories → {title}). Low effort, surfaces breadcrumb-rich-result rows in search.
+  - [ ] Submit sitemap to Google Search Console (`https://doornegar.org/sitemap.xml`). Needs GSC property verification first via `google-site-verification` meta tag.
+  - [ ] Submit same sitemap to Bing Webmaster Tools — meaningful share of Farsi search happens via DuckDuckGo/Bing in diaspora markets.
+  - [ ] Dynamic per-story OG image generator (Next `opengraph-image.tsx` route returning a rendered PNG with story title + coverage bar). Bigger lift but hugely improves social-share click-through.
+  - [ ] Sitemap index split — currently single sitemap.xml with ≤5000 story entries; switch to sitemap-index format once cluster count crosses ~10k.
 - [ ] **Cloudflare CDN/WAF in front of Railway** — single biggest security win
   - Requires a custom domain (~$10/year)
   - Gives: DDoS protection, bot detection, WAF, rate limiting at edge, analytics

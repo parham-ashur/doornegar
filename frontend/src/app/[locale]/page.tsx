@@ -751,33 +751,31 @@ export default async function HomePage({
                         {s.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300"> · درون‌مرزی {toFa(s.state_pct)}٪</span>}
                         {s.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400"> · برون‌مرزی {toFa(s.diaspora_pct)}٪</span>}
                       </p>
-                      {/* Two-side bullets, 2 lines each, colored markers
-                          so the reader can scan the side's framing at a
-                          glance. Falls back to two generic bias-bullets
-                          when the story lacks side-specific narrative. */}
+                      {/* Two-side bullets, 1 line each — Parham asked
+                          for single-line bullets in mostViewed to keep
+                          the column compact and the row balanced. */}
                       {stateS && (
-                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">
+                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 mt-1 line-clamp-1">
                           <span className="text-[#1e3a5f] dark:text-blue-300 font-bold">• </span>{stateS}
                         </p>
                       )}
                       {diasporaS && (
-                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">
+                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 mt-1 line-clamp-1">
                           <span className="text-[#ea580c] dark:text-orange-400 font-bold">• </span>{diasporaS}
                         </p>
                       )}
                       {!stateS && !diasporaS && fallbackBullets.map((b, j) => (
-                        <p key={j} className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-2">• {b}</p>
+                        <p key={j} className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-1">• {b}</p>
                       ))}
-                      {/* Telegram first prediction + first claim, 2-line
-                          clamps. Uses Niloofar-polished text when the
-                          backend polish step has run. */}
+                      {/* Telegram first prediction + first claim, 1-line
+                          clamp each. */}
                       {tg?.predictions && tg.predictions.length > 0 && (
-                        <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-2">
+                        <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-1">
                           <span className="font-bold text-blue-500">پیش‌بینی:</span> {predictionText(tg.predictions[0])}
                         </p>
                       )}
                       {tg?.key_claims && tg.key_claims.length > 0 && (
-                        <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-2">
+                        <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-1">
                           <span className="font-bold text-amber-500">ادعا:</span> {claimText(tg.key_claims[0])}
                         </p>
                       )}
