@@ -275,15 +275,45 @@ export default async function HomePage({
   // deserves the slot), then fresh without update (new blindspot), then
   // fall back to the most recent stale one rather than leave the slot
   // empty — a one-sided story from yesterday is still informative.
+  // Formal blindspots (state_only / diaspora_only) come from the backend's
+  // classifier. On most news days one side's blindspot bucket is empty —
+  // today e.g. 10 state_only, 0 diaspora_only — which would leave the
+  // opposite column empty on the homepage. Fall back to the most heavily
+  // one-sided story on that axis so both نگاه یک‌جانبه slots always show
+  // something, even if the backend hasn't formally flagged it as a
+  // blindspot. 60/40 is the pragmatic threshold for "one-sided enough
+  // to be worth calling out" without crossing into strict blindspot
+  // territory (which the backend reserves for ≥80/20 coverage gaps).
+  const ONE_SIDED_MAJOR = 60;  // % covered by the dominant side
+  const ONE_SIDED_MINOR = 40;  // % covered by the minority side
+  const stateHeavy = (s: StoryBrief) =>
+    (s.state_pct || 0) >= ONE_SIDED_MAJOR && (s.diaspora_pct || 0) <= ONE_SIDED_MINOR;
+  const diasporaHeavy = (s: StoryBrief) =>
+    (s.diaspora_pct || 0) >= ONE_SIDED_MAJOR && (s.state_pct || 0) <= ONE_SIDED_MINOR;
+
   const conservativeBlind =
     blindspots.find(s => s.blindspot_type === "state_only" && isFresh(s) && hasUpdate(s)) ||
     blindspots.find(s => s.blindspot_type === "state_only" && isFresh(s)) ||
     blindspots.find(s => s.blindspot_type === "state_only") ||
+    // Fallback: most extreme state-heavy story among trending.
+    [...stories].filter(stateHeavy).filter(isFresh).sort((a, b) =>
+      (b.state_pct - b.diaspora_pct) - (a.state_pct - a.diaspora_pct)
+    )[0] ||
+    [...stories].filter(stateHeavy).sort((a, b) =>
+      (b.state_pct - b.diaspora_pct) - (a.state_pct - a.diaspora_pct)
+    )[0] ||
     undefined;
   const oppositionBlind =
     blindspots.find(s => s.blindspot_type === "diaspora_only" && isFresh(s) && hasUpdate(s)) ||
     blindspots.find(s => s.blindspot_type === "diaspora_only" && isFresh(s)) ||
     blindspots.find(s => s.blindspot_type === "diaspora_only") ||
+    // Fallback: most extreme diaspora-heavy story among trending.
+    [...stories].filter(diasporaHeavy).filter(isFresh).sort((a, b) =>
+      (b.diaspora_pct - b.state_pct) - (a.diaspora_pct - a.state_pct)
+    )[0] ||
+    [...stories].filter(diasporaHeavy).sort((a, b) =>
+      (b.diaspora_pct - b.state_pct) - (a.diaspora_pct - a.state_pct)
+    )[0] ||
     undefined;
 
   // ── Deduplication: track which stories are placed ──
@@ -397,14 +427,16 @@ export default async function HomePage({
   // each other. Running them in a single Promise.all cuts the critical
   // path from 4 sequential stages (~5s) to 2 (~3s).
   //
-  // Telegram source pool: take the top 5 trending stories that are FRESH
-  // (last_updated_at within 24h). If fewer than 3 fresh stories exist we
-  // fall back to top trending so the panel never goes completely empty,
-  // but on a normal news day this keeps stale predictions/claims off the
-  // homepage in line with the rotation rule applied to hero/blindspot.
+  // Telegram source pool: top-15 trending fresh stories (falling back to
+  // plain top-15 if fewer than 3 fresh). Only 17 analysts cover most of
+  // Iran's news, so commentary is sparse — top-5 often had 2-3 stories
+  // with no_data (hero + slot-4 today), leaving the sidebar empty even
+  // though other stories further down had rich analysis. 15 gives enough
+  // depth that the sidebar picks up whatever IS available; the component
+  // only renders what it gets, so extra slots are free.
   const freshTopStories = sorted.filter(isFresh);
   const telegramSourceStories = freshTopStories.length >= 3 ? freshTopStories : sorted;
-  const telegramAnalysisIds = telegramSourceStories.slice(0, 5).map(s => s.id);
+  const telegramAnalysisIds = telegramSourceStories.slice(0, 15).map(s => s.id);
   // leftTextStories AND mostViewed both get telegram strips now, so
   // fetch their analyses in parallel with everything else. Each group
   // goes into its own lookup map indexed by story id.
