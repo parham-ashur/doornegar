@@ -55,6 +55,7 @@ STEP_TIMEOUTS_SEC = {
     "bias_score": 3600,            # per-article LLM calls, heaviest step
     "fix_images": 1200,
     "telegram_analysis": 3600,     # per-story LLM analysis
+    "backfill_analyst_counts": 300,  # no LLM — just resolves supporter names
     "niloofar_editorial": 1200,
     "niloofar_polish_telegram": 900,
     "quality_postprocess": 1800,
@@ -3738,6 +3739,73 @@ JSON با این ساختار:
     return stats
 
 
+async def step_backfill_analyst_counts():
+    """Resolve `supporters` → analyst channel IDs for every story's existing
+    telegram_analysis, writing real `supporter_count` / `analysts_total` /
+    `pct` onto each prediction.
+
+    Why: pass-2 used to leak `"pct": 40` from the prompt example straight
+    into every prediction. No LLM call is needed to fix historical rows —
+    we just resolve the LLM's free-text supporter names against the
+    TelegramChannel table. Cheap.
+
+    Runs in the full pipeline + can be triggered ad-hoc from the admin
+    API. Idempotent; safe to re-run.
+    """
+    from sqlalchemy import select, update
+    from app.database import async_session
+    from app.models.story import Story
+    from app.services.telegram_analysis import enrich_predictions_with_analyst_counts
+
+    stats = {"updated": 0, "skipped": 0, "no_analysis": 0}
+
+    async with async_session() as db:
+        result = await db.execute(
+            select(Story).where(Story.telegram_analysis.isnot(None))
+        )
+        stories = list(result.scalars().all())
+
+    for story in stories:
+        analysis = story.telegram_analysis
+        if not analysis or not isinstance(analysis, dict):
+            stats["no_analysis"] += 1
+            continue
+
+        preds = analysis.get("predictions") or []
+        if not preds:
+            stats["skipped"] += 1
+            continue
+
+        async with async_session() as db:
+            enriched = dict(analysis)
+            enriched["predictions"] = [dict(p) if isinstance(p, dict) else p for p in preds]
+            await enrich_predictions_with_analyst_counts(db, enriched)
+
+            # Propagate the counts to predictions_display too — Niloofar's
+            # polish step keeps its own copies of each prediction dict
+            # (polished text + preserved metadata), built positionally from
+            # the raw predictions list.
+            disp = enriched.get("predictions_display")
+            if isinstance(disp, list):
+                for i, d in enumerate(disp):
+                    if not isinstance(d, dict):
+                        continue
+                    raw = enriched["predictions"][i] if i < len(enriched["predictions"]) else None
+                    if isinstance(raw, dict):
+                        for k in ("supporter_count", "analysts_total", "pct"):
+                            if k in raw:
+                                d[k] = raw[k]
+
+            await db.execute(
+                update(Story).where(Story.id == story.id).values(telegram_analysis=enriched)
+            )
+            await db.commit()
+            stats["updated"] += 1
+
+    logger.info(f"Backfill analyst counts: {stats}")
+    return stats
+
+
 FULL_PIPELINE = [
     ("ingest", "Ingest RSS + Telegram (may take 10-20 min)", "step_ingest"),
     ("prune_noise", "Drop too-short Telegram posts/articles before NLP", "step_prune_noise"),
@@ -3766,6 +3834,7 @@ FULL_PIPELINE = [
     ("rater_feedback", "Apply rater feedback", "step_rater_feedback_apply"),
     ("feedback_health", "Feedback system health", "step_feedback_health"),
     ("telegram_analysis", "Deep Telegram discourse analysis (two-pass)", "step_telegram_deep_analysis"),
+    ("backfill_analyst_counts", "Resolve prediction supporters → analyst counts (no LLM)", "step_backfill_analyst_counts"),
     ("telegram_health", "Telegram session health", "step_telegram_health"),
     ("visual", "Visual check", "step_visual_check"),
     ("uptime", "Uptime check", "step_uptime_check"),

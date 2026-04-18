@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { ChevronDown } from "lucide-react";
 import TelegramAnalyzingAnimation from "@/components/common/TelegramAnalyzingAnimation";
+import { toFa } from "@/lib/utils";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -175,13 +176,19 @@ export default function StoryTelegramSection({ storyId, initialTab, highlightTex
             {activeTab === "predictions" && predictions.map((p, i) => {
               const text = typeof p === "string" ? p : (p as any).text || "";
               const pct = typeof p === "object" && !(typeof p === "string") ? (p as any).pct : undefined;
+              const supporterCount = typeof p === "object" ? (p as any).supporter_count : undefined;
+              const analystsTotal = typeof p === "object" ? (p as any).analysts_total : undefined;
               const isHighlighted = !!(highlightText && clean(text).includes(highlightText));
               return (
                 <div key={i} ref={isHighlighted ? highlightRef : undefined} className={isHighlighted ? "bg-blue-50 dark:bg-blue-900/20 -mx-2 px-2 py-1 border-r-2 border-blue-500" : ""}>
                   <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400">• {clean(text)}</p>
-                  {pct != null && pct > 0 && (
-                    <span className="text-[13px] text-blue-500 dark:text-blue-400 font-medium mr-3">{pct}٪ از تحلیلگران</span>
-                  )}
+                  {supporterCount != null && analystsTotal != null && supporterCount > 0 ? (
+                    <span className="text-[13px] text-blue-500 dark:text-blue-400 font-medium mr-3">
+                      {toFa(supporterCount)} از {toFa(analystsTotal)} تحلیلگر
+                    </span>
+                  ) : pct != null && pct > 0 ? (
+                    <span className="text-[13px] text-blue-500 dark:text-blue-400 font-medium mr-3">{toFa(pct)}٪ از تحلیلگران</span>
+                  ) : null}
                 </div>
               );
             })}

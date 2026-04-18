@@ -9,6 +9,13 @@ All notable changes to the Doornegar project are documented here, organized by w
 ### Homepage polish
 - `frontend/src/styles/globals.css` — added `text-wrap: pretty` to `h1-h4` globally so single-word widows stop hanging on the last line of story titles. Covered by Chrome 117+, Safari 17.5+, Firefox 124+; older browsers fall back silently.
 - `frontend/src/components/home/TelegramDiscussions.tsx` — bumped predictions + claims caps from 2 → 4 each so the «تحلیل روایت‌های تلگرام» sidebar fills the column height next to the hero story instead of leaving a tall gap below the 4th item.
+- `frontend/src/components/story/StoryTelegramSection.tsx` — removed the `slice(0, 3)` caps on predictions + claims so the story page shows every item the data carries (the tab buttons already advertise the full count).
+- `getCredLabel` in `TelegramDiscussions.tsx` learned Niloofar's new structured prefix labels («تأیید شده:», «مشکوک:», «تبلیغاتی:», «تک‌منبع:», «نیازمند تأیید:») so polished claims get the right badge colour.
+
+### Telegram analyst-count fix (ends the `40٪` hallucination)
+- `backend/app/services/telegram_analysis.py` — the pass-2 JSON example used to show `"pct": 40`, which the LLM faithfully copied into every prediction. Removed the number from the example and added a post-processing helper `enrich_predictions_with_analyst_counts()` that resolves the LLM's free-text `supporters` list against the active commentary `TelegramChannel`s (the "analysts"), writing a real `supporter_count` / `analysts_total` / `pct` onto each prediction.
+- `backend/auto_maintenance.py` — new `step_backfill_analyst_counts` runs the same enrichment against existing `Story.telegram_analysis` rows (no LLM), propagating counts to `predictions_display` when Niloofar has polished a story. Wired into `FULL_PIPELINE` after `telegram_analysis`.
+- Frontend (homepage + story page) now renders `«N از T تحلیلگر»` when the real counts are present and falls back to the old `«X٪ از تحلیلگران»` for as-yet-unbackfilled rows.
 
 ---
 

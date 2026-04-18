@@ -83,8 +83,8 @@ JSON برگردان:
 {{
   "discourse_summary": "۳-۴ جمله تحلیلی. مستقیم بنویس چرا هر طرف چنین موضعی دارد. بدون مقدمه یا عبارات کلیشه‌ای",
   "predictions": [
-    {{"text": "پیش‌بینی مشخص بدون «با توجه به» — مستقیم بگو چه اتفاقی خواهد افتاد", "supporters": ["نام کانال‌هایی که مشابه پیش‌بینی کردند"], "pct": 40}},
-    {{"text": "پیش‌بینی دوم", "supporters": ["کانال ۱", "کانال ۲"], "pct": 25}}
+    {{"text": "پیش‌بینی مشخص بدون «با توجه به» — مستقیم بگو چه اتفاقی خواهد افتاد", "supporters": ["نام کانال‌هایی که مشابه پیش‌بینی کردند"]}},
+    {{"text": "پیش‌بینی دوم", "supporters": ["کانال ۱", "کانال ۲"]}}
   ],
   "worldviews": {{
     "pro_regime": "روایت محافظه‌کار: چه می‌گویند و چرا (با نقل واژگان خاص)",
@@ -168,6 +168,99 @@ async def _get_cross_story_context(db: AsyncSession, story_id: str) -> str:
     for sim, s in related[:3]:
         lines.append(f"- {s.title_fa}: {(s.summary_fa or '')[:100]}")
     return "\n".join(lines)
+
+
+def _normalize_channel_name(s: str) -> str:
+    """Normalize Telegram channel/username strings for fuzzy matching.
+
+    Lowercase, strip «@» + whitespace, collapse Arabic/Persian letter
+    variants that the LLM's free-text supporter strings often vary on.
+    """
+    if not s:
+        return ""
+    t = s.strip().lower().replace("@", "").replace("«", "").replace("»", "")
+    # ی / ي , ک / ك — keep Persian form
+    t = t.replace("ي", "ی").replace("ك", "ک")
+    # Strip "کانال " / "channel " prefix the LLM often adds
+    for prefix in ("کانال ", "channel ", "@"):
+        if t.startswith(prefix):
+            t = t[len(prefix):]
+    return t.strip()
+
+
+async def enrich_predictions_with_analyst_counts(
+    db: AsyncSession, analysis: dict
+) -> dict:
+    """Resolve each prediction's free-text `supporters` list to real analyst
+    channels (commentary-typed, is_active) and compute
+    `supporter_count` + `analysts_total` + a real `pct`.
+
+    Replaces the old hallucinated `pct` (an LLM artifact — the prompt's
+    JSON example had "pct": 40, which the model copied verbatim into
+    every prediction). The numbers we write here are grounded in the
+    TelegramChannel table, not invented by the LLM.
+
+    Idempotent: safe to call on already-enriched analyses, and cheap
+    (one DB query per story, O(supporters × analysts) in-memory match).
+    """
+    if not analysis or not isinstance(analysis, dict):
+        return analysis
+
+    preds = analysis.get("predictions") or []
+    if not preds:
+        return analysis
+
+    # Load the universe of active analysts (commentary channels).
+    # Filtered once per call — amortized over all predictions of the story.
+    result = await db.execute(
+        select(TelegramChannel).where(
+            TelegramChannel.is_active.is_(True),
+            TelegramChannel.channel_type == "commentary",
+        )
+    )
+    analysts = list(result.scalars().all())
+    total = len(analysts)
+
+    if total == 0:
+        return analysis
+
+    # Lookup tables for cheap matching: exact username, exact title, and
+    # a list for substring fallback (LLM often writes "کانال احمد زیدآبادی"
+    # which contains the title but isn't equal to it).
+    by_uname = {_normalize_channel_name(c.username): c for c in analysts if c.username}
+    by_title = {_normalize_channel_name(c.title): c for c in analysts if c.title}
+    titles_norm = [(c, _normalize_channel_name(c.title)) for c in analysts if c.title]
+
+    def _match(name: str):
+        n = _normalize_channel_name(name)
+        if not n:
+            return None
+        if n in by_uname:
+            return by_uname[n]
+        if n in by_title:
+            return by_title[n]
+        # substring fallback, longest-first so "زیدآبادی" matches before a
+        # generic two-letter partial.
+        for c, t in sorted(titles_norm, key=lambda x: -len(x[1])):
+            if t and (t in n or n in t):
+                return c
+        return None
+
+    for pred in preds:
+        if not isinstance(pred, dict):
+            continue
+        supporters = pred.get("supporters") or []
+        matched_ids = set()
+        for s in supporters:
+            m = _match(s if isinstance(s, str) else str(s))
+            if m is not None:
+                matched_ids.add(m.id)
+        count = len(matched_ids)
+        pred["supporter_count"] = count
+        pred["analysts_total"] = total
+        pred["pct"] = round(count / total * 100) if total else 0
+
+    return analysis
 
 
 def _build_track_records(posts: list) -> str:
@@ -305,6 +398,11 @@ async def analyze_story_telegram(
                 else:
                     normalized_claims.append(str(c))
             result["key_claims"] = normalized_claims
+
+        # Resolve supporter names → real analyst channels so the UI can
+        # render "N از T تحلیلگر" instead of the hallucinated pct the
+        # LLM used to copy from the prompt example.
+        await enrich_predictions_with_analyst_counts(db, result)
 
         return result
 

@@ -27,6 +27,8 @@ interface AnalysisItem {
 interface RankedItem {
   text: string;
   pct?: number;
+  supporterCount?: number;
+  analystsTotal?: number;
   storyId: string;
 }
 
@@ -100,10 +102,12 @@ export default function TelegramDiscussions({
     for (const p of preds) {
       const text = typeof p === "string" ? p : (p as any).text || "";
       const pct = typeof p === "object" ? (p as any).pct : undefined;
+      const supporterCount = typeof p === "object" ? (p as any).supporter_count : undefined;
+      const analystsTotal = typeof p === "object" ? (p as any).analysts_total : undefined;
       const key = text.slice(0, 30);
       if (text && !seenPred.has(key)) {
         seenPred.add(key);
-        predictions.push({ text, pct, storyId: item.storyId });
+        predictions.push({ text, pct, supporterCount, analystsTotal, storyId: item.storyId });
       }
     }
     for (const c of kclaims) {
@@ -166,9 +170,13 @@ export default function TelegramDiscussions({
                 <p className="text-[13px] leading-5 text-slate-600 dark:text-slate-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 line-clamp-2 transition-colors">
                   {clean(item.text)}
                 </p>
-                {item.pct != null && item.pct > 0 && (
+                {item.supporterCount != null && item.analystsTotal != null && item.supporterCount > 0 ? (
+                  <p className="text-[13px] text-blue-500 dark:text-blue-400 text-left">
+                    {toFa(item.supporterCount)} از {toFa(item.analystsTotal)} تحلیلگر
+                  </p>
+                ) : item.pct != null && item.pct > 0 ? (
                   <p className="text-[13px] text-blue-500 dark:text-blue-400 text-left">{toFa(item.pct)}٪ از تحلیلگران</p>
-                )}
+                ) : null}
               </Link>
             ))}
           </div>
