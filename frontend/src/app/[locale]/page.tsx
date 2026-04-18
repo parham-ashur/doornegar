@@ -716,13 +716,17 @@ export default async function HomePage({
 
           {/* Most read (5 cols). The parent grid row stretches this
               column to match the hero-style leftTextStories height
-              (CSS grid default align-stretch). We use flex-col + h-full
-              here so the story list fills that height instead of
-              leaving whitespace at the bottom — and justify-between
-              pushes the leftover slack between cards rather than at
-              the end. Inside each card, flex-1 on the content region
-              makes the vertical spacer between "meta" and the optional
-              telegram strip dynamic. */}
+              (CSS grid default align-stretch). Below, we use an inner
+              CSS grid with auto-rows-fr so the 4 cards each occupy an
+              equal share of the available height — when the column
+              stretches to match the tall left side, every card
+              stretches with it instead of piling up at the top and
+              leaving whitespace below. Each card is `items-stretch`
+              (instead of items-start) so its numbered rank + content
+              fill the row vertically; the content block inside uses
+              justify-center to park the text in the middle of its
+              stretched cell, which reads naturally even on quiet news
+              days when the left column is very tall. */}
           <div className="col-span-5 pr-6 flex flex-col h-full">
             <div className="flex items-center gap-3 mb-4 shrink-0">
               <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
@@ -730,7 +734,7 @@ export default async function HomePage({
               <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
             </div>
 
-            <div className="flex-1 flex flex-col justify-between">
+            <div className="flex-1 grid auto-rows-fr gap-0 min-h-0">
               {mostViewed.map((s, i) => {
                 const analysis = allAnalyses[s.id];
                 const stateS = analysis?.state_summary_fa;
@@ -747,9 +751,9 @@ export default async function HomePage({
                 }
                 return (
                   <Link key={s.id} href={`/${locale}/stories/${s.id}`}
-                    className={`group flex items-start gap-3 py-4 ${i > 0 ? "border-t border-slate-100 dark:border-slate-800/60" : ""}`}>
-                    <span className="text-[24px] font-black text-slate-200 dark:text-slate-700 shrink-0 w-8 text-center mt-0.5">{toFa(i + 1)}</span>
-                    <div className="flex-1 min-w-0">
+                    className={`group flex items-stretch gap-3 py-4 ${i > 0 ? "border-t border-slate-100 dark:border-slate-800/60" : ""}`}>
+                    <span className="text-[24px] font-black text-slate-200 dark:text-slate-700 shrink-0 w-8 text-center self-start mt-0.5">{toFa(i + 1)}</span>
+                    <div className="flex-1 min-w-0 flex flex-col justify-center">
                       <h3 className="text-[18px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
                         {s.title_fa}
                       </h3>
