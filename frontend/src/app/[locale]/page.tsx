@@ -309,9 +309,9 @@ export default async function HomePage({
   leftTextStories.forEach(s => usedIds.add(s.id));
 
   // Most viewed: blended score = views + trending + recency bonus.
-  // 5 stories to balance visual height against the left column's 3
-  // hero-style cards (each left card ≈ 1.6× a right card in vertical
-  // space because of the two-side narrative grid + telegram strip).
+  // 4 stories — the 3 hero-style leftTextStories set the visual height
+  // of the row and a 5th card on the right pushes the columns out of
+  // balance (empty space appears under "در روزهای گذشته").
   const now = Date.now();
   const mostViewed = [...sorted]
     .filter(s => !usedIds.has(s.id))
@@ -323,7 +323,7 @@ export default async function HomePage({
       return { ...s, _popScore: score };
     })
     .sort((a, b) => b._popScore - a._popScore)
-    .slice(0, 5);
+    .slice(0, 4);
   mostViewed.forEach(s => usedIds.add(s.id));
 
   // Most disputed: not already used
