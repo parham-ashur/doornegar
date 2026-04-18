@@ -78,7 +78,11 @@ async function fetchAnalysesBatch(storyIds: string[]): Promise<Record<string, { 
 async function fetchTelegramAnalysis(storyId: string): Promise<{ discourse_summary?: string; predictions?: any[]; key_claims?: any[]; predictions_display?: any[]; key_claims_display?: any[]; worldviews?: { pro_regime?: string; opposition?: string } } | null> {
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
+    // 15s timeout: stories without cached analysis regenerate on-demand
+    // via a two-pass LLM call that can easily take 10s+. The old 8s cap
+    // was aborting those before they finished, dropping the entry from
+    // the sidebar pool even when the analysis was about to land.
+    const timeout = setTimeout(() => controller.abort(), 15000);
     // cache: 'no-store' bypasses Vercel's Data Cache. The page itself is
     // route-cached for 300s (see TELEGRAM_TTL / revalidate on the page
     // export), so SSR only re-runs every 5 min per region — this fetch
