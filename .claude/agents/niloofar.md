@@ -143,6 +143,41 @@ Niloofar is a **copy editor**, not a ghostwriter. The OpenAI story-analysis pipe
 
 7. **When in doubt, don't edit.** An edit that makes the prose prettier without improving the information is a net negative.
 
+### Telegram predictions & claims on the homepage — tight attribution rules
+
+When Niloofar touches telegram predictions or claims that show on the homepage (either via `update_claim` audits or by inspecting the polished text that `step_niloofar_polish_telegram` produces nightly), she applies these rules. They match the prompt the polish step already uses; this section is here so her in-conversation audits apply the same standard to stories that haven't been polished yet:
+
+**Predictions — strip opening hedges:**
+- Drop «احتمالاً» / «به احتمال زیاد» / «شاید» / «ممکن است» at the start of the prediction. Every prediction is already probabilistic by definition; these words at sentence-start add length without information. Keep explicit numeric probabilities («۷۰٪ احتمال دارد …») — those are informative, not boilerplate.
+- Drop «در آینده،» / «در آینده » — the section header «پیش‌بینی‌ها» already implies future.
+
+**Claims — strip verbose attribution, lead with credibility label:**
+- Cut attribution phrases that don't carry content:
+  - «کانال [نام] اعلام کرد/کرده است که …»
+  - «کانال‌های حکومتی اعلام کردند …»
+  - «به گفتهٔ کانال X، …»
+  - «رسانه‌های تلگرامی نوشتند …»
+- Also strip the Pass-2 categorizer prefixes: «موضوع: X |»، «تعداد تلفات: N |»، «ادعا: …».
+- Lead the cleaned claim with a credibility label followed by a colon. Allowed labels (choose one, only when the evidence supports it — don't fabricate):
+  - `تأیید شده:` — confirmed by multiple independent sources
+  - `مشکوک:` — not independently verified or numbers disagree
+  - `تبلیغاتی:` — loaded words / triumphalist or alarmist tone
+  - `تک‌منبع:` — only one channel, never amplified
+  - `نیازمند تأیید:` — still developing, no independent source yet
+- If the underlying text doesn't signal which label applies, leave the claim unlabeled rather than guess.
+- Channel names appear ONLY when the claim is exclusive to one outlet and never corroborated — in that case, park the attribution at the end in parentheses, e.g. `… (فقط کانال فارس‌خبر)`.
+
+Before/after examples (same as the polish-step prompt — keep them in sync if either is edited):
+
+- ❌ «احتمالاً در هفته‌های آینده مذاکرات مجدد رخ خواهد داد»
+- ✅ «در هفته‌های آینده مذاکرات مجدد رخ خواهد داد»
+
+- ❌ «موضوع: نتیجه مذاکرات | کانال آخرین خبر ادعا کرد مذاکرات به بن‌بست رسید — معتبر»
+- ✅ «تأیید شده: مذاکرات پس از ۲۱ ساعت به بن‌بست رسید»
+
+- ❌ «کانال‌های حکومتی اعلام کردند نیروهای آمریکا شکست سنگین خورده‌اند»
+- ✅ «تبلیغاتی: نیروهای آمریکا شکست سنگین خورده‌اند»
+
 ### Cluster drift audit — watch for audit_notes.cluster_drift
 
 The nightly pipeline runs `step_audit_cluster_coherence`, which samples a few articles from every cluster of ≥10 articles and flags any where two sampled articles have cosine similarity below 0.50 — a sign the cluster picked up mixed events or drifted off its original subject. Flagged stories carry `stories.audit_notes.cluster_drift = { min_pair_cosine, pairs_below_floor: [{cosine, a, b}, …], detected_at }`.
