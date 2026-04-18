@@ -308,12 +308,10 @@ export default async function HomePage({
   const leftTextStories = sorted.filter(s => !usedIds.has(s.id)).slice(0, 3);
   leftTextStories.forEach(s => usedIds.add(s.id));
 
-  // Most viewed: blended score = views + trending + recency bonus.
-  // Render 10 stories instead of 4 — the box is now a fixed-height
-  // scrollable pane matching the leftTextStories column height, so we
-  // WANT more content than fits on screen so the scroll always has
-  // somewhere to go. The box never leaves whitespace at the bottom
-  // because it's capped at the parent grid row height.
+  // Most viewed: top 5. Each card shows both narrative sides plus
+  // the first telegram prediction + first claim (2-line clamps), so
+  // the card is information-dense enough that 5 stories naturally
+  // fill the column height without needing a scroll.
   const now = Date.now();
   const mostViewed = [...sorted]
     .filter(s => !usedIds.has(s.id))
@@ -325,7 +323,7 @@ export default async function HomePage({
       return { ...s, _popScore: score };
     })
     .sort((a, b) => b._popScore - a._popScore)
-    .slice(0, 10);
+    .slice(0, 5);
   mostViewed.forEach(s => usedIds.add(s.id));
 
   // Most disputed: not already used
@@ -716,25 +714,18 @@ export default async function HomePage({
             </div>
           </div>
 
-          {/* Most read (5 cols). Tricky layout: we render ~10 stories
-              and want the list to scroll inside a box whose height is
-              driven by the LEFT column (leftTextStories). Default CSS
-              grid would let this column's own content push the row
-              taller, which defeats the scroll.
-              Fix: position:absolute inset-0 on the inner stack. The
-              content is out of normal flow, so the grid row height
-              is decided by the left column alone. The absolute layer
-              then fills that cell via inset-0, giving the scroll a
-              definite height to clip against. */}
-          <div className="col-span-5 pr-6 relative min-h-[400px]">
-            <div className="absolute inset-0 pr-6 flex flex-col">
-            <div className="flex items-center gap-3 mb-4 shrink-0">
+          {/* Most read (5 cols). Natural-flow column — 5 info-dense
+              cards (two-side bullets + 2-line prediction/claim) give
+              it enough vertical content to match leftTextStories on
+              a normal news day, without scroll or absolute layering. */}
+          <div className="col-span-5 pr-6">
+            <div className="flex items-center gap-3 mb-4">
               <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
               <span className="text-[13px] font-black text-slate-900 dark:text-white shrink-0">پرمخاطب‌ترین</span>
               <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
             </div>
 
-            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain pl-1 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-slate-300 dark:[&::-webkit-scrollbar-thumb]:bg-slate-700 [&::-webkit-scrollbar-thumb]:rounded-full">
+            <div className="space-y-0">
               {mostViewed.map((s, i) => {
                 const analysis = allAnalyses[s.id];
                 const stateS = analysis?.state_summary_fa;
@@ -763,32 +754,31 @@ export default async function HomePage({
                         {s.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300"> · درون‌مرزی {toFa(s.state_pct)}٪</span>}
                         {s.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400"> · برون‌مرزی {toFa(s.diaspora_pct)}٪</span>}
                       </p>
-                      {/* Bullets clamp to 1 line each — each card stays
-                          compact, and the list handles variable content
-                          length by scrolling within the fixed-height
-                          pane rather than stretching cards. */}
+                      {/* Both narrative sides rendered — blue • for
+                          the state bullet, orange • for the diaspora
+                          bullet, up to 2 lines each. */}
                       {stateS && (
-                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 mt-1 line-clamp-1">
+                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">
                           <span className="text-[#1e3a5f] dark:text-blue-300 font-bold">• </span>{stateS}
                         </p>
                       )}
                       {diasporaS && (
-                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 mt-1 line-clamp-1">
+                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">
                           <span className="text-[#ea580c] dark:text-orange-400 font-bold">• </span>{diasporaS}
                         </p>
                       )}
                       {!stateS && !diasporaS && fallbackBullets.map((b, j) => (
-                        <p key={j} className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-1">• {b}</p>
+                        <p key={j} className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-2">• {b}</p>
                       ))}
-                      {/* Telegram first prediction + first claim, 1-line
-                          clamp each. */}
+                      {/* Telegram first prediction + first claim,
+                          up to 2 lines each. */}
                       {tg?.predictions && tg.predictions.length > 0 && (
-                        <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-1">
+                        <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-2">
                           <span className="font-bold text-blue-500">پیش‌بینی:</span> {predictionText(tg.predictions[0])}
                         </p>
                       )}
                       {tg?.key_claims && tg.key_claims.length > 0 && (
-                        <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-1">
+                        <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-2">
                           <span className="font-bold text-amber-500">ادعا:</span> {claimText(tg.key_claims[0])}
                         </p>
                       )}
@@ -796,7 +786,6 @@ export default async function HomePage({
                   </Link>
                 );
               })}
-            </div>
             </div>
           </div>
         </div>
