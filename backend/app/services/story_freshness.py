@@ -92,32 +92,61 @@ def compute_update_signal(
     snap_articles = int(snapshot.get("article_count") or 0)
     snap_bias_hash = snapshot.get("bias_hash")
 
+    # Helpers for Farsi rendering of numbers.
+    _FA_DIGITS = str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹")
+    def _fa_int(n: int) -> str:
+        return str(n).translate(_FA_DIGITS)
+    def _fa_one_decimal(x: float) -> str:
+        return f"{x:.1f}".translate(_FA_DIGITS)
+
     # 1) Dispute score shifted materially (narratives became more or
     #    less contested). Phrase the direction for the reader.
+    # Arrow direction in RTL: "old ← new" reads naturally right-to-left
+    # as "from [old value on right] to [new value on left]".
     if snap_dispute is not None and current_dispute_score is not None:
         delta = current_dispute_score - snap_dispute
         if abs(delta) >= DISPUTE_DELTA_THRESHOLD:
             if delta > 0:
-                reason = f"اختلاف روایت‌ها افزایش یافت ({snap_dispute:.1f} → {current_dispute_score:.1f})"
+                reason = f"اختلاف روایت‌ها افزایش یافت ({_fa_one_decimal(snap_dispute)} ← {_fa_one_decimal(current_dispute_score)})"
             else:
-                reason = f"اختلاف روایت‌ها کاهش یافت ({snap_dispute:.1f} → {current_dispute_score:.1f})"
+                reason = f"اختلاف روایت‌ها کاهش یافت ({_fa_one_decimal(snap_dispute)} ← {_fa_one_decimal(current_dispute_score)})"
             return {"has_update": True, "kind": "dispute", "reason_fa": reason}
 
     # 2) Coverage distribution shifted — a new side started covering or
     #    an old one dropped off. We look at the inside/outside split
     #    because that's what the coverage bar surfaces; sub-subgroup
     #    shifts are noisier.
+    #
+    # Edge case: when the snapshot was captured at a moment the story
+    # was one-sided (snap_inside or snap_outside is 0 or 100), the
+    # parenthetical "0٪ ← 46٪" reads like we're asserting the story was
+    # previously unknown-to-state coverage, which is often misleading
+    # — maybe the snapshot happened to catch a narrow window. Phrase
+    # start/stop edges as events ("آغاز شد" / "کمرنگ شد") without the
+    # numbers to avoid implying a precise historical baseline.
     cur_inside = int(current_inside_pct or 0)
     cur_outside = int(current_outside_pct or 0)
     inside_delta = abs(cur_inside - snap_inside)
     outside_delta = abs(cur_outside - snap_outside)
     if max(inside_delta, outside_delta) >= COVERAGE_PCT_DELTA_THRESHOLD:
         if cur_inside > snap_inside:
-            reason = f"پوشش درون‌مرزی تقویت شد ({snap_inside}٪ → {cur_inside}٪)"
+            if snap_inside == 0:
+                reason = "پوشش درون‌مرزی آغاز شد"
+            else:
+                reason = f"پوشش درون‌مرزی تقویت شد ({_fa_int(snap_inside)}٪ ← {_fa_int(cur_inside)}٪)"
         elif cur_outside > snap_outside:
-            reason = f"پوشش برون‌مرزی تقویت شد ({snap_outside}٪ → {cur_outside}٪)"
+            if snap_outside == 0:
+                reason = "پوشش برون‌مرزی آغاز شد"
+            else:
+                reason = f"پوشش برون‌مرزی تقویت شد ({_fa_int(snap_outside)}٪ ← {_fa_int(cur_outside)}٪)"
         else:
-            reason = f"توزیع پوشش تغییر کرد ({snap_inside}٪/{snap_outside}٪ → {cur_inside}٪/{cur_outside}٪)"
+            # One side dropped; phrase as a retreat rather than a swap.
+            if cur_inside < snap_inside and cur_inside == 0:
+                reason = "پوشش درون‌مرزی کمرنگ شد"
+            elif cur_outside < snap_outside and cur_outside == 0:
+                reason = "پوشش برون‌مرزی کمرنگ شد"
+            else:
+                reason = f"توزیع پوشش تغییر کرد ({_fa_int(snap_inside)}٪/{_fa_int(snap_outside)}٪ ← {_fa_int(cur_inside)}٪/{_fa_int(cur_outside)}٪)"
         return {"has_update": True, "kind": "coverage_shift", "reason_fa": reason}
 
     # 3) Article volume grew and the bias comparison was rewritten —
@@ -126,7 +155,7 @@ def compute_update_signal(
     new_articles = current_article_count - snap_articles
     cur_bias_hash = _bias_hash(current_bias_explanation_fa)
     if new_articles >= NEW_ARTICLES_THRESHOLD and cur_bias_hash and cur_bias_hash != snap_bias_hash:
-        reason = f"{new_articles} مقالهٔ جدید و بازنویسی تحلیل سوگیری"
+        reason = f"{_fa_int(new_articles)} مقالهٔ جدید و بازنویسی تحلیل سوگیری"
         return {"has_update": True, "kind": "new_articles", "reason_fa": reason}
 
     return {"has_update": False, "kind": None, "reason_fa": None}

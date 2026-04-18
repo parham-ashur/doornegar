@@ -288,17 +288,21 @@ async def step_detect_hourly_updates():
             # Trigger 2: coverage shift ≥ 15pp. Only evaluate when both
             # before and after have enough rows to compute a meaningful
             # percentage — a jump from 0 articles to 3 isn't a "shift".
-            elif total_before >= 3 and total_after >= 3:
+            # Requires inside_before ≥ 1 AND outside_before ≥ 1 so we
+            # don't claim a "shift" on a story that was one-sided an
+            # hour ago (that's actually trigger 1's job).
+            elif total_before >= 3 and total_after >= 3 and inside_before >= 1 and outside_before >= 1:
                 pct_inside_before = round(100 * inside_before / total_before)
                 pct_inside_after = round(100 * inside_after / total_after)
                 delta = pct_inside_after - pct_inside_before
                 if abs(delta) >= PCT_SHIFT:
+                    # RTL-friendly "old ← new" arrow; Farsi digits.
                     if delta > 0:
-                        reason = f"پوشش درون‌مرزی تقویت شد ({pct_inside_before}٪ → {pct_inside_after}٪)"
+                        reason = f"پوشش درون‌مرزی تقویت شد ({_fa_digits(pct_inside_before)}٪ ← {_fa_digits(pct_inside_after)}٪)"
                     else:
                         pct_outside_before = 100 - pct_inside_before
                         pct_outside_after = 100 - pct_inside_after
-                        reason = f"پوشش برون‌مرزی تقویت شد ({pct_outside_before}٪ → {pct_outside_after}٪)"
+                        reason = f"پوشش برون‌مرزی تقویت شد ({_fa_digits(pct_outside_before)}٪ ← {_fa_digits(pct_outside_after)}٪)"
                     signal = {
                         "has_update": True, "kind": "coverage_shift",
                         "reason_fa": reason, "detected_at": now_iso,
@@ -306,12 +310,9 @@ async def step_detect_hourly_updates():
                     stats["coverage_shift"] += 1
             # Trigger 3: burst. Only if no earlier trigger fired.
             if not signal["has_update"] and new_count >= BURST_ARTICLES:
-                # Persian digits
-                digit_map = str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹")
-                n_fa = str(new_count).translate(digit_map)
                 signal = {
                     "has_update": True, "kind": "burst",
-                    "reason_fa": f"{n_fa} مقاله جدید در ساعت گذشته",
+                    "reason_fa": f"{_fa_digits(new_count)} مقاله جدید در ساعت گذشته",
                     "detected_at": now_iso,
                 }
                 stats["burst"] += 1
@@ -333,6 +334,15 @@ async def step_detect_hourly_updates():
 def _json_dumps(obj):
     import json as _j
     return _j.dumps(obj, ensure_ascii=False)
+
+
+# Latin → Persian digits (۰–۹). Used in all Farsi user-facing reason
+# strings so numbers render the same as the rest of the UI.
+_FA_DIGITS_TABLE = str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹")
+
+
+def _fa_digits(n) -> str:
+    return str(n).translate(_FA_DIGITS_TABLE)
 
 
 async def step_prune_noise():
