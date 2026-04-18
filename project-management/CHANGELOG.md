@@ -4,6 +4,14 @@ All notable changes to the Doornegar project are documented here, organized by w
 
 ---
 
+## April 18, 2026
+
+### Homepage polish
+- `frontend/src/styles/globals.css` — added `text-wrap: pretty` to `h1-h4` globally so single-word widows stop hanging on the last line of story titles. Covered by Chrome 117+, Safari 17.5+, Firefox 124+; older browsers fall back silently.
+- `frontend/src/components/home/TelegramDiscussions.tsx` — bumped predictions + claims caps from 2 → 4 each so the «تحلیل روایت‌های تلگرام» sidebar fills the column height next to the hero story instead of leaving a tall gap below the 4th item.
+
+---
+
 ## April 17, 2026
 
 ### Audit & documentation

@@ -146,7 +146,7 @@ export default function TelegramDiscussions({
         <div>
           <h4 className="text-[13px] font-black text-blue-600 dark:text-blue-400 mb-2">پیش‌بینی‌ها</h4>
           <div className="space-y-2">
-            {predictions.slice(0, 2).map((item, i) => (
+            {predictions.slice(0, 4).map((item, i) => (
               <Link
                 key={i}
                 href={`/${locale}/stories/${item.storyId}?tg=predictions&hl=${encodeURIComponent(clean(item.text).slice(0, 40))}#telegram`}
@@ -169,7 +169,7 @@ export default function TelegramDiscussions({
         <div>
           <h4 className="text-[13px] font-black text-amber-600 dark:text-amber-400 mb-2">ادعاهای کلیدی</h4>
           <div className="space-y-2">
-            {claims.slice(0, 2).map((item, i) => {
+            {claims.slice(0, 4).map((item, i) => {
               const cred = getCredLabel(item.text);
               return (
                 <Link
