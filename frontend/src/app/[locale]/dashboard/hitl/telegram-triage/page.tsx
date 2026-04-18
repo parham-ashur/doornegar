@@ -22,6 +22,85 @@ interface TriagePost {
   candidates: Candidate[];
 }
 
+interface StoryHit {
+  id: string;
+  title_fa: string | null;
+  article_count: number;
+  trending_score: number;
+}
+
+// Per-post story search — lets the reviewer pick a story that's outside
+// the top-3 similarity candidates by typing a few chars of the title.
+function StorySearchPicker({
+  onPick,
+  disabled,
+}: {
+  onPick: (storyId: string) => void;
+  disabled?: boolean;
+}) {
+  const [q, setQ] = useState("");
+  const [hits, setHits] = useState<StoryHit[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (q.trim().length < 2) {
+      setHits([]);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      setLoading(true);
+      try {
+        const res = await fetch(
+          `${API}/api/v1/admin/hitl/story-search?q=${encodeURIComponent(q)}&limit=10`,
+          { headers: adminHeaders() }
+        );
+        if (res.ok) {
+          const data = await res.json();
+          setHits(data.results || []);
+        }
+      } finally {
+        setLoading(false);
+      }
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [q]);
+
+  return (
+    <div className="mt-2">
+      <input
+        type="text"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="جستجوی خبر دیگر بر اساس عنوان…"
+        disabled={disabled}
+        className="w-full px-2 py-1 text-[12px] border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40"
+      />
+      {loading && <p className="text-[11px] text-slate-400 mt-1">جستجو…</p>}
+      {hits.length > 0 && (
+        <div className="mt-1 space-y-1 max-h-48 overflow-y-auto border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+          {hits.map((h) => (
+            <button
+              key={h.id}
+              type="button"
+              onClick={() => {
+                onPick(h.id);
+                setQ("");
+                setHits([]);
+              }}
+              className="w-full text-right px-2 py-1 text-[12px] hover:bg-blue-50 dark:hover:bg-blue-950/30 border-b border-slate-100 dark:border-slate-800 last:border-0"
+            >
+              <span className="text-slate-700 dark:text-slate-300">{h.title_fa}</span>
+              <span className="text-slate-400 font-mono mr-2" dir="ltr">
+                ({h.article_count}a · {h.trending_score.toFixed(1)}t)
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function TelegramTriagePage() {
   const [authed, setAuthed] = useState(false);
   const [token, setToken] = useState("");
@@ -287,13 +366,14 @@ export default function TelegramTriagePage() {
                   </a>
                 </div>
               ))}
+              <StorySearchPicker onPick={(sid) => link(p.post_id, sid)} />
               {p.current_story_id && (
                 <button
                   type="button"
                   onClick={() => unlink(p.post_id)}
                   className="px-2 py-1 text-[12px] bg-red-50 dark:bg-red-950/40 text-red-600 border border-red-200 dark:border-red-900/40 mt-2"
                 >
-                  قطع اتصال
+                  قطع اتصال از خبر فعلی
                 </button>
               )}
             </div>

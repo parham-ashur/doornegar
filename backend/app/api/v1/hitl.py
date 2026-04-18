@@ -245,6 +245,47 @@ async def telegram_triage_action(
     return {"status": "ok", "post_id": str(post_id), "action": body.action}
 
 
+class StorySearchItem(BaseModel):
+    id: str
+    title_fa: str | None
+    article_count: int
+    trending_score: float
+
+
+@router.get("/story-search")
+async def story_search(
+    q: str = Query(..., min_length=2, max_length=200),
+    limit: int = Query(default=15, le=50),
+    db: AsyncSession = Depends(get_db),
+):
+    """Free-text story picker used by the triage UI when the "right"
+    story for a post is outside the top-3 similarity candidates.
+    Matches Farsi title with ILIKE — cheap, good-enough for the
+    hundreds of visible stories we have at any time.
+    """
+    stmt = (
+        select(Story.id, Story.title_fa, Story.article_count, Story.trending_score)
+        .where(
+            Story.article_count >= 2,
+            Story.title_fa.ilike(f"%{q}%"),
+        )
+        .order_by(desc(Story.trending_score))
+        .limit(limit)
+    )
+    rows = (await db.execute(stmt)).all()
+    return {
+        "results": [
+            StorySearchItem(
+                id=str(r.id),
+                title_fa=r.title_fa,
+                article_count=r.article_count or 0,
+                trending_score=r.trending_score or 0.0,
+            )
+            for r in rows
+        ]
+    }
+
+
 # ─── 2. Channel reclassification ─────────────────────────────
 
 class ChannelListItem(BaseModel):
