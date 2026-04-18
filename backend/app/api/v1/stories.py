@@ -579,6 +579,7 @@ async def get_story(
         **brief.model_dump(),
         summary_en=story.summary_en,
         summary_fa=story.summary_fa,
+        editorial_context_fa=story.editorial_context_fa,
         articles=articles_with_bias,
     )
 

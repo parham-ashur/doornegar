@@ -538,23 +538,72 @@ async def analyze_story_telegram(
 
 
 async def link_posts_by_embedding(db: AsyncSession, threshold: float = 0.35) -> dict:
-    """Link unlinked Telegram posts to stories via embedding similarity.
+    """Link unlinked Telegram posts to stories via URL match + embeddings.
 
-    Scoring: for each story, take the MAX of (story centroid score,
-    best per-article score). Broad umbrella stories have diluted
-    centroids — averaging 100+ articles spanning ceasefire + Hormuz +
-    talks produces a blurry vector no specific post matches strongly.
-    Adding per-article best-match rescues those cases: a post quoting
-    an IRGC statement scores near 1.0 against the specific IRGC
-    article, even if it scores 0.3 against the story centroid.
-
-    Replaces URL-based matching with semantic matching.
+    Two-pass:
+      1. URL extraction (high precision, ~free): if a post contains a
+         URL matching an article URL we already cluster, link directly
+         to that article's story. Bypasses embedding entirely — a post
+         that explicitly quotes a Reuters link doesn't need fuzzy
+         matching.
+      2. Embedding similarity fallback: for posts with no article URL,
+         score against story centroids AND each article's own embedding,
+         taking the MAX. Broad umbrella stories have diluted centroids
+         (100+ articles averaged produces a blurry vector); per-article
+         rescue finds posts that match one specific article sharply.
     """
+    import re
+    from urllib.parse import urlparse
+
     from app.models.article import Article
     from app.nlp.embeddings import generate_embeddings_batch, cosine_similarity
+    from sqlalchemy import update
 
-    # Load stories + their article embeddings. Grouping happens
-    # in-process — two queries beats N+1 per-story selects.
+    # ── Pass 1: URL extraction ──
+    # Build an index of article_url → story_id so we can lookup in O(1).
+    # Only include articles in stories we'd consider anyway (≥3 articles,
+    # matching the centroid query below). ~3K articles, cheap.
+    art_index_result = await db.execute(
+        select(Article.url, Article.story_id)
+        .where(Article.story_id.isnot(None), Article.url.isnot(None))
+    )
+    url_to_story: dict[str, str] = {}
+    for art_url, sid in art_index_result.all():
+        if art_url and sid:
+            url_to_story[art_url] = str(sid)
+            # Also index by (host, path) so paywall redirects and query
+            # strings don't block matches on the same article
+            try:
+                u = urlparse(art_url)
+                key = f"{u.hostname}{u.path}".lower().rstrip("/")
+                url_to_story.setdefault(key, str(sid))
+            except Exception:
+                pass
+
+    # Match http(s) URLs only; ignore tg:// and bare mentions.
+    URL_RE = re.compile(r"https?://[^\s<>\"\)]+", re.I)
+
+    def _find_story_via_url(text: str) -> str | None:
+        """Return the story_id of the first article URL cited in `text`,
+        or None. Matches on exact URL first, then on (host, path) for
+        resilience to utm params / fragment differences."""
+        if not text:
+            return None
+        for raw in URL_RE.findall(text):
+            # Strip trailing punctuation Telegram captures sometimes glue on
+            clean = raw.rstrip(".,;:!؟،؛")
+            if clean in url_to_story:
+                return url_to_story[clean]
+            try:
+                u = urlparse(clean)
+                key = f"{u.hostname}{u.path}".lower().rstrip("/")
+                if key in url_to_story:
+                    return url_to_story[key]
+            except Exception:
+                continue
+        return None
+
+    # ── Pass 2 prep: centroids + per-article embeddings ──
     result = await db.execute(
         select(Story).where(
             Story.centroid_embedding.isnot(None),
@@ -612,15 +661,39 @@ async def link_posts_by_embedding(db: AsyncSession, threshold: float = 0.35) -> 
     if not posts:
         return {"linked": 0, "reason": "no unlinked posts"}
 
-    # Embed posts
-    post_texts = [(p.text or "")[:500] for p in posts]
+    # ── Pass 1: URL extraction (high-precision, zero LLM) ──
+    linked_by_url = 0
+    remaining_posts = []
+    for post in posts:
+        sid = _find_story_via_url(post.text or "")
+        if sid:
+            await db.execute(
+                update(TelegramPost)
+                .where(TelegramPost.id == post.id)
+                .values(story_id=sid)
+            )
+            linked_by_url += 1
+        else:
+            remaining_posts.append(post)
+
+    # ── Pass 2: Embedding similarity on whatever URL didn't catch ──
+    if not remaining_posts:
+        await db.commit()
+        logger.info(f"URL-linked {linked_by_url} posts, no residual for embedding pass")
+        return {
+            "linked": linked_by_url,
+            "total_posts": len(posts),
+            "via_url": linked_by_url,
+            "via_embedding": 0,
+            "threshold": threshold,
+        }
+
+    post_texts = [(p.text or "")[:500] for p in remaining_posts]
     embeddings = generate_embeddings_batch(post_texts, batch_size=100)
 
-    # Match
-    from sqlalchemy import update
-    linked = 0
-    via_article = 0
-    for post, emb in zip(posts, embeddings):
+    linked_by_embedding = 0
+    via_article_rescue = 0
+    for post, emb in zip(remaining_posts, embeddings):
         if not emb or all(v == 0 for v in emb) or any(v is None for v in emb):
             continue
 
@@ -659,20 +732,24 @@ async def link_posts_by_embedding(db: AsyncSession, threshold: float = 0.35) -> 
                 .where(TelegramPost.id == post.id)
                 .values(story_id=best_story_id)
             )
-            linked += 1
+            linked_by_embedding += 1
             if best_via_article:
-                via_article += 1
+                via_article_rescue += 1
 
     await db.commit()
+    total_linked = linked_by_url + linked_by_embedding
     logger.info(
-        f"Embedding-linked {linked} telegram posts to stories "
-        f"(via_article_rescue={via_article}, threshold={threshold})"
+        f"Linked {total_linked} telegram posts "
+        f"(url={linked_by_url}, embedding={linked_by_embedding}, "
+        f"via_article_rescue={via_article_rescue}, threshold={threshold})"
     )
     return {
-        "linked": linked,
+        "linked": total_linked,
         "total_posts": len(posts),
+        "via_url": linked_by_url,
+        "via_embedding": linked_by_embedding,
+        "via_article_rescue": via_article_rescue,
         "threshold": threshold,
-        "via_article_rescue": via_article,
     }
 
 
