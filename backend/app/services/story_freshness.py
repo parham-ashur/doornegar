@@ -42,12 +42,24 @@ def build_snapshot(
     inside_pct: int | None,
     outside_pct: int | None,
     bias_explanation_fa: str | None,
+    state_summary_fa: str | None = None,
+    diaspora_summary_fa: str | None = None,
 ) -> dict:
     """Produce the JSON payload stored in `Story.analysis_snapshot_24h`.
 
-    Kept small (≈200 bytes) so 500+ stories × JSONB column stays trivial.
-    Only the numeric axes and a short hash of the bias text — no full text.
+    We also keep truncated copies of the three narrative texts so the
+    homepage can surface sentence-level "what changed since yesterday"
+    deltas in a dedicated به‌روز callout, not just a badge. Cap each
+    field at ~2000 chars to keep snapshot JSONB under ~8 KB per row
+    (400–500 stories × 8 KB ≈ 4 MB — trivial on Neon).
     """
+    _CAP = 2000
+
+    def _trim(s: str | None) -> str | None:
+        if not s:
+            return None
+        return s[:_CAP]
+
     return {
         "snapshotted_at": datetime.now(timezone.utc).isoformat(),
         "article_count": int(article_count or 0),
@@ -55,6 +67,9 @@ def build_snapshot(
         "inside_pct": int(inside_pct or 0),
         "outside_pct": int(outside_pct or 0),
         "bias_hash": _bias_hash(bias_explanation_fa),
+        "bias_text": _trim(bias_explanation_fa),
+        "state_text": _trim(state_summary_fa),
+        "diaspora_text": _trim(diaspora_summary_fa),
     }
 
 
@@ -197,3 +212,81 @@ def update_signal_from_story(story: Any) -> dict:
         current_bias_explanation_fa=blob.get("bias_explanation_fa"),
         snapshot=getattr(story, "analysis_snapshot_24h", None),
     )
+
+
+def _split_sentences(text: str | None) -> list[str]:
+    """Split Farsi narrative text into sentences for sentence-level diff.
+
+    Splits on Persian + Latin terminators: «؛» (semicolon — our narrative
+    fields use this as the primary bullet separator), «.»، «؟»، «!». Drops
+    empty fragments and trims whitespace. Short fragments (< 15 chars) are
+    dropped because they tend to be enumerator glue ("یکم،"، "دوم،") that
+    isn't useful to highlight as a delta.
+    """
+    if not text:
+        return []
+    import re as _re
+
+    parts = _re.split(r"[؛.؟!]\s*", text)
+    return [p.strip() for p in parts if p and len(p.strip()) >= 15]
+
+
+def _normalize_for_compare(s: str) -> str:
+    """Reduce a sentence to a compact key for equality testing.
+
+    Strips punctuation, collapses whitespace, removes Farsi kashida. Two
+    sentences that differ only in punctuation or spacing should be treated
+    as identical so we don't flag them as "new".
+    """
+    import re as _re
+
+    s = s.replace("\u200c", " ")  # ZWNJ
+    s = s.replace("ـ", "")        # kashida
+    s = _re.sub(r"[،؛.؟!«»()\[\]\-—–]", "", s)
+    s = _re.sub(r"\s+", " ", s).strip()
+    return s
+
+
+def diff_narratives(
+    *,
+    current_bias: str | None,
+    current_state: str | None,
+    current_diaspora: str | None,
+    snapshot: dict | None,
+) -> dict | None:
+    """Compute sentence-level diffs between the live narrative fields and
+    the snapshot captured ~24h ago. Returns a structure consumable by the
+    homepage and story page to render a colored "به‌روز" callout listing
+    new sentences per field:
+
+        {"bias_new": [str, ...],
+         "state_new": [str, ...],
+         "diaspora_new": [str, ...]}
+
+    Empty lists when nothing changed. Whole-field skip (all sentences new)
+    for fields where the current text shares almost nothing with the
+    snapshot — those look like a full rewrite, and showing the entire new
+    text in a "what changed" callout would just duplicate the narrative.
+    We set the field to [] and leave the user to read the full text below.
+    """
+    if not snapshot or not isinstance(snapshot, dict):
+        return None
+
+    def _diff_field(current: str | None, previous: str | None) -> list[str]:
+        if not current or not previous:
+            return []
+        current_sents = _split_sentences(current)
+        prev_keys = {_normalize_for_compare(s) for s in _split_sentences(previous)}
+        new = [s for s in current_sents if _normalize_for_compare(s) not in prev_keys]
+        # Guard: if almost everything is "new" it's a full rewrite, not a
+        # delta. Don't highlight — let the badge alone carry the signal.
+        if current_sents and len(new) / len(current_sents) > 0.8:
+            return []
+        # Cap the callout length so it doesn't dominate the story card.
+        return new[:4]
+
+    return {
+        "bias_new": _diff_field(current_bias, snapshot.get("bias_text")),
+        "state_new": _diff_field(current_state, snapshot.get("state_text")),
+        "diaspora_new": _diff_field(current_diaspora, snapshot.get("diaspora_text")),
+    }

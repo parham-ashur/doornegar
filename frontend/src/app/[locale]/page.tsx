@@ -123,6 +123,49 @@ function Meta({ story }: { story: StoryBrief }) {
   );
 }
 
+// "به‌روز" callout showing the sentence-level diff vs last night's
+// snapshot. Rendered ABOVE the bias comparison / narrative sides when
+// update_signal.delta carries new sentences. Each new fragment is
+// shown in a colored (green) background with a "به‌روز" pill at its
+// front so the reader can scan what's new without re-reading the
+// whole narrative. Empty when nothing changed sentence-level (e.g.
+// the trigger was a pct shift rather than a bias rewrite).
+function UpdateDeltaCallout({
+  story,
+  field,
+  className = "mb-2",
+}: {
+  story: StoryBrief;
+  field: "bias" | "state" | "diaspora";
+  className?: string;
+}) {
+  const delta = story.update_signal?.delta;
+  if (!delta) return null;
+  const items: string[] =
+    field === "bias" ? delta.bias_new :
+    field === "state" ? delta.state_new :
+    delta.diaspora_new;
+  if (!items || items.length === 0) return null;
+  return (
+    <div
+      dir="rtl"
+      className={`${className} border-r-2 border-emerald-500 bg-emerald-50/70 dark:bg-emerald-900/15 px-2.5 py-1.5 space-y-1`}
+    >
+      {items.map((sentence, i) => (
+        <p
+          key={i}
+          className="text-[13px] leading-5 text-emerald-900 dark:text-emerald-100"
+        >
+          <span className="inline-block ml-1 align-middle text-[10px] font-black text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/40 px-1 py-0.5">
+            به‌روز
+          </span>
+          {sentence}
+        </p>
+      ))}
+    </div>
+  );
+}
+
 // Compact update pill for homepage story cards. Two variants:
 //   - Orange "بروزرسانی · <reason>"  — a trigger fired (side flip,
 //     coverage shift, burst, or the 24h-snapshot signal). Significant.
@@ -477,6 +520,7 @@ export default async function HomePage({
                 if (!points.length) return null;
                 return (
                   <div className="mt-3 space-y-1">
+                    <UpdateDeltaCallout story={hero} field="bias" />
                     {points.map((point, i) => (
                       <p key={i} className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-1">• {point}</p>
                     ))}
@@ -484,19 +528,24 @@ export default async function HomePage({
                 );
               }
               return (
-                <div className="mt-3 grid grid-cols-2 gap-3">
-                  {stateSummary && (
-                    <div className="border-r-2 border-[#1e3a5f] pr-3">
-                      <p className="text-[13px] font-bold text-[#1e3a5f] dark:text-blue-300 mb-1">روایت درون‌مرزی</p>
-                      <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-4">{stateSummary}</p>
-                    </div>
-                  )}
-                  {diasporaSummary && (
-                    <div className="border-r-2 border-[#ea580c] pr-3">
-                      <p className="text-[13px] font-bold text-[#ea580c] dark:text-orange-400 mb-1">روایت برون‌مرزی</p>
-                      <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-4">{diasporaSummary}</p>
-                    </div>
-                  )}
+                <div className="mt-3">
+                  <UpdateDeltaCallout story={hero} field="bias" />
+                  <div className="grid grid-cols-2 gap-3">
+                    {stateSummary && (
+                      <div className="border-r-2 border-[#1e3a5f] pr-3">
+                        <p className="text-[13px] font-bold text-[#1e3a5f] dark:text-blue-300 mb-1">روایت درون‌مرزی</p>
+                        <UpdateDeltaCallout story={hero} field="state" className="mb-1.5" />
+                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-4">{stateSummary}</p>
+                      </div>
+                    )}
+                    {diasporaSummary && (
+                      <div className="border-r-2 border-[#ea580c] pr-3">
+                        <p className="text-[13px] font-bold text-[#ea580c] dark:text-orange-400 mb-1">روایت برون‌مرزی</p>
+                        <UpdateDeltaCallout story={hero} field="diaspora" className="mb-1.5" />
+                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-4">{diasporaSummary}</p>
+                      </div>
+                    )}
+                  </div>
                 </div>
               );
             })()}

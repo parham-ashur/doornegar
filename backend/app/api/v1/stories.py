@@ -787,7 +787,7 @@ def _story_brief_with_extras(story: Story) -> StoryBrief:
         if use_hourly:
             brief.update_signal = hourly
         else:
-            from app.services.story_freshness import compute_update_signal
+            from app.services.story_freshness import compute_update_signal, diff_narratives
 
             blob_for_signal = {}
             if story.summary_en:
@@ -803,6 +803,20 @@ def _story_brief_with_extras(story: Story) -> StoryBrief:
                 current_bias_explanation_fa=blob_for_signal.get("bias_explanation_fa"),
                 snapshot=getattr(story, "analysis_snapshot_24h", None),
             )
+            # Attach sentence-level delta when the signal is live, so the
+            # UI can render a colored به‌روز callout showing exactly which
+            # bits of the bias comparison or side narratives are new
+            # since last night's snapshot. Cheap — pure string compare.
+            if brief.update_signal and brief.update_signal.get("has_update"):
+                try:
+                    brief.update_signal["delta"] = diff_narratives(
+                        current_bias=blob_for_signal.get("bias_explanation_fa"),
+                        current_state=getattr(story, "state_summary_fa", None),
+                        current_diaspora=getattr(story, "diaspora_summary_fa", None),
+                        snapshot=getattr(story, "analysis_snapshot_24h", None),
+                    )
+                except Exception:
+                    pass
     except Exception:
         brief.update_signal = None
 

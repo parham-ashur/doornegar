@@ -94,8 +94,19 @@ export interface StoryBrief {
   // in the hero/blindspot slot when its narrative has materially shifted.
   update_signal?: {
     has_update: boolean;
-    kind: "dispute" | "coverage_shift" | "new_articles" | null;
+    kind: "dispute" | "coverage_shift" | "new_articles" | "side_flip" | "burst" | null;
     reason_fa: string | null;
+    detected_at?: string | null;
+    // Sentence-level diff vs last night's snapshot. New sentences only —
+    // UI renders these in a colored "به‌روز" callout above the bias
+    // comparison / narrative sides. Each field is [] when nothing new,
+    // or when the whole field was rewritten from scratch (showing
+    // everything as "new" would duplicate the narrative).
+    delta?: {
+      bias_new: string[];
+      state_new: string[];
+      diaspora_new: string[];
+    } | null;
   } | null;
   updated_at: string | null;
   trending_score: number;

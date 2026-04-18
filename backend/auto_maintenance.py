@@ -3275,6 +3275,8 @@ async def step_snapshot_analyses():
                 inside_pct=inside_pct,
                 outside_pct=outside_pct,
                 bias_explanation_fa=blob.get("bias_explanation_fa"),
+                state_summary_fa=getattr(story, "state_summary_fa", None),
+                diaspora_summary_fa=getattr(story, "diaspora_summary_fa", None),
             )
             story.analysis_snapshot_24h = snapshot
             stats["snapshotted"] += 1
