@@ -623,8 +623,19 @@ def _is_bad_image(url: str) -> bool:
         ".ico",  # Favicon files
         "telesco.pe",  # Telegram CDN auth tokens expire — unreliable public URLs
         "cdn.telegram",  # Same story for the older Telegram CDN host
+        # Icon/PWA patterns captured from broken RSS <media:content> tags
+        "ico-192x192", "ico-512x512", "webapp/ico-", "manifest-icon",
     ]
-    return any(p in lower for p in bad_patterns)
+    if any(p in lower for p in bad_patterns):
+        return True
+    # Iran International's Sanity CDN returns 400 on bare hash paths —
+    # a valid URL must end with a -WxH.ext transform (e.g. -800x531.jpg).
+    # The ingester sometimes captures the bare form from article HTML.
+    if "i.iranintl.com/" in lower:
+        import re as _re
+        if not _re.search(r"-\d+x\d+\.(jpg|jpeg|png|webp)(\?|$)", lower):
+            return True
+    return False
 
 
 _LATIN_TO_FARSI = str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹")

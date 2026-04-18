@@ -57,6 +57,7 @@ STEP_TIMEOUTS_SEC = {
     "migrate_images_r2": 1800,   # download + upload per article, capped 300/run
     "telegram_analysis": 3600,     # per-story LLM analysis
     "telegram_reassign": 1200,     # re-embed 3K posts, pure math, no LLM
+    "niloofar_image_rescue": 300,  # no LLM — scans article images, picks fallback
     "backfill_analyst_counts": 300,  # no LLM — just resolves supporter names
     "niloofar_editorial": 1200,
     "niloofar_polish_telegram": 900,
@@ -1954,6 +1955,120 @@ async def step_telegram_reassign_posts():
     async with async_session() as db:
         stats = await reassign_posts_by_embedding(db)
 
+    return stats
+
+
+async def step_niloofar_image_rescue():
+    """Niloofar picks a story image when the auto-chosen one is bad.
+
+    The frontend picks a story's cover via _story_brief_with_extras,
+    which scores each article's image_url by (is-stable-URL, title
+    overlap, length) and picks the winner. That scorer is good at
+    ranking but doesn't bail out when ALL candidates are bad — it
+    just returns None and we fall through to the site-logo fallback,
+    leaving a newspaper icon where a real photo should be.
+
+    This step fixes that: for every story whose best available image
+    is null/icon/broken-iranintl, walk the articles again with the
+    stricter _is_bad_image filter and promote the first real photo
+    to `manual_image_url` inside summary_en, flagging is_edited so
+    the pipeline won't overwrite it.
+
+    No LLM call — Niloofar here is "the editorial rule", not a prompt.
+    Runs after fix_images so we pick up whatever R2 migration just
+    landed. Capped at 200 stories per run by trending_score.
+    """
+    import json as _json
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    from app.database import async_session
+    from app.models.article import Article
+    from app.models.story import Story
+    from app.api.v1.stories import _is_bad_image
+
+    stats = {"checked": 0, "rescued": 0, "no_candidate": 0, "already_ok": 0}
+
+    async with async_session() as db:
+        result = await db.execute(
+            select(Story)
+            .options(selectinload(Story.articles))
+            .where(Story.article_count >= 2)
+            .order_by(Story.trending_score.desc())
+            .limit(200)
+        )
+        stories = list(result.scalars().all())
+
+    for story in stories:
+        stats["checked"] += 1
+        # If a curator already set a manual_image_url and it's still
+        # valid, leave it alone — that's an editorial decision.
+        blob = {}
+        if story.summary_en:
+            try:
+                blob = _json.loads(story.summary_en)
+            except Exception:
+                blob = {}
+        existing_manual = blob.get("manual_image_url")
+        if existing_manual and not _is_bad_image(existing_manual):
+            stats["already_ok"] += 1
+            continue
+
+        # Would the frontend scorer pick a real photo on its own?
+        candidates = [
+            a for a in story.articles
+            if a.image_url and not _is_bad_image(a.image_url)
+        ]
+        if not candidates:
+            stats["no_candidate"] += 1
+            continue
+
+        # If the automatic scorer would already pick a valid image we
+        # don't need to intervene — only step in when a manual pick
+        # does better. Prefer: (stable URL, title overlap, length).
+        story_words = {w for w in (story.title_fa or "").split() if len(w) >= 3}
+
+        def _score(a):
+            art_words = {
+                w for w in (a.title_fa or a.title_original or "").split()
+                if len(w) >= 3
+            }
+            overlap = len(story_words & art_words)
+            url = a.image_url or ""
+            is_stable = url.startswith("/images/") or "r2.dev" in url or "r2.cloudflarestorage" in url
+            return (1 if is_stable else 0, overlap, len(url))
+
+        best = max(candidates, key=_score)
+        # Already a valid image_url on story (auto scorer is happy)?
+        # Skip writing manual_image_url so we don't accumulate no-op
+        # is_edited flags on otherwise-clean stories.
+        auto_ok = any(
+            a.image_url and not _is_bad_image(a.image_url)
+            for a in story.articles
+        )
+        if auto_ok and not existing_manual:
+            # Auto scorer will pick a good image next page load; nothing
+            # to write. `best` may differ from its pick, but "good enough
+            # without an editorial flag" is the right default.
+            stats["already_ok"] += 1
+            continue
+
+        async with async_session() as db:
+            s = await db.get(Story, story.id)
+            if not s:
+                continue
+            try:
+                cur_blob = _json.loads(s.summary_en) if s.summary_en else {}
+            except Exception:
+                cur_blob = {}
+            cur_blob["manual_image_url"] = best.image_url
+            s.summary_en = _json.dumps(cur_blob, ensure_ascii=False)
+            if hasattr(s, "is_edited"):
+                s.is_edited = True
+            await db.commit()
+        stats["rescued"] += 1
+
+    logger.info(f"Niloofar image rescue: {stats}")
     return stats
 
 
@@ -3943,6 +4058,9 @@ FULL_PIPELINE = [
     ("bias_score", "Bias scoring", "step_bias_score"),
     ("fix_images", "Fix broken images", "step_fix_images"),
     ("migrate_images_r2", "Migrate source-CDN images to R2 (up to 300/run)", "step_migrate_images_to_r2"),
+    # Rescue stories whose auto-picked image resolves to null/icon/broken —
+    # writes a manual_image_url pointing at the best valid article image.
+    ("niloofar_image_rescue", "Niloofar rescues stories with bad cover images", "step_niloofar_image_rescue"),
     ("story_quality", "Story quality checks", "step_story_quality"),
     ("detect_silences", "Detect coverage silences", "step_detect_silences"),
     ("detect_coordination", "Detect coordinated messaging", "step_detect_coordination"),
