@@ -172,7 +172,7 @@ export default function StoryTelegramSection({ storyId, initialTab, highlightTex
           </div>
 
           <div className="space-y-1.5">
-            {activeTab === "predictions" && predictions.slice(0, 3).map((p, i) => {
+            {activeTab === "predictions" && predictions.map((p, i) => {
               const text = typeof p === "string" ? p : (p as any).text || "";
               const pct = typeof p === "object" && !(typeof p === "string") ? (p as any).pct : undefined;
               const isHighlighted = !!(highlightText && clean(text).includes(highlightText));
@@ -185,7 +185,7 @@ export default function StoryTelegramSection({ storyId, initialTab, highlightTex
                 </div>
               );
             })}
-            {activeTab === "claims" && claims.slice(0, 3).map((c, i) => {
+            {activeTab === "claims" && claims.map((c, i) => {
               const isHighlighted = !!(highlightText && clean(c).includes(highlightText));
               const cred = getCredLabel(c);
               return (

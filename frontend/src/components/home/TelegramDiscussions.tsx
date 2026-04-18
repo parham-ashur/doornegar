@@ -126,8 +126,19 @@ export default function TelegramDiscussions({
     .replace(/^کانال\s*[«»]?[^«»]*[«»]?\s*ادعا کرد (که\s*)?/i, "")
     .replace(/^[^،]+ ادعا کرد (که\s*)?/i, "");
 
-  // Extract credibility label from claim text
+  // Extract credibility label from claim text. Niloofar's polish step
+  // prefixes each claim with one of these exact labels followed by a
+  // colon («تأیید شده: …», «مشکوک: …», «تبلیغاتی: …», «تک‌منبع: …»,
+  // «نیازمند تأیید: …»). Leading-prefix matches are preferred; free-text
+  // keyword fallbacks stay below for un-polished claims that still
+  // carry an "(… — cred)" suffix from pass-2.
   const getCredLabel = (t: string): { label: string; color: string } | null => {
+    if (/^تأیید شده\s*:|^تایید شده\s*:/.test(t)) return { label: "تأیید شده", color: "text-emerald-500" };
+    if (/^مشکوک\s*:/.test(t)) return { label: "مشکوک", color: "text-red-500" };
+    if (/^تبلیغاتی\s*:/.test(t)) return { label: "تبلیغاتی", color: "text-red-400" };
+    if (/^تک[‌\s]?منبع\s*:/.test(t)) return { label: "تک‌منبع", color: "text-amber-500" };
+    if (/^نیازمند تأیید\s*:|^نیازمند تایید\s*:/.test(t)) return { label: "نیازمند تأیید", color: "text-amber-500" };
+    // Free-text fallback for un-polished claims
     if (/مشکوک|اغراق|بعید|غیرواقعی/.test(t)) return { label: "مشکوک", color: "text-red-500" };
     if (/تبلیغاتی|جنبه تبلیغی|پروپاگاند/.test(t)) return { label: "تبلیغاتی", color: "text-red-400" };
     if (/نیازمند.*تایید|نیازمند.*تأیید|نیاز به تایید|نیاز به تأیید|تأیید نشده|تایید نشده|قابل.تأیید نیست|نیازمند.*مستقل|صحت.*نیاز/.test(t)) return { label: "تأیید نشده", color: "text-amber-500" };
