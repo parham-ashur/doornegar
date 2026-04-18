@@ -302,11 +302,16 @@ export default async function HomePage({
   if (hero) usedIds.add(hero.id);
 
   // Weekly briefing: next 4 not already used
-  const leftTextStories = sorted.filter(s => !usedIds.has(s.id)).slice(0, 4);
+  // Left-text "در روزهای گذشته" block now renders hero-style cards
+  // (two-side narrative + telegram strip, no image), so each card takes
+  // more vertical space. 3 stories fits the visual budget.
+  const leftTextStories = sorted.filter(s => !usedIds.has(s.id)).slice(0, 3);
   leftTextStories.forEach(s => usedIds.add(s.id));
 
   // Most viewed: blended score = views + trending + recency bonus
-  // When views are sparse, trending score dominates; as views grow, real popularity takes over
+  // When views are sparse, trending score dominates; as views grow, real popularity takes over.
+  // Cap at 4 stories — each card now carries two-side bullets (2 lines each)
+  // so five was pushing the right column too tall.
   const now = Date.now();
   const mostViewed = [...sorted]
     .filter(s => !usedIds.has(s.id))
@@ -318,7 +323,7 @@ export default async function HomePage({
       return { ...s, _popScore: score };
     })
     .sort((a, b) => b._popScore - a._popScore)
-    .slice(0, 5);
+    .slice(0, 4);
   mostViewed.forEach(s => usedIds.add(s.id));
 
   // Most disputed: not already used
@@ -389,11 +394,19 @@ export default async function HomePage({
   const freshTopStories = sorted.filter(isFresh);
   const telegramSourceStories = freshTopStories.length >= 3 ? freshTopStories : sorted;
   const telegramAnalysisIds = telegramSourceStories.slice(0, 5).map(s => s.id);
-  const [allAnalyses, heroTelegram, ...telegramResults] = await Promise.all([
+  // leftTextStories also get a telegram strip each now (hero-style
+  // card without image). Fetch those in parallel with everything else
+  // so there's no extra serial round-trip.
+  const [allAnalyses, heroTelegram, telegramResults, leftTextTelegramResults] = await Promise.all([
     fetchAnalysesBatch(Array.from(allIds)),
     hero ? fetchTelegramAnalysis(hero.id) : Promise.resolve(null),
-    ...telegramAnalysisIds.map(id => fetchTelegramAnalysis(id)),
+    Promise.all(telegramAnalysisIds.map(id => fetchTelegramAnalysis(id))),
+    Promise.all(leftTextStories.map(s => fetchTelegramAnalysis(s.id))),
   ]);
+  const leftTextTelegramById: Record<string, any> = {};
+  leftTextStories.forEach((s, i) => {
+    if (leftTextTelegramResults[i]) leftTextTelegramById[s.id] = leftTextTelegramResults[i];
+  });
 
   const allSummaries: Record<string, string | null> = {};
   for (const id of Array.from(allIds)) {
@@ -629,23 +642,70 @@ export default async function HomePage({
           <div className="col-span-7 pl-6 border-l border-slate-200 dark:border-slate-800">
             <h2 className="text-[24px] font-black text-slate-900 dark:text-white mb-6">در روزهای گذشته ...</h2>
             <div className="mr-8">
-              {leftTextStories.map((s, i) => (
-                <Link key={s.id} href={`/${locale}/stories/${s.id}`}
-                  className={`group block py-5 ${i > 0 ? "border-t border-slate-100 dark:border-slate-800/60" : ""}`}>
-                  <h3 className="text-[22px] font-black leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
-                    {s.title_fa}
-                  </h3>
-                  <UpdateBadge story={s} className="mt-2" />
-                  <Meta story={s} />
-                  {(() => {
-                    const bias = allAnalyses[s.id]?.bias_explanation_fa;
-                    if (!bias) return null;
-                    const firstPoint = bias.split(/[.؛]/).map((p: string) => p.trim()).find((p: string) => p.length > 10);
-                    if (!firstPoint) return null;
-                    return <p className="mt-1.5 text-[13px] leading-5 text-slate-400 dark:text-slate-500 line-clamp-1">• {firstPoint}</p>;
-                  })()}
-                </Link>
-              ))}
+              {leftTextStories.map((s, i) => {
+                const analysis = allAnalyses[s.id];
+                const stateSummary = analysis?.state_summary_fa;
+                const diasporaSummary = analysis?.diaspora_summary_fa;
+                const tg = leftTextTelegramById[s.id];
+                return (
+                  <div key={s.id} className={`py-5 ${i > 0 ? "border-t border-slate-100 dark:border-slate-800/60" : ""}`}>
+                    <Link href={`/${locale}/stories/${s.id}`} className="group block">
+                      <h3 className="text-[22px] font-black leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
+                        {s.title_fa}
+                      </h3>
+                    </Link>
+                    <UpdateBadge story={s} className="mt-2" />
+                    <Meta story={s} />
+                    {/* Two-side bias comparison — hero-style card without image */}
+                    {stateSummary || diasporaSummary ? (
+                      <div className="mt-3">
+                        <UpdateDeltaCallout story={s} field="bias" />
+                        <div className="grid grid-cols-2 gap-3">
+                          {stateSummary && (
+                            <div className="border-r-2 border-[#1e3a5f] pr-3">
+                              <p className="text-[13px] font-bold text-[#1e3a5f] dark:text-blue-300 mb-1">روایت درون‌مرزی</p>
+                              <UpdateDeltaCallout story={s} field="state" className="mb-1.5" />
+                              <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-4">{stateSummary}</p>
+                            </div>
+                          )}
+                          {diasporaSummary && (
+                            <div className="border-r-2 border-[#ea580c] pr-3">
+                              <p className="text-[13px] font-bold text-[#ea580c] dark:text-orange-400 mb-1">روایت برون‌مرزی</p>
+                              <UpdateDeltaCallout story={s} field="diaspora" className="mb-1.5" />
+                              <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-4">{diasporaSummary}</p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ) : (() => {
+                      const bias = analysis?.bias_explanation_fa;
+                      if (!bias) return null;
+                      const firstPoint = bias.split(/[.؛]/).map((p: string) => p.trim()).find((p: string) => p.length > 10);
+                      if (!firstPoint) return null;
+                      return <p className="mt-1.5 text-[13px] leading-5 text-slate-400 dark:text-slate-500 line-clamp-1">• {firstPoint}</p>;
+                    })()}
+                    {/* Telegram strip — discourse + first prediction + first claim */}
+                    {tg?.discourse_summary && (
+                      <div className="mt-3 px-1">
+                        <p className="text-[14px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">
+                          <span className="font-bold text-slate-600 dark:text-slate-300">تحلیل روایت‌های تلگرام.</span>
+                          {" "}{tg.discourse_summary}
+                        </p>
+                        {tg.predictions && tg.predictions.length > 0 && (
+                          <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-1">
+                            <span className="font-bold text-blue-500">پیش‌بینی:</span> {predictionText(tg.predictions[0])}
+                          </p>
+                        )}
+                        {tg.key_claims && tg.key_claims.length > 0 && (
+                          <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-1">
+                            <span className="font-bold text-amber-500">ادعا:</span> {claimText(tg.key_claims[0])}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
 
@@ -659,8 +719,18 @@ export default async function HomePage({
 
             <div className="space-y-0">
               {mostViewed.map((s, i) => {
-                const bias = allAnalyses[s.id]?.bias_explanation_fa;
-                const firstPoint = bias?.split(/[.؛]/).map((p: string) => p.trim()).find((p: string) => p.length > 10);
+                const analysis = allAnalyses[s.id];
+                const stateS = analysis?.state_summary_fa;
+                const diasporaS = analysis?.diaspora_summary_fa;
+                // Fallback to splitting bias_explanation_fa when the
+                // story doesn't have side-specific summaries yet.
+                let fallbackBullets: string[] = [];
+                if (!stateS && !diasporaS) {
+                  const bias = analysis?.bias_explanation_fa;
+                  fallbackBullets = bias
+                    ? bias.split(/[.؛]/).map((p: string) => p.trim()).filter((p: string) => p.length > 10).slice(0, 2)
+                    : [];
+                }
                 return (
                   <Link key={s.id} href={`/${locale}/stories/${s.id}`}
                     className={`group flex items-start gap-3 py-4 ${i > 0 ? "border-t border-slate-100 dark:border-slate-800/60" : ""}`}>
@@ -675,10 +745,24 @@ export default async function HomePage({
                         {s.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300"> · درون‌مرزی {toFa(s.state_pct)}٪</span>}
                         {s.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400"> · برون‌مرزی {toFa(s.diaspora_pct)}٪</span>}
                       </p>
-                      {firstPoint && (
-                        <p className="text-[14px] text-slate-400 dark:text-slate-500 mt-1 line-clamp-1">• {firstPoint}</p>
+                      {/* Two-side bullets, 2 lines each, colored markers
+                          so the reader can scan the side's framing at a
+                          glance. Falls back to two generic bias-bullets
+                          when the story lacks side-specific narrative. */}
+                      {stateS && (
+                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">
+                          <span className="text-[#1e3a5f] dark:text-blue-300 font-bold">• </span>{stateS}
+                        </p>
                       )}
-                        </div>
+                      {diasporaS && (
+                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">
+                          <span className="text-[#ea580c] dark:text-orange-400 font-bold">• </span>{diasporaS}
+                        </p>
+                      )}
+                      {!stateS && !diasporaS && fallbackBullets.map((b, j) => (
+                        <p key={j} className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-2">• {b}</p>
+                      ))}
+                    </div>
                   </Link>
                 );
               })}
