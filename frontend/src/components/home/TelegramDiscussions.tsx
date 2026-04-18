@@ -170,13 +170,11 @@ export default function TelegramDiscussions({
                 <p className="text-[13px] leading-5 text-slate-600 dark:text-slate-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 line-clamp-2 transition-colors">
                   {clean(item.text)}
                 </p>
-                {item.supporterCount != null && item.analystsTotal != null && item.supporterCount > 0 ? (
+                {item.supporterCount != null && item.analystsTotal != null && item.supporterCount > 0 && (
                   <p className="text-[13px] text-blue-500 dark:text-blue-400 text-left">
                     {toFa(item.supporterCount)} از {toFa(item.analystsTotal)} تحلیلگر
                   </p>
-                ) : item.pct != null && item.pct > 0 ? (
-                  <p className="text-[13px] text-blue-500 dark:text-blue-400 text-left">{toFa(item.pct)}٪ از تحلیلگران</p>
-                ) : null}
+                )}
               </Link>
             ))}
           </div>
