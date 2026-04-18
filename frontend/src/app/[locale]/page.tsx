@@ -823,12 +823,12 @@ export default async function HomePage({
                     {(stateSummary || diasporaSummary) && (
                       <div className="mt-2 space-y-1">
                         {stateSummary && (
-                          <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-1">
+                          <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">
                             <span className="text-[#1e3a5f] dark:text-blue-300 font-medium">• </span>{stateSummary}
                           </p>
                         )}
                         {diasporaSummary && (
-                          <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-1">
+                          <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">
                             <span className="text-[#ea580c] dark:text-orange-400 font-medium">در مقابل </span>{diasporaSummary}
                           </p>
                         )}
