@@ -60,51 +60,30 @@ async function fetchAnalysesBatch(storyIds: string[]): Promise<Record<string, { 
   if (storyIds.length === 0) return {};
   // Dedupe + stable-sort so identical sets share a cache key.
   const ids = Array.from(new Set(storyIds)).sort();
-  const url = `${API}/api/v1/stories/analyses?ids=${ids.join(",")}`;
-  // [DIAG] — surfaces the SSR fetch result in Vercel Runtime Logs so
-  // we can see why the homepage renders with empty prefetchedData.
-  // Remove once the cause is pinned down.
-  const t0 = Date.now();
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10000);
-    const res = await fetch(url, { next: { revalidate: ANALYSIS_TTL }, signal: controller.signal });
+    const res = await fetch(
+      `${API}/api/v1/stories/analyses?ids=${ids.join(",")}`,
+      { next: { revalidate: ANALYSIS_TTL }, signal: controller.signal },
+    );
     clearTimeout(timeout);
-    const dur = Date.now() - t0;
-    if (!res.ok) {
-      console.error(`[DIAG] fetchAnalysesBatch NOT_OK status=${res.status} dur=${dur}ms ids=${ids.length} url=${url.slice(0, 120)}`);
-      return {};
-    }
-    const data = await res.json();
-    const keys = Object.keys(data).length;
-    console.error(`[DIAG] fetchAnalysesBatch OK dur=${dur}ms ids=${ids.length} got_keys=${keys}`);
-    return data;
-  } catch (e: any) {
-    const dur = Date.now() - t0;
-    console.error(`[DIAG] fetchAnalysesBatch THREW dur=${dur}ms ids=${ids.length} err=${e?.name}:${e?.message} url=${url.slice(0, 120)}`);
+    if (!res.ok) return {};
+    return await res.json();
+  } catch {
     return {};
   }
 }
 
 async function fetchTelegramAnalysis(storyId: string): Promise<{ discourse_summary?: string; predictions?: any[]; key_claims?: any[]; predictions_display?: any[]; key_claims_display?: any[]; worldviews?: { pro_regime?: string; opposition?: string } } | null> {
-  const url = `${API}/api/v1/social/stories/${storyId}/telegram-analysis`;
-  const t0 = Date.now();
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 8000);
-    const res = await fetch(url, { next: { revalidate: TELEGRAM_TTL }, signal: controller.signal });
+    const res = await fetch(`${API}/api/v1/social/stories/${storyId}/telegram-analysis`, { next: { revalidate: TELEGRAM_TTL }, signal: controller.signal });
     clearTimeout(timeout);
-    const dur = Date.now() - t0;
-    if (!res.ok) {
-      console.error(`[DIAG] fetchTelegram NOT_OK status=${res.status} dur=${dur}ms id=${storyId.slice(0,8)}`);
-      return null;
-    }
+    if (!res.ok) return null;
     const data = await res.json();
-    if (data.status !== "ok" || !data.analysis) {
-      console.error(`[DIAG] fetchTelegram BAD_DATA status_field=${data.status} has_analysis=${!!data.analysis} dur=${dur}ms id=${storyId.slice(0,8)}`);
-      return null;
-    }
-    console.error(`[DIAG] fetchTelegram OK dur=${dur}ms id=${storyId.slice(0,8)} preds=${(data.analysis.predictions||[]).length}`);
+    if (data.status !== "ok" || !data.analysis) return null;
     // Homepage prefers Niloofar-polished versions. Raw fields stay for the
     // story detail page where "موضوع: X |" grouping is still useful.
     const a = data.analysis;
@@ -113,17 +92,9 @@ async function fetchTelegramAnalysis(storyId: string): Promise<{ discourse_summa
       predictions: a.predictions_display || a.predictions,
       key_claims: a.key_claims_display || a.key_claims,
     };
-  } catch (e: any) {
-    const dur = Date.now() - t0;
-    console.error(`[DIAG] fetchTelegram THREW dur=${dur}ms id=${storyId.slice(0,8)} err=${e?.name}:${e?.message}`);
+  } catch {
     return null;
   }
-}
-
-// Run-once banner so we know the SSR hit this file at all and the
-// API base is what we expect at runtime.
-if (typeof window === "undefined") {
-  console.error(`[DIAG] page.tsx loaded API=${API}`);
 }
 
 function Meta({ story }: { story: StoryBrief }) {
