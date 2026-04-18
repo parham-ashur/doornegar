@@ -731,35 +731,14 @@ export default async function HomePage({
               <div className="space-y-5 px-4 pb-4 pt-2 flex-1 flex flex-col justify-between overflow-hidden">
                 {(() => {
                   type BattleItem = {
+                    storyId: string;
                     title: string;
                     conservative: string;
                     opposition: string;
-                    conservativeLabel: string;
-                    oppositionLabel: string;
-                    context: string;
+                    stateSummary: string;
+                    diasporaSummary: string;
                   };
                   const battleItems: BattleItem[] = [];
-
-                  function pickContext(biasText: string | undefined, fallbackState: string | undefined, fallbackDiaspora: string | undefined): string {
-                    if (biasText) {
-                      const sentences = biasText
-                        .split(/[؛.]/)
-                        .map(s => s.trim())
-                        .filter(s => s.length > 25);
-                      const twoSided = sentences.find(s =>
-                        (s.includes("درون‌مرزی") || s.includes("حکومتی") || s.includes("اصول‌گرا")) &&
-                        (s.includes("برون‌مرزی") || s.includes("اپوزیسیون") || s.includes("دیاسپورا"))
-                      );
-                      if (twoSided) return twoSided;
-                      const withQuote = sentences.find(s => /«[^»]+»/.test(s));
-                      if (withQuote) return withQuote;
-                      if (sentences[0]) return sentences[0];
-                    }
-                    const parts: string[] = [];
-                    if (fallbackState) parts.push(`درون‌مرزی: ${fallbackState.split(/[؛.]/)[0]}`);
-                    if (fallbackDiaspora) parts.push(`برون‌مرزی: ${fallbackDiaspora.split(/[؛.]/)[0]}`);
-                    return parts.join(" | ");
-                  }
 
                   for (const story of [mostDisputed, secondDisputed, thirdDisputed]) {
                     if (!story) continue;
@@ -767,19 +746,18 @@ export default async function HomePage({
                     if (!analysis) continue;
 
                     const words = analysis.loaded_words;
-                    const stateSummary = analysis.state_summary_fa;
-                    const diasporaSummary = analysis.diaspora_summary_fa;
+                    const stateSummary = analysis.state_summary_fa || "";
+                    const diasporaSummary = analysis.diaspora_summary_fa || "";
                     const biasText = analysis.bias_explanation_fa;
-                    const context = pickContext(biasText, stateSummary, diasporaSummary);
 
                     if (words?.conservative?.length && words?.opposition?.length) {
                       battleItems.push({
+                        storyId: story.id,
                         title: story.title_fa || "",
                         conservative: `«${words.conservative[0].replace(/[«»]/g, "")}»`,
                         opposition: `«${words.opposition[0].replace(/[«»]/g, "")}»`,
-                        conservativeLabel: words.conservative.length > 1 ? words.conservative.slice(1, 3).join("، ") : "روایت درون‌مرزی",
-                        oppositionLabel: words.opposition.length > 1 ? words.opposition.slice(1, 3).join("، ") : "روایت برون‌مرزی",
-                        context,
+                        stateSummary,
+                        diasporaSummary,
                       });
                       continue;
                     }
@@ -787,52 +765,80 @@ export default async function HomePage({
                       const quotes = biasText.match(/«[^»]+»/g);
                       if (quotes && quotes.length >= 2) {
                         battleItems.push({
+                          storyId: story.id,
                           title: story.title_fa || "",
                           conservative: quotes[0],
                           opposition: quotes[1],
-                          conservativeLabel: stateSummary ? stateSummary.slice(0, 40) + (stateSummary.length > 40 ? "..." : "") : "روایت درون‌مرزی",
-                          oppositionLabel: diasporaSummary ? diasporaSummary.slice(0, 40) + (diasporaSummary.length > 40 ? "..." : "") : "روایت برون‌مرزی",
-                          context,
+                          stateSummary,
+                          diasporaSummary,
                         });
                         continue;
                       }
                     }
                     if (stateSummary && diasporaSummary) {
-                      const stateShort = stateSummary.length > 25 ? stateSummary.slice(0, 25) + "..." : stateSummary;
-                      const diasporaShort = diasporaSummary.length > 25 ? diasporaSummary.slice(0, 25) + "..." : diasporaSummary;
                       battleItems.push({
+                        storyId: story.id,
                         title: story.title_fa || "",
-                        conservative: `«${stateShort}»`,
-                        opposition: `«${diasporaShort}»`,
-                        conservativeLabel: "خلاصه رسانه‌های درون‌مرزی",
-                        oppositionLabel: "خلاصه رسانه‌های برون‌مرزی",
-                        context,
+                        conservative: "«روایت درون‌مرزی»",
+                        opposition: "«روایت برون‌مرزی»",
+                        stateSummary,
+                        diasporaSummary,
                       });
                     }
                   }
 
-                  return battleItems.slice(0, 2).map((item, idx) => (
-                    <div key={idx}>
-                      <p className="text-[13px] font-bold text-slate-900 dark:text-white mb-3 line-clamp-1">{item.title}</p>
-                      <div className="flex gap-0 text-center">
-                        <div className="flex-1 py-3 bg-[#1e3a5f]/10 dark:bg-blue-900/20 border-t-[3px] border-[#1e3a5f]">
-                          <p className={`${item.conservative.length > 20 ? "text-[24px]" : "text-[14px]"} font-black text-[#1e3a5f] dark:text-blue-300 line-clamp-1 px-2`}>{item.conservative}</p>
-                          <p className="text-[13px] text-slate-500 mt-1 line-clamp-1 px-2">{item.conservativeLabel}</p>
-                          <p className="text-[13px] text-[#1e3a5f] dark:text-blue-300 font-medium mt-0.5">درون‌مرزی</p>
+                  return battleItems.slice(0, 2).map((item, idx) => {
+                    const inner = (
+                      <>
+                        {/* Full title — was line-clamp-1 before; Parham
+                            wants to see the whole story title. */}
+                        <h4 className="text-[15px] font-bold leading-snug text-slate-900 dark:text-white mb-3 group-hover:text-blue-700 dark:group-hover:text-blue-400">
+                          {item.title}
+                        </h4>
+                        {/* Uniform 15px for both quoted-word boxes —
+                            the old conditional scaled long quotes UP to
+                            24px which read inconsistent next to short
+                            quotes. Same size, same weight, line-clamp-1
+                            truncates anything that doesn't fit. */}
+                        <div className="flex gap-0 text-center">
+                          <div className="flex-1 py-3 bg-[#1e3a5f]/10 dark:bg-blue-900/20 border-t-[3px] border-[#1e3a5f]">
+                            <p className="text-[15px] font-black text-[#1e3a5f] dark:text-blue-300 line-clamp-1 px-2">{item.conservative}</p>
+                            <p className="text-[13px] text-[#1e3a5f] dark:text-blue-300 font-medium mt-1">درون‌مرزی</p>
+                          </div>
+                          <div className="flex-1 py-3 bg-[#ea580c]/10 dark:bg-orange-900/20 border-t-[3px] border-[#ea580c]">
+                            <p className="text-[15px] font-black text-[#ea580c] dark:text-orange-400 line-clamp-1 px-2">{item.opposition}</p>
+                            <p className="text-[13px] text-[#ea580c] dark:text-orange-400 font-medium mt-1">برون‌مرزی</p>
+                          </div>
                         </div>
-                        <div className="flex-1 py-3 bg-[#ea580c]/10 dark:bg-orange-900/20 border-t-[3px] border-[#ea580c]">
-                          <p className={`${item.opposition.length > 20 ? "text-[24px]" : "text-[14px]"} font-black text-[#ea580c] dark:text-orange-400 line-clamp-1 px-2`}>{item.opposition}</p>
-                          <p className="text-[13px] text-slate-500 mt-1 line-clamp-1 px-2">{item.oppositionLabel}</p>
-                          <p className="text-[13px] text-[#ea580c] dark:text-orange-400 font-medium mt-0.5">برون‌مرزی</p>
-                        </div>
-                      </div>
-                      {item.context && (
-                        <p className="mt-3 text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-3">
-                          {item.context}
-                        </p>
-                      )}
-                    </div>
-                  ));
+                        {/* Replace the generic context sentence with
+                            the actual two-side summaries — each up to
+                            2 lines, color-coded markers to match the
+                            side above. Reads as: "here are the boxes,
+                            here's what each side actually says." */}
+                        {(item.stateSummary || item.diasporaSummary) && (
+                          <div className="mt-3 space-y-1">
+                            {item.stateSummary && (
+                              <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">
+                                <span className="text-[#1e3a5f] dark:text-blue-300 font-bold">• </span>{item.stateSummary}
+                              </p>
+                            )}
+                            {item.diasporaSummary && (
+                              <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">
+                                <span className="text-[#ea580c] dark:text-orange-400 font-bold">در مقابل </span>{item.diasporaSummary}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    );
+                    return item.storyId ? (
+                      <Link key={idx} href={`/${locale}/stories/${item.storyId}`} className="group block">
+                        {inner}
+                      </Link>
+                    ) : (
+                      <div key={idx}>{inner}</div>
+                    );
+                  });
                 })()}
               </div>
             </div>
@@ -840,7 +846,7 @@ export default async function HomePage({
                 up to 2 stories; hide the whole box if nothing qualifies
                 (no empty shells). Top 2 rotate as dispute_score shifts
                 from day to day. */}
-            {(mostDisputed || secondDisputed) && (
+            {(mostDisputed || secondDisputed || thirdDisputed) && (
               <div className="flex-1 min-h-0 border border-slate-300 dark:border-slate-600 flex flex-col">
                 <div className="flex items-center -mt-3 mx-4">
                   <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
@@ -848,7 +854,7 @@ export default async function HomePage({
                   <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
                 </div>
                 <div className="px-4 pb-4 pt-2 flex-1 overflow-hidden">
-                  {[mostDisputed, secondDisputed].filter(Boolean).map((story, i) => {
+                  {[mostDisputed, secondDisputed, thirdDisputed].filter(Boolean).map((story, i) => {
                     const s = story!;
                     const analysis = allAnalyses[s.id];
                     const stateSummary = analysis?.state_summary_fa;
@@ -868,12 +874,12 @@ export default async function HomePage({
                         {(stateSummary || diasporaSummary) && (
                           <div className="mt-2 space-y-1">
                             {stateSummary && (
-                              <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-1">
+                              <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">
                                 <span className="text-[#1e3a5f] dark:text-blue-300 font-medium">• </span>{stateSummary}
                               </p>
                             )}
                             {diasporaSummary && (
-                              <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-1">
+                              <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">
                                 <span className="text-[#ea580c] dark:text-orange-400 font-medium">در مقابل </span>{diasporaSummary}
                               </p>
                             )}
@@ -890,7 +896,7 @@ export default async function HomePage({
       )}
 
       {/* ═══ پرمخاطب‌ترین — full-width row with image on the right ═══ */}
-      <div className="py-10 border-b border-slate-200 dark:border-slate-800">
+      <div className="py-10 px-8 md:px-14 border-b border-slate-200 dark:border-slate-800">
         <h2 className="text-[32px] font-black text-slate-900 dark:text-white mb-8 text-center">پرمخاطب‌ترین</h2>
         <div>
           {mostViewed.map((s, i) => {
@@ -913,46 +919,51 @@ export default async function HomePage({
                 {i > 0 && (
                   <div className="my-4 mx-auto w-1/2 h-px bg-slate-200/60 dark:bg-slate-700/40" />
                 )}
-                <Link href={`/${locale}/stories/${s.id}`} className="group flex items-start gap-6 py-5">
-                  {/* Image first in DOM → in RTL it renders visually
-                      on the right, which matches Parham's spec. Fixed
-                      128×128 square keeps the row height predictable. */}
-                  <div className="w-32 h-32 shrink-0 overflow-hidden bg-slate-100 dark:bg-slate-800">
+                <Link href={`/${locale}/stories/${s.id}`} className="group flex items-stretch gap-6 py-5">
+                  {/* Image first in DOM → visually on the right in RTL.
+                      items-stretch on the Link lets the image match the
+                      row's full content height — Parham's "same height
+                      as each row" spec. Fixed width keeps the layout
+                      predictable; height follows the text block. */}
+                  <div className="w-48 shrink-0 overflow-hidden bg-slate-100 dark:bg-slate-800 self-stretch">
                     <SafeImage src={s.image_url} className="w-full h-full object-cover" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start gap-3">
                       <span className="text-[32px] font-black text-slate-200 dark:text-slate-700 shrink-0 leading-none mt-1">{toFa(i + 1)}</span>
                       <div className="flex-1 min-w-0">
+                        {/* Tightened inter-line spacing throughout —
+                            mt-1.5 → mt-1, leading-6 → leading-5.
+                            Parham's "smaller between two lines" ask. */}
                         <h3 className="text-[22px] font-black leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
                           {s.title_fa}
                         </h3>
-                        <UpdateBadge story={s} className="mt-1.5" />
-                        <p className="text-[14px] text-slate-400 mt-1.5">
+                        <UpdateBadge story={s} className="mt-1" />
+                        <p className="text-[14px] text-slate-400 mt-1">
                           {toFa(s.article_count)} مقاله · {toFa(s.source_count)} رسانه
                           {s.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300"> · درون‌مرزی {toFa(s.state_pct)}٪</span>}
                           {s.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400"> · برون‌مرزی {toFa(s.diaspora_pct)}٪</span>}
                         </p>
                         {stateS && (
-                          <p className="text-[14px] leading-6 text-slate-500 dark:text-slate-400 mt-2 line-clamp-2">
+                          <p className="text-[14px] leading-5 text-slate-500 dark:text-slate-400 mt-1.5 line-clamp-2">
                             <span className="text-[#1e3a5f] dark:text-blue-300 font-bold">• </span>{stateS}
                           </p>
                         )}
                         {diasporaS && (
-                          <p className="text-[14px] leading-6 text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">
+                          <p className="text-[14px] leading-5 text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-2">
                             <span className="text-[#ea580c] dark:text-orange-400 font-bold">• </span>{diasporaS}
                           </p>
                         )}
                         {!stateS && !diasporaS && fallbackBullets.map((b, j) => (
-                          <p key={j} className="text-[14px] leading-6 text-slate-400 dark:text-slate-500 mt-1 line-clamp-2">• {b}</p>
+                          <p key={j} className="text-[14px] leading-5 text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-2">• {b}</p>
                         ))}
                         {tg?.predictions && tg.predictions.length > 0 && (
-                          <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1.5 line-clamp-2">
+                          <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-2">
                             <span className="font-bold text-blue-500">پیش‌بینی:</span> {predictionText(tg.predictions[0])}
                           </p>
                         )}
                         {tg?.key_claims && tg.key_claims.length > 0 && (
-                          <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-2">
+                          <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-2">
                             <span className="font-bold text-amber-500">ادعا:</span> {claimText(tg.key_claims[0])}
                           </p>
                         )}
