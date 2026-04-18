@@ -728,7 +728,7 @@ export default async function HomePage({
                 <span className="text-[13px] font-black text-slate-900 dark:text-white px-3 bg-white dark:bg-[#0a0e1a]">تقابل روایت‌ها</span>
                 <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
               </div>
-              <div className="space-y-5 px-4 pb-4 pt-2 flex-1 flex flex-col justify-between overflow-hidden">
+              <div className="space-y-5 px-4 pb-6 pt-6 flex-1 flex flex-col justify-between overflow-hidden">
                 {(() => {
                   type BattleItem = {
                     storyId: string;
