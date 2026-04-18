@@ -10,10 +10,50 @@ const MIN_HEIGHT = 80;
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+// Iran-hosted media that geo-block Vercel's US/EU edge IPs. Vercel's
+// `/_next/image` proxy-fetches the source from its own servers to
+// optimize; when the source blocks Vercel, the endpoint returns a
+// 400 and the image renders as a placeholder even though users can
+// reach it directly from their browsers. For these hostnames we
+// bypass Vercel's optimizer and emit a plain <img> — browsers load
+// the image directly from the source.
+const GEOBLOCKED_FROM_VERCEL = [
+  "irna.ir",
+  "tasnimnews.com",
+  "farsnews.ir",
+  "farsnews.com",
+  "mehrnews.com",
+  "mashreghnews.ir",
+  "nournews.ir",
+  "iribnews.ir",
+  "isna.ir",
+  "etemadnewspaper.ir",
+  "khabaronline.ir",
+  "yjc.ir",
+  "tabnak.ir",
+  "asriran.com",
+  "sharghdaily.com",
+  "ilna.ir",
+  "entekhab.ir",
+  "rajanews.com",
+  "hamshahrionline.ir",
+];
+
 function resolveUrl(src: string): string {
   // Relative /images/... paths served by the backend
   if (src.startsWith("/images/")) return `${API_BASE}${src}`;
   return src;
+}
+
+function isGeoblockedFromVercel(src: string): boolean {
+  try {
+    const host = new URL(src).hostname.toLowerCase();
+    return GEOBLOCKED_FROM_VERCEL.some(
+      (d) => host === d || host.endsWith("." + d),
+    );
+  } catch {
+    return false;
+  }
 }
 
 export default function SafeImage({
@@ -52,12 +92,15 @@ export default function SafeImage({
     );
   }
 
+  const resolved = resolveUrl(src);
+  const skipOptimization = isGeoblockedFromVercel(resolved);
+
   // next/image fill mode needs a position:relative parent. We render our own
   // so callers don't have to add `relative` to every aspect-ratio wrapper.
   return (
     <div className="relative h-full w-full">
       <Image
-        src={resolveUrl(src)}
+        src={resolved}
         alt={alt}
         fill
         sizes={sizes}
@@ -65,7 +108,7 @@ export default function SafeImage({
         className={className || "object-cover"}
         onError={() => setFailed(true)}
         onLoad={handleLoad}
-        unoptimized={false}
+        unoptimized={skipOptimization}
       />
     </div>
   );
