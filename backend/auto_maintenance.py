@@ -54,6 +54,7 @@ STEP_TIMEOUTS_SEC = {
     "summarize": 1800,
     "bias_score": 3600,            # per-article LLM calls, heaviest step
     "fix_images": 1200,
+    "migrate_images_r2": 1800,   # download + upload per article, capped 300/run
     "telegram_analysis": 3600,     # per-story LLM analysis
     "backfill_analyst_counts": 300,  # no LLM — just resolves supporter names
     "niloofar_editorial": 1200,
@@ -3757,6 +3758,68 @@ JSON با این ساختار:
     return stats
 
 
+async def step_migrate_images_to_r2():
+    """Download source-CDN article images and re-host them on R2.
+
+    Why: several Iran-hosted media (irna.ir, tabnak.ir, tasnimnews.com…)
+    geo-block non-Iran IPs. When Vercel's `/_next/image` tries to proxy
+    their CDNs from US/EU edge IPs, the upstream fetch fails and the
+    homepage shows placeholders. Copying every article image onto R2
+    at ingest time removes the runtime dependency on origin reachability
+    — the frontend always loads from our own CDN.
+
+    Idempotent via the existing `_object_exists_in_r2` short-circuit in
+    `download_image`. Capped at 300 articles per run so a single
+    maintenance pass stays under the step timeout; most-recent articles
+    go first so new content lands on R2 before it surfaces on the
+    homepage. Articles whose source download fails are left alone
+    (SafeImage's per-source geoblock bypass remains the fallback).
+    """
+    from sqlalchemy import and_, or_, select, not_
+    from app.config import settings
+    from app.database import async_session
+    from app.models.article import Article
+    from app.services.image_downloader import download_image, LOCAL_IMAGE_BASE
+
+    stats = {"migrated": 0, "skipped": 0, "failed": 0, "no_config": 0}
+
+    if not settings.r2_public_url:
+        logger.warning("R2 not configured — skipping migrate_images_r2")
+        stats["no_config"] = 1
+        return stats
+
+    r2_prefix = settings.r2_public_url.rstrip("/")
+
+    async with async_session() as db:
+        result = await db.execute(
+            select(Article)
+            .where(
+                Article.image_url.isnot(None),
+                Article.image_url != "",
+                not_(Article.image_url.like(f"{r2_prefix}%")),
+                not_(Article.image_url.like(f"{LOCAL_IMAGE_BASE}%")),
+            )
+            .order_by(Article.ingested_at.desc())
+            .limit(300)
+        )
+        articles = list(result.scalars().all())
+
+        for a in articles:
+            stored = await download_image(a.image_url)
+            if stored and stored != a.image_url:
+                a.image_url = stored
+                stats["migrated"] += 1
+            elif stored:
+                stats["skipped"] += 1
+            else:
+                stats["failed"] += 1
+
+        await db.commit()
+
+    logger.info(f"Migrate images R2: {stats}")
+    return stats
+
+
 async def step_backfill_analyst_counts():
     """Resolve `supporters` → analyst channel IDs for every story's existing
     telegram_analysis, writing real `supporter_count` / `analysts_total` /
@@ -3837,6 +3900,7 @@ FULL_PIPELINE = [
     ("summarize", "Summarize new stories", "step_summarize"),
     ("bias_score", "Bias scoring", "step_bias_score"),
     ("fix_images", "Fix broken images", "step_fix_images"),
+    ("migrate_images_r2", "Migrate source-CDN images to R2 (up to 300/run)", "step_migrate_images_to_r2"),
     ("story_quality", "Story quality checks", "step_story_quality"),
     ("detect_silences", "Detect coverage silences", "step_detect_silences"),
     ("detect_coordination", "Detect coordinated messaging", "step_detect_coordination"),
@@ -3882,6 +3946,9 @@ INGEST_ONLY_PIPELINE = [
     ("cluster", "Cluster articles into stories", "step_cluster"),
     ("centroids", "Recompute story centroid embeddings", "step_recompute_centroids"),
     ("telegram_link", "Link Telegram posts to stories (embeddings)", "step_telegram_link_posts"),
+    # Keeps newly-ingested images on R2 so the homepage never depends on
+    # the origin CDN being reachable from Vercel. Idempotent, capped 300/run.
+    ("migrate_images_r2", "Migrate source-CDN images to R2 (up to 300/run)", "step_migrate_images_to_r2"),
     # Same hourly update detection the rss-cron runs. Keeping it here too
     # means the signal refreshes on the 4 hours rss-cron skips by design
     # (00/06/12/18 UTC — the ingest-cron collision slots).
