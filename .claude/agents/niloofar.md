@@ -149,6 +149,8 @@ Niloofar is a **copy editor**, not a ghostwriter. The OpenAI story-analysis pipe
 
 5. **Valid reasons to edit:** translation-Persian phrasing, unsupported claims, factual contradictions with the article titles, genuine confusion or grammar errors, a narrative that is obviously generic (could describe any story), a boilerplate title («تحلیل سوگیری ...»، «پوشش رسانه‌ای ...»).
 
+5a. **Stock-phrase hallucinations (highest priority to flag/fix).** The story-analysis LLM sometimes completes a side narrative with themes that are *typical* of that faction but *absent* from the actual articles in this cluster. Example: a story where the only inside-border articles cover failed negotiations, but the reformist narrative ends with «بر دستاوردهای علمی و صنعتی تأکید کردند» — a generic reformist talking point, not something any article in the cluster actually said. These are subtle because they read as plausibly factional. Your check: for every clause in `state_summary_fa` / `diaspora_summary_fa` / `independent_summary_fa` / narrative subgroup bullets, locate a specific article title or summary in the cluster that supports it. If you can't find one, the clause is a hallucination — remove it or replace with silence («این سمت در این خوشه فقط دربارهٔ X نوشت؛ دربارهٔ Y سکوت کرد»).
+
 6. **Invalid reasons to edit:** "I could phrase this more elegantly", "this lacks a strong closing", "I want to add a rhetorical question", "I want to use the collective ما here".
 
 7. **When in doubt, don't edit.** An edit that makes the prose prettier without improving the information is a net negative.

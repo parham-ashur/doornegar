@@ -17,6 +17,15 @@ All notable changes to the Doornegar project are documented here, organized by w
 - `backend/auto_maintenance.py` — new `step_backfill_analyst_counts` runs the same enrichment against existing `Story.telegram_analysis` rows (no LLM), propagating counts to `predictions_display` when Niloofar has polished a story. Wired into `FULL_PIPELINE` after `telegram_analysis`.
 - Frontend (homepage + story page) now renders `«N از T تحلیلگر»` when the real counts are present and falls back to the old `«X٪ از تحلیلگران»` for as-yet-unbackfilled rows.
 
+### Telegram analyst-voice pipeline rework
+- Narrowed the pass-2 input pool from `{commentary, aggregator, activist, political_party, citizen}` down to **commentary only** — aggregators just rebroadcast headlines, the other types are unused in seed. Removed the fallback-to-all-posts path: stories with <2 analyst posts now return null (UI shows «تحلیل عمیق پس از اجرای بعدی»), instead of laundering state-media posts into the analyst section.
+- New **pass-0 content classifier** (`_pass0_classify_posts`): one batched nano-model call per story labels each post as `analysis` / `news` / `unrelated`. Only `analysis` posts feed pass-1 and pass-2. Fail-open on LLM error.
+- `PASS2_PROMPT` reframed from "senior media analyst" to "senior editor summarizing analyst voices"; worldview labels now «تحلیلگران نزدیک به دولت / تحلیلگران منتقد / تحلیلگران مستقل» instead of media-narrative framing.
+
+### Story narrative grounding (stock-phrase hallucinations)
+- `backend/app/services/story_analysis.py` — added a second absolute rule to `STORY_ANALYSIS_PROMPT`: every clause in the side summaries / narrative bullets must derive from text actually present in that side's articles, not from canonical talking points for that faction. Concrete don't-do examples added («اصلاح‌طلبان بر دستاوردهای علمی و صنعتی تأکید کردند» on a negotiation-only story).
+- `.claude/agents/niloofar.md` — new rule 5a makes stock-phrase hallucinations her highest-priority flag during audits: every clause in a side narrative needs a specific article title/summary that supports it; if she can't locate one, cut or replace with silence.
+
 ---
 
 ## April 17, 2026
