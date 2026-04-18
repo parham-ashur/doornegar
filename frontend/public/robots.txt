@@ -1,9 +1,15 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://doornegar.vercel.app/sitemap.xml
+Sitemap: https://doornegar.org/sitemap.xml
 
-# Block lab/experimental pages from indexing
-Disallow: /*/lab/
+# Admin / internal / experimental — never index
 Disallow: /*/dashboard/
+Disallow: /*/lab/
 Disallow: /*/rate/
+Disallow: /*/improve/
+Disallow: /*/auth/
+Disallow: /*/suggest/
+
+# Block raw content / API endpoints if any land on the frontend
+Disallow: /api/

@@ -10,15 +10,23 @@ import PageAtmosphere from "@/components/common/PageAtmosphere";
 import WelcomeModal from "@/components/common/WelcomeModal";
 import "@/styles/globals.css";
 
+// metadataBase lets Next resolve all relative OG/Twitter image URLs and
+// canonical hrefs against the public origin. Without it, Next logs a
+// warning and uses a fallback that breaks OG previews on social.
 export const metadata: Metadata = {
-  title: "دورنگر — شفافیت رسانه‌ای ایران | Doornegar",
+  metadataBase: new URL("https://doornegar.org"),
+  title: {
+    default: "دورنگر — شفافیت رسانه‌ای ایران | Doornegar",
+    template: "%s — دورنگر",
+  },
   description:
     "مقایسه پوشش خبری رسانه‌های داخل و خارج ایران. تحلیل سوگیری، نگاه یک‌جانبه، و چارچوب‌بندی رسانه‌ها. " +
     "Compare Iranian news coverage across state, diaspora, and independent media.",
   keywords: [
     "دورنگر", "شفافیت رسانه", "ایران", "خبر", "سوگیری رسانه",
+    "مقایسه پوشش خبری", "نگاه یک‌جانبه", "رسانه‌های فارسی",
     "Doornegar", "Iran", "media transparency", "media bias", "news comparison",
-    "BBC Persian", "Iran International", "press freedom",
+    "BBC Persian", "Iran International", "press freedom", "Persian news",
   ],
   authors: [{ name: "Doornegar" }],
   openGraph: {
@@ -26,7 +34,9 @@ export const metadata: Metadata = {
     description: "مقایسه پوشش خبری رسانه‌های داخل و خارج ایران. کدام رسانه چه خبری را پوشش داده؟",
     type: "website",
     locale: "fa_IR",
+    alternateLocale: ["en_US"],
     siteName: "Doornegar - دورنگر",
+    url: "https://doornegar.org",
   },
   twitter: {
     card: "summary_large_image",
@@ -36,6 +46,24 @@ export const metadata: Metadata = {
   robots: {
     index: true,
     follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-image-preview": "large",
+      "max-snippet": -1,
+      "max-video-preview": -1,
+    },
+  },
+  // Generic hreflang pointing at the locale roots. Per-page routes
+  // override this with their own alternates via generateMetadata so
+  // /fa/stories/X and /en/stories/X reference each other specifically.
+  alternates: {
+    canonical: "https://doornegar.org",
+    languages: {
+      fa: "https://doornegar.org/fa",
+      en: "https://doornegar.org/en",
+      "x-default": "https://doornegar.org/fa",
+    },
   },
 };
 

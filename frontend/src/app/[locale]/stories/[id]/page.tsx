@@ -22,14 +22,52 @@ export async function generateMetadata({
 }: {
   params: Promise<{ locale: string; id: string }>;
 }): Promise<Metadata> {
-  const { id } = await params;
+  const { locale, id } = await params;
   try {
     const story = await getStory(id);
-    const title = story.title_fa || story.title_en;
-    const description = story.summary_fa || `${story.source_count} رسانه · ${story.article_count} مقاله`;
+    const titleFa = story.title_fa || story.title_en || "";
+    const titleEn = story.title_en || story.title_fa || "";
+    const title = locale === "en" ? titleEn : titleFa;
+    // Prefer summary_fa (1–2 sentence editorial blurb) for the meta
+    // description; fall back to a deterministic stats line so there's
+    // always SOMETHING — empty descriptions get penalized in search.
+    const description =
+      story.summary_fa ||
+      story.summary_en ||
+      `مقایسهٔ پوشش این خبر در ${story.source_count} رسانه (${story.article_count} مقاله) — ایران درون‌مرزی vs برون‌مرزی.`;
+
+    const canonical = `https://doornegar.org/${locale}/stories/${id}`;
+    const ogImage = story.image_url || undefined;
+
     return {
-      title: `${title} — دورنگر`,
+      title, // root layout's template adds " — دورنگر"
       description,
+      alternates: {
+        canonical,
+        languages: {
+          fa: `https://doornegar.org/fa/stories/${id}`,
+          en: `https://doornegar.org/en/stories/${id}`,
+          "x-default": `https://doornegar.org/fa/stories/${id}`,
+        },
+      },
+      openGraph: {
+        title,
+        description,
+        type: "article",
+        url: canonical,
+        siteName: "Doornegar - دورنگر",
+        locale: locale === "en" ? "en_US" : "fa_IR",
+        alternateLocale: locale === "en" ? ["fa_IR"] : ["en_US"],
+        publishedTime: story.first_published_at || undefined,
+        modifiedTime: story.last_updated_at || story.updated_at || undefined,
+        images: ogImage ? [{ url: ogImage, alt: title }] : undefined,
+      },
+      twitter: {
+        card: "summary_large_image",
+        title,
+        description,
+        images: ogImage ? [ogImage] : undefined,
+      },
     };
   } catch {
     return { title: "دورنگر" };
@@ -80,8 +118,52 @@ export default async function StoryDetailPage({
   const coveringSlugs = new Set(story.articles.map((a) => a.source_slug).filter(Boolean));
   const coveringSources = allSources.filter((s) => coveringSlugs.has(s.slug));
 
+  // JSON-LD NewsArticle schema — feeds Google News, knowledge panels,
+  // rich-result carousels. Must match the visible content: same
+  // headline, same publish date, same image. Embedded via <script
+  // type="application/ld+json"> inline because Next doesn't have a
+  // first-class Metadata API for structured data yet.
+  const canonicalUrl = `https://doornegar.org/${locale}/stories/${id}`;
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "NewsArticle",
+    headline: title,
+    description:
+      story.summary_fa ||
+      story.summary_en ||
+      `${story.source_count} رسانه · ${story.article_count} مقاله`,
+    datePublished: story.first_published_at || undefined,
+    dateModified: story.last_updated_at || story.updated_at || story.first_published_at || undefined,
+    inLanguage: locale === "en" ? "en" : "fa",
+    image: story.image_url ? [story.image_url] : undefined,
+    mainEntityOfPage: {
+      "@type": "WebPage",
+      "@id": canonicalUrl,
+    },
+    publisher: {
+      "@type": "Organization",
+      name: "Doornegar - دورنگر",
+      url: "https://doornegar.org",
+      logo: {
+        "@type": "ImageObject",
+        url: "https://doornegar.org/favicon.ico",
+      },
+    },
+    // Outlets covering the story surface as citations — signals to
+    // crawlers that this is an aggregation page, not original reporting.
+    citation: coveringSources.map(s => ({
+      "@type": "CreativeWork",
+      name: s.name_fa || s.name_en || s.slug,
+      url: s.website_url,
+    })),
+  };
+
   return (
     <FeedbackProvider>
+    <script
+      type="application/ld+json"
+      dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+    />
     <StoryFeedbackOverlay storyId={id} storyTitle={title} />
     <div dir="rtl" className="mx-auto max-w-7xl px-4 py-8">
       {/* Header */}
