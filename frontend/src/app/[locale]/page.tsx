@@ -2,7 +2,6 @@ import { setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import SafeImage from "@/components/common/SafeImage";
 import type { StoryBrief } from "@/lib/types";
-import WordsOfWeek from "@/components/home/WordsOfWeek";
 import TelegramDiscussions from "@/components/home/TelegramDiscussions";
 import WeeklyDigest from "@/components/home/WeeklyDigest";
 import { formatRelativeTime, toFa } from "@/lib/utils";
@@ -218,13 +217,12 @@ export default async function HomePage({
   // iframe; it hides the mobile layout so the desktop layout renders alone.
   const sp = (await Promise.resolve(searchParams)) ?? {};
   const forceDesktop = sp.desktop === "1";
-  // Stage 1: all independent fetches in parallel — trending, blindspots,
-  // weekly digest, and loaded words. None depend on story IDs.
-  const [stories, blindspots, weeklyDigestData, loadedWordsData] = await Promise.all([
+  // Stage 1: all independent fetches in parallel — trending,
+  // blindspots, weekly digest. None depend on story IDs.
+  const [stories, blindspots, weeklyDigestData] = await Promise.all([
     fetchAPI<StoryBrief[]>("/api/v1/stories/trending?limit=50").then(d => d || []),
     fetchAPI<StoryBrief[]>("/api/v1/stories/blindspots?limit=10").then(d => d || []),
     fetchAPI<{ status: string; content?: string }>("/api/v1/stories/weekly-digest"),
-    fetchAPI<{ conservative: string[]; opposition: string[] }>("/api/v1/stories/insights/loaded-words"),
   ]);
 
   if (stories.length === 0) {
@@ -455,7 +453,6 @@ export default async function HomePage({
           allAnalyses={allAnalyses}
           heroTelegram={heroTelegram}
           prefetchedTelegram={prefetchedTelegram}
-          loadedWordsData={loadedWordsData}
         />
       )}
 
@@ -467,18 +464,15 @@ export default async function HomePage({
       {/* ═══ TOP SECTION: Blind spots | Hero | Telegram ═══ */}
       <div className="grid grid-cols-12 gap-0 border-b-2 border-slate-300 dark:border-slate-700">
 
-        {/* RIGHT: Telegram discussions — fixed height matching hero */}
+        {/* RIGHT: Telegram discussions — gets the full column height
+            now that واژه‌های روز has been removed. More predictions +
+            claims visible without scrolling. */}
         <div className="col-span-3 py-6 pl-6 border-l border-slate-200 dark:border-slate-800 flex flex-col overflow-hidden" style={{ maxHeight: 700 }}>
           <h3 className="text-[13px] font-black text-slate-900 dark:text-white mb-3 pb-2 border-b border-slate-200 dark:border-slate-800 shrink-0">
             تحلیل روایت‌های تلگرام
           </h3>
           <div className="flex-1 min-h-0 overflow-hidden">
             <TelegramDiscussions prefetchedData={prefetchedTelegram} locale={locale} />
-          </div>
-
-          {/* Words of the day — pushed to bottom */}
-          <div className="shrink-0 pt-4 border-t border-slate-200 dark:border-slate-800">
-            <WordsOfWeek prefetchedData={loadedWordsData} />
           </div>
         </div>
 
@@ -1006,7 +1000,6 @@ function MobileHome({
   allAnalyses,
   heroTelegram,
   prefetchedTelegram,
-  loadedWordsData,
 }: {
   hero: StoryBrief | undefined;
   stories: StoryBrief[];
@@ -1017,7 +1010,6 @@ function MobileHome({
   allAnalyses: Record<string, { bias_explanation_fa?: string; state_summary_fa?: string; diaspora_summary_fa?: string } | null>;
   heroTelegram: { discourse_summary?: string; predictions?: any[]; key_claims?: any[] } | null;
   prefetchedTelegram: { storyId: string; analysis: any }[];
-  loadedWordsData: { conservative?: any[]; opposition?: any[] } | null;
 }) {
   if (!hero) return null;
 
@@ -1248,10 +1240,6 @@ function MobileHome({
         </div>
       )}
 
-      {/* ── 6. Today's words — final section ── */}
-      <div className="px-4 py-5">
-        <WordsOfWeek prefetchedData={loadedWordsData} />
-      </div>
     </div>
   );
 }
