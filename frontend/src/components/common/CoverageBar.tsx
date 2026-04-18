@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment } from "react";
-import { cn } from "@/lib/utils";
+import { cn, toFa } from "@/lib/utils";
 import {
   GROUP_COLORS,
   GROUP_LABELS_FA,
@@ -54,11 +54,11 @@ export default function CoverageBar({
         <div className="mb-1.5 flex items-center justify-between text-[11px] font-medium text-slate-500 dark:text-slate-400">
           <span className="flex items-center gap-1.5">
             <span className="inline-block h-2 w-2" style={{ backgroundColor: GROUP_COLORS.principlist }} />
-            {SIDE_LABELS_FA.inside} {inside}٪
+            {SIDE_LABELS_FA.inside} {toFa(inside)}٪
           </span>
           <span className="flex items-center gap-1.5">
             <span className="inline-block h-2 w-2" style={{ backgroundColor: GROUP_COLORS.radical_diaspora }} />
-            {SIDE_LABELS_FA.outside} {outside}٪
+            {SIDE_LABELS_FA.outside} {toFa(outside)}٪
           </span>
         </div>
       )}
@@ -69,7 +69,7 @@ export default function CoverageBar({
           HEIGHT_CLASS[height],
         )}
         role="img"
-        aria-label={`درون‌مرزی ${inside}٪ — برون‌مرزی ${outside}٪`}
+        aria-label={`درون‌مرزی ${toFa(inside)}٪ — برون‌مرزی ${toFa(outside)}٪`}
       >
         {NARRATIVE_GROUP_ORDER.map((group, i) => {
           const width = pct[group];
@@ -97,7 +97,7 @@ export default function CoverageBar({
               <div key={side} className="flex flex-col gap-0.5">
                 <div className="font-bold text-slate-700 dark:text-slate-300">
                   {SIDE_LABELS_FA[side]}{" "}
-                  <span className="font-normal text-slate-400">({sideTotal}٪)</span>
+                  <span className="font-normal text-slate-400">({toFa(sideTotal)}٪)</span>
                 </div>
                 {withinSidePercentages(GROUPS_BY_SIDE[side], pct, sideTotal).map(
                   ([g, withinPct]) => (
@@ -110,7 +110,7 @@ export default function CoverageBar({
                         style={{ backgroundColor: GROUP_COLORS[g] }}
                       />
                       <span>{GROUP_LABELS_FA[g]}</span>
-                      <span className="text-slate-400">{withinPct}٪</span>
+                      <span className="text-slate-400">{toFa(withinPct)}٪</span>
                     </div>
                   ),
                 )}
