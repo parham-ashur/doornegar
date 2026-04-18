@@ -715,17 +715,20 @@ export default async function HomePage({
             </div>
           </div>
 
-          {/* تقابل روایت‌ها (moved up from row 2). Col-span-5 gives
-              more horizontal room for context sentences than the old
-              grid-cols-2 half. Bordered-box chrome matches row 2. */}
-          <div className="col-span-5 pr-6">
-            <div className="border border-slate-300 dark:border-slate-600 h-full flex flex-col">
+          {/* Row 1 right column is now stacked: تقابل روایت‌ها on top,
+              بیشترین اختلاف نگاه below (2 stories each). Each box
+              claims flex-1 so they split the column height driven by
+              leftTextStories. If there are no disputed candidates the
+              bottom box is hidden entirely and تقابل takes the whole
+              column — no empty shells. */}
+          <div className="col-span-5 pr-6 flex flex-col gap-4">
+            <div className="flex-1 min-h-0 border border-slate-300 dark:border-slate-600 flex flex-col">
               <div className="flex items-center -mt-3 mx-4">
                 <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
                 <span className="text-[13px] font-black text-slate-900 dark:text-white px-3 bg-white dark:bg-[#0a0e1a]">تقابل روایت‌ها</span>
                 <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
               </div>
-              <div className="space-y-5 px-4 pb-4 pt-2 flex-1 flex flex-col justify-between">
+              <div className="space-y-5 px-4 pb-4 pt-2 flex-1 flex flex-col justify-between overflow-hidden">
                 {(() => {
                   type BattleItem = {
                     title: string;
@@ -808,7 +811,7 @@ export default async function HomePage({
                     }
                   }
 
-                  return battleItems.slice(0, 3).map((item, idx) => (
+                  return battleItems.slice(0, 2).map((item, idx) => (
                     <div key={idx}>
                       <p className="text-[13px] font-bold text-slate-900 dark:text-white mb-3 line-clamp-1">{item.title}</p>
                       <div className="flex gap-0 text-center">
@@ -833,128 +836,134 @@ export default async function HomePage({
                 })()}
               </div>
             </div>
+            {/* بیشترین اختلاف نگاه — bottom half of the column. Show
+                up to 2 stories; hide the whole box if nothing qualifies
+                (no empty shells). Top 2 rotate as dispute_score shifts
+                from day to day. */}
+            {(mostDisputed || secondDisputed) && (
+              <div className="flex-1 min-h-0 border border-slate-300 dark:border-slate-600 flex flex-col">
+                <div className="flex items-center -mt-3 mx-4">
+                  <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
+                  <span className="text-[13px] font-black text-slate-900 dark:text-white px-3 bg-white dark:bg-[#0a0e1a]">بیشترین اختلاف نگاه</span>
+                  <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
+                </div>
+                <div className="px-4 pb-4 pt-2 flex-1 overflow-hidden">
+                  {[mostDisputed, secondDisputed].filter(Boolean).map((story, i) => {
+                    const s = story!;
+                    const analysis = allAnalyses[s.id];
+                    const stateSummary = analysis?.state_summary_fa;
+                    const diasporaSummary = analysis?.diaspora_summary_fa;
+                    return (
+                      <div key={s.id} className={`py-3 ${i > 0 ? "border-t border-slate-100 dark:border-slate-800/60" : ""}`}>
+                        <Link href={`/${locale}/stories/${s.id}`} className="group block">
+                          <h4 className="text-[13px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
+                            {s.title_fa}
+                          </h4>
+                          <UpdateBadge story={s} className="mt-1" />
+                          <div className="mt-1 flex items-center justify-end gap-3 text-[13px]">
+                            <span className="text-[#1e3a5f] dark:text-blue-300 font-medium">درون‌مرزی {toFa(s.state_pct)}٪</span>
+                            <span className="text-[#ea580c] dark:text-orange-400 font-medium">برون‌مرزی {toFa(s.diaspora_pct)}٪</span>
+                          </div>
+                        </Link>
+                        {(stateSummary || diasporaSummary) && (
+                          <div className="mt-2 space-y-1">
+                            {stateSummary && (
+                              <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-1">
+                                <span className="text-[#1e3a5f] dark:text-blue-300 font-medium">• </span>{stateSummary}
+                              </p>
+                            )}
+                            {diasporaSummary && (
+                              <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-1">
+                                <span className="text-[#ea580c] dark:text-orange-400 font-medium">در مقابل </span>{diasporaSummary}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
 
-      {/* ═══ COMMON GROUND + BATTLE OF NUMBERS ═══ */}
-      <div className="grid grid-cols-2 gap-6 py-8 border-b border-slate-200 dark:border-slate-800 items-stretch">
-
-        {/* Most disputed */}
+      {/* ═══ پرمخاطب‌ترین — full-width row with image on the right ═══ */}
+      <div className="py-10 border-b border-slate-200 dark:border-slate-800">
+        <h2 className="text-[32px] font-black text-slate-900 dark:text-white mb-8 text-center">پرمخاطب‌ترین</h2>
         <div>
-          <div className="border border-slate-300 dark:border-slate-600 h-full flex flex-col">
-            <div className="flex items-center -mt-3 mx-4">
-              <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
-              <span className="text-[13px] font-black text-slate-900 dark:text-white px-3 bg-white dark:bg-[#0a0e1a]">بیشترین اختلاف نگاه</span>
-              <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
-            </div>
-            <div className="px-4 pb-4 pt-2 flex-1">
-              {[mostDisputed, secondDisputed, thirdDisputed].filter(Boolean).map((story, i) => {
-                const s = story!;
-                const analysis = allAnalyses[s.id];
-                const stateSummary = analysis?.state_summary_fa;
-                const diasporaSummary = analysis?.diaspora_summary_fa;
-                return (
-                  <div key={s.id} className={`py-4 ${i > 0 ? "border-t border-slate-100 dark:border-slate-800/60" : ""}`}>
-                    <Link href={`/${locale}/stories/${s.id}`} className="group block">
-                      <h4 className="text-[13px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
-                        {s.title_fa}
-                      </h4>
-                      <UpdateBadge story={s} className="mt-1" />
-                      <div className="mt-1 flex items-center justify-end gap-3 text-[13px]">
-                        <span className="text-[#1e3a5f] dark:text-blue-300 font-medium">درون‌مرزی {toFa(s.state_pct)}٪</span>
-                        <span className="text-[#ea580c] dark:text-orange-400 font-medium">برون‌مرزی {toFa(s.diaspora_pct)}٪</span>
-                      </div>
-                    </Link>
-                    {(stateSummary || diasporaSummary) && (
-                      <div className="mt-2 space-y-1">
-                        {stateSummary && (
-                          <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">
-                            <span className="text-[#1e3a5f] dark:text-blue-300 font-medium">• </span>{stateSummary}
-                          </p>
-                        )}
-                        {diasporaSummary && (
-                          <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">
-                            <span className="text-[#ea580c] dark:text-orange-400 font-medium">در مقابل </span>{diasporaSummary}
-                          </p>
-                        )}
-                      </div>
-                    )}
+          {mostViewed.map((s, i) => {
+            const analysis = allAnalyses[s.id];
+            const stateS = analysis?.state_summary_fa;
+            const diasporaS = analysis?.diaspora_summary_fa;
+            const tg = mostViewedTelegramById[s.id];
+            let fallbackBullets: string[] = [];
+            if (!stateS && !diasporaS) {
+              const bias = analysis?.bias_explanation_fa;
+              fallbackBullets = bias
+                ? bias.split(/[.؛]/).map((p: string) => p.trim()).filter((p: string) => p.length > 10).slice(0, 2)
+                : [];
+            }
+            return (
+              <div key={s.id}>
+                {/* Between-story separator — half width, transparent,
+                    centered. Rendered ABOVE every card except the
+                    first so spacing stays symmetric. */}
+                {i > 0 && (
+                  <div className="my-4 mx-auto w-1/2 h-px bg-slate-200/60 dark:bg-slate-700/40" />
+                )}
+                <Link href={`/${locale}/stories/${s.id}`} className="group flex items-start gap-6 py-5">
+                  {/* Image first in DOM → in RTL it renders visually
+                      on the right, which matches Parham's spec. Fixed
+                      128×128 square keeps the row height predictable. */}
+                  <div className="w-32 h-32 shrink-0 overflow-hidden bg-slate-100 dark:bg-slate-800">
+                    <SafeImage src={s.image_url} className="w-full h-full object-cover" />
                   </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-
-        {/* پرمخاطب‌ترین (moved down from row 1). Top 3 stories in the
-            same bordered-box chrome as بیشترین اختلاف نگاه so the two
-            row-2 boxes read as a matched pair. */}
-        <div>
-          <div className="border border-slate-300 dark:border-slate-600 h-full flex flex-col">
-            <div className="flex items-center -mt-3 mx-4">
-              <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
-              <span className="text-[13px] font-black text-slate-900 dark:text-white px-3 bg-white dark:bg-[#0a0e1a]">پرمخاطب‌ترین</span>
-              <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
-            </div>
-            <div className="px-4 pb-4 pt-2 flex-1">
-              {mostViewed.map((s, i) => {
-                const analysis = allAnalyses[s.id];
-                const stateS = analysis?.state_summary_fa;
-                const diasporaS = analysis?.diaspora_summary_fa;
-                const tg = mostViewedTelegramById[s.id];
-                let fallbackBullets: string[] = [];
-                if (!stateS && !diasporaS) {
-                  const bias = analysis?.bias_explanation_fa;
-                  fallbackBullets = bias
-                    ? bias.split(/[.؛]/).map((p: string) => p.trim()).filter((p: string) => p.length > 10).slice(0, 2)
-                    : [];
-                }
-                return (
-                  <Link key={s.id} href={`/${locale}/stories/${s.id}`}
-                    className={`group flex items-start gap-3 py-4 ${i > 0 ? "border-t border-slate-100 dark:border-slate-800/60" : ""}`}>
-                    <span className="text-[24px] font-black text-slate-200 dark:text-slate-700 shrink-0 w-8 text-center mt-0.5">{toFa(i + 1)}</span>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="text-[18px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
-                        {s.title_fa}
-                      </h3>
-                      <UpdateBadge story={s} className="mt-1" />
-                      <p className="text-[14px] text-slate-400 mt-1">
-                        {toFa(s.article_count)} مقاله · {toFa(s.source_count)} رسانه
-                        {s.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300"> · درون‌مرزی {toFa(s.state_pct)}٪</span>}
-                        {s.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400"> · برون‌مرزی {toFa(s.diaspora_pct)}٪</span>}
-                      </p>
-                      {stateS && (
-                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">
-                          <span className="text-[#1e3a5f] dark:text-blue-300 font-bold">• </span>{stateS}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start gap-3">
+                      <span className="text-[32px] font-black text-slate-200 dark:text-slate-700 shrink-0 leading-none mt-1">{toFa(i + 1)}</span>
+                      <div className="flex-1 min-w-0">
+                        <h3 className="text-[22px] font-black leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
+                          {s.title_fa}
+                        </h3>
+                        <UpdateBadge story={s} className="mt-1.5" />
+                        <p className="text-[14px] text-slate-400 mt-1.5">
+                          {toFa(s.article_count)} مقاله · {toFa(s.source_count)} رسانه
+                          {s.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300"> · درون‌مرزی {toFa(s.state_pct)}٪</span>}
+                          {s.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400"> · برون‌مرزی {toFa(s.diaspora_pct)}٪</span>}
                         </p>
-                      )}
-                      {diasporaS && (
-                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">
-                          <span className="text-[#ea580c] dark:text-orange-400 font-bold">• </span>{diasporaS}
-                        </p>
-                      )}
-                      {!stateS && !diasporaS && fallbackBullets.map((b, j) => (
-                        <p key={j} className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-2">• {b}</p>
-                      ))}
-                      {tg?.predictions && tg.predictions.length > 0 && (
-                        <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-2">
-                          <span className="font-bold text-blue-500">پیش‌بینی:</span> {predictionText(tg.predictions[0])}
-                        </p>
-                      )}
-                      {tg?.key_claims && tg.key_claims.length > 0 && (
-                        <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-2">
-                          <span className="font-bold text-amber-500">ادعا:</span> {claimText(tg.key_claims[0])}
-                        </p>
-                      )}
+                        {stateS && (
+                          <p className="text-[14px] leading-6 text-slate-500 dark:text-slate-400 mt-2 line-clamp-2">
+                            <span className="text-[#1e3a5f] dark:text-blue-300 font-bold">• </span>{stateS}
+                          </p>
+                        )}
+                        {diasporaS && (
+                          <p className="text-[14px] leading-6 text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">
+                            <span className="text-[#ea580c] dark:text-orange-400 font-bold">• </span>{diasporaS}
+                          </p>
+                        )}
+                        {!stateS && !diasporaS && fallbackBullets.map((b, j) => (
+                          <p key={j} className="text-[14px] leading-6 text-slate-400 dark:text-slate-500 mt-1 line-clamp-2">• {b}</p>
+                        ))}
+                        {tg?.predictions && tg.predictions.length > 0 && (
+                          <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1.5 line-clamp-2">
+                            <span className="font-bold text-blue-500">پیش‌بینی:</span> {predictionText(tg.predictions[0])}
+                          </p>
+                        )}
+                        {tg?.key_claims && tg.key_claims.length > 0 && (
+                          <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-2">
+                            <span className="font-bold text-amber-500">ادعا:</span> {claimText(tg.key_claims[0])}
+                          </p>
+                        )}
+                      </div>
                     </div>
-                  </Link>
-                );
-              })}
-            </div>
-          </div>
+                  </div>
+                </Link>
+              </div>
+            );
+          })}
         </div>
-
       </div>
 
       {/* ═══ WEEKLY DIGEST ═══ */}
