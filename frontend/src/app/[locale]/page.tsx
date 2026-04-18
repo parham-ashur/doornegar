@@ -733,7 +733,7 @@ export default async function HomePage({
               <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
             </div>
 
-            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-slate-300 dark:[&::-webkit-scrollbar-thumb]:bg-slate-700 [&::-webkit-scrollbar-thumb]:rounded-full">
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain pl-1 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-slate-300 dark:[&::-webkit-scrollbar-thumb]:bg-slate-700 [&::-webkit-scrollbar-thumb]:rounded-full">
               {mostViewed.map((s, i) => {
                 const analysis = allAnalyses[s.id];
                 const stateS = analysis?.state_summary_fa;
