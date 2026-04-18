@@ -716,17 +716,18 @@ export default async function HomePage({
             </div>
           </div>
 
-          {/* Most read (5 cols). Fixed-height scrollable pane — the
-              parent grid row stretches this column to match the
-              hero-style leftTextStories height, and the inner list
-              scrolls within that cap. Rendering more stories than
-              fit guarantees the scroll always has somewhere to go,
-              so there's no whitespace at the bottom regardless of
-              how tall the left column is. Mirrors the article-list
-              scrollable pattern on story pages Parham referenced.
-              scrollbar-thin + thin-colored track keeps the scroll
-              visible without being obtrusive. */}
-          <div className="col-span-5 pr-6 flex flex-col h-full">
+          {/* Most read (5 cols). Tricky layout: we render ~10 stories
+              and want the list to scroll inside a box whose height is
+              driven by the LEFT column (leftTextStories). Default CSS
+              grid would let this column's own content push the row
+              taller, which defeats the scroll.
+              Fix: position:absolute inset-0 on the inner stack. The
+              content is out of normal flow, so the grid row height
+              is decided by the left column alone. The absolute layer
+              then fills that cell via inset-0, giving the scroll a
+              definite height to clip against. */}
+          <div className="col-span-5 pr-6 relative min-h-[400px]">
+            <div className="absolute inset-0 pr-6 flex flex-col">
             <div className="flex items-center gap-3 mb-4 shrink-0">
               <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
               <span className="text-[13px] font-black text-slate-900 dark:text-white shrink-0">پرمخاطب‌ترین</span>
@@ -795,6 +796,7 @@ export default async function HomePage({
                   </Link>
                 );
               })}
+            </div>
             </div>
           </div>
         </div>
