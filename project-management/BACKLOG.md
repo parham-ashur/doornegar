@@ -127,6 +127,23 @@
 - [x] **Suggest-source page** simplified (removed category grouping)
 - [x] **Mobile stories carousel** exploration at `/fa/stories-beta` — parked for future iteration; production mobile homepage reverted to original `MobileHome()`
 
+## Human-in-the-Loop (HITL) roadmap
+
+Background: the pipeline's weakest failure modes are all places where a human editor would catch something obvious and the machine doesn't. The /rate page already has priority/title/image/merge feedback buttons. The work below is the queue UIs and application loop that turn those submissions (plus new ones) into applied edits without Parham typing SQL.
+
+### In this session (2026-04-18)
+- [x] **User content submission form** — public form at `/[locale]/submit` where anyone can paste an article title/summary/source, a telegram post (with channel + analyst flag), an Instagram/other social excerpt, optionally link to an existing story. Backend POST `/api/v1/submissions` + new `user_submissions` table.
+- [x] **Blindspot one-click confirm** — on story cards with `is_blindspot=true`, add thumbs-up/thumbs-down button that posts to `/api/v1/improvements` with `issue_type=blindspot_confirm|blindspot_reject`. Feeds the is_blindspot heuristic over time.
+
+### Tier 2 — next session
+- [ ] **Telegram post triage queue** — admin page listing posts that scored 0.30-0.40 to any story centroid (below link threshold, close enough to be worth reviewing). One-click approve → links to that story + invalidates the cached analysis. Rejected posts stay orphaned.
+- [ ] **Source reclassification UI** — /admin/sources page showing 20 most-recent posts per telegram channel + dropdown to change channel_type (news/commentary/aggregator/activist/citizen/political_party). Batch save.
+
+### Tier 3 — follow-up sessions
+- [ ] **Narrative 4-subgroup bullets editor** — admin page per story letting Niloofar/Parham write 2-3 bullets for principlist/reformist/moderate/radical subgroups. Wrap the `update_narratives` fix_type already in journalist_audit into a UI. Unblocks hero-like stories whose LLM auto-gen returned empty subgroups.
+- [ ] **Stock-image picker modal** — when a story has no valid article image, admin modal shows top 6 results from an Unsplash/Pexels search keyed by the story's topics or title keywords. One-click pins as `manual_image_url`. Needs Unsplash free API key (no cost, attribution in footer).
+- [ ] **Feed health decisions workshop** — parked. The 4 dead state feeds (mehr-news, irib-news, mashregh-news, nour-news) return "No entries" because Railway's IP is geo-blocked from inside Iran. Options to decide: (a) residential-IP RSS proxy ($15-30/mo), (b) drop the sources, (c) switch each to telegram-channel ingest (like Manoto→@ManotoTV). Needs a sit-down discussion.
+
 ## Must Have (before public launch)
 
 ### Immediate (blocks launch)
