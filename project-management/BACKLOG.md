@@ -201,6 +201,31 @@
 - [ ] Email-based invite system for new raters
 - [ ] Rating UI polish
 
+### Growth / adoption (parked until product quality bar met)
+
+Positioning locked in `memory/project_audience_strategy.md`: hub-and-spoke, not broadcast. Journalists and researchers are the credibility gate; diaspora reach is downstream of their citations; users *inside* Iran are never marketed to.
+
+**Phase 1 (0–6 months) — Win 20 hubs.**
+- [ ] Build a named list of 20 Iran-watcher journalists/researchers (Reuters, AFP, BBC Persian, Foreign Policy, Crisis Group, IISS, Carnegie, Atlantic Council, Iranian-studies academics at UCLA/Princeton/Oxford/SOAS). Include handles, beat, recent articles.
+- [ ] Draft one-page Doornegar brief for hubs — differentiation line, 3 example blindspots, 1 example bias-comparison screenshot, link to /stories/trending. Bilingual not required for hubs (English fine).
+- [ ] Personalized outreach email/DM template per hub (referencing a specific article they wrote where Doornegar would have shown them the counter-narrative). Ask for feedback, not adoption.
+- [ ] Track citations/mentions: set up a shared Notion page to log every time a journalist cites Doornegar.
+
+**Phase 2 (6–18 months) — Let diaspora find you.**
+- [ ] Shareable story cards: one-click screenshot with the bias bar + title + short silence-detection blurb. Add share button on each story.
+- [ ] Embed-friendly bias bars: `<iframe>` endpoint so journalists can drop a live bias comparison into an article.
+- [ ] Persian-language explainer page ("چرا دورنگر؟") that avoids sounding like an opposition site — emphasizes transparency, not advocacy.
+- [ ] Metric: organic referrer traffic from journalist articles + Twitter/Telegram shares. No ads.
+
+**Phase 3 (18+ months) — Institutional partnerships.**
+- [ ] Pitch 2–3 Iranian-studies programs on an academic-license / research-access arrangement (bulk export, longitudinal data).
+- [ ] Approach Article 19 or similar legitimacy-heavy NGO — natural fit with IID's civic framing.
+- [ ] Consider: embassy-level briefings (low priority, opportunistic).
+
+**Precondition (gates Phase 1 outreach):**
+- Product quality bar — no obvious hallucinations on trending-story bias narratives, no orphan attribution verbs, telegram predictions all grounded with real analyst counts. Hub journalists will spot these instantly.
+- Security posture hardened enough that we wouldn't wince if a journalist featured Doornegar in a piece that reaches inside Iran.
+
 ### Intelligence Layer (New — Future Enhancements)
 - [ ] Expand analyst database — seed 20+ Iranian political commentators with Telegram handles
 - [ ] Prediction scorecard — aggregate verified/falsified predictions per analyst, show reliability %
