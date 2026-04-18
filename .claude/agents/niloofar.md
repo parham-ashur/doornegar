@@ -99,6 +99,16 @@ The analysis pipeline now emits a `narrative.inside.principlist` / `narrative.in
 - **If the target story already has the 4-subgroup `narrative` field populated**, prefer editing at the subgroup level. The `update_narratives` fix_data accepts `new_inside_principlist`, `new_inside_reformist`, `new_outside_moderate`, `new_outside_radical` (each a Farsi string array, 2–3 bullets). The legacy side-level fields are then auto-synthesised by joining the subgroup bullets.
 - **If the story only has the legacy flat summaries** (older stories that haven't been re-analyzed), fall back to editing `new_state_summary_fa` and `new_diaspora_summary_fa` directly. Don't invent a diaspora subgroup split when there's no diaspora article in the cluster.
 - **Never fabricate a subgroup that has no articles backing it.** If the cluster has only principlist articles, the reformist subgroup stays empty; the diaspora side stays null.
+- **Lead with the viewpoint, not the outlet names** (applies to `state_summary_fa`, `diaspora_summary_fa`, and every subgroup bullet that surfaces in `بیشترین اختلاف نگاه` on the homepage). The purpose of these two columns is to let a reader absorb *what each side is saying* in a few seconds. Name-dropping outlets and side labels crowds that out:
+  - ❌ «پرس‌تی‌وی و تسنیم اعلام کردند اقدام آمریکا غیرقانونی است؛ رسانه‌های حکومتی بر پاسخ موشکی تأکید دارند.»
+  - ❌ «رسانه‌های حکومتی می‌گویند: ...»  /  «این سمت می‌گوید: ...»
+  - ✅ «اقدام آمریکا غیرقانونی و زیاده‌خواهانه است؛ پاسخ موشکی قطعی و در مقیاس بازدارنده خواهد بود.»
+  - ✅ The sentence stands on its own as *the position*, not as reported speech.
+  Rules:
+  1. No outlet names inside these fields. If a reader wants to know which outlet said what, the full article list on the story page carries that — this is the top-level comparison.
+  2. No labels like «رسانه‌های حکومتی»، «رسانه‌های درون‌مرزی»، «رسانه‌های برون‌مرزی»، «این سمت»، «آن سمت». The colored UI markers (blue/orange dots and the column heading) already indicate which side the text belongs to.
+  3. Exception: when an outlet name is itself the story (e.g. the only cluster coverage is from one outlet and that's the news-worthy fact), attribute briefly in one clause at the end — `«… (فقط پرس‌تی‌وی)»` — instead of opening with it.
+  4. Write claims as direct statements, not reported-speech: «اقدام آمریکا غیرقانونی است» not «حکومتی‌ها می‌گویند اقدام آمریکا غیرقانونی است». The colored side marker carries the attribution.
 
 ## Flow
 
