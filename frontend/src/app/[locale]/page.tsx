@@ -308,10 +308,8 @@ export default async function HomePage({
   const leftTextStories = sorted.filter(s => !usedIds.has(s.id)).slice(0, 3);
   leftTextStories.forEach(s => usedIds.add(s.id));
 
-  // Most viewed: top 5. Each card shows both narrative sides plus
-  // the first telegram prediction + first claim (2-line clamps), so
-  // the card is information-dense enough that 5 stories naturally
-  // fill the column height without needing a scroll.
+  // Most viewed: top 3. Narrower half-column now (grid-cols-2 cell in
+  // row 2), so fewer cards at richer density reads better.
   const now = Date.now();
   const mostViewed = [...sorted]
     .filter(s => !usedIds.has(s.id))
@@ -323,7 +321,7 @@ export default async function HomePage({
       return { ...s, _popScore: score };
     })
     .sort((a, b) => b._popScore - a._popScore)
-    .slice(0, 5);
+    .slice(0, 3);
   mostViewed.forEach(s => usedIds.add(s.id));
 
   // Most disputed: not already used
@@ -332,8 +330,10 @@ export default async function HomePage({
     .sort((a, b) => Math.abs(b.state_pct - b.diaspora_pct) - Math.abs(a.state_pct - a.diaspora_pct));
   let mostDisputed = disputedCandidates[0] || null;
   let secondDisputed = disputedCandidates[1] || null;
+  let thirdDisputed = disputedCandidates[2] || null;
   if (mostDisputed) usedIds.add(mostDisputed.id);
   if (secondDisputed) usedIds.add(secondDisputed.id);
+  if (thirdDisputed) usedIds.add(thirdDisputed.id);
 
   // Common ground: not already used
   const commonGround = [...stories]
@@ -429,6 +429,7 @@ export default async function HomePage({
   });
   mostDisputed = disputedResorted[0] || null;
   secondDisputed = disputedResorted[1] || null;
+  thirdDisputed = disputedResorted[2] || null;
 
   const prefetchedTelegram: { storyId: string; analysis: any }[] = [];
   telegramAnalysisIds.forEach((id, i) => {
@@ -714,78 +715,123 @@ export default async function HomePage({
             </div>
           </div>
 
-          {/* Most read (5 cols). Natural-flow column — 5 info-dense
-              cards (two-side bullets + 2-line prediction/claim) give
-              it enough vertical content to match leftTextStories on
-              a normal news day, without scroll or absolute layering. */}
+          {/* تقابل روایت‌ها (moved up from row 2). Col-span-5 gives
+              more horizontal room for context sentences than the old
+              grid-cols-2 half. Bordered-box chrome matches row 2. */}
           <div className="col-span-5 pr-6">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
-              <span className="text-[13px] font-black text-slate-900 dark:text-white shrink-0">پرمخاطب‌ترین</span>
-              <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
-            </div>
+            <div className="border border-slate-300 dark:border-slate-600 h-full flex flex-col">
+              <div className="flex items-center -mt-3 mx-4">
+                <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
+                <span className="text-[13px] font-black text-slate-900 dark:text-white px-3 bg-white dark:bg-[#0a0e1a]">تقابل روایت‌ها</span>
+                <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
+              </div>
+              <div className="space-y-5 px-4 pb-4 pt-2 flex-1 flex flex-col justify-between">
+                {(() => {
+                  type BattleItem = {
+                    title: string;
+                    conservative: string;
+                    opposition: string;
+                    conservativeLabel: string;
+                    oppositionLabel: string;
+                    context: string;
+                  };
+                  const battleItems: BattleItem[] = [];
 
-            <div className="space-y-0">
-              {mostViewed.map((s, i) => {
-                const analysis = allAnalyses[s.id];
-                const stateS = analysis?.state_summary_fa;
-                const diasporaS = analysis?.diaspora_summary_fa;
-                const tg = mostViewedTelegramById[s.id];
-                // Fallback to splitting bias_explanation_fa when the
-                // story doesn't have side-specific summaries yet.
-                let fallbackBullets: string[] = [];
-                if (!stateS && !diasporaS) {
-                  const bias = analysis?.bias_explanation_fa;
-                  fallbackBullets = bias
-                    ? bias.split(/[.؛]/).map((p: string) => p.trim()).filter((p: string) => p.length > 10).slice(0, 2)
-                    : [];
-                }
-                return (
-                  <Link key={s.id} href={`/${locale}/stories/${s.id}`}
-                    className={`group flex items-start gap-3 py-4 ${i > 0 ? "border-t border-slate-100 dark:border-slate-800/60" : ""}`}>
-                    <span className="text-[24px] font-black text-slate-200 dark:text-slate-700 shrink-0 w-8 text-center mt-0.5">{toFa(i + 1)}</span>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="text-[18px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
-                        {s.title_fa}
-                      </h3>
-                      <UpdateBadge story={s} className="mt-1" />
-                      <p className="text-[14px] text-slate-400 mt-1">
-                        {toFa(s.article_count)} مقاله · {toFa(s.source_count)} رسانه
-                        {s.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300"> · درون‌مرزی {toFa(s.state_pct)}٪</span>}
-                        {s.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400"> · برون‌مرزی {toFa(s.diaspora_pct)}٪</span>}
-                      </p>
-                      {/* Both narrative sides rendered — blue • for
-                          the state bullet, orange • for the diaspora
-                          bullet, up to 2 lines each. */}
-                      {stateS && (
-                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">
-                          <span className="text-[#1e3a5f] dark:text-blue-300 font-bold">• </span>{stateS}
-                        </p>
-                      )}
-                      {diasporaS && (
-                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">
-                          <span className="text-[#ea580c] dark:text-orange-400 font-bold">• </span>{diasporaS}
-                        </p>
-                      )}
-                      {!stateS && !diasporaS && fallbackBullets.map((b, j) => (
-                        <p key={j} className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-2">• {b}</p>
-                      ))}
-                      {/* Telegram first prediction + first claim,
-                          up to 2 lines each. */}
-                      {tg?.predictions && tg.predictions.length > 0 && (
-                        <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-2">
-                          <span className="font-bold text-blue-500">پیش‌بینی:</span> {predictionText(tg.predictions[0])}
-                        </p>
-                      )}
-                      {tg?.key_claims && tg.key_claims.length > 0 && (
-                        <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-2">
-                          <span className="font-bold text-amber-500">ادعا:</span> {claimText(tg.key_claims[0])}
+                  function pickContext(biasText: string | undefined, fallbackState: string | undefined, fallbackDiaspora: string | undefined): string {
+                    if (biasText) {
+                      const sentences = biasText
+                        .split(/[؛.]/)
+                        .map(s => s.trim())
+                        .filter(s => s.length > 25);
+                      const twoSided = sentences.find(s =>
+                        (s.includes("درون‌مرزی") || s.includes("حکومتی") || s.includes("اصول‌گرا")) &&
+                        (s.includes("برون‌مرزی") || s.includes("اپوزیسیون") || s.includes("دیاسپورا"))
+                      );
+                      if (twoSided) return twoSided;
+                      const withQuote = sentences.find(s => /«[^»]+»/.test(s));
+                      if (withQuote) return withQuote;
+                      if (sentences[0]) return sentences[0];
+                    }
+                    const parts: string[] = [];
+                    if (fallbackState) parts.push(`درون‌مرزی: ${fallbackState.split(/[؛.]/)[0]}`);
+                    if (fallbackDiaspora) parts.push(`برون‌مرزی: ${fallbackDiaspora.split(/[؛.]/)[0]}`);
+                    return parts.join(" | ");
+                  }
+
+                  for (const story of [mostDisputed, secondDisputed, thirdDisputed]) {
+                    if (!story) continue;
+                    const analysis = allAnalyses[story.id];
+                    if (!analysis) continue;
+
+                    const words = analysis.loaded_words;
+                    const stateSummary = analysis.state_summary_fa;
+                    const diasporaSummary = analysis.diaspora_summary_fa;
+                    const biasText = analysis.bias_explanation_fa;
+                    const context = pickContext(biasText, stateSummary, diasporaSummary);
+
+                    if (words?.conservative?.length && words?.opposition?.length) {
+                      battleItems.push({
+                        title: story.title_fa || "",
+                        conservative: `«${words.conservative[0].replace(/[«»]/g, "")}»`,
+                        opposition: `«${words.opposition[0].replace(/[«»]/g, "")}»`,
+                        conservativeLabel: words.conservative.length > 1 ? words.conservative.slice(1, 3).join("، ") : "روایت درون‌مرزی",
+                        oppositionLabel: words.opposition.length > 1 ? words.opposition.slice(1, 3).join("، ") : "روایت برون‌مرزی",
+                        context,
+                      });
+                      continue;
+                    }
+                    if (biasText) {
+                      const quotes = biasText.match(/«[^»]+»/g);
+                      if (quotes && quotes.length >= 2) {
+                        battleItems.push({
+                          title: story.title_fa || "",
+                          conservative: quotes[0],
+                          opposition: quotes[1],
+                          conservativeLabel: stateSummary ? stateSummary.slice(0, 40) + (stateSummary.length > 40 ? "..." : "") : "روایت درون‌مرزی",
+                          oppositionLabel: diasporaSummary ? diasporaSummary.slice(0, 40) + (diasporaSummary.length > 40 ? "..." : "") : "روایت برون‌مرزی",
+                          context,
+                        });
+                        continue;
+                      }
+                    }
+                    if (stateSummary && diasporaSummary) {
+                      const stateShort = stateSummary.length > 25 ? stateSummary.slice(0, 25) + "..." : stateSummary;
+                      const diasporaShort = diasporaSummary.length > 25 ? diasporaSummary.slice(0, 25) + "..." : diasporaSummary;
+                      battleItems.push({
+                        title: story.title_fa || "",
+                        conservative: `«${stateShort}»`,
+                        opposition: `«${diasporaShort}»`,
+                        conservativeLabel: "خلاصه رسانه‌های درون‌مرزی",
+                        oppositionLabel: "خلاصه رسانه‌های برون‌مرزی",
+                        context,
+                      });
+                    }
+                  }
+
+                  return battleItems.slice(0, 3).map((item, idx) => (
+                    <div key={idx}>
+                      <p className="text-[13px] font-bold text-slate-900 dark:text-white mb-3 line-clamp-1">{item.title}</p>
+                      <div className="flex gap-0 text-center">
+                        <div className="flex-1 py-3 bg-[#1e3a5f]/10 dark:bg-blue-900/20 border-t-[3px] border-[#1e3a5f]">
+                          <p className={`${item.conservative.length > 20 ? "text-[24px]" : "text-[14px]"} font-black text-[#1e3a5f] dark:text-blue-300 line-clamp-1 px-2`}>{item.conservative}</p>
+                          <p className="text-[13px] text-slate-500 mt-1 line-clamp-1 px-2">{item.conservativeLabel}</p>
+                          <p className="text-[13px] text-[#1e3a5f] dark:text-blue-300 font-medium mt-0.5">درون‌مرزی</p>
+                        </div>
+                        <div className="flex-1 py-3 bg-[#ea580c]/10 dark:bg-orange-900/20 border-t-[3px] border-[#ea580c]">
+                          <p className={`${item.opposition.length > 20 ? "text-[24px]" : "text-[14px]"} font-black text-[#ea580c] dark:text-orange-400 line-clamp-1 px-2`}>{item.opposition}</p>
+                          <p className="text-[13px] text-slate-500 mt-1 line-clamp-1 px-2">{item.oppositionLabel}</p>
+                          <p className="text-[13px] text-[#ea580c] dark:text-orange-400 font-medium mt-0.5">برون‌مرزی</p>
+                        </div>
+                      </div>
+                      {item.context && (
+                        <p className="mt-3 text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-3">
+                          {item.context}
                         </p>
                       )}
                     </div>
-                  </Link>
-                );
-              })}
+                  ));
+                })()}
+              </div>
             </div>
           </div>
         </div>
@@ -803,7 +849,7 @@ export default async function HomePage({
               <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
             </div>
             <div className="px-4 pb-4 pt-2 flex-1">
-              {[mostDisputed, secondDisputed].filter(Boolean).map((story, i) => {
+              {[mostDisputed, secondDisputed, thirdDisputed].filter(Boolean).map((story, i) => {
                 const s = story!;
                 const analysis = allAnalyses[s.id];
                 const stateSummary = analysis?.state_summary_fa;
@@ -841,111 +887,71 @@ export default async function HomePage({
           </div>
         </div>
 
-        {/* Battle of numbers */}
+        {/* پرمخاطب‌ترین (moved down from row 1). Top 3 stories in the
+            same bordered-box chrome as بیشترین اختلاف نگاه so the two
+            row-2 boxes read as a matched pair. */}
         <div>
           <div className="border border-slate-300 dark:border-slate-600 h-full flex flex-col">
             <div className="flex items-center -mt-3 mx-4">
               <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
-              <span className="text-[13px] font-black text-slate-900 dark:text-white px-3 bg-white dark:bg-[#0a0e1a]">تقابل روایت‌ها</span>
+              <span className="text-[13px] font-black text-slate-900 dark:text-white px-3 bg-white dark:bg-[#0a0e1a]">پرمخاطب‌ترین</span>
               <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
             </div>
-
-          <div className="space-y-5 px-4 pb-4 pt-2 flex-1 flex flex-col justify-between">
-            {(() => {
-              // Build battle items from the top 2 most disputed stories
-              type BattleItem = { title: string; conservative: string; opposition: string; conservativeLabel: string; oppositionLabel: string };
-              const battleItems: BattleItem[] = [];
-
-              for (const story of [mostDisputed, secondDisputed]) {
-                if (!story) continue;
-                const analysis = allAnalyses[story.id];
-                if (!analysis) continue;
-
-                const words = analysis.loaded_words;
-                const stateSummary = analysis.state_summary_fa;
-                const diasporaSummary = analysis.diaspora_summary_fa;
-                const biasText = analysis.bias_explanation_fa;
-
-                // Strategy 1: Use loaded_words if both sides have terms
-                if (words?.conservative?.length && words?.opposition?.length) {
-                  battleItems.push({
-                    title: story.title_fa || "",
-                    conservative: `«${words.conservative[0].replace(/[«»]/g, "")}»`,
-                    opposition: `«${words.opposition[0].replace(/[«»]/g, "")}»`,
-                    conservativeLabel: words.conservative.length > 1 ? words.conservative.slice(1, 3).join("، ") : "روایت درون‌مرزی",
-                    oppositionLabel: words.opposition.length > 1 ? words.opposition.slice(1, 3).join("، ") : "روایت برون‌مرزی",
-                  });
-                  continue;
+            <div className="px-4 pb-4 pt-2 flex-1">
+              {mostViewed.map((s, i) => {
+                const analysis = allAnalyses[s.id];
+                const stateS = analysis?.state_summary_fa;
+                const diasporaS = analysis?.diaspora_summary_fa;
+                const tg = mostViewedTelegramById[s.id];
+                let fallbackBullets: string[] = [];
+                if (!stateS && !diasporaS) {
+                  const bias = analysis?.bias_explanation_fa;
+                  fallbackBullets = bias
+                    ? bias.split(/[.؛]/).map((p: string) => p.trim()).filter((p: string) => p.length > 10).slice(0, 2)
+                    : [];
                 }
-
-                // Strategy 2: Extract «quoted» pairs from bias_explanation_fa
-                if (biasText) {
-                  const quotes = biasText.match(/«[^»]+»/g);
-                  if (quotes && quotes.length >= 2) {
-                    battleItems.push({
-                      title: story.title_fa || "",
-                      conservative: quotes[0],
-                      opposition: quotes[1],
-                      conservativeLabel: stateSummary ? stateSummary.slice(0, 40) + (stateSummary.length > 40 ? "..." : "") : "روایت درون‌مرزی",
-                      oppositionLabel: diasporaSummary ? diasporaSummary.slice(0, 40) + (diasporaSummary.length > 40 ? "..." : "") : "روایت برون‌مرزی",
-                    });
-                    continue;
-                  }
-                }
-
-                // Strategy 3: Use state_summary_fa vs diaspora_summary_fa as contrasting framings
-                if (stateSummary && diasporaSummary) {
-                  const stateShort = stateSummary.length > 25 ? stateSummary.slice(0, 25) + "..." : stateSummary;
-                  const diasporaShort = diasporaSummary.length > 25 ? diasporaSummary.slice(0, 25) + "..." : diasporaSummary;
-                  battleItems.push({
-                    title: story.title_fa || "",
-                    conservative: `«${stateShort}»`,
-                    opposition: `«${diasporaShort}»`,
-                    conservativeLabel: "خلاصه رسانه‌های درون‌مرزی",
-                    oppositionLabel: "خلاصه رسانه‌های برون‌مرزی",
-                  });
-                }
-              }
-
-              // Fallback: hardcoded content if no real data available
-              if (battleItems.length === 0) {
-                battleItems.push(
-                  {
-                    title: "تلفات حملات هوایی",
-                    conservative: "«شهدای مدافع»",
-                    opposition: "«صدها غیرنظامی»",
-                    conservativeLabel: "تلفات محدود نظامی",
-                    oppositionLabel: "کشتار گسترده مردم",
-                  },
-                  {
-                    title: "قطع اینترنت",
-                    conservative: "«اختلال موقت»",
-                    opposition: "«۴۰ روز قطع کامل»",
-                    conservativeLabel: "محدودیت امنیتی",
-                    oppositionLabel: "قطع عمدی و سراسری",
-                  },
+                return (
+                  <Link key={s.id} href={`/${locale}/stories/${s.id}`}
+                    className={`group flex items-start gap-3 py-4 ${i > 0 ? "border-t border-slate-100 dark:border-slate-800/60" : ""}`}>
+                    <span className="text-[24px] font-black text-slate-200 dark:text-slate-700 shrink-0 w-8 text-center mt-0.5">{toFa(i + 1)}</span>
+                    <div className="flex-1 min-w-0">
+                      <h3 className="text-[18px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
+                        {s.title_fa}
+                      </h3>
+                      <UpdateBadge story={s} className="mt-1" />
+                      <p className="text-[14px] text-slate-400 mt-1">
+                        {toFa(s.article_count)} مقاله · {toFa(s.source_count)} رسانه
+                        {s.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300"> · درون‌مرزی {toFa(s.state_pct)}٪</span>}
+                        {s.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400"> · برون‌مرزی {toFa(s.diaspora_pct)}٪</span>}
+                      </p>
+                      {stateS && (
+                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">
+                          <span className="text-[#1e3a5f] dark:text-blue-300 font-bold">• </span>{stateS}
+                        </p>
+                      )}
+                      {diasporaS && (
+                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">
+                          <span className="text-[#ea580c] dark:text-orange-400 font-bold">• </span>{diasporaS}
+                        </p>
+                      )}
+                      {!stateS && !diasporaS && fallbackBullets.map((b, j) => (
+                        <p key={j} className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-2">• {b}</p>
+                      ))}
+                      {tg?.predictions && tg.predictions.length > 0 && (
+                        <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-2">
+                          <span className="font-bold text-blue-500">پیش‌بینی:</span> {predictionText(tg.predictions[0])}
+                        </p>
+                      )}
+                      {tg?.key_claims && tg.key_claims.length > 0 && (
+                        <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-2">
+                          <span className="font-bold text-amber-500">ادعا:</span> {claimText(tg.key_claims[0])}
+                        </p>
+                      )}
+                    </div>
+                  </Link>
                 );
-              }
-
-              return battleItems.slice(0, 2).map((item, idx) => (
-                <div key={idx}>
-                  <p className="text-[13px] font-bold text-slate-900 dark:text-white mb-3 line-clamp-1">{item.title}</p>
-                  <div className="flex gap-0 text-center">
-                    <div className="flex-1 py-3 bg-[#1e3a5f]/10 dark:bg-blue-900/20 border-t-[3px] border-[#1e3a5f]">
-                      <p className={`${item.conservative.length > 20 ? "text-[24px]" : "text-[14px]"} font-black text-[#1e3a5f] dark:text-blue-300 line-clamp-1 px-2`}>{item.conservative}</p>
-                      <p className="text-[13px] text-slate-500 mt-1 line-clamp-1 px-2">{item.conservativeLabel}</p>
-                      <p className="text-[13px] text-[#1e3a5f] dark:text-blue-300 font-medium mt-0.5">درون‌مرزی</p>
-                    </div>
-                    <div className="flex-1 py-3 bg-[#ea580c]/10 dark:bg-orange-900/20 border-t-[3px] border-[#ea580c]">
-                      <p className={`${item.opposition.length > 20 ? "text-[24px]" : "text-[14px]"} font-black text-[#ea580c] dark:text-orange-400 line-clamp-1 px-2`}>{item.opposition}</p>
-                      <p className="text-[13px] text-slate-500 mt-1 line-clamp-1 px-2">{item.oppositionLabel}</p>
-                      <p className="text-[13px] text-[#ea580c] dark:text-orange-400 font-medium mt-0.5">برون‌مرزی</p>
-                    </div>
-                  </div>
-                </div>
-              ));
-            })()}
-          </div>
+              })}
+            </div>
           </div>
         </div>
 
