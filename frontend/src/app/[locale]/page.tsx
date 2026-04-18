@@ -897,7 +897,14 @@ export default async function HomePage({
 
       {/* ═══ پرمخاطب‌ترین — full-width row with image on the right ═══ */}
       <div className="py-10 px-8 md:px-14 border-b border-slate-200 dark:border-slate-800">
-        <h2 className="text-[32px] font-black text-slate-900 dark:text-white mb-8 text-center">پرمخاطب‌ترین</h2>
+        {/* Line-title-line divider, same pattern as «نگاه یک‌جانبه»
+            on the hero row. Keeps the section visually tied to the
+            rest of the homepage's chrome language. */}
+        <div className="flex items-center gap-3 mb-8">
+          <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
+          <span className="text-[13px] font-black text-slate-900 dark:text-white shrink-0">پرمخاطب‌ترین</span>
+          <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
+        </div>
         <div>
           {mostViewed.map((s, i) => {
             const analysis = allAnalyses[s.id];
