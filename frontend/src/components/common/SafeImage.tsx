@@ -8,6 +8,25 @@ import { Newspaper } from "lucide-react";
 const MIN_WIDTH = 120;
 const MIN_HEIGHT = 80;
 
+// URL-level filter for icons and logos the ingester sometimes picks up
+// as the article image when no real og:image is present (happens on
+// radiofarda, some Iranian sites that only return a favicon-sized
+// app icon). These are 192×192 or similar — they pass the MIN_WIDTH
+// check but look like placeholders because they're just site logos
+// upscaled into a 16:9 card. Reject at URL level before fetching.
+const ICON_URL_PATTERNS = [
+  /\/ico-\d+x\d+\.(png|jpg|webp|svg)(\?|$)/i,  // ico-192x192.png
+  /\/favicon[.\-]/i,
+  /\/icon[.\-]\d+/i,
+  /\/apple-touch-icon/i,
+  /\/webApp\/ico-/i,
+  /\/manifest-icon/i,
+];
+
+function isLikelyIcon(src: string): boolean {
+  return ICON_URL_PATTERNS.some((re) => re.test(src));
+}
+
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 // Iran-hosted media that geo-block Vercel's US/EU edge IPs. Vercel's
@@ -84,7 +103,7 @@ export default function SafeImage({
     }
   }, []);
 
-  if (!src || failed) {
+  if (!src || failed || isLikelyIcon(src)) {
     return (
       <div className={placeholderClass || "flex h-full w-full items-center justify-center bg-slate-100 dark:bg-slate-800"}>
         <Newspaper className="h-10 w-10 text-slate-300 dark:text-slate-700" />
