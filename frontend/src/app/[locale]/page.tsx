@@ -79,7 +79,15 @@ async function fetchTelegramAnalysis(storyId: string): Promise<{ discourse_summa
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 8000);
-    const res = await fetch(`${API}/api/v1/social/stories/${storyId}/telegram-analysis`, { next: { revalidate: TELEGRAM_TTL }, signal: controller.signal });
+    // cache: 'no-store' bypasses Vercel's Data Cache. The page itself is
+    // route-cached for 300s (see TELEGRAM_TTL / revalidate on the page
+    // export), so SSR only re-runs every 5 min per region — this fetch
+    // only hits the API ~once per revalidation cycle. We were hitting a
+    // bug where Data Cache latched onto `no_data` responses taken during
+    // maintenance (before analysis was written back to the story row) and
+    // stale-while-revalidate never re-populated them even hours later.
+    // Direct fetch is the safe, predictable path for this endpoint.
+    const res = await fetch(`${API}/api/v1/social/stories/${storyId}/telegram-analysis`, { cache: "no-store", signal: controller.signal });
     clearTimeout(timeout);
     if (!res.ok) return null;
     const data = await res.json();

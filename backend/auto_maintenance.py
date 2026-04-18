@@ -1257,20 +1257,21 @@ async def step_source_health():
 
 
 async def step_cost_tracking():
-    """Step 4e: Track OpenAI API costs from maintenance runs."""
+    """Step 4e: Track OpenAI API costs from maintenance runs.
+
+    Only useful in local dev where the `project-management/` sibling of
+    `backend/` actually exists. On Railway `__file__` lives near the
+    container root so the path resolves to `/project-management/…` which
+    is unwritable — skip cleanly instead of failing the pipeline.
+    """
     from pathlib import Path
 
     log_file = Path(__file__).parent.parent / "project-management" / "COST_LOG.md"
-
-    # Estimate costs based on what was done this run
-    # GPT-4o-mini pricing: ~$0.15/1M input, ~$0.60/1M output
-    # Average clustering batch: ~3K tokens in, ~1K out = ~$0.001
-    # Average summary: ~5K tokens in, ~1K out = ~$0.002
-    # Average translation batch (30 titles): ~1K tokens in, ~1K out = ~$0.0005
+    if not log_file.parent.exists():
+        return {"skipped": True, "reason": "project-management dir not present (production)"}
 
     now = datetime.now()
     date_str = now.strftime("%Y-%m-%d %H:%M")
-
     entry = f"| {date_str} | auto-maintenance | Est. ~$0.01-0.05 | Cluster + Summarize + Translate |\n"
 
     if log_file.exists():
@@ -3775,7 +3776,7 @@ async def step_migrate_images_to_r2():
     homepage. Articles whose source download fails are left alone
     (SafeImage's per-source geoblock bypass remains the fallback).
     """
-    from sqlalchemy import and_, or_, select, not_
+    from sqlalchemy import select, not_, update
     from app.config import settings
     from app.database import async_session
     from app.models.article import Article
@@ -3790,9 +3791,13 @@ async def step_migrate_images_to_r2():
 
     r2_prefix = settings.r2_public_url.rstrip("/")
 
+    # Pull the work list in a short read session, then close it. Downloading
+    # 300 images takes ~15 min, and Neon/asyncpg close the connection well
+    # before that — a single long-held session + deferred commit loses the
+    # whole batch (as happened 2026-04-18: 249 R2 uploads, 0 DB updates).
     async with async_session() as db:
         result = await db.execute(
-            select(Article)
+            select(Article.id, Article.image_url)
             .where(
                 Article.image_url.isnot(None),
                 Article.image_url != "",
@@ -3802,19 +3807,37 @@ async def step_migrate_images_to_r2():
             .order_by(Article.ingested_at.desc())
             .limit(300)
         )
-        articles = list(result.scalars().all())
+        work = [(row.id, row.image_url) for row in result.all()]
 
-        for a in articles:
-            stored = await download_image(a.image_url)
-            if stored and stored != a.image_url:
-                a.image_url = stored
-                stats["migrated"] += 1
-            elif stored:
-                stats["skipped"] += 1
-            else:
-                stats["failed"] += 1
+    # Commit in small batches so partial progress survives a mid-run crash,
+    # and no session stays idle while the network does the heavy lifting.
+    BATCH = 25
+    pending: list[tuple] = []  # (article_id, new_url)
 
-        await db.commit()
+    async def _flush():
+        if not pending:
+            return
+        async with async_session() as db:
+            for article_id, new_url in pending:
+                await db.execute(
+                    update(Article).where(Article.id == article_id).values(image_url=new_url)
+                )
+            await db.commit()
+        pending.clear()
+
+    for article_id, old_url in work:
+        stored = await download_image(old_url)
+        if stored and stored != old_url:
+            pending.append((article_id, stored))
+            stats["migrated"] += 1
+            if len(pending) >= BATCH:
+                await _flush()
+        elif stored:
+            stats["skipped"] += 1
+        else:
+            stats["failed"] += 1
+
+    await _flush()
 
     logger.info(f"Migrate images R2: {stats}")
     return stats

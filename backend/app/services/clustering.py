@@ -1557,7 +1557,7 @@ async def audit_cluster_coherence(
             await db.execute(
                 _text(
                     "UPDATE stories SET audit_notes = "
-                    "COALESCE(audit_notes, '{}'::jsonb) || jsonb_build_object('cluster_drift', :note::jsonb) "
+                    "COALESCE(audit_notes, '{}'::jsonb) || jsonb_build_object('cluster_drift', CAST(:note AS jsonb)) "
                     "WHERE id = :sid"
                 ),
                 {"note": __import__("json").dumps(note, ensure_ascii=False), "sid": sid},
