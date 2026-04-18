@@ -35,19 +35,34 @@ export function cleanClaim(text: string): string {
   // from Pass-2's categorizer prefix.
   t = t.replace(/^[\u0600-\u06FF\s]{1,25}:\s*[^|]+\|\s*/, "");
   // Verbose attribution verbs that Parham flagged as non-essential:
-  //   «کانال [X] اعلام کرد/کرده است که …»
-  //   «کانال‌های حکومتی اعلام کردند …»
+  //   «کانال [X] اعلام کرد/کرده است/کرده‌اند/ادعا کردند که …»
+  //   «کانال‌های حکومتی نزدیک به دولت ادعا کردند …»
   //   «به گفتهٔ کانال X، …»
   //   «رسانه‌های تلگرامی نوشتند …»
   // We don't cover every possible phrasing — the Niloofar polish step
   // handles the long tail. This strips the most common offenders for
   // un-polished fallback text.
+  //
+  // Earlier regexes missed plural «کردند» and perfect «کرده است», leaving
+  // orphan «ند» or «کرده است که» at the start of a claim. The verb
+  // alternation below is split into (a) compound verbs that require a
+  // «کرد(ند/ه است/ه‌اند)» tail and (b) standalone verbs (گفت/نوشت) that
+  // take inflection suffixes directly.
+  // NB: alternation is tried left-to-right, so longer endings MUST come
+  // before their prefixes — otherwise «کرد» matches before «کردند» and
+  // leaves the «ند» orphan at the start of the claim.
+  const COMPOUND = "(?:اعلام|ادعا|اظهار|گزارش|تأکید|تاکید)\\s*(?:کرده است|کرده‌اند|کرده اند|کردند|کرد)";
+  const STANDALONE = "(?:گفت|نوشت)(?:ه است|ه‌اند|ه اند|ند)?";
+  const EZAFE = "(?:اظهار\\s+(?:داشته است|داشتند|داشت))";
+  const ATTR = `(?:${COMPOUND}|${STANDALONE}|${EZAFE})`;
+
+  // «کانال X [descriptor] <verb>» and «کانال‌های/رسانه‌های X <verb>»
   t = t.replace(
-    /^کانال(?:‌های)?\s+[^\s،]{1,40}(?:\s+[^\s،]{1,40})?\s+(اعلام|گفت|نوشت|اظهار داشت|اظهار کرد)(?:ند)?(?:ه? است)?\s*(که\s+)?/,
+    new RegExp(`^کانال(?:‌های)?\\s+[^،]{1,60}\\s+${ATTR}\\s*(که\\s+)?`),
     "",
   );
   t = t.replace(
-    /^(کانال‌های|رسانه‌های)\s+[^\s،]{1,40}\s+(اعلام|گفتند|نوشتند|اظهار کردند)(?:ند)?\s*(که\s+)?/,
+    new RegExp(`^(کانال‌های|رسانه‌های)\\s+[^،]{1,60}\\s+${ATTR}\\s*(که\\s+)?`),
     "",
   );
   t = t.replace(/^به گفتهٔ\s+[^،]+،\s*/, "");

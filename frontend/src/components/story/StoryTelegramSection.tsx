@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { ChevronDown } from "lucide-react";
 import TelegramAnalyzingAnimation from "@/components/common/TelegramAnalyzingAnimation";
 import { toFa } from "@/lib/utils";
+import { cleanClaim, cleanPrediction } from "@/lib/telegram-text";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -121,12 +122,13 @@ export default function StoryTelegramSection({ storyId, initialTab, highlightTex
     );
   }
 
-  const clean = (t: string) => t
+  // Route through the shared cleanClaim/cleanPrediction so the story
+  // page benefits from the same plural/perfect-tense attribution
+  // stripping as the homepage («ادعا کردند», «اعلام کرده است»).
+  const clean = (t: string) => cleanClaim(cleanPrediction(t))
     .replace(/^[\s۰-۹0-9]+[).\-–]\s*/, "")
     .replace(/^[•·]\s*/, "")
-    .replace(/^با توجه به [^،]+،\s*/, "")
-    .replace(/^کانال\s*[«»]?[^«»]*[«»]?\s*ادعا کرد (که\s*)?/i, "")
-    .replace(/^[^،]+ ادعا کرد (که\s*)?/i, "");
+    .replace(/^با توجه به [^،]+،\s*/, "");
 
   const getCredLabel = (t: string): { label: string; color: string } | null => {
     if (/مشکوک|اغراق|بعید|غیرواقعی/.test(t)) return { label: "مشکوک", color: "text-red-500" };

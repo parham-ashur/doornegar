@@ -3583,6 +3583,11 @@ async def step_niloofar_polish_telegram():
 - حذف «احتمالاً»، «به احتمال زیاد»، «شاید»، «ممکن است» در ابتدا — همهٔ پیش‌بینی‌ها ذاتاً احتمالی‌اند؛ این واژه‌ها در صدر جمله تنها طول را زیاد می‌کنند
 - اگر قطعیت درصدی مشخص در متن آمده (مثل «۷۰ درصد احتمال دارد»)، آن را حفظ کن — این اطلاعاتی است، نه پرده‌نشینی
 - یک جمله کوتاه و مستقیم: فعل آینده در انتها، موضوع اصلی ابتدا
+- **بازنویسی پیش‌بینی‌های فرا-رسانه‌ای (meta-prediction)**: اگر پیش‌بینیِ خام دربارهٔ رفتارِ رسانه‌هاست، نه دربارهٔ اتفاقِ واقعی، آن را به پیش‌بینیِ رویداد تبدیل کن. ممنوع‌های رایج:
+    * «روایت‌های حکومتی تلاش خواهند کرد تا حملات را کم‌اهمیت نشان دهند» → «حملات احتمالاً شدت خواهند گرفت» (فقط اگر متن اصلی چنین چیزی دلالت می‌کند؛ وگرنه این پیش‌بینی را حذف کن)
+    * «کانال‌های اپوزیسیون بر بحران تأکید خواهند کرد» → نه پیش‌بینی، بلکه توصیف. حذف.
+    * «رسانه‌ها X را بزرگ‌نمایی خواهند کرد» → نه پیش‌بینی. حذف.
+  اگر نمی‌توانی پیش‌بینی را به رویدادی خارج از حوزهٔ رسانه تبدیل کنی، با رشته خالی برگردان — بهتر از پیش‌بینیِ فرا-رسانه‌ای، حذف آن است.
 
 برای ادعاها:
 - **حذف افعالِ مقدمه‌چینی و انتسابِ مبهم**. اینها حذفی‌اند:
@@ -3713,8 +3718,21 @@ JSON با این ساختار:
                 merged["text"] = polished_text
                 return merged
 
-            predictions_display = [_merge(raw_preds[i], polished_preds[i]) for i in range(len(raw_preds))]
-            key_claims_display = [_merge(raw_claims[i], polished_claims[i]) for i in range(len(raw_claims))]
+            # Drop items Niloofar polished to empty — that's her signal
+            # for "this was a meta-prediction / pure commentary with no real
+            # content, don't show it". An empty string would render as a
+            # blank row on the homepage; keeping it out of the display list
+            # is cleaner.
+            predictions_display = [
+                _merge(raw_preds[i], polished_preds[i])
+                for i in range(len(raw_preds))
+                if (polished_preds[i] or "").strip()
+            ]
+            key_claims_display = [
+                _merge(raw_claims[i], polished_claims[i])
+                for i in range(len(raw_claims))
+                if (polished_claims[i] or "").strip()
+            ]
 
             new_analysis = dict(analysis)
             new_analysis["predictions_display"] = predictions_display

@@ -163,6 +163,12 @@ When Niloofar touches telegram predictions or claims that show on the homepage (
 - Drop «احتمالاً» / «به احتمال زیاد» / «شاید» / «ممکن است» at the start of the prediction. Every prediction is already probabilistic by definition; these words at sentence-start add length without information. Keep explicit numeric probabilities («۷۰٪ احتمال دارد …») — those are informative, not boilerplate.
 - Drop «در آینده،» / «در آینده » — the section header «پیش‌بینی‌ها» already implies future.
 
+**Predictions — reject meta-framing (highest priority):** A prediction is about an event in the world, not about how *media* will cover it. The following shapes are meta-predictions and must be rewritten to describe the underlying event, or dropped entirely:
+- ❌ «روایت‌های حکومتی تلاش خواهند کرد تا حملات را کم‌اهمیت نشان دهند»
+- ❌ «کانال‌های اپوزیسیون بر بحران تأکید خواهند کرد»
+- ❌ «رسانه‌ها X را بزرگ‌نمایی خواهند کرد»
+The fix path: if the underlying text actually implies a real-world prediction behind the meta-framing, pull that out («حملات احتمالاً شدت خواهند گرفت»). If there's no real event buried in there — just commentary on media behavior — drop the prediction. Returning an empty string is better than keeping a meta-prediction on the homepage.
+
 **Claims — strip verbose attribution, lead with credibility label:**
 - Cut attribution phrases that don't carry content:
   - «کانال [نام] اعلام کرد/کرده است که …»

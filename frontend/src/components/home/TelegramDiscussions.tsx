@@ -122,13 +122,14 @@ export default function TelegramDiscussions({
 
   // Strip "در آینده،" (predictions) and "موضوع: X |" (claims) first — those
   // are LLM label-boilerplate the Pass-2 prompt explicitly requests.
-  // Then strip numbering, bullets, and channel attribution.
+  // Then strip numbering, bullets, and "با توجه به X،" hedges.
+  // Channel attribution («کانال X ادعا کرد/کردند/کرده است...») is already
+  // handled inside cleanClaim — earlier ad-hoc regexes that only matched
+  // singular «ادعا کرد» were leaving orphan «ند» / «کرده است» heads.
   const clean = (t: string) => cleanClaim(cleanPrediction(t))
     .replace(/^[\s۰-۹0-9]+[).\-–]\s*/, "")
     .replace(/^[•·]\s*/, "")
-    .replace(/^با توجه به [^،]+،\s*/, "")
-    .replace(/^کانال\s*[«»]?[^«»]*[«»]?\s*ادعا کرد (که\s*)?/i, "")
-    .replace(/^[^،]+ ادعا کرد (که\s*)?/i, "");
+    .replace(/^با توجه به [^،]+،\s*/, "");
 
   // Extract credibility label from claim text. Niloofar's polish step
   // prefixes each claim with one of these exact labels followed by a
