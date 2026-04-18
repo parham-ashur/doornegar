@@ -44,6 +44,7 @@ STEP_TIMEOUTS_SEC = {
     "ingest": 1800,                # RSS + Telegram for 20+ sources
     "ingest_rss": 900,             # RSS only — hourly mode, stricter budget
     "prune_noise": 180,            # single UPDATE/DELETE batch, no LLM
+    "recount": 60,                 # two UPDATE…FROM (GROUP BY) queries, no LLM
     "detect_hourly_updates": 120,  # pure SQL aggregate, no LLM
     "process": 1800,               # embeddings + translation over many articles
     "cluster": 1200,               # LLM clustering batch
@@ -571,6 +572,55 @@ async def step_bias_score():
     return total
 
 
+async def step_recount_stories():
+    """Recompute article_count + source_count from the actual attached
+    articles. Fixes drift caused by step_flag_unrelated_articles /
+    step_deduplicate_articles / manual detachments, which remove rows
+    from articles.story_id but never decremented the cached counters
+    on stories.{article_count, source_count}.
+
+    One UPDATE … FROM (GROUP BY) per table → fast even at 400+ stories.
+    Idempotent. Safe to run in every pipeline.
+    """
+    from sqlalchemy import text as _text
+
+    from app.database import async_session
+
+    async with async_session() as db:
+        # Recount article_count. Stories with zero attached articles
+        # keep their cached value intact (those are usually pending
+        # cleanup and would zero out incorrectly).
+        r1 = await db.execute(_text("""
+            UPDATE stories s
+               SET article_count = sub.c
+              FROM (
+                SELECT story_id, COUNT(*)::int AS c
+                  FROM articles
+                 WHERE story_id IS NOT NULL
+                 GROUP BY story_id
+              ) sub
+             WHERE s.id = sub.story_id
+               AND s.article_count <> sub.c
+        """))
+        r2 = await db.execute(_text("""
+            UPDATE stories s
+               SET source_count = sub.c
+              FROM (
+                SELECT story_id, COUNT(DISTINCT source_id)::int AS c
+                  FROM articles
+                 WHERE story_id IS NOT NULL
+                 GROUP BY story_id
+              ) sub
+             WHERE s.id = sub.story_id
+               AND s.source_count <> sub.c
+        """))
+        await db.commit()
+
+    stats = {"articles_fixed": r1.rowcount or 0, "sources_fixed": r2.rowcount or 0}
+    logger.info(f"Recount stories: {stats}")
+    return stats
+
+
 async def step_cluster():
     """Step 3: Cluster articles into stories."""
     from app.database import async_session
@@ -690,20 +740,50 @@ async def step_summarize():
         )
         top_ids = {row[0] for row in top_result.all()}
 
-        # 2. Find stories that need a summary (skip recently-failed)
-        #    Also re-summarize stories that have new articles since last analysis
+        # 2. Find stories that need a summary. Two flavors:
+        #    (a) summary_fa is NULL — never analyzed
+        #    (b) article set changed since last analysis (articles joined
+        #        or left the cluster; detected via sorted-article-id hash
+        #        stored inside the summary_en JSONB blob). That one
+        #        catches clusters whose composition drifted since the
+        #        last LLM run, so stale bias_explanation_fa doesn't keep
+        #        citing outlets no longer in the cluster.
+        #    is_edited stories are ALWAYS skipped so Niloofar's
+        #    hand-edits aren't clobbered.
         MAX_STORIES_PER_RUN = 15  # quality over quantity — deep analysis on top 15 only
         retry_cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
         result = await db.execute(
             select(Story)
+            .options(selectinload(Story.articles))
             .where(
-                Story.summary_fa.is_(None),
                 Story.article_count >= 5,
                 (Story.llm_failed_at.is_(None)) | (Story.llm_failed_at < retry_cutoff),
+                Story.is_edited.is_(False),
             )
             .order_by(Story.article_count.desc())
         )
-        all_candidates = list(result.scalars().all())
+        scan_candidates = list(result.scalars().all())
+
+        import hashlib as _hashlib
+        def _articles_hash(story_obj: Story) -> str:
+            ids = sorted(str(a.id) for a in (story_obj.articles or []))
+            return _hashlib.md5(",".join(ids).encode()).hexdigest()[:12]
+
+        all_candidates: list[Story] = []
+        for s in scan_candidates:
+            if s.summary_fa is None:
+                all_candidates.append(s)
+                continue
+            # Check blob for the last-run article hash. If missing or
+            # different → re-analyze.
+            try:
+                b = _json.loads(s.summary_en) if s.summary_en else {}
+            except Exception:
+                b = {}
+            last_hash = b.get("articles_hash") if isinstance(b, dict) else None
+            cur_hash = _articles_hash(s)
+            if last_hash != cur_hash:
+                all_candidates.append(s)
 
         # 3. Rank by analysis priority (bias-richness, not just article count)
         def _analysis_priority(s: Story) -> float:
@@ -877,6 +957,10 @@ async def step_summarize():
                 # Store analyst factors for premium stories
                 if is_premium and analysis.get("analyst"):
                     extras["analyst"] = analysis["analyst"]
+                # Stamp the article-set hash so the next pipeline run can
+                # detect composition drift and re-analyze — see the
+                # articles_hash check above in step_summarize.
+                extras["articles_hash"] = _articles_hash(story)
                 story.summary_en = _json.dumps(extras, ensure_ascii=False)
                 story.llm_failed_at = None  # clear any previous failure
                 await db.commit()
@@ -3608,6 +3692,7 @@ JSON با این ساختار:
 FULL_PIPELINE = [
     ("ingest", "Ingest RSS + Telegram (may take 10-20 min)", "step_ingest"),
     ("prune_noise", "Drop too-short Telegram posts/articles before NLP", "step_prune_noise"),
+    ("recount", "Recount article_count / source_count from attached rows", "step_recount_stories"),
     ("process", "NLP process (embed, translate, extract)", "step_process"),
     ("backfill_farsi_titles", "Backfill Farsi titles", "step_backfill_farsi_titles"),
     ("cluster", "Cluster articles into stories", "step_cluster"),
@@ -3654,6 +3739,7 @@ FULL_PIPELINE = [
 INGEST_ONLY_PIPELINE = [
     ("ingest", "Ingest RSS + Telegram", "step_ingest"),
     ("prune_noise", "Drop too-short Telegram posts/articles before NLP", "step_prune_noise"),
+    ("recount", "Recount article_count / source_count from attached rows", "step_recount_stories"),
     ("process", "NLP process (embed, translate, extract)", "step_process"),
     ("backfill_farsi_titles", "Backfill Farsi titles", "step_backfill_farsi_titles"),
     ("cluster", "Cluster articles into stories", "step_cluster"),
