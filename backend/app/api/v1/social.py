@@ -204,7 +204,9 @@ async def get_telegram_analysis(
             force_refresh = False
 
     # Channel stats — only non-media channels (analysts, commentators, aggregators)
-    NON_MEDIA_TYPES = ("commentary", "aggregator", "activist", "political_party", "citizen")
+    # Aggregator dropped 2026-04-19 — rebroadcasts leak news-framing
+    # into the "X posts from analysts" counter shown on story pages.
+    NON_MEDIA_TYPES = ("commentary", "activist", "political_party", "citizen")
     channel_stats = []
     posts_result = await db.execute(
         select(TelegramChannel.title, TelegramChannel.channel_type, func.count(TelegramPost.id).label("cnt"))

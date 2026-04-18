@@ -411,17 +411,14 @@ async def analyze_story_telegram(
     if not story:
         return None
 
-    # Non-media pool: commentary + aggregator + activist + citizen +
-    # political_party. Commentary alone (17 channels) was too narrow —
-    # most stories ended up with 0-3 posts and no_data even on a live
-    # news day, leaving homepage sidebar empty despite 10K+ total posts
-    # in the system. State-media NEWS channels stay excluded (they feed
-    # the article bias pipeline, not the analyst discourse). The hard
-    # safety net against «روایت‌های حکومتی» hallucinations is the pass-0
-    # classifier below — it drops every post it labels "news" or
-    # "unrelated" before pass-2 ever sees them, so widening the channel
-    # pool here can't leak state-media framing into the analyst narrative.
-    ANALYTICAL_TYPES = ("commentary", "aggregator", "activist", "citizen", "political_party")
+    # Non-media pool: commentary + activist + citizen + political_party.
+    # Aggregator was briefly included to widen the signal but Parham cut
+    # it 2026-04-19 — aggregators rebroadcast headlines and leak news-
+    # framing into the analyst narrative even through the pass-0 filter.
+    # Keep state-media news channels out for the same reason; they feed
+    # the article bias pipeline instead. Pass-0 below is still the hard
+    # filter against news-rehash leaking in from the remaining types.
+    ANALYTICAL_TYPES = ("commentary", "activist", "citizen", "political_party")
     posts_result = await db.execute(
         select(TelegramPost)
         .options(selectinload(TelegramPost.channel))
