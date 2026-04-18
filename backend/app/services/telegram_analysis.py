@@ -28,6 +28,32 @@ CHANNEL_TRACK_RECORDS = {
     "neutral": "کانال‌های مستقل: معمولاً چند منبع را مقایسه می‌کنند. از زبان احتیاطی استفاده می‌کنند.",
 }
 
+# ── Pass 0: Content classifier (nano, batched, very cheap) ──
+# Upstream filter: drops posts that are pure news repetition or off-topic
+# BEFORE they enter fact extraction. Analyst channels routinely rebroadcast
+# BBC/Reuters headlines without commentary — those aren't analysis, they're
+# feed noise that was previously being laundered into "analyst predictions".
+PASS0_CLASSIFY_PROMPT = """تو ویراستار محتوا هستی. برای هر پست زیر، مشخص کن آیا حاوی تحلیل/نظر/پیش‌بینی از تحلیلگر است، یا صرفاً بازنشر خبر بدون نظر، یا بی‌ربط به موضوع.
+
+═══ موضوع ═══
+{story_title}
+{story_summary}
+
+═══ پست‌ها ═══
+{posts_block}
+═══ پایان ═══
+
+برای هر پست یکی از سه برچسب را بده:
+- "analysis" — تحلیلگر نظر/استدلال/پیش‌بینی/ارزیابی می‌کند (حتی کوتاه). علامت‌ها: «من فکر می‌کنم»، «احتمالاً»، «دلیلش این است»، پیش‌بینی آینده، توضیح علت، موضع‌گیری، نقد، ارزیابی اعتبار، مقایسه با گذشته
+- "news" — بازنشر خبر/تیتر/بیانیه بدون نظر تحلیلگر. علامت‌ها: فقط گزارش واقعه، نقل‌قول از مقام رسمی بدون تفسیر، تیتر خبرگزاری
+- "unrelated" — به موضوع مشخص‌شده بالا ربط ندارد
+
+JSON برگردان — فقط یک آرایه از برچسب‌ها به ترتیب پست‌ها:
+{{"labels": ["analysis", "news", "analysis", "unrelated", ...]}}
+
+فقط JSON."""
+
+
 # ── Pass 1: Fact extraction (cheap, nano model) ──
 PASS1_PROMPT = """از پست‌های تلگرامی زیر، حقایق ساختاریافته استخراج کن.
 
@@ -48,7 +74,7 @@ JSON برگردان:
 فقط JSON."""
 
 # ── Pass 2: Deep analysis (premium model with context) ──
-PASS2_PROMPT = """تو یک تحلیلگر ارشد رسانه‌ای هستی. حقایق استخراج‌شده از پست‌های تلگرامی درباره یک موضوع خبری را تحلیل کن.
+PASS2_PROMPT = """تو سردبیر ارشد خبری هستی. پست‌های تلگرامی ورودی فقط از تحلیلگران و صاحب‌نظران سیاسی هستند (رسانه‌های خبری و بازنشر‌کنندگان تیتر حذف شده‌اند). هدف: جمع‌بندی تحلیل‌ها، پیش‌بینی‌ها و ادعاهای این تحلیلگران — نه روایت رسانه‌ای.
 
 عنوان: {story_title}
 خلاصه خبری: {story_summary}
@@ -87,9 +113,9 @@ JSON برگردان:
     {{"text": "پیش‌بینی دوم", "supporters": ["کانال ۱", "کانال ۲"]}}
   ],
   "worldviews": {{
-    "pro_regime": "روایت محافظه‌کار: چه می‌گویند و چرا (با نقل واژگان خاص)",
-    "opposition": "روایت اپوزیسیون: چه می‌گویند و چرا (با نقل واژگان خاص)",
-    "neutral": "دیدگاه مستقل‌ها (اگر موجود)"
+    "pro_regime": "تحلیلگران نزدیک به دولت: چه می‌گویند و چرا (با نقل واژگان خاص)",
+    "opposition": "تحلیلگران منتقد/اپوزیسیون: چه می‌گویند و چرا (با نقل واژگان خاص)",
+    "neutral": "تحلیلگران مستقل/میانه‌رو (اگر موجود)"
   }},
   "key_claims": [
     "موضوع: [نام موضوع واحد] | ادعای مشخص + نام کانال + ارزیابی اعتبار. مثلاً: «موضوع: تعداد موشک‌های شلیک‌شده | کانال مصاف ادعا کرد ۵۰۰ موشک شلیک شده — مشکوک، زیرا منابع نظامی مستقل رقم کمتری تأیید کردند»",
@@ -103,6 +129,64 @@ JSON برگردان:
 }}
 
 فقط JSON. بدون فیلد emotional_tone."""
+
+
+async def _pass0_classify_posts(
+    posts: list, story_title: str, story_summary: str
+) -> list[str]:
+    """Classify each post as analysis / news / unrelated in one batched call.
+
+    Returns a label list aligned with `posts` (same length, same order).
+    On LLM failure, returns ["analysis"] * len(posts) — fail-open so a
+    nano outage doesn't kill the whole pipeline; downstream filters still
+    apply via channel_type.
+    """
+    if not posts:
+        return []
+    if not settings.openai_api_key:
+        return ["analysis"] * len(posts)
+
+    lines = []
+    for idx, p in enumerate(posts, start=1):
+        ch = p.channel.title if p.channel else "?"
+        text = (p.text or "")[:300]
+        lines.append(f"[{idx}] [{ch}] {text}")
+    posts_block = "\n\n".join(lines)
+
+    try:
+        from app.services.llm_helper import build_openai_params
+        client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
+        params = build_openai_params(
+            model=settings.translation_model,  # nano
+            prompt=PASS0_CLASSIFY_PROMPT.format(
+                story_title=story_title or "",
+                story_summary=(story_summary or "")[:300],
+                posts_block=posts_block,
+            ),
+            max_tokens=512,
+            temperature=0,
+        )
+        params["response_format"] = {"type": "json_object"}
+        response = await client.chat.completions.create(**params)
+        content = response.choices[0].message.content.strip()
+        parsed = json.loads(content)
+        labels = parsed.get("labels") or []
+        if not isinstance(labels, list):
+            return ["analysis"] * len(posts)
+        # Pad or truncate to match posts length — the LLM occasionally
+        # returns a short list if it got confused.
+        if len(labels) < len(posts):
+            labels = list(labels) + ["analysis"] * (len(posts) - len(labels))
+        elif len(labels) > len(posts):
+            labels = labels[:len(posts)]
+        # Normalize unknown labels to "analysis" to stay fail-open.
+        return [
+            lb if lb in ("analysis", "news", "unrelated") else "analysis"
+            for lb in labels
+        ]
+    except Exception as e:
+        logger.warning(f"Telegram pass 0 classifier failed, keeping all posts: {e}")
+        return ["analysis"] * len(posts)
 
 
 async def _pass1_extract_facts(posts_block: str) -> dict | None:
@@ -295,8 +379,13 @@ async def analyze_story_telegram(
     if not story:
         return None
 
-    # Fetch posts from NON-MEDIA channels only (analysts, commentators, aggregators)
-    # Media channel posts are used for article bias comparison instead
+    # Analyst-only pool: commentary channels (the 17 seeded analysts).
+    # Aggregators just rebroadcast headlines; activist/political_party/citizen
+    # are unused in seed. Media channels go through the article bias pipeline
+    # instead. We deliberately do NOT fall back to all posts when the pool is
+    # thin — leaking state-media posts into the "analyst narrative" is what
+    # was producing phrases like «روایت‌های حکومتی» on stories that had no
+    # real analyst coverage.
     posts_result = await db.execute(
         select(TelegramPost)
         .options(selectinload(TelegramPost.channel))
@@ -304,26 +393,27 @@ async def analyze_story_telegram(
         .where(TelegramPost.story_id == story_id)
         .where(TelegramPost.text.isnot(None))
         .where(TelegramPost.text != "")
-        .where(TelegramChannel.channel_type.in_(["commentary", "aggregator", "activist", "political_party", "citizen"]))
+        .where(TelegramChannel.channel_type == "commentary")
+        .where(TelegramChannel.is_active.is_(True))
         .order_by(TelegramPost.date.desc())
         .limit(40)
     )
     posts = list(posts_result.scalars().all())
 
-    # If not enough non-media posts, fall back to all posts
     if len(posts) < 2:
-        posts_result = await db.execute(
-            select(TelegramPost)
-            .options(selectinload(TelegramPost.channel))
-            .where(TelegramPost.story_id == story_id)
-            .where(TelegramPost.text.isnot(None))
-            .where(TelegramPost.text != "")
-            .order_by(TelegramPost.date.desc())
-            .limit(40)
-        )
-        posts = list(posts_result.scalars().all())
+        return None
+
+    # Content filter (pass 0, nano): drop posts that are just news rehash
+    # or off-topic, so only actual analyst commentary feeds pass-1/pass-2.
+    labels = await _pass0_classify_posts(
+        posts,
+        story_title=story.title_fa or story.title_en or "",
+        story_summary=story.summary_fa or story.summary_en or "",
+    )
+    posts = [p for p, lb in zip(posts, labels) if lb == "analysis"]
 
     if len(posts) < 2:
+        logger.info(f"Telegram analysis skipped for {story_id}: <2 analytical posts after pass-0 filter")
         return None
 
     # Build posts block
