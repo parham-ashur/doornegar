@@ -54,6 +54,7 @@ STEP_TIMEOUTS_SEC = {
     "summarize": 1800,
     "bias_score": 3600,            # per-article LLM calls, heaviest step
     "fix_images": 1200,
+    "diaspora_ogimages": 1200,   # HTTP GET per article, capped 200/run
     "migrate_images_r2": 1800,   # download + upload per article, capped 300/run
     "telegram_analysis": 3600,     # per-story LLM analysis
     "telegram_reassign": 1200,     # re-embed 3K posts, pure math, no LLM
@@ -3887,6 +3888,135 @@ JSON با این ساختار:
     return stats
 
 
+async def step_backfill_diaspora_ogimages():
+    """Pull og:image from diaspora-outlet article URLs when the stored
+    image_url is missing or obviously bad (icon, expired telesco.pe,
+    broken iranintl hash).
+
+    Scoped to diaspora (production_location='outside_iran') outlets
+    because:
+      - Railway's IP can reach BBC Persian, Iran International, Euronews,
+        Radio Farda, DW, RFI, Kayhan London, etc. without geo-blocks.
+      - Inside-Iran state/semi-state sites (irna, press-tv, tasnim,
+        mehrnews, etc.) actively geo-block Railway and return either 403
+        or a captcha page — pulling their og:image from outside Iran
+        just wastes request budget.
+      - Telegram posts are skipped entirely (they have no article URL
+        and telesco.pe CDN expires).
+
+    Attribution: source.name_fa becomes the photo credit line. Frontend
+    already reads a `manual_image_credit` key from summary_en when set
+    via the HITL pin-image flow; we reuse the same mechanism here so
+    the reader sees «عکس: بی‌بی‌سی فارسی» etc. under the cover image.
+
+    Idempotent: each write sets image_checked_at so a retry skips
+    articles already processed in the last 24h. Capped at 200 articles
+    per run to stay inside the step timeout.
+    """
+    from sqlalchemy import and_, or_, select
+
+    from app.database import async_session
+    from app.models.article import Article
+    from app.models.source import Source
+    from app.services.nlp_pipeline import _fetch_og_image
+
+    # Mirror the "bad image" heuristic from app.api.v1.stories so we
+    # target exactly the URLs the frontend scorer would reject.
+    BAD_FRAGMENTS = (
+        "ico-192x192", "ico-512x512", "webapp/ico-", "manifest-icon",
+        "favicon", "apple-touch-icon", "/logo.", "/icon.",
+        ".ico", ".svg", "telesco.pe", "cdn.telegram",
+        "google.com/s2/favicons",
+    )
+
+    stats = {
+        "checked": 0, "found_ogimage": 0, "replaced_null": 0,
+        "replaced_bad": 0, "no_ogimage": 0, "errors": 0,
+    }
+
+    async with async_session() as db:
+        # Candidates: diaspora articles with missing or "bad-looking" URLs
+        # that haven't been re-checked in the last 24h.
+        recheck_cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+
+        # Build a SQL OR clause covering each bad-URL fragment + null.
+        bad_url_conditions = [Article.image_url.is_(None)]
+        for frag in BAD_FRAGMENTS:
+            bad_url_conditions.append(Article.image_url.contains(frag))
+        # iranintl bare-hash URLs (no -WxH.ext) — detect by negation
+        # inside Python after fetching; too complex to express in SQL.
+
+        result = await db.execute(
+            select(Article)
+            .join(Source, Article.source_id == Source.id)
+            .where(
+                Source.production_location == "outside_iran",
+                Source.is_active.is_(True),
+                or_(*bad_url_conditions),
+                or_(
+                    Article.image_checked_at.is_(None),
+                    Article.image_checked_at < recheck_cutoff,
+                ),
+            )
+            .order_by(Article.ingested_at.desc())
+            .limit(200)
+        )
+        articles = list(result.scalars().all())
+
+    if not articles:
+        return stats
+
+    now_ts = datetime.now(timezone.utc)
+
+    # Process in small batches with short sessions so a long run doesn't
+    # hold one Neon connection for 10+ minutes and get killed.
+    BATCH = 20
+    for i in range(0, len(articles), BATCH):
+        chunk = articles[i : i + BATCH]
+        updates: list[tuple[str, str | None]] = []  # (article_id, new_url)
+
+        for art in chunk:
+            stats["checked"] += 1
+            try:
+                og_url = await _fetch_og_image(art.url)
+            except Exception:
+                stats["errors"] += 1
+                og_url = None
+
+            if og_url:
+                # Reject obvious icons / broken patterns from the og:image too
+                low = og_url.lower()
+                if any(f in low for f in BAD_FRAGMENTS):
+                    og_url = None
+
+            if og_url:
+                stats["found_ogimage"] += 1
+                if art.image_url is None:
+                    stats["replaced_null"] += 1
+                else:
+                    stats["replaced_bad"] += 1
+                updates.append((str(art.id), og_url))
+            else:
+                stats["no_ogimage"] += 1
+                # Stamp the checked_at anyway so we don't re-try tomorrow
+                updates.append((str(art.id), None))
+
+        async with async_session() as db:
+            from sqlalchemy import update as _upd
+
+            for article_id, new_url in updates:
+                values: dict = {"image_checked_at": now_ts}
+                if new_url:
+                    values["image_url"] = new_url
+                await db.execute(
+                    _upd(Article).where(Article.id == article_id).values(**values)
+                )
+            await db.commit()
+
+    logger.info(f"Diaspora og:image backfill: {stats}")
+    return stats
+
+
 async def step_migrate_images_to_r2():
     """Download source-CDN article images and re-host them on R2.
 
@@ -4057,6 +4187,11 @@ FULL_PIPELINE = [
     ("summarize", "Summarize new stories", "step_summarize"),
     ("bias_score", "Bias scoring", "step_bias_score"),
     ("fix_images", "Fix broken images", "step_fix_images"),
+    # Pull og:image from diaspora-outlet article URLs when image_url is
+    # null or an obvious icon/telesco.pe dead-link. Runs BEFORE
+    # migrate_images_r2 so the newly-fetched URLs get uploaded to R2
+    # in the same maintenance pass.
+    ("diaspora_ogimages", "Backfill diaspora article og:images", "step_backfill_diaspora_ogimages"),
     ("migrate_images_r2", "Migrate source-CDN images to R2 (up to 300/run)", "step_migrate_images_to_r2"),
     # Rescue stories whose auto-picked image resolves to null/icon/broken —
     # writes a manual_image_url pointing at the best valid article image.
