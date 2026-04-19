@@ -205,8 +205,8 @@ async def step_detect_hourly_updates():
         just joined.
       - Coverage shift: state/diaspora ratio moved ≥ 15pp in an hour.
         "پوشش درون‌مرزی تقویت شد (۴۰٪ → ۵۵٪)"
-      - Burst: ≥5 articles attached to one story within the hour. Means
-        a major event is unfolding, not routine drip.
+      - Burst: ≥2 articles attached to one story within the hour. Small
+        drip on a quiet story still signals movement worth surfacing.
 
     Stories that gained articles but tripped no trigger get
     hourly_update_signal = {"has_update": False, ...} — the API then
@@ -223,7 +223,7 @@ async def step_detect_hourly_updates():
     # Minimum delta used for the coverage-shift trigger. Matches the 24h
     # snapshot's threshold so the two signal layers stay consistent.
     PCT_SHIFT = 15
-    BURST_ARTICLES = 5
+    BURST_ARTICLES = 2
 
     stats = {"stories_seen": 0, "side_flip": 0, "coverage_shift": 0, "burst": 0, "quiet": 0}
 

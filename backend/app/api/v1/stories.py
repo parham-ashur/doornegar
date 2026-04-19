@@ -788,7 +788,7 @@ def _story_brief_with_extras(story: Story) -> StoryBrief:
     # 1) Hourly layer — written by step_detect_hourly_updates when a story
     #    gains articles in the last hour AND a trigger fires. Fresher but
     #    narrower in what it catches (side flip, coverage ≥15pp, ≥5-article
-    #    burst). We prefer it when its detected_at is within the last 2h.
+    #    burst). We prefer it when its detected_at is within the last 4h.
     # 2) 24h snapshot layer — compares live analysis state to the nightly
     #    snapshot. Catches slower signals (dispute_score shifted, bias
     #    rewrite) that hourly can't see.
@@ -803,7 +803,7 @@ def _story_brief_with_extras(story: Story) -> StoryBrief:
                     from datetime import datetime as _dt, timezone as _tz
                     dt = _dt.fromisoformat(detected_at.replace("Z", "+00:00"))
                     age_s = (_dt.now(_tz.utc) - dt).total_seconds()
-                    if 0 <= age_s <= 2 * 3600:
+                    if 0 <= age_s <= 4 * 3600:
                         use_hourly = True
                 except Exception:
                     pass
