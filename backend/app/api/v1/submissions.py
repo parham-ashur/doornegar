@@ -91,6 +91,17 @@ class SubmissionUpdate(BaseModel):
 # ─── Public POST ─────────────────────────────────────────────
 
 
+def _normalize_for_hash(text: str) -> str:
+    """Collapse whitespace + strip zero-width chars before hashing so
+    "same content with extra spaces" counts as a duplicate."""
+    import re
+    # Strip common zero-width and bidi markers that Persian text often carries
+    text = re.sub(r"[\u200b-\u200f\u202a-\u202e\ufeff]", "", text)
+    # Collapse all whitespace runs to a single space
+    text = re.sub(r"\s+", " ", text).strip().lower()
+    return text
+
+
 @router.post("", response_model=SubmissionResponse)
 @_limiter.limit("10/hour")
 async def create_submission(
@@ -101,12 +112,62 @@ async def create_submission(
     """Accept a content submission from the public. Rate-limited to
     10/hour/IP to deter spam. Returns the created submission's ID so
     the frontend can show "your submission #XYZ is pending review".
+
+    Dedup layers (cheap-first):
+      1. source_url exact match against existing Articles → already in system
+      2. source_url exact match against prior UserSubmissions → pending dup
+      3. SHA-256 of normalized content matches prior UserSubmission → text dup
+    Any hit short-circuits to a 200 response with a friendly message so
+    the submitter sees "already in the system" instead of silently
+    queuing a duplicate.
     """
+    import hashlib
+
+    from app.models.article import Article
+
     # Light validation for telegram-post shape
     if body.submission_type == "telegram_post" and not body.channel_username:
         raise HTTPException(
             status_code=400,
             detail="telegram_post submissions must include channel_username",
+        )
+
+    # ── Dedup checks ──
+    if body.source_url:
+        existing_art = (
+            await db.execute(select(Article).where(Article.url == body.source_url))
+        ).scalar_one_or_none()
+        if existing_art:
+            return SubmissionResponse(
+                id=uuid.uuid4(),
+                status="duplicate",
+                message="این مقاله قبلاً در دورنگر ثبت شده است (با همین لینک).",
+            )
+        existing_sub = (
+            await db.execute(
+                select(UserSubmission).where(UserSubmission.source_url == body.source_url)
+            )
+        ).scalar_one_or_none()
+        if existing_sub:
+            return SubmissionResponse(
+                id=existing_sub.id,
+                status="duplicate",
+                message=f"این لینک قبلاً ارسال شده و در وضعیت «{existing_sub.status}» است.",
+            )
+
+    content_hash = hashlib.sha256(
+        _normalize_for_hash(body.content).encode("utf-8")
+    ).hexdigest()
+    existing_hash = (
+        await db.execute(
+            select(UserSubmission).where(UserSubmission.content_hash == content_hash)
+        )
+    ).scalar_one_or_none()
+    if existing_hash:
+        return SubmissionResponse(
+            id=existing_hash.id,
+            status="duplicate",
+            message=f"متن یکسانی قبلاً ارسال شده (وضعیت: «{existing_hash.status}»).",
         )
 
     ip = request.client.host if request.client else None
@@ -126,6 +187,7 @@ async def create_submission(
         suggested_story_id=body.suggested_story_id,
         title=body.title,
         content=body.content,
+        content_hash=content_hash,
         source_name=body.source_name,
         source_url=body.source_url,
         channel_username=(body.channel_username or "").lstrip("@") or None,
@@ -231,7 +293,11 @@ async def update_submission(
             db.add(src)
             await db.flush()
 
-        synthetic_url = f"https://doornegar.org/submissions/{item.id}"
+        # Use the submitter's real source_url when they provided one — lets
+        # on_conflict_do_nothing catch an article that's since been ingested
+        # by the regular RSS pipeline. Fall back to a synthetic URL so the
+        # FK still has a unique value when no link was provided.
+        article_url = item.source_url or f"https://doornegar.org/submissions/{item.id}"
         stmt = (
             _pg_insert(Article)
             .values(
@@ -239,7 +305,7 @@ async def update_submission(
                 title_original=item.title or (item.content[:80] + "…"),
                 title_fa=item.title if item.language == "fa" else None,
                 title_en=item.title if item.language == "en" else None,
-                url=synthetic_url,
+                url=article_url,
                 content_text=item.content,
                 image_url=item.image_url,
                 language=item.language,

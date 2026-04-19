@@ -96,6 +96,11 @@ class UserSubmission(Base):
 
     # Anti-spam / audit
     submitter_ip: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    # SHA-256 of the normalized content — lets us reject duplicate submissions
+    # without scanning the whole content text on every POST.
+    content_hash: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

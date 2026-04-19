@@ -79,7 +79,10 @@ export default function SubmitPage() {
         body: JSON.stringify(payload),
       });
       const data = await res.json();
-      if (res.ok) {
+      if (res.ok && data.status === "duplicate") {
+        // Friendly duplicate message — not an error, just informational.
+        setResult({ ok: false, message: data.message || "این مورد قبلاً ارسال شده است." });
+      } else if (res.ok) {
         setResult({ ok: true, message: data.message || "ارسال شد" });
         // Reset everything except submitter identity
         setTitle(""); setContent(""); setSourceName(""); setSourceUrl("");
