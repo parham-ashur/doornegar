@@ -185,6 +185,18 @@ export interface NarrativeBullets {
     moderate: string[];
     radical: string[];
   };
+  /** Per-subgroup BIAS framing — one short paragraph on how each
+   * subgroup's slant / word choices / emphasis shape the story.
+   * Different from the narrative bullets (which report WHAT each
+   * subgroup said). Optional — populated manually via the HITL
+   * narrative editor. Legacy stories without it fall back to the
+   * flat bias_explanation_fa prose. */
+  bias_by_subgroup?: {
+    principlist?: string;
+    reformist?: string;
+    moderate_diaspora?: string;
+    radical_diaspora?: string;
+  };
 }
 
 export interface StoryAnalysis {

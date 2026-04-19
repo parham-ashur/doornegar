@@ -796,19 +796,17 @@ export default async function HomePage({
               bottom box is hidden entirely and تقابل takes the whole
               column — no empty shells. */}
           <div className="col-span-5 pr-6 flex flex-col gap-4">
-            <div className="flex-1 min-h-0 border border-slate-300 dark:border-slate-600 flex flex-col">
-              {/* Line-title-line pattern — gray horizontal line spans the
-                  full width, the title span sits on top with bg cutting
-                  through it. Previously used flex-1 spacers + -mt-3 over
-                  the outer border; that broke visually on some viewports
-                  (the border showed corners but the middle went white).
-                  This version uses absolute positioning so it renders the
-                  same every time. */}
-              <div className="relative flex items-center justify-center h-0 -mt-3">
-                <div className="absolute inset-x-4 top-1/2 -translate-y-1/2 h-px bg-slate-300 dark:bg-slate-600" />
-                <span className="relative text-[15px] font-black text-slate-900 dark:text-white px-3 bg-white dark:bg-[#0a0e1a]">تقابل روایت‌ها</span>
-              </div>
-              <div className="space-y-5 px-4 pb-6 pt-6 flex-1 flex flex-col justify-between overflow-hidden">
+            <div className="relative flex-1 min-h-0 border border-slate-300 dark:border-slate-600 flex flex-col">
+              {/* Box title sits ON the outer top border, centered, with
+                  bg cutting through the border behind it. Absolute
+                  positioning anchored to the outer box — title's center
+                  aligns exactly with the border line (top: 0 +
+                  -translate-y-1/2). Content area below gets generous
+                  pt to breathe after the overlay. */}
+              <span className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10 text-[15px] font-black text-slate-900 dark:text-white px-3 bg-white dark:bg-[#0a0e1a] whitespace-nowrap">
+                تقابل روایت‌ها
+              </span>
+              <div className="space-y-5 px-4 pb-6 pt-8 flex-1 flex flex-col justify-between overflow-hidden">
                 {(() => {
                   type BattleItem = {
                     storyId: string;
@@ -927,12 +925,11 @@ export default async function HomePage({
                 (no empty shells). Top 2 rotate as dispute_score shifts
                 from day to day. */}
             {(mostDisputed || secondDisputed || thirdDisputed) && (
-              <div className="flex-1 min-h-0 border border-slate-300 dark:border-slate-600 flex flex-col">
-                <div className="relative flex items-center justify-center h-0 -mt-3">
-                  <div className="absolute inset-x-4 top-1/2 -translate-y-1/2 h-px bg-slate-300 dark:bg-slate-600" />
-                  <span className="relative text-[15px] font-black text-slate-900 dark:text-white px-3 bg-white dark:bg-[#0a0e1a]">بیشترین اختلاف نگاه</span>
-                </div>
-                <div className="px-4 pb-4 pt-2 flex-1 overflow-hidden">
+              <div className="relative flex-1 min-h-0 border border-slate-300 dark:border-slate-600 flex flex-col">
+                <span className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10 text-[15px] font-black text-slate-900 dark:text-white px-3 bg-white dark:bg-[#0a0e1a] whitespace-nowrap">
+                  بیشترین اختلاف نگاه
+                </span>
+                <div className="px-4 pb-4 pt-6 flex-1 overflow-hidden">
                   {/* Cap at 2 stories per Parham's preference — three made
                       the column feel overfull next to the 2-story تقابل
                       box above. thirdDisputed still populated for analytics

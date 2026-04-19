@@ -201,12 +201,27 @@ export default async function StoryDetailPage({
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 lg:items-start">
         {/* RIGHT column (RTL): bias tabs → articles */}
         <div className="lg:pl-6 lg:border-l border-slate-200 dark:border-slate-800">
-          {/* Editorial context */}
+          {/* Editorial context — collapsed by default. Reader clicks
+              the summary to expand. Uses the native <details>/<summary>
+              so it works without client JS / hydration, styled with
+              Tailwind + open:rotate-180 for the chevron. */}
           {story.editorial_context_fa?.context && (
-            <div className="mb-4 border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 px-4 py-3">
-              <p className="text-[13px] font-bold text-slate-500 dark:text-slate-400 mb-1">زمینه خبر</p>
-              <p className="text-[13px] leading-6 text-slate-700 dark:text-slate-300">{story.editorial_context_fa.context}</p>
-            </div>
+            <details className="group mb-4 border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50">
+              <summary className="flex items-center justify-between cursor-pointer list-none px-4 py-2.5 select-none">
+                <span className="text-[13px] font-bold text-slate-500 dark:text-slate-400">
+                  زمینه خبر
+                </span>
+                <span
+                  aria-hidden="true"
+                  className="text-slate-400 text-[11px] transition-transform group-open:rotate-90"
+                >
+                  ◀
+                </span>
+              </summary>
+              <p className="text-[13px] leading-6 text-slate-700 dark:text-slate-300 px-4 pb-3 pt-1">
+                {story.editorial_context_fa.context}
+              </p>
+            </details>
           )}
           {/* Bias comparison */}
           <StoryAnalysisPanel analysis={analysis} />
