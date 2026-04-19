@@ -1,12 +1,8 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState } from "react";
 import Image from "next/image";
 import { Newspaper } from "lucide-react";
-
-// Images smaller than this are considered low quality (tracking pixels, tiny icons).
-const MIN_WIDTH = 120;
-const MIN_HEIGHT = 80;
 
 // URL-level filter for icons and logos the ingester sometimes picks up
 // as the article image when no real og:image is present (happens on
@@ -114,15 +110,6 @@ export default function SafeImage({
 }) {
   const [failed, setFailed] = useState(false);
 
-  const handleLoad = useCallback((e: React.SyntheticEvent<HTMLImageElement>) => {
-    const img = e.currentTarget;
-    if (img.naturalWidth && img.naturalHeight) {
-      if (img.naturalWidth < MIN_WIDTH || img.naturalHeight < MIN_HEIGHT) {
-        setFailed(true);
-      }
-    }
-  }, []);
-
   if (!src || failed || isLikelyIcon(src) || isBrokenIranInternationalUrl(src)) {
     return (
       <div className={placeholderClass || "flex h-full w-full items-center justify-center bg-slate-100 dark:bg-slate-800"}>
@@ -146,7 +133,6 @@ export default function SafeImage({
         priority={priority}
         className={className || "object-cover"}
         onError={() => setFailed(true)}
-        onLoad={handleLoad}
         unoptimized={skipOptimization}
       />
     </div>
