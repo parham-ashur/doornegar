@@ -169,28 +169,21 @@ export default function TelegramDiscussions({
           <h4 className="text-[13px] font-black text-blue-600 dark:text-blue-400 mb-2">پیش‌بینی‌ها</h4>
           <div className="space-y-2">
             {predictions.slice(0, 6).map((item, i) => {
-              const hasAnalystLine =
-                item.supporterCount != null && item.analystsTotal != null && item.supporterCount > 0;
               return (
                 <Link
                   key={i}
                   href={`/${locale}/stories/${item.storyId}?tg=predictions&hl=${encodeURIComponent(clean(item.text).slice(0, 40))}#telegram`}
                   className="block group border-b border-slate-100 dark:border-slate-800 pb-2 last:border-0 last:pb-0"
                 >
-                  {/* Without the analyst line, let the text take its row so
-                      each item keeps roughly the same visual height. */}
-                  <p
-                    className={`text-[13px] leading-5 text-slate-600 dark:text-slate-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors ${
-                      hasAnalystLine ? "line-clamp-2" : "line-clamp-3"
-                    }`}
-                  >
+                  {/* Analyst-count label («N از M تحلیلگر») removed on
+                      Parham's request — the small counts (1/16, 2/16)
+                      read as weak signal on the homepage and distract
+                      from the prediction itself. Still available on the
+                      story page where the full discourse context makes
+                      the ratio meaningful. */}
+                  <p className="text-[13px] leading-5 text-slate-600 dark:text-slate-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-3">
                     {clean(item.text)}
                   </p>
-                  {hasAnalystLine && (
-                    <p className="text-[13px] text-blue-500 dark:text-blue-400 text-left">
-                      {toFa(item.supporterCount!)} از {toFa(item.analystsTotal!)} تحلیلگر
-                    </p>
-                  )}
                 </Link>
               );
             })}

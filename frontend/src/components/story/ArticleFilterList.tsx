@@ -21,10 +21,14 @@ const filters: { key: FilterKey; label: string }[] = [
 ];
 
 function getAlignmentBadge(alignment: string | null) {
+  // Collapse to a 2-label display on article cards: state + semi_state
+  // both read as «درون‌مرزی»; diaspora reads as «برون‌مرزی»; independent
+  // hides the badge. Finer distinction (semi_state vs state, or the
+  // 4-subgroup narrative) lives on the sources spectrum and narrative
+  // panel — it over-loaded the article list with classifier labels.
   const map: Record<string, { label: string; color: string }> = {
     state: { label: "درون‌مرزی", color: "text-[#1e3a5f] dark:text-blue-300" },
-    semi_state: { label: "نیمه‌درون‌مرزی", color: "text-[#2563eb] dark:text-blue-300" },
-    independent: { label: "مستقل", color: "text-slate-500 dark:text-slate-400" },
+    semi_state: { label: "درون‌مرزی", color: "text-[#1e3a5f] dark:text-blue-300" },
     diaspora: { label: "برون‌مرزی", color: "text-[#ea580c] dark:text-orange-400" },
   };
   if (!alignment || !map[alignment]) return null;
