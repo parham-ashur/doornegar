@@ -102,15 +102,73 @@ export default function StoryAnalysisPanel({ analysis }: { analysis: StoryAnalys
       <div className="py-5 border-b border-slate-200 dark:border-slate-800">
         {activeTab === "bias" && (
           <div>
-            {analysis.bias_explanation_fa ? (
-              <p className="text-[13px] leading-7 text-slate-600 dark:text-slate-300">
+            {analysis.bias_explanation_fa && (
+              <p className="text-[13px] leading-7 text-slate-600 dark:text-slate-300 mb-6">
                 {analysis.bias_explanation_fa}
               </p>
-            ) : (
-              <p className="text-[13px] text-slate-400">
-                متن مقایسهٔ کلی هنوز نوشته نشده — بخش‌های «روایت درون‌مرزی» و «روایت برون‌مرزی» را ببینید.
-              </p>
             )}
+            {/* Structural overview: sides + their two subgroups with
+                colored titles. No bullet content here — full narrative
+                lives in the دو tab next door. Gives the reader an
+                at-a-glance map of who's on which side with consistent
+                palette (navy family inside, amber family outside). */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Inside Iran column */}
+              <div className="border-r-2 border-[#1e3a5f] pr-4 space-y-3">
+                <h4 className="text-[14px] font-black text-[#1e3a5f] dark:text-blue-300">
+                  روایت درون‌مرزی
+                </h4>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="inline-block h-2.5 w-2.5"
+                      style={{ backgroundColor: GROUP_COLORS.principlist }}
+                    />
+                    <span className="text-[13px] font-bold text-[#1e3a5f] dark:text-blue-300">
+                      {GROUP_LABELS_FA.principlist}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="inline-block h-2.5 w-2.5"
+                      style={{ backgroundColor: GROUP_COLORS.reformist }}
+                    />
+                    <span className="text-[13px] font-bold text-[#4f7cac] dark:text-sky-300">
+                      {GROUP_LABELS_FA.reformist}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              {/* Outside Iran column */}
+              <div className="border-r-2 border-[#c2410c] pr-4 space-y-3">
+                <h4 className="text-[14px] font-black text-[#c2410c] dark:text-orange-400">
+                  روایت برون‌مرزی
+                </h4>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="inline-block h-2.5 w-2.5"
+                      style={{ backgroundColor: GROUP_COLORS.moderate_diaspora }}
+                    />
+                    <span className="text-[13px] font-bold text-[#f97316] dark:text-amber-400">
+                      {GROUP_LABELS_FA.moderate_diaspora}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="inline-block h-2.5 w-2.5"
+                      style={{ backgroundColor: GROUP_COLORS.radical_diaspora }}
+                    />
+                    <span className="text-[13px] font-bold text-[#c2410c] dark:text-red-400">
+                      {GROUP_LABELS_FA.radical_diaspora}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <p className="mt-5 text-[12px] text-slate-400 dark:text-slate-500">
+              برای جزئیات روایت هر زیرگروه، تب‌های «روایت درون‌مرزی» و «روایت برون‌مرزی» را ببینید.
+            </p>
           </div>
         )}
 
