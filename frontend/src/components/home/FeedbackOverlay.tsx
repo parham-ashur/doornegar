@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useCallback, createContext, useContext } from "react";
-import { Image as ImageIcon, Type, ArrowUp, ArrowDown, GitMerge } from "lucide-react";
+import { Type, ArrowUp, ArrowDown, GitMerge } from "lucide-react";
 import ImprovementModal from "@/components/improvement/ImprovementModal";
 import RaterOnboarding from "@/components/improvement/RaterOnboarding";
+import ImageSuggestionButton from "@/components/story/ImageSuggestionButton";
 
 type TargetType =
   | "story" | "story_title" | "story_image" | "story_summary"
@@ -81,14 +82,16 @@ export function StoryFeedback({ storyId, title, imageUrl, children }: {
         className="absolute top-1 left-1 z-20 p-1.5 bg-slate-900/90 dark:bg-white/90 text-white dark:text-slate-900 shadow-md md:opacity-0 md:group-hover:opacity-100 opacity-100 transition-opacity hover:scale-110">
         <Type className="h-3 w-3" />
       </button>
-      {/* Image feedback (only if image exists) */}
-      {imageUrl && (
-        <button type="button" title="تصویر" aria-label="تصویر"
-          onClick={(e) => { e.preventDefault(); e.stopPropagation(); openFeedback({ targetType: "story_image", targetId: storyId, imageUrl, defaultIssueType: "bad_image", contextLabel: title }); }}
-          className="absolute top-1 right-1 z-20 p-1.5 bg-slate-900/90 dark:bg-white/90 text-white dark:text-slate-900 shadow-md md:opacity-0 md:group-hover:opacity-100 opacity-100 transition-opacity hover:scale-110">
-          <ImageIcon className="h-3 w-3" />
-        </button>
-      )}
+      {/* Image suggestion (URL paste) — shown whether or not the story
+          already has an image. When there's no image, it lets the rater
+          suggest one; when there is one, it lets them suggest a better
+          replacement. */}
+      <div
+        className="absolute top-1 right-1 z-20 md:opacity-0 md:group-hover:opacity-100 opacity-100 transition-opacity"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <ImageSuggestionButton storyId={storyId} storyTitle={title} />
+      </div>
       {/* Priority + merge actions */}
       <div className="absolute bottom-1 right-1 z-20 flex gap-1 md:opacity-0 md:group-hover:opacity-100 opacity-100 transition-opacity" dir="ltr">
         <PriorityBtn storyId={storyId} direction="higher" />
