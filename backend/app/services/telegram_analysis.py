@@ -433,6 +433,74 @@ async def analyze_story_telegram(
     )
     posts = list(posts_result.scalars().all())
 
+    # Neighbor-story pool: the telegram linker writes each post to ONE
+    # story_id (winner-takes-all by cosine score). Broad umbrella stories
+    # (like the ceasefire+Hormuz hero, 175 articles) lose post after post
+    # to narrower siblings that happen to match slightly better. Pull in
+    # posts from stories whose centroid is highly similar to this one
+    # — they're genuinely about the same topic, the linker just had to
+    # pick a winner. Cap at NEIGHBOR_POST_BUDGET to keep pass-2 prompt
+    # size in check. Only applies when the direct pool is thin.
+    NEIGHBOR_CENTROID_THRESHOLD = 0.65
+    NEIGHBOR_POST_BUDGET = 30
+    DIRECT_POOL_FLOOR = 20  # skip neighbor borrow once the direct pool is rich
+    if len(posts) < DIRECT_POOL_FLOOR and story.centroid_embedding:
+        from app.nlp.embeddings import cosine_similarity as _cs
+        own_centroid = story.centroid_embedding
+        if isinstance(own_centroid, list) and all(
+            isinstance(v, (int, float)) for v in own_centroid
+        ):
+            # Find neighbor stories by centroid similarity
+            neighbors_result = await db.execute(
+                select(Story).where(
+                    Story.id != story.id,
+                    Story.centroid_embedding.isnot(None),
+                    Story.article_count >= 3,
+                    Story.trending_score > 0,
+                )
+            )
+            neighbor_ids: list[str] = []
+            for neighbor in neighbors_result.scalars().all():
+                c = neighbor.centroid_embedding
+                if not isinstance(c, list) or not c:
+                    continue
+                if any(v is None or not isinstance(v, (int, float)) for v in c):
+                    continue
+                try:
+                    sim = _cs(own_centroid, c)
+                except Exception:
+                    continue
+                if sim >= NEIGHBOR_CENTROID_THRESHOLD:
+                    neighbor_ids.append(str(neighbor.id))
+            if neighbor_ids:
+                have_ids = {str(p.id) for p in posts}
+                borrow_result = await db.execute(
+                    select(TelegramPost)
+                    .options(selectinload(TelegramPost.channel))
+                    .join(
+                        TelegramChannel,
+                        TelegramPost.channel_id == TelegramChannel.id,
+                    )
+                    .where(TelegramPost.story_id.in_(neighbor_ids))
+                    .where(TelegramPost.text.isnot(None))
+                    .where(TelegramPost.text != "")
+                    .where(TelegramChannel.channel_type.in_(ANALYTICAL_TYPES))
+                    .where(TelegramChannel.is_active.is_(True))
+                    .order_by(TelegramPost.date.desc())
+                    .limit(NEIGHBOR_POST_BUDGET * 2)
+                )
+                borrowed = [
+                    p for p in borrow_result.scalars().all()
+                    if str(p.id) not in have_ids
+                ]
+                borrowed = borrowed[:NEIGHBOR_POST_BUDGET]
+                if borrowed:
+                    logger.info(
+                        f"Story {story_id}: direct pool {len(posts)} posts, "
+                        f"borrowed {len(borrowed)} from {len(neighbor_ids)} neighbors"
+                    )
+                    posts.extend(borrowed)
+
     # Minimum pool size before pass-0. Kept at 1 (down from 2 on 2026-04-19
     # after dropping aggregators halved the pool on many top stories —
     # hero had only 3 analyst-channel posts, below the old threshold).
