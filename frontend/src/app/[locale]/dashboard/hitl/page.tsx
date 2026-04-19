@@ -1,6 +1,13 @@
+"use client";
+
+import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 export default function HitlIndex() {
+  const router = useRouter();
+  const [storyId, setStoryId] = useState("");
+
   const tiles = [
     {
       href: "/fa/dashboard/hitl/submissions",
@@ -18,6 +25,20 @@ export default function HitlIndex() {
       desc: "مرور نمونه پست‌های هر کانال و اصلاح نوع آن (خبری، تحلیلگر، بازنشر و غیره).",
     },
   ];
+
+  const extractId = (v: string): string | null => {
+    const trimmed = v.trim();
+    if (!trimmed) return null;
+    const match = trimmed.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+    return match ? match[0] : null;
+  };
+
+  const go = (kind: "stock-images" | "narrative") => {
+    const id = extractId(storyId);
+    if (!id) return;
+    router.push(`/fa/dashboard/hitl/${kind}/${id}`);
+  };
+
   return (
     <div>
       <h1 className="text-xl font-black text-slate-900 dark:text-white mb-4">
@@ -43,10 +64,41 @@ export default function HitlIndex() {
           </Link>
         ))}
       </div>
-      <p className="mt-6 text-[13px] text-slate-400 dark:text-slate-500">
-        ویرایش روایت‌های هر خبر و انتخاب تصویر پوشش از صفحهٔ جزئیات هر خبر انجام می‌شود
-        (لینک‌های «ویرایش روایت» و «انتخاب تصویر» در نوار ابزار خبر).
-      </p>
+
+      <div className="mt-8 border border-slate-200 dark:border-slate-800 p-4">
+        <h2 className="text-[13px] font-black text-slate-900 dark:text-white mb-1">
+          ویرایش خبر خاص
+        </h2>
+        <p className="text-[13px] text-slate-500 dark:text-slate-400 mb-3 leading-6">
+          شناسه خبر یا لینک کامل صفحهٔ خبر را بچسبانید — مستقیم به صفحهٔ انتخاب تصویر یا ویرایش روایت می‌رود.
+        </p>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            dir="ltr"
+            value={storyId}
+            onChange={(e) => setStoryId(e.target.value)}
+            placeholder="https://doornegar.org/fa/stories/… یا UUID"
+            className="flex-1 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-[13px] px-2 py-1.5"
+          />
+          <button
+            type="button"
+            onClick={() => go("stock-images")}
+            disabled={!extractId(storyId)}
+            className="text-[13px] font-bold px-3 py-1.5 bg-slate-900 dark:bg-white text-white dark:text-slate-900 disabled:opacity-40"
+          >
+            انتخاب تصویر
+          </button>
+          <button
+            type="button"
+            onClick={() => go("narrative")}
+            disabled={!extractId(storyId)}
+            className="text-[13px] font-bold px-3 py-1.5 border border-slate-300 dark:border-slate-700 disabled:opacity-40"
+          >
+            ویرایش روایت
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
