@@ -1840,6 +1840,19 @@ export default function DashboardPage() {
           Open Editor →
         </a>
       </div>
+
+      {/* HITL tools — human-in-the-loop review queues + per-story image/narrative editors */}
+      <div className="mt-6 border border-slate-200 dark:border-slate-800 p-5 flex items-center justify-between">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-900 dark:text-white">HITL Tools</h2>
+          <p className="text-xs text-slate-500 mt-1">
+            Submissions review, Telegram triage, channel classification, stock-image picker and narrative editor.
+          </p>
+        </div>
+        <a href="./dashboard/hitl" className="border border-rose-300 dark:border-rose-700 bg-rose-50 dark:bg-rose-900/10 px-4 py-2 text-sm text-rose-700 dark:text-rose-300 hover:bg-rose-100 dark:hover:bg-rose-900/20">
+          Open HITL →
+        </a>
+      </div>
     </div>
   );
 }
