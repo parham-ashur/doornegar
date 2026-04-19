@@ -529,7 +529,7 @@ export default async function HomePage({
             now that واژه‌های روز has been removed. More predictions +
             claims visible without scrolling. */}
         <div className="col-span-3 py-6 pl-6 border-l border-slate-200 dark:border-slate-800 flex flex-col overflow-hidden" style={{ maxHeight: 700 }}>
-          <h3 className="text-[13px] font-black text-slate-900 dark:text-white mb-3 pb-2 border-b border-slate-200 dark:border-slate-800 shrink-0">
+          <h3 className="text-[15px] font-black text-slate-900 dark:text-white mb-3 pb-2 border-b border-slate-200 dark:border-slate-800 shrink-0">
             تحلیل روایت‌های تلگرام
           </h3>
           <div className="flex-1 min-h-0 overflow-hidden">
@@ -648,7 +648,7 @@ export default async function HomePage({
         <div className="col-span-3 py-4 pr-6 border-r border-slate-200 dark:border-slate-800 space-y-4 flex flex-col justify-center">
           <div className="flex items-center gap-3 mb-2">
             <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
-            <span className="text-[13px] font-black text-slate-900 dark:text-white shrink-0">نگاه یک‌جانبه</span>
+            <span className="text-[15px] font-black text-slate-900 dark:text-white shrink-0">نگاه یک‌جانبه</span>
             <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
           </div>
           {conservativeBlind && (
@@ -779,7 +779,7 @@ export default async function HomePage({
             <div className="flex-1 min-h-0 border border-slate-300 dark:border-slate-600 flex flex-col">
               <div className="flex items-center -mt-3 mx-4">
                 <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
-                <span className="text-[13px] font-black text-slate-900 dark:text-white px-3 bg-white dark:bg-[#0a0e1a]">تقابل روایت‌ها</span>
+                <span className="text-[15px] font-black text-slate-900 dark:text-white px-3 bg-white dark:bg-[#0a0e1a]">تقابل روایت‌ها</span>
                 <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
               </div>
               <div className="space-y-5 px-4 pb-6 pt-6 flex-1 flex flex-col justify-between overflow-hidden">
@@ -846,7 +846,7 @@ export default async function HomePage({
                       <>
                         {/* Full title — was line-clamp-1 before; Parham
                             wants to see the whole story title. */}
-                        <h4 className="text-[15px] font-bold leading-snug text-slate-900 dark:text-white mb-3 group-hover:text-blue-700 dark:group-hover:text-blue-400">
+                        <h4 className="text-[17px] font-bold leading-snug text-slate-900 dark:text-white mb-3 group-hover:text-blue-700 dark:group-hover:text-blue-400">
                           {item.title}
                         </h4>
                         {/* Uniform 15px for both quoted-word boxes —
@@ -916,7 +916,7 @@ export default async function HomePage({
                     return (
                       <div key={s.id} className={`py-3 ${i > 0 ? "border-t border-slate-100 dark:border-slate-800/60" : ""}`}>
                         <Link href={`/${locale}/stories/${s.id}`} className="group block">
-                          <h4 className="text-[13px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
+                          <h4 className="text-[17px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
                             {s.title_fa}
                           </h4>
                           <UpdateBadge story={s} className="mt-1" />
@@ -1187,7 +1187,7 @@ function MobileHome({
 
       {/* ── 2. Telegram section (cross-story discussions) ── */}
       <div className="px-4 py-5 border-b border-slate-200 dark:border-slate-800">
-        <h3 className="text-[13px] font-black text-slate-900 dark:text-white mb-3 pb-2 border-b border-slate-200 dark:border-slate-800">
+        <h3 className="text-[15px] font-black text-slate-900 dark:text-white mb-3 pb-2 border-b border-slate-200 dark:border-slate-800">
           تحلیل روایت‌های تلگرام
         </h3>
         <TelegramDiscussions prefetchedData={prefetchedTelegram} locale={locale} />
@@ -1198,7 +1198,7 @@ function MobileHome({
         <div className="px-4 py-5 border-b border-slate-200 dark:border-slate-800">
           <div className="flex items-center gap-3 mb-4">
             <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
-            <span className="text-[13px] font-black text-slate-900 dark:text-white shrink-0">نگاه یک‌جانبه</span>
+            <span className="text-[15px] font-black text-slate-900 dark:text-white shrink-0">نگاه یک‌جانبه</span>
             <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
           </div>
           <div className="space-y-4">
@@ -1247,7 +1247,7 @@ function MobileHome({
         <div className="px-4 py-5 border-b border-slate-200 dark:border-slate-800">
           <div className="flex items-center gap-3 mb-4">
             <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
-            <span className="text-[13px] font-black text-slate-900 dark:text-white shrink-0">پرمخاطب‌ترین</span>
+            <span className="text-[15px] font-black text-slate-900 dark:text-white shrink-0">پرمخاطب‌ترین</span>
             <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
           </div>
           <div className="divide-y divide-slate-100 dark:divide-slate-800/60">

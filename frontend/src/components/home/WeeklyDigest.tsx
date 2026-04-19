@@ -107,7 +107,7 @@ export default function WeeklyDigest({ prefetchedContent }: { prefetchedContent?
       <div dir="rtl" className="border border-slate-300 dark:border-slate-600">
         <div className="flex items-center -mt-3 mx-4">
           <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
-          <span className="text-[13px] font-black text-slate-900 dark:text-white px-3 bg-white dark:bg-[#0a0e1a]">خلاصه هفتگی دورنگر</span>
+          <span className="text-[15px] font-black text-slate-900 dark:text-white px-3 bg-white dark:bg-[#0a0e1a]">خلاصه هفتگی دورنگر</span>
           <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
         </div>
         <div className="px-4 pb-4 pt-3 animate-pulse">
@@ -123,7 +123,7 @@ export default function WeeklyDigest({ prefetchedContent }: { prefetchedContent?
       <div dir="rtl" className="border border-slate-300 dark:border-slate-600">
         <div className="flex items-center -mt-3 mx-4">
           <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
-          <span className="text-[13px] font-black text-slate-900 dark:text-white px-3 bg-white dark:bg-[#0a0e1a]">خلاصه هفتگی دورنگر</span>
+          <span className="text-[15px] font-black text-slate-900 dark:text-white px-3 bg-white dark:bg-[#0a0e1a]">خلاصه هفتگی دورنگر</span>
           <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
         </div>
         <div className="px-4 pb-4 pt-3">
@@ -137,7 +137,7 @@ export default function WeeklyDigest({ prefetchedContent }: { prefetchedContent?
     <div dir="rtl" className="border border-slate-300 dark:border-slate-600">
       <div className="flex items-center -mt-3 mx-4">
         <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
-        <span className="text-[13px] font-black text-slate-900 dark:text-white px-3 bg-white dark:bg-[#0a0e1a]">خلاصه هفتگی دورنگر</span>
+        <span className="text-[15px] font-black text-slate-900 dark:text-white px-3 bg-white dark:bg-[#0a0e1a]">خلاصه هفتگی دورنگر</span>
         <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
       </div>
 
