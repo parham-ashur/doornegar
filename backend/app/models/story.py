@@ -84,6 +84,15 @@ class Story(Base):
     # intra-day granularity.
     hourly_update_signal: Mapped[dict | None] = mapped_column(JSONB, nullable=True, comment="Hourly detected-update signal (4h TTL on UI)")
 
+    # Story arc membership — a curated grouping of related stories that
+    # form one narrative journey (e.g. ceasefire arc: blockade → talks →
+    # reopening). Both columns are nullable; a story can live outside
+    # any arc (most do).
+    arc_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True, index=True, comment="FK to story_arcs.id (soft — no constraint)"
+    )
+    arc_order: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="0-based chapter order inside the arc")
+
     # Relationships
     articles: Mapped[list["Article"]] = relationship(back_populates="story")  # noqa: F821
 

@@ -24,6 +24,11 @@ export default function HitlIndex() {
       title: "دسته‌بندی کانال‌ها",
       desc: "مرور نمونه پست‌های هر کانال و اصلاح نوع آن (خبری، تحلیلگر، بازنشر و غیره).",
     },
+    {
+      href: "/fa/dashboard/hitl/arcs",
+      title: "قوس‌های روایت",
+      desc: "پیشنهاد و ساخت قوس‌های روایتی — گروه‌بندی خبرهای مرتبط که در زمان پشت‌سرِ هم رخ داده‌اند.",
+    },
   ];
 
   const extractId = (v: string): string | null => {

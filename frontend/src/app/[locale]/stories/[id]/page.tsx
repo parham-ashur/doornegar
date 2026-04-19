@@ -166,6 +166,45 @@ export default async function StoryDetailPage({
     />
     <StoryFeedbackOverlay storyId={id} storyTitle={title} />
     <div dir="rtl" className="mx-auto max-w-7xl px-4 py-8">
+      {/* Arc chapter strip — visible only when this story is part of a
+          curated arc. Shows all chapters in chronological order with
+          the current chapter highlighted, each linking to its story. */}
+      {story.arc && story.arc.chapters.length > 1 && (
+        <div className="mb-4 pb-4 border-b border-slate-200 dark:border-slate-800">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+              قوس
+            </span>
+            <h2 className="text-[13px] font-black text-slate-700 dark:text-slate-300">
+              {story.arc.title_fa}
+            </h2>
+          </div>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {story.arc.chapters.map((ch, i) => {
+              const isCurrent = ch.story_id === id;
+              const isLast = i === story.arc!.chapters.length - 1;
+              return (
+                <span key={ch.story_id} className="flex items-center gap-1.5">
+                  {isCurrent ? (
+                    <span className="border-2 border-slate-900 dark:border-white bg-slate-900 dark:bg-white text-white dark:text-slate-900 px-2 py-0.5 text-[12px] font-bold">
+                      {ch.title_fa || "(بدون عنوان)"}
+                    </span>
+                  ) : (
+                    <Link
+                      href={`/${locale}/stories/${ch.story_id}`}
+                      className="border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:border-slate-900 dark:hover:border-white hover:text-slate-900 dark:hover:text-white px-2 py-0.5 text-[12px] transition-colors"
+                    >
+                      {ch.title_fa || "(بدون عنوان)"}
+                    </Link>
+                  )}
+                  {!isLast && <span className="text-slate-300 dark:text-slate-600 text-[12px]">←</span>}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="mb-6 pb-6 border-b border-slate-200 dark:border-slate-800">
         <h1 className="text-2xl font-black leading-snug text-slate-900 dark:text-white md:text-3xl">

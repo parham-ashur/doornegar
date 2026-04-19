@@ -68,11 +68,25 @@ class StoryArticleWithBias(ArticleBrief):
     bias_scores: list[BiasScoreResponse] = []
 
 
+class ArcChapterBrief(BaseModel):
+    story_id: str
+    title_fa: str | None = None
+    order: int
+
+
+class StoryArcBrief(BaseModel):
+    id: str
+    title_fa: str
+    slug: str
+    chapters: list[ArcChapterBrief] = []
+
+
 class StoryDetail(StoryBrief):
     summary_en: str | None = None
     summary_fa: str | None = None
     editorial_context_fa: dict | None = None
     articles: list[StoryArticleWithBias] = []
+    arc: StoryArcBrief | None = None
 
 
 class StoryListResponse(BaseModel):

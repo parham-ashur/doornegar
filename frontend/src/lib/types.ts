@@ -141,11 +141,25 @@ export interface EditorialContext {
   updated_at?: string;
 }
 
+export interface ArcChapterBrief {
+  story_id: string;
+  title_fa: string | null;
+  order: number;
+}
+
+export interface StoryArcBrief {
+  id: string;
+  title_fa: string;
+  slug: string;
+  chapters: ArcChapterBrief[];
+}
+
 export interface StoryDetail extends StoryBrief {
   summary_en: string | null;
   summary_fa: string | null;
   editorial_context_fa: EditorialContext | null;
   articles: StoryArticleWithBias[];
+  arc: StoryArcBrief | null;
 }
 
 export interface SocialSentiment {

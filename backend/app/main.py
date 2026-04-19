@@ -47,6 +47,18 @@ async def lifespan(app: FastAPI):
                 "ALTER TABLE stories ADD COLUMN IF NOT EXISTS analysis_snapshot_24h JSONB",
                 "ALTER TABLE stories ADD COLUMN IF NOT EXISTS hourly_update_signal JSONB",
                 "ALTER TABLE stories ADD COLUMN IF NOT EXISTS audit_notes JSONB",
+                "ALTER TABLE stories ADD COLUMN IF NOT EXISTS arc_id UUID",
+                "ALTER TABLE stories ADD COLUMN IF NOT EXISTS arc_order INTEGER",
+                """CREATE TABLE IF NOT EXISTS story_arcs (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    title_fa TEXT NOT NULL,
+                    title_en TEXT,
+                    slug VARCHAR(200) NOT NULL UNIQUE,
+                    description_fa TEXT,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )""",
+                "CREATE INDEX IF NOT EXISTS idx_stories_arc_id ON stories(arc_id)",
             ):
                 try:
                     await db.execute(text(ddl))

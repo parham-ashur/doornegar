@@ -581,12 +581,42 @@ async def get_story(
     # fields that aren't on the ORM model.
     brief = _story_brief_with_extras(story)
 
+    # Pull arc sibling strip when this story belongs to one. Single
+    # extra query — no-op when arc_id is None (most stories).
+    arc_brief = None
+    if getattr(story, "arc_id", None) is not None:
+        from app.models.story_arc import StoryArc
+        from app.schemas.story import ArcChapterBrief, StoryArcBrief
+
+        arc = await db.get(StoryArc, story.arc_id)
+        if arc is not None:
+            chapters_q = await db.execute(
+                select(Story.id, Story.title_fa, Story.arc_order)
+                .where(Story.arc_id == arc.id)
+                .order_by(Story.arc_order.asc().nullslast(), Story.first_published_at.asc().nullslast())
+            )
+            chapters = [
+                ArcChapterBrief(
+                    story_id=str(r.id),
+                    title_fa=r.title_fa,
+                    order=r.arc_order if r.arc_order is not None else i,
+                )
+                for i, r in enumerate(chapters_q.all())
+            ]
+            arc_brief = StoryArcBrief(
+                id=str(arc.id),
+                title_fa=arc.title_fa,
+                slug=arc.slug,
+                chapters=chapters,
+            )
+
     response = StoryDetail(
         **brief.model_dump(),
         summary_en=story.summary_en,
         summary_fa=story.summary_fa,
         editorial_context_fa=story.editorial_context_fa,
         articles=articles_with_bias,
+        arc=arc_brief,
     )
 
     # Bump view_count AFTER the response is built, in a background task so
