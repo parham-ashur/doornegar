@@ -341,15 +341,29 @@ export default async function HomePage({
 
   const sorted = [...stories];
 
+  // Pre-fetch analyses for the top-15 trending so the hero picker can
+  // require a populated bias comparison. Without this check the hero
+  // sometimes landed on a story whose state_summary_fa / diaspora_
+  // summary_fa hadn't been generated yet — the card would render with
+  // just a title and no two-side narrative, defeating the point of the
+  // site. Reusing these analyses below as the primary batch.
+  const prefetchIds = sorted.slice(0, 15).map(s => s.id);
+  const prefetchedAnalyses = await fetchAnalysesBatch(prefetchIds);
+  const hasBiasNarrative = (s: StoryBrief): boolean => {
+    const a = prefetchedAnalyses[s.id];
+    return !!(a && (a.state_summary_fa || a.diaspora_summary_fa) && a.bias_explanation_fa);
+  };
+
   // Hero picker fallback chain — most specific first so we surface the
-  // richest story that qualifies:
-  //   1. fresh + has_update + balanced  (the ideal — something changed today)
-  //   2. fresh + balanced               (first-time hero, no badge yet)
-  //   3. fresh + has_update             (update on a non-balanced story)
-  //   4. fresh                          (brand-new cluster)
-  //   5. balanced                       (quiet news day fallback)
-  //   6. top trending                   (ultimate fallback so hero never empty)
+  // richest story that qualifies. The bias-narrative gate sits at the
+  // top because the hero card is useless without it; once the gate is
+  // exhausted we fall through to the older signals so the slot never
+  // goes empty on a thin news day.
   const hero =
+    sorted.find(s => hasBiasNarrative(s) && isFresh(s) && hasUpdate(s) && s.state_pct >= 5 && s.diaspora_pct >= 5) ||
+    sorted.find(s => hasBiasNarrative(s) && isFresh(s) && s.state_pct >= 5 && s.diaspora_pct >= 5) ||
+    sorted.find(s => hasBiasNarrative(s) && isFresh(s)) ||
+    sorted.find(hasBiasNarrative) ||
     sorted.find(s => isFresh(s) && hasUpdate(s) && s.state_pct >= 5 && s.diaspora_pct >= 5) ||
     sorted.find(s => isFresh(s) && s.state_pct >= 5 && s.diaspora_pct >= 5) ||
     sorted.find(s => isFresh(s) && hasUpdate(s)) ||
@@ -456,13 +470,16 @@ export default async function HomePage({
   // leftTextStories AND mostViewed both get telegram strips now, so
   // fetch their analyses in parallel with everything else. Each group
   // goes into its own lookup map indexed by story id.
-  const [allAnalyses, heroTelegram, telegramResults, leftTextTelegramResults, mostViewedTelegramResults] = await Promise.all([
-    fetchAnalysesBatch(Array.from(allIds)),
+  // Only fetch analyses we don't already have from the hero-picker prefetch.
+  const missingIds = Array.from(allIds).filter(id => !(id in prefetchedAnalyses));
+  const [extraAnalyses, heroTelegram, telegramResults, leftTextTelegramResults, mostViewedTelegramResults] = await Promise.all([
+    missingIds.length ? fetchAnalysesBatch(missingIds) : Promise.resolve({}),
     hero ? fetchTelegramAnalysis(hero.id) : Promise.resolve(null),
     Promise.all(telegramAnalysisIds.map(id => fetchTelegramAnalysis(id))),
     Promise.all(leftTextStories.map(s => fetchTelegramAnalysis(s.id))),
     Promise.all(mostViewed.map(s => fetchTelegramAnalysis(s.id))),
   ]);
+  const allAnalyses = { ...prefetchedAnalyses, ...extraAnalyses };
   const leftTextTelegramById: Record<string, any> = {};
   leftTextStories.forEach((s, i) => {
     if (leftTextTelegramResults[i]) leftTextTelegramById[s.id] = leftTextTelegramResults[i];
@@ -904,11 +921,15 @@ export default async function HomePage({
               <div className="flex-1 min-h-0 border border-slate-300 dark:border-slate-600 flex flex-col">
                 <div className="flex items-center -mt-3 mx-4">
                   <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
-                  <span className="text-[13px] font-black text-slate-900 dark:text-white px-3 bg-white dark:bg-[#0a0e1a]">بیشترین اختلاف نگاه</span>
+                  <span className="text-[15px] font-black text-slate-900 dark:text-white px-3 bg-white dark:bg-[#0a0e1a]">بیشترین اختلاف نگاه</span>
                   <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
                 </div>
                 <div className="px-4 pb-4 pt-2 flex-1 overflow-hidden">
-                  {[mostDisputed, secondDisputed, thirdDisputed].filter(Boolean).map((story, i) => {
+                  {/* Cap at 2 stories per Parham's preference — three made
+                      the column feel overfull next to the 2-story تقابل
+                      box above. thirdDisputed still populated for analytics
+                      but not rendered here. */}
+                  {[mostDisputed, secondDisputed].filter(Boolean).map((story, i) => {
                     const s = story!;
                     const analysis = allAnalyses[s.id];
                     const stateSummary = analysis?.state_summary_fa;
