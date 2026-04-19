@@ -643,9 +643,21 @@ export default async function HomePage({
                   </div>
                 );
               }
+              const biasPoints = bias
+                ?.split(/[.؛]/)
+                .map((p: string) => p.trim())
+                .filter((p: string) => p.length > 10)
+                .slice(0, 2) || [];
               return (
                 <div className="mt-3">
                   <UpdateDeltaCallout story={hero} field="bias" />
+                  {biasPoints.length > 0 && (
+                    <div className="mb-3 space-y-1">
+                      {biasPoints.map((point, i) => (
+                        <p key={i} className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-1">• {point}</p>
+                      ))}
+                    </div>
+                  )}
                   <div className="grid grid-cols-2 gap-3">
                     {stateSummary && (
                       <div className="border-r-2 border-[#1e3a5f] pr-3">
@@ -1192,20 +1204,29 @@ function MobileHome({
         {/* Two-side bias comparison — same structure as desktop hero */}
         <div className="px-4 pt-3">
           {(heroStateSummary || heroDiasporaSummary) ? (
-            <div className="grid grid-cols-2 gap-3">
-              {heroStateSummary && (
-                <div className="border-r-2 border-[#1e3a5f] pr-3">
-                  <p className="text-[12px] font-bold text-[#1e3a5f] dark:text-blue-300 mb-1">روایت درون‌مرزی</p>
-                  <p className="text-[13px] leading-5 text-slate-600 dark:text-slate-400 line-clamp-5">{heroStateSummary}</p>
+            <>
+              {heroBiasPoints.length > 0 && (
+                <div className="mb-3 space-y-1">
+                  {heroBiasPoints.map((point, i) => (
+                    <p key={i} className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">• {point}</p>
+                  ))}
                 </div>
               )}
-              {heroDiasporaSummary && (
-                <div className="border-r-2 border-[#ea580c] pr-3">
-                  <p className="text-[12px] font-bold text-[#ea580c] dark:text-orange-400 mb-1">روایت برون‌مرزی</p>
-                  <p className="text-[13px] leading-5 text-slate-600 dark:text-slate-400 line-clamp-5">{heroDiasporaSummary}</p>
-                </div>
-              )}
-            </div>
+              <div className="grid grid-cols-2 gap-3">
+                {heroStateSummary && (
+                  <div className="border-r-2 border-[#1e3a5f] pr-3">
+                    <p className="text-[12px] font-bold text-[#1e3a5f] dark:text-blue-300 mb-1">روایت درون‌مرزی</p>
+                    <p className="text-[13px] leading-5 text-slate-600 dark:text-slate-400 line-clamp-5">{heroStateSummary}</p>
+                  </div>
+                )}
+                {heroDiasporaSummary && (
+                  <div className="border-r-2 border-[#ea580c] pr-3">
+                    <p className="text-[12px] font-bold text-[#ea580c] dark:text-orange-400 mb-1">روایت برون‌مرزی</p>
+                    <p className="text-[13px] leading-5 text-slate-600 dark:text-slate-400 line-clamp-5">{heroDiasporaSummary}</p>
+                  </div>
+                )}
+              </div>
+            </>
           ) : heroBiasPoints.length > 0 ? (
             <div className="space-y-1">
               {heroBiasPoints.map((point, i) => (
