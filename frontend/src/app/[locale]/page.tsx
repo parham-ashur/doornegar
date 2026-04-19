@@ -956,7 +956,7 @@ export default async function HomePage({
             rest of the homepage's chrome language. */}
         <div className="flex items-center gap-3 mb-8">
           <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
-          <span className="text-[13px] font-black text-slate-900 dark:text-white shrink-0">پرمخاطب‌ترین</span>
+          <span className="text-[15px] font-black text-slate-900 dark:text-white shrink-0">پرمخاطب‌ترین</span>
           <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
         </div>
         <div>
