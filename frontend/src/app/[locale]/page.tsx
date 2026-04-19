@@ -6,6 +6,7 @@ import TelegramDiscussions from "@/components/home/TelegramDiscussions";
 import WeeklyDigest from "@/components/home/WeeklyDigest";
 import { formatRelativeTime, toFa } from "@/lib/utils";
 import { predictionText, claimText } from "@/lib/telegram-text";
+import { normalizedSidePercentages, independentShare } from "@/lib/narrativeGroups";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -117,7 +118,14 @@ function Meta({ story }: { story: StoryBrief }) {
     : null;
   const showUpdated = updated && story.updated_at && story.first_published_at
     && Math.abs(new Date(story.updated_at).getTime() - new Date(story.first_published_at).getTime()) > 3600000;
-  const hasSides = story.state_pct > 0 || story.diaspora_pct > 0;
+  // Normalized side percentages always sum to 100 so the reader doesn't
+  // see 76% + 22% = 98 and wonder where the other 2 went. Raw state_pct
+  // / diaspora_pct leave implicit room for independent outlets (not in
+  // either political side); we surface that share in parentheses when
+  // it's non-trivial (≥5%).
+  const { inside: insidePct, outside: outsidePct } = normalizedSidePercentages(story);
+  const indepPct = independentShare(story);
+  const hasSides = insidePct > 0 || outsidePct > 0;
   return (
     <div className="mt-1.5" dir="rtl">
       <div className="flex items-center justify-between text-[13px] leading-5">
@@ -128,9 +136,14 @@ function Meta({ story }: { story: StoryBrief }) {
         </p>
         {hasSides && (
           <p className="shrink-0">
-            {story.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300">درون‌مرزی {toFa(story.state_pct)}٪</span>}
-            {story.state_pct > 0 && story.diaspora_pct > 0 && <span className="text-slate-300 dark:text-slate-600"> · </span>}
-            {story.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400">برون‌مرزی {toFa(story.diaspora_pct)}٪</span>}
+            {insidePct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300">درون‌مرزی {toFa(insidePct)}٪</span>}
+            {insidePct > 0 && outsidePct > 0 && <span className="text-slate-300 dark:text-slate-600"> · </span>}
+            {outsidePct > 0 && <span className="text-[#ea580c] dark:text-orange-400">برون‌مرزی {toFa(outsidePct)}٪</span>}
+            {indepPct >= 5 && (
+              <span className="text-slate-400 dark:text-slate-500">
+                {" · "}مستقل {toFa(indepPct)}٪
+              </span>
+            )}
           </p>
         )}
       </div>

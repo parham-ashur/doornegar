@@ -9,6 +9,7 @@ import {
   NARRATIVE_GROUP_ORDER,
   SIDE_LABELS_FA,
   narrativeGroupsFrom,
+  independentShare,
 } from "@/lib/narrativeGroups";
 import type { NarrativeGroup, NarrativeGroups, StoryBrief } from "@/lib/types";
 
@@ -34,19 +35,32 @@ export default function CoverageBar({
   showSideTotals = false,
   className,
 }: CoverageBarProps) {
-  const pct: NarrativeGroups = groups ?? (story ? narrativeGroupsFrom(story) : {
+  const raw: NarrativeGroups = groups ?? (story ? narrativeGroupsFrom(story) : {
     principlist: 0,
     reformist: 0,
     moderate_diaspora: 0,
     radical_diaspora: 0,
   });
 
-  const total =
-    pct.principlist + pct.reformist + pct.moderate_diaspora + pct.radical_diaspora;
-  if (total === 0) return null;
+  const rawTotal =
+    raw.principlist + raw.reformist + raw.moderate_diaspora + raw.radical_diaspora;
+  if (rawTotal === 0) return null;
 
-  const inside = pct.principlist + pct.reformist;
-  const outside = pct.moderate_diaspora + pct.radical_diaspora;
+  // Normalize over the 4-subgroup total so the displayed bar always sums
+  // to 100. Raw percentages leave an implicit gap for independent-outlet
+  // coverage, which reads as "numbers that don't add up" for viewers.
+  // The bar itself stays a faithful share of classified coverage; the
+  // independent share is surfaced separately below when non-trivial.
+  const pct: NarrativeGroups = {
+    principlist: (raw.principlist / rawTotal) * 100,
+    reformist: (raw.reformist / rawTotal) * 100,
+    moderate_diaspora: (raw.moderate_diaspora / rawTotal) * 100,
+    radical_diaspora: (raw.radical_diaspora / rawTotal) * 100,
+  };
+  const inside = Math.round(pct.principlist + pct.reformist);
+  const outside = 100 - inside;
+
+  const independentPct = story ? independentShare(story) : 0;
 
   return (
     <div className={cn("w-full", className)}>
@@ -118,6 +132,15 @@ export default function CoverageBar({
             );
           })}
         </div>
+      )}
+
+      {/* Independent-share footnote. Only shown when ≥5% of the story's
+          coverage comes from independent outlets — otherwise the bar's
+          100% renormalization is lossless and we can skip the note. */}
+      {independentPct >= 5 && (
+        <p className="mt-1.5 text-[11px] text-slate-400 dark:text-slate-500">
+          + {toFa(independentPct)}٪ روایت مستقل (خارج از طیف دو سو)
+        </p>
       )}
     </div>
   );
