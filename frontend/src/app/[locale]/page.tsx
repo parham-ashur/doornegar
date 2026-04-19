@@ -574,9 +574,9 @@ export default async function HomePage({
               const analysis = allAnalyses[hero.id];
               const stateSummary = analysis?.state_summary_fa;
               const diasporaSummary = analysis?.diaspora_summary_fa;
+              const bias = analysis?.bias_explanation_fa;
               if (!stateSummary && !diasporaSummary) {
                 // Fallback to bias_explanation_fa points
-                const bias = analysis?.bias_explanation_fa;
                 const points = bias?.split(/[.؛]/).map((p: string) => p.trim()).filter((p: string) => p.length > 10).slice(0, 2) || [];
                 if (!points.length) return null;
                 return (
@@ -591,19 +591,28 @@ export default async function HomePage({
               return (
                 <div className="mt-3">
                   <UpdateDeltaCallout story={hero} field="bias" />
+                  {/* Editor-written overview sits above the two-side split
+                      so the reader gets the big-picture comparison before
+                      diving into each side's bullets. Clamped to 4 lines
+                      — the full explanation lives on the story page. */}
+                  {bias && (
+                    <p className="text-[13px] leading-6 text-slate-600 dark:text-slate-300 mb-3 line-clamp-4">
+                      {bias}
+                    </p>
+                  )}
                   <div className="grid grid-cols-2 gap-3">
                     {stateSummary && (
                       <div className="border-r-2 border-[#1e3a5f] pr-3">
                         <p className="text-[13px] font-bold text-[#1e3a5f] dark:text-blue-300 mb-1">روایت درون‌مرزی</p>
                         <UpdateDeltaCallout story={hero} field="state" className="mb-1.5" />
-                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-4">{stateSummary}</p>
+                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-6">{stateSummary}</p>
                       </div>
                     )}
                     {diasporaSummary && (
                       <div className="border-r-2 border-[#ea580c] pr-3">
                         <p className="text-[13px] font-bold text-[#ea580c] dark:text-orange-400 mb-1">روایت برون‌مرزی</p>
                         <UpdateDeltaCallout story={hero} field="diaspora" className="mb-1.5" />
-                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-4">{diasporaSummary}</p>
+                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-6">{diasporaSummary}</p>
                       </div>
                     )}
                   </div>

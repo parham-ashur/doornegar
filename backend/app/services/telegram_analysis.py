@@ -433,7 +433,11 @@ async def analyze_story_telegram(
     )
     posts = list(posts_result.scalars().all())
 
-    if len(posts) < 2:
+    # Minimum pool size before pass-0. Kept at 1 (down from 2 on 2026-04-19
+    # after dropping aggregators halved the pool on many top stories —
+    # hero had only 3 analyst-channel posts, below the old threshold).
+    # The analysis will be thinner with one voice, but empty is worse.
+    if len(posts) < 1:
         return None
 
     # Content filter (pass 0, nano): drop posts that are just news rehash
@@ -445,8 +449,8 @@ async def analyze_story_telegram(
     )
     posts = [p for p, lb in zip(posts, labels) if lb == "analysis"]
 
-    if len(posts) < 2:
-        logger.info(f"Telegram analysis skipped for {story_id}: <2 analytical posts after pass-0 filter")
+    if len(posts) < 1:
+        logger.info(f"Telegram analysis skipped for {story_id}: 0 analytical posts after pass-0 filter")
         return None
 
     # Build posts block
