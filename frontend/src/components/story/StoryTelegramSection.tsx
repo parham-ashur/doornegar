@@ -177,18 +177,30 @@ export default function StoryTelegramSection({ storyId, initialTab, highlightTex
           <div className="space-y-1.5">
             {activeTab === "predictions" && predictions.map((p, i) => {
               const text = typeof p === "string" ? p : (p as any).text || "";
-              const pct = typeof p === "object" && !(typeof p === "string") ? (p as any).pct : undefined;
+              const supporters = typeof p === "object" ? ((p as any).supporters || []) : [];
               const supporterCount = typeof p === "object" ? (p as any).supporter_count : undefined;
               const analystsTotal = typeof p === "object" ? (p as any).analysts_total : undefined;
               const isHighlighted = !!(highlightText && clean(text).includes(highlightText));
               return (
                 <div key={i} ref={isHighlighted ? highlightRef : undefined} className={isHighlighted ? "bg-blue-50 dark:bg-blue-900/20 -mx-2 px-2 py-1 border-r-2 border-blue-500" : ""}>
                   <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400">• {clean(text)}</p>
-                  {supporterCount != null && analystsTotal != null && supporterCount > 0 && (
+                  {/* Prefer naming the supporters over a bare ratio —
+                      «۱ از ۱۶ تحلیلگر» read as cryptic next to the
+                      «X پست از Y کانال» line below (numbers didn't
+                      match — direct-link post count vs. total-tracked-
+                      analyst count). Showing the channel name(s) makes
+                      the attribution concrete. Fall back to the count
+                      only when supporter names aren't stored. */}
+                  {supporters.length > 0 ? (
+                    <span className="text-[13px] text-blue-500 dark:text-blue-400 font-medium mr-3">
+                      از: {supporters.slice(0, 3).join("، ")}
+                      {supporters.length > 3 && ` و ${toFa(supporters.length - 3)} کانال دیگر`}
+                    </span>
+                  ) : supporterCount != null && analystsTotal != null && supporterCount > 0 ? (
                     <span className="text-[13px] text-blue-500 dark:text-blue-400 font-medium mr-3">
                       {toFa(supporterCount)} از {toFa(analystsTotal)} تحلیلگر
                     </span>
-                  )}
+                  ) : null}
                 </div>
               );
             })}
@@ -221,11 +233,16 @@ export default function StoryTelegramSection({ storyId, initialTab, highlightTex
         </CollapsibleSection>
       )}
 
-      {/* Channel stats — compact one line */}
+      {/* Channel stats — compact one line.
+          Labeled «پست مستقیم» to make clear these are posts directly
+          linked to THIS story. The prediction/claim analysis may also
+          draw on posts from closely-related sibling stories (neighbor
+          pooling — enabled when the direct pool is thin), which don't
+          appear in this count but do inform the narrative above. */}
       {channels.length > 0 && (
         <div className="pt-1 border-t border-slate-100 dark:border-slate-800">
           <p className="text-[13px] text-slate-400">
-            {postCount} پست از {channels.length} کانال — {channels.map(ch => `${ch.name} (${ch.posts})`).join("، ")}
+            {postCount} پست مستقیم از {channels.length} کانال — {channels.map(ch => `${ch.name} (${ch.posts})`).join("، ")}
           </p>
         </div>
       )}
