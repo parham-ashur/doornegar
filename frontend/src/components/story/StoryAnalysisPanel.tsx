@@ -85,19 +85,86 @@ export default function StoryAnalysisPanel({ analysis }: { analysis: StoryAnalys
       {/* Tab content — full width */}
       <div className="py-5 border-b border-slate-200 dark:border-slate-800">
         {activeTab === "bias" && (
-          <div className="space-y-2">
-            {analysis?.bias_explanation_fa
-              ?.split(/[.؛]/)
-              .map((s) => s.trim())
-              .filter((s) => s.length > 10)
-              .map((point, i) => (
-                <div key={i} className="flex gap-2 text-[13px] leading-6">
-                  <span className="text-slate-400 mt-1 shrink-0">•</span>
-                  <span className="text-slate-600 dark:text-slate-400">{point}</span>
-                </div>
-              )) || (
-              <p className="text-[13px] text-slate-400">داده‌ای موجود نیست</p>
+          <div>
+            {/* Editor prose overview — sits above the two-column split */}
+            {analysis?.bias_explanation_fa && (
+              <p className="text-[13px] leading-7 text-slate-600 dark:text-slate-300 mb-5">
+                {analysis.bias_explanation_fa}
+              </p>
             )}
+            {/* Two-column 4-subgroup comparison. Inside gets principlist +
+                reformist (navy family); outside gets moderate + radical
+                (amber family). Each subgroup uses its own GROUP_COLORS
+                shade so the reader can read bullets by faction at a glance. */}
+            {(analysis?.narrative?.inside || analysis?.narrative?.outside) ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Inside Iran */}
+                <div className="border-r-2 border-[#1e3a5f] pr-4 space-y-4">
+                  <p className="text-[13px] font-black text-[#1e3a5f] dark:text-blue-300">
+                    روایت درون‌مرزی
+                  </p>
+                  <SubgroupBullets
+                    group="principlist"
+                    bullets={analysis?.narrative?.inside?.principlist || []}
+                  />
+                  <SubgroupBullets
+                    group="reformist"
+                    bullets={analysis?.narrative?.inside?.reformist || []}
+                  />
+                  {!(analysis?.narrative?.inside?.principlist?.length ||
+                     analysis?.narrative?.inside?.reformist?.length) &&
+                     analysis?.state_summary_fa && (
+                    <p className="text-[13px] leading-6 text-slate-600 dark:text-slate-400">
+                      {analysis.state_summary_fa}
+                    </p>
+                  )}
+                </div>
+                {/* Outside Iran */}
+                <div className="border-r-2 border-[#c2410c] pr-4 space-y-4">
+                  <p className="text-[13px] font-black text-[#c2410c] dark:text-orange-400">
+                    روایت برون‌مرزی
+                  </p>
+                  <SubgroupBullets
+                    group="moderate_diaspora"
+                    bullets={analysis?.narrative?.outside?.moderate || []}
+                  />
+                  <SubgroupBullets
+                    group="radical_diaspora"
+                    bullets={analysis?.narrative?.outside?.radical || []}
+                  />
+                  {!(analysis?.narrative?.outside?.moderate?.length ||
+                     analysis?.narrative?.outside?.radical?.length) &&
+                     analysis?.diaspora_summary_fa && (
+                    <p className="text-[13px] leading-6 text-slate-600 dark:text-slate-400">
+                      {analysis.diaspora_summary_fa}
+                    </p>
+                  )}
+                </div>
+              </div>
+            ) : (analysis?.state_summary_fa || analysis?.diaspora_summary_fa) ? (
+              // Legacy two-string fallback when the 4-subgroup structure
+              // hasn't been populated for this story yet.
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="border-r-2 border-[#1e3a5f] pr-4">
+                  <p className="text-[13px] font-black text-[#1e3a5f] dark:text-blue-300 mb-2">
+                    روایت درون‌مرزی
+                  </p>
+                  <p className="text-[13px] leading-6 text-slate-600 dark:text-slate-400">
+                    {analysis?.state_summary_fa || "—"}
+                  </p>
+                </div>
+                <div className="border-r-2 border-[#c2410c] pr-4">
+                  <p className="text-[13px] font-black text-[#c2410c] dark:text-orange-400 mb-2">
+                    روایت برون‌مرزی
+                  </p>
+                  <p className="text-[13px] leading-6 text-slate-600 dark:text-slate-400">
+                    {analysis?.diaspora_summary_fa || "—"}
+                  </p>
+                </div>
+              </div>
+            ) : !analysis?.bias_explanation_fa ? (
+              <p className="text-[13px] text-slate-400">داده‌ای موجود نیست</p>
+            ) : null}
           </div>
         )}
 

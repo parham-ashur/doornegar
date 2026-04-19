@@ -569,32 +569,13 @@ export default async function HomePage({
               )
             )}
             <Meta story={hero} />
-            {/* Two-side bias comparison with 4-subgroup colored bullets */}
+            {/* Two-side bias comparison (flat, homepage-density) */}
             {(() => {
-              const analysis = allAnalyses[hero.id] as (
-                | {
-                    state_summary_fa?: string;
-                    diaspora_summary_fa?: string;
-                    bias_explanation_fa?: string;
-                    narrative?: {
-                      inside?: { principlist?: string[]; reformist?: string[] };
-                      outside?: { moderate?: string[]; radical?: string[] };
-                    };
-                  }
-                | undefined
-              );
+              const analysis = allAnalyses[hero.id];
               const stateSummary = analysis?.state_summary_fa;
               const diasporaSummary = analysis?.diaspora_summary_fa;
               const bias = analysis?.bias_explanation_fa;
-              const narr = analysis?.narrative;
-              const principlist = narr?.inside?.principlist || [];
-              const reformist = narr?.inside?.reformist || [];
-              const moderate = narr?.outside?.moderate || [];
-              const radical = narr?.outside?.radical || [];
-              const hasSubgroups =
-                principlist.length + reformist.length + moderate.length + radical.length > 0;
-
-              if (!stateSummary && !diasporaSummary && !hasSubgroups) {
+              if (!stateSummary && !diasporaSummary) {
                 const points = bias?.split(/[.؛]/).map((p: string) => p.trim()).filter((p: string) => p.length > 10).slice(0, 2) || [];
                 if (!points.length) return null;
                 return (
@@ -609,89 +590,21 @@ export default async function HomePage({
               return (
                 <div className="mt-3">
                   <UpdateDeltaCallout story={hero} field="bias" />
-                  {/* Editor overview above the two-side split — reader sees
-                      the big-picture comparison before each side's bullets.
-                      4-line clamp; full prose lives on the story page. */}
-                  {bias && (
-                    <p className="text-[13px] leading-6 text-slate-600 dark:text-slate-300 mb-3 line-clamp-4">
-                      {bias}
-                    </p>
-                  )}
-                  <div className="grid grid-cols-2 gap-4">
-                    {/* Inside Iran: principlist (navy) + reformist (slate) */}
-                    <div className="border-r-2 border-[#1e3a5f] pr-3 space-y-3">
-                      <p className="text-[13px] font-bold text-[#1e3a5f] dark:text-blue-300">
-                        روایت درون‌مرزی
-                      </p>
-                      <UpdateDeltaCallout story={hero} field="state" />
-                      {hasSubgroups ? (
-                        <>
-                          {principlist.length > 0 && (
-                            <div>
-                              <p className="text-[12px] font-bold text-[#1e3a5f] dark:text-blue-300 mb-1">
-                                اصول‌گرا
-                              </p>
-                              <ul className="space-y-1 marker:text-[#1e3a5f] list-disc pr-4">
-                                {principlist.map((b, i) => (
-                                  <li key={i} className="text-[13px] leading-5 text-slate-600 dark:text-slate-300">{b}</li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
-                          {reformist.length > 0 && (
-                            <div>
-                              <p className="text-[12px] font-bold text-[#4f7cac] dark:text-sky-300 mb-1">
-                                اصلاح‌طلب
-                              </p>
-                              <ul className="space-y-1 marker:text-[#4f7cac] list-disc pr-4">
-                                {reformist.map((b, i) => (
-                                  <li key={i} className="text-[13px] leading-5 text-slate-600 dark:text-slate-300">{b}</li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
-                        </>
-                      ) : stateSummary ? (
-                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-6">{stateSummary}</p>
-                      ) : null}
-                    </div>
-                    {/* Outside Iran: moderate (amber) + radical (deep orange) */}
-                    <div className="border-r-2 border-[#c2410c] pr-3 space-y-3">
-                      <p className="text-[13px] font-bold text-[#c2410c] dark:text-orange-400">
-                        روایت برون‌مرزی
-                      </p>
-                      <UpdateDeltaCallout story={hero} field="diaspora" />
-                      {hasSubgroups ? (
-                        <>
-                          {moderate.length > 0 && (
-                            <div>
-                              <p className="text-[12px] font-bold text-[#f97316] dark:text-amber-400 mb-1">
-                                میانه‌رو
-                              </p>
-                              <ul className="space-y-1 marker:text-[#f97316] list-disc pr-4">
-                                {moderate.map((b, i) => (
-                                  <li key={i} className="text-[13px] leading-5 text-slate-600 dark:text-slate-300">{b}</li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
-                          {radical.length > 0 && (
-                            <div>
-                              <p className="text-[12px] font-bold text-[#c2410c] dark:text-red-400 mb-1">
-                                رادیکال
-                              </p>
-                              <ul className="space-y-1 marker:text-[#c2410c] list-disc pr-4">
-                                {radical.map((b, i) => (
-                                  <li key={i} className="text-[13px] leading-5 text-slate-600 dark:text-slate-300">{b}</li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
-                        </>
-                      ) : diasporaSummary ? (
-                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-6">{diasporaSummary}</p>
-                      ) : null}
-                    </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    {stateSummary && (
+                      <div className="border-r-2 border-[#1e3a5f] pr-3">
+                        <p className="text-[13px] font-bold text-[#1e3a5f] dark:text-blue-300 mb-1">روایت درون‌مرزی</p>
+                        <UpdateDeltaCallout story={hero} field="state" className="mb-1.5" />
+                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-4">{stateSummary}</p>
+                      </div>
+                    )}
+                    {diasporaSummary && (
+                      <div className="border-r-2 border-[#ea580c] pr-3">
+                        <p className="text-[13px] font-bold text-[#ea580c] dark:text-orange-400 mb-1">روایت برون‌مرزی</p>
+                        <UpdateDeltaCallout story={hero} field="diaspora" className="mb-1.5" />
+                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-4">{diasporaSummary}</p>
+                      </div>
+                    )}
                   </div>
                 </div>
               );

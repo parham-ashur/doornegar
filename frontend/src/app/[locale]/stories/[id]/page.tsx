@@ -14,6 +14,7 @@ import SummaryRating from "@/components/feedback/SummaryRating";
 import EditableTitle from "@/components/feedback/EditableTitle";
 import PriorityControl from "@/components/feedback/PriorityControl";
 import StoryFeedbackOverlay from "@/components/improvement/StoryFeedbackOverlay";
+import ImageSuggestionButton from "@/components/story/ImageSuggestionButton";
 import { getStory, getSources, getStoryAnalysis } from "@/lib/api";
 import { formatRelativeTime, toFa } from "@/lib/utils";
 
@@ -194,6 +195,13 @@ export default async function StoryDetailPage({
         {/* Coverage bar — 4 narrative subgroups grouped into 2 sides */}
         <div className="mt-4 max-w-md">
           <CoverageBar story={story} height="md" showSideTotals showSubgroupLabels />
+        </div>
+
+        {/* Reader actions: image suggestion sits alongside the existing
+            feedback overlay so readers have a direct path to propose a
+            better cover image without hunting for the generic feedback menu. */}
+        <div className="mt-4 flex items-center gap-2">
+          <ImageSuggestionButton storyId={id} storyTitle={title || ""} />
         </div>
       </div>
 
