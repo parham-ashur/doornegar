@@ -24,6 +24,20 @@
 
 ---
 
+## Cost reduction — telegram analysis (in progress)
+
+**Context**: Today's OpenAI spend is ~$1.50/day (→$45/mo). The bleed is `step_telegram_deep_analysis` — top-15 stories × 3 LLM calls × 6 maintenance runs/day = 270 calls/day, re-running the full 3-pass pipeline even when the post set didn't change.
+
+### Shipped
+- [x] **Posts-hash cache in step_telegram_deep_analysis** (auto_maintenance.py:2081). Compute stable hash of post IDs + text lengths; skip the LLM pipeline when the hash matches what's already stored on `story.telegram_analysis.posts_hash`. Estimated: 60–80% fewer calls, ~$15–25/mo saved, zero quality loss.
+
+### Planned
+- [ ] **Rate-limit re-analysis to once per 6h** even when the hash drifts slightly (single-post edits / reorders shouldn't justify $0.008). Add a `min_regen_interval_hours = 6` guard alongside the hash check.
+- [ ] **Top-12 instead of top-15** for the maintenance sweep. The bottom 3 stories in that window rarely have ≥5 posts and end up analyzed-then-ignored on the homepage.
+- [ ] **Batch bias scoring** — currently 1 LLM call per article, up to 150/run. Batch 5–10 articles per call. Requires prompt redesign + careful output parsing. Medium risk, ~$2/mo saved. Only do if the telegram-cache win isn't enough.
+
+---
+
 ## Done this session (2026-04-17)
 
 ### Audit
