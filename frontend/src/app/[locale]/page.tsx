@@ -472,8 +472,11 @@ export default async function HomePage({
   // goes into its own lookup map indexed by story id.
   // Only fetch analyses we don't already have from the hero-picker prefetch.
   const missingIds = Array.from(allIds).filter(id => !(id in prefetchedAnalyses));
+  // Always call fetchAnalysesBatch (it short-circuits on empty input) so the
+  // Promise.all union type stays concrete. Earlier I used Promise.resolve({})
+  // as the shortcut which widened the type to {} and broke build-time TS.
   const [extraAnalyses, heroTelegram, telegramResults, leftTextTelegramResults, mostViewedTelegramResults] = await Promise.all([
-    missingIds.length ? fetchAnalysesBatch(missingIds) : Promise.resolve({}),
+    fetchAnalysesBatch(missingIds),
     hero ? fetchTelegramAnalysis(hero.id) : Promise.resolve(null),
     Promise.all(telegramAnalysisIds.map(id => fetchTelegramAnalysis(id))),
     Promise.all(leftTextStories.map(s => fetchTelegramAnalysis(s.id))),
