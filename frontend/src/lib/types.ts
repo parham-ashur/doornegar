@@ -97,6 +97,10 @@ export interface StoryBrief {
     kind: "dispute" | "coverage_shift" | "new_articles" | "side_flip" | "burst" | null;
     reason_fa: string | null;
     detected_at?: string | null;
+    // Number of new articles clustered in the hour the cron detected.
+    // Set for `burst` signals only; the UI uses this + detected_at to
+    // render "N مقاله جدید در H ساعت گذشته" where H grows with signal age.
+    new_count?: number | null;
     // Sentence-level diff vs last night's snapshot. New sentences only —
     // UI renders these in a colored "به‌روز" callout above the bias
     // comparison / narrative sides. Each field is [] when nothing new,

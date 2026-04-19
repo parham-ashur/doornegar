@@ -194,6 +194,26 @@ function UpdateDeltaCallout({
   );
 }
 
+// Age-correct burst reason text. The backend writes "N مقاله جدید در
+// ساعت گذشته" at cron time, but we display the signal for up to 4h.
+// Stretch the window to match real time elapsed: articles arrived in
+// the [detected_at-1h, detected_at] slice, and we're rendering `age`
+// later, so they're actually "within the past ceil(age)+1 hours."
+function toFaDigits(n: number): string {
+  return String(n).replace(/\d/g, (d) => "۰۱۲۳۴۵۶۷۸۹"[Number(d)]);
+}
+function formatUpdateReason(sig: NonNullable<StoryBrief["update_signal"]>): string | null {
+  if (sig.kind === "burst" && typeof sig.new_count === "number" && sig.detected_at) {
+    const ageMs = Date.now() - new Date(sig.detected_at).getTime();
+    const ageH = ageMs / 3600000;
+    if (ageH > 0.5) {
+      const windowH = Math.max(1, Math.ceil(ageH) + 1);
+      return `${toFaDigits(sig.new_count)} مقاله جدید در ${toFaDigits(windowH)} ساعت گذشته`;
+    }
+  }
+  return sig.reason_fa;
+}
+
 // Compact update pill for homepage story cards. Two variants:
 //   - Orange "بروزرسانی · <reason>"  — a trigger fired (side flip,
 //     coverage shift, burst, or the 24h-snapshot signal). Significant.
@@ -205,7 +225,7 @@ function UpdateDeltaCallout({
 function UpdateBadge({ story, className = "mt-1.5" }: { story: StoryBrief; className?: string }) {
   // Orange — significant update
   if (story.update_signal?.has_update) {
-    const reason = story.update_signal.reason_fa;
+    const reason = formatUpdateReason(story.update_signal);
     return (
       <span
         className={`${className} inline-block border border-orange-300 dark:border-orange-700 bg-orange-50 dark:bg-orange-900/20 px-1.5 py-0.5 text-[10px] font-bold text-orange-700 dark:text-orange-300`}
@@ -579,17 +599,20 @@ export default async function HomePage({
                 fires when new articles arrived within the last 2h but
                 no trigger qualified — still useful to show the hero is
                 actively gaining coverage. */}
-            {hero.update_signal?.has_update ? (
-              <div className="mt-2 inline-flex items-center gap-2 border border-orange-300 dark:border-orange-700 bg-orange-50 dark:bg-orange-900/20 px-2 py-1">
-                <span className="inline-block h-1.5 w-1.5 rounded-full bg-orange-500" />
-                <span className="text-[11px] font-bold text-orange-700 dark:text-orange-300">بروزرسانی</span>
-                {hero.update_signal.reason_fa && (
-                  <span className="text-[11px] text-orange-700/80 dark:text-orange-300/80">
-                    {hero.update_signal.reason_fa}
-                  </span>
-                )}
-              </div>
-            ) : (
+            {hero.update_signal?.has_update ? (() => {
+              const heroReason = formatUpdateReason(hero.update_signal);
+              return (
+                <div className="mt-2 inline-flex items-center gap-2 border border-orange-300 dark:border-orange-700 bg-orange-50 dark:bg-orange-900/20 px-2 py-1">
+                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-orange-500" />
+                  <span className="text-[11px] font-bold text-orange-700 dark:text-orange-300">بروزرسانی</span>
+                  {heroReason && (
+                    <span className="text-[11px] text-orange-700/80 dark:text-orange-300/80">
+                      {heroReason}
+                    </span>
+                  )}
+                </div>
+              );
+            })() : (
               hero.last_updated_at &&
               Date.now() - new Date(hero.last_updated_at).getTime() < 2 * 3600 * 1000 && (
                 <div className="mt-2 inline-flex items-center gap-2 border border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/20 px-2 py-1">
@@ -673,18 +696,18 @@ export default async function HomePage({
           </div>
           {conservativeBlind && (
             <Link href={`/${locale}/stories/${conservativeBlind.id}`} className="group block border-[3px] border-[#1e3a5f] shadow-[0_0_12px_rgba(30,58,95,0.4)] hover:shadow-[0_0_20px_rgba(30,58,95,0.6)] transition-shadow animate-pulse-glow-blue">
-              <div className="aspect-[4/3] overflow-hidden bg-slate-100 dark:bg-slate-800">
+              <div className="relative aspect-[4/3] overflow-hidden bg-slate-100 dark:bg-slate-800">
                 <SafeImage src={conservativeBlind.image_url} className="h-full w-full object-cover" />
+                {conservativeBlind.update_signal?.has_update && (
+                  <span className="absolute bottom-2 right-2 border border-orange-300 dark:border-orange-700 bg-orange-50/95 dark:bg-orange-900/80 px-1.5 py-0.5 text-[10px] font-bold text-orange-700 dark:text-orange-200 backdrop-blur-sm">
+                    بروزرسانی{formatUpdateReason(conservativeBlind.update_signal) ? ` · ${formatUpdateReason(conservativeBlind.update_signal)}` : ""}
+                  </span>
+                )}
               </div>
               <div className="p-3">
                 <h3 className="text-[18px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
                   {conservativeBlind.title_fa}
                 </h3>
-                {conservativeBlind.update_signal?.has_update && (
-                  <span className="mt-1.5 inline-block border border-orange-300 dark:border-orange-700 bg-orange-50 dark:bg-orange-900/20 px-1.5 py-0.5 text-[10px] font-bold text-orange-700 dark:text-orange-300">
-                    بروزرسانی{conservativeBlind.update_signal.reason_fa ? ` · ${conservativeBlind.update_signal.reason_fa}` : ""}
-                  </span>
-                )}
                 <p className="mt-1.5 text-[13px] text-slate-400">
                   فقط روایت درون‌مرزی · {conservativeBlind.article_count} مقاله
                 </p>
@@ -693,18 +716,18 @@ export default async function HomePage({
           )}
           {oppositionBlind && (
             <Link href={`/${locale}/stories/${oppositionBlind.id}`} className="group block border-[3px] border-[#ea580c] shadow-[0_0_12px_rgba(234,88,12,0.4)] hover:shadow-[0_0_20px_rgba(234,88,12,0.6)] transition-shadow animate-pulse-glow-orange">
-              <div className="aspect-[4/3] overflow-hidden bg-slate-100 dark:bg-slate-800">
+              <div className="relative aspect-[4/3] overflow-hidden bg-slate-100 dark:bg-slate-800">
                 <SafeImage src={oppositionBlind.image_url} className="h-full w-full object-cover" />
+                {oppositionBlind.update_signal?.has_update && (
+                  <span className="absolute bottom-2 right-2 border border-orange-300 dark:border-orange-700 bg-orange-50/95 dark:bg-orange-900/80 px-1.5 py-0.5 text-[10px] font-bold text-orange-700 dark:text-orange-200 backdrop-blur-sm">
+                    بروزرسانی{formatUpdateReason(oppositionBlind.update_signal) ? ` · ${formatUpdateReason(oppositionBlind.update_signal)}` : ""}
+                  </span>
+                )}
               </div>
               <div className="p-3">
                 <h3 className="text-[18px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
                   {oppositionBlind.title_fa}
                 </h3>
-                {oppositionBlind.update_signal?.has_update && (
-                  <span className="mt-1.5 inline-block border border-orange-300 dark:border-orange-700 bg-orange-50 dark:bg-orange-900/20 px-1.5 py-0.5 text-[10px] font-bold text-orange-700 dark:text-orange-300">
-                    بروزرسانی{oppositionBlind.update_signal.reason_fa ? ` · ${oppositionBlind.update_signal.reason_fa}` : ""}
-                  </span>
-                )}
                 <p className="mt-1.5 text-[13px] text-orange-500">
                   فقط روایت برون‌مرزی · {oppositionBlind.article_count} مقاله
                 </p>
@@ -1235,8 +1258,13 @@ function MobileHome({
               <Link href={`/${locale}/stories/${conservativeBlind.id}`}
                 className="group block border-[3px] border-[#1e3a5f] shadow-[0_0_12px_rgba(30,58,95,0.4)] animate-pulse-glow-blue">
                 <div className="flex gap-3 p-3">
-                  <div className="w-20 h-20 shrink-0 overflow-hidden bg-slate-100 dark:bg-slate-800">
+                  <div className="relative w-20 h-20 shrink-0 overflow-hidden bg-slate-100 dark:bg-slate-800">
                     <SafeImage src={conservativeBlind.image_url} className="h-full w-full object-cover" />
+                    {conservativeBlind.update_signal?.has_update && (
+                      <span className="absolute bottom-0 inset-x-0 bg-orange-500/95 text-white text-center text-[9px] font-bold py-0.5">
+                        بروزرسانی
+                      </span>
+                    )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <h3 className="text-[18px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
@@ -1253,8 +1281,13 @@ function MobileHome({
               <Link href={`/${locale}/stories/${oppositionBlind.id}`}
                 className="group block border-[3px] border-[#ea580c] shadow-[0_0_12px_rgba(234,88,12,0.4)] animate-pulse-glow-orange">
                 <div className="flex gap-3 p-3">
-                  <div className="w-20 h-20 shrink-0 overflow-hidden bg-slate-100 dark:bg-slate-800">
+                  <div className="relative w-20 h-20 shrink-0 overflow-hidden bg-slate-100 dark:bg-slate-800">
                     <SafeImage src={oppositionBlind.image_url} className="h-full w-full object-cover" />
+                    {oppositionBlind.update_signal?.has_update && (
+                      <span className="absolute bottom-0 inset-x-0 bg-orange-500/95 text-white text-center text-[9px] font-bold py-0.5">
+                        بروزرسانی
+                      </span>
+                    )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <h3 className="text-[18px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">

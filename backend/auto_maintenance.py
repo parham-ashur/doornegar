@@ -316,10 +316,15 @@ async def step_detect_hourly_updates():
                     }
                     stats["coverage_shift"] += 1
             # Trigger 3: burst. Only if no earlier trigger fired.
+            # `new_count` is stored alongside the Farsi reason so the UI
+            # can regenerate the text with an age-correct window (e.g.
+            # "۲ مقاله جدید در ۳ ساعت گذشته" when rendered 2h after the
+            # cron wrote the signal).
             if not signal["has_update"] and new_count >= BURST_ARTICLES:
                 signal = {
                     "has_update": True, "kind": "burst",
                     "reason_fa": f"{_fa_digits(new_count)} مقاله جدید در ساعت گذشته",
+                    "new_count": new_count,
                     "detected_at": now_iso,
                 }
                 stats["burst"] += 1
