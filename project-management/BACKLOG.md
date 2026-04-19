@@ -1,6 +1,28 @@
 # Doornegar - Backlog
 
-**Last updated**: 2026-04-17 (Audit + security + narrative taxonomy + pipeline hardening + i18n plan)
+**Last updated**: 2026-04-19 (clustering absorption defense)
+
+## Clustering — absorption defense (in progress)
+
+**Context**: Two existing "attractor" stories can gobble up articles/posts that really belong to a third, distinct-but-related story. Example: a "Pakistan role in ceasefire negotiations" story + a "ceasefire" story can absorb articles about a "Pakistan security concerns" angle because cosine similarity is high enough that each candidate looks plausible in isolation. Result: the third story never reaches the 5-article visibility threshold.
+
+### Shipped
+- [x] **#1 Co-unmatched sub-cluster reservation** (`clustering.py:_find_new_story_subclusters`). Before the matcher runs, group this run's incoming articles by cosine ≥ 0.65 + shared identity signal (title-token Jaccard ≥ 0.35, shared quote, or shared number). Any component of ≥ 2 articles is reserved — skipped by the matcher and flows into new-cluster creation. Zero extra LLM calls.
+
+### Planned (not shipped — order matters)
+
+- [ ] **#3 Drift-flagged story splitting (dry-run first)** — `audit_cluster_drift` already flags clusters whose internal pairwise cosine drops below 0.50 but only emits a warning. Add graph-connected-components split on those clusters.
+  - **Blast radius is high** — re-assigns articles between existing stories. Ship behind a dry-run flag first: surface proposed splits in a HITL dashboard view, Parham approves/rejects each, then flip an "apply" button per split.
+  - After a few days of reviewed dry-runs, consider auto-apply for high-confidence splits (e.g. min-pair cosine ≤ 0.30 and two clean components ≥ 3 articles each).
+  - No LLM calls.
+
+- [ ] **#2 Tighter auto-match (only if #1 isn't enough)** — drop AUTO_MATCH_COSINE from 0.85 → 0.80 and require stronger shared signal (shared named entity beyond country, or shared quote). Moves borderline matches from deterministic auto-match into the LLM middle band.
+  - Only worth doing if post-#1 observation still shows topical-adjacency absorption.
+  - Cost impact: +$0.10–0.30/month (20–40% more LLM matching calls). Within budget.
+  - Risk: the LLM's "reject by default" prompt sometimes rejects correct matches; this change could cause invisible quality regressions on edge cases.
+  - Tune thresholds only after we have a baseline from #1 in production.
+
+---
 
 ## Done this session (2026-04-17)
 

@@ -421,6 +421,108 @@ def _jaccard(a: set, b: set) -> float:
     return len(a & b) / len(a | b)
 
 
+def _find_new_story_subclusters(
+    articles: list["Article"],
+    *,
+    min_cluster_size: int = 2,
+    cosine_threshold: float = 0.65,
+) -> set:
+    """Spot coherent sub-clusters inside the batch of unmatched articles.
+
+    Why: two existing "attractor" stories can absorb every new article
+    that's topically adjacent (e.g. "Pakistan ceasefire role" + "ceasefire
+    itself" absorbing articles about a distinct "Pakistan security
+    concerns" angle). Left alone, no third story ever forms — the
+    matcher only looks at unmatched-so-far articles, but by then each
+    one looks like a plausible extension of an existing cluster in
+    isolation.
+
+    Defense: before running the matcher, build a similarity graph over
+    THIS run's incoming articles. Any connected component of ≥
+    min_cluster_size articles that share a concrete identity signal
+    (title-token Jaccard ≥ 0.35, a quoted phrase, or a numeric token)
+    is a "forming new story" — reserve those articles, skip the matcher
+    entirely, and let them flow into new-cluster creation.
+
+    Returns the set of Article.id values that should be reserved. Empty
+    set when nothing coherent forms (normal case — most runs).
+    """
+    from app.nlp.embeddings import cosine_similarity as _cosine_sim
+
+    # Only consider articles that actually have embeddings; the rest
+    # fall through to the matcher's normal conservative path.
+    embedded = [a for a in articles if a.embedding and any(v != 0.0 for v in a.embedding[:5])]
+    if len(embedded) < min_cluster_size:
+        return set()
+
+    # Precompute identity signals per article so the graph pass is cheap.
+    sigs: dict = {}
+    for a in embedded:
+        title = a.title_fa or a.title_original or ""
+        sigs[a.id] = {
+            "tokens": _title_tokens(title),
+            "quotes": _quoted_phrases(title),
+            "numbers": _number_tokens(title),
+        }
+
+    # Union-find over articles connected by cosine ≥ threshold.
+    parent: dict = {a.id: a.id for a in embedded}
+
+    def _find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def _union(x, y):
+        rx, ry = _find(x), _find(y)
+        if rx != ry:
+            parent[rx] = ry
+
+    for i in range(len(embedded)):
+        for j in range(i + 1, len(embedded)):
+            a_i, a_j = embedded[i], embedded[j]
+            try:
+                sim = _cosine_sim(a_i.embedding, a_j.embedding)
+            except Exception:
+                continue
+            if sim < cosine_threshold:
+                continue
+            _union(a_i.id, a_j.id)
+
+    # Group by component, then keep only components ≥ min_cluster_size
+    # that ALSO share a concrete identity signal across ≥ 2 members. A
+    # cosine-only cluster of generic country-news articles (e.g. 3
+    # "Pakistan …" pieces with no overlapping named token) isn't worth
+    # reserving — those legitimately might belong to different stories.
+    groups: dict = {}
+    for aid in parent:
+        groups.setdefault(_find(aid), []).append(aid)
+
+    reserved: set = set()
+    for members in groups.values():
+        if len(members) < min_cluster_size:
+            continue
+        # Pairwise check: at least one pair in the cluster must share a
+        # token beyond stopwords, a quote, or a number.
+        has_shared_signal = False
+        for i in range(len(members)):
+            for j in range(i + 1, len(members)):
+                si, sj = sigs[members[i]], sigs[members[j]]
+                if (
+                    _jaccard(si["tokens"], sj["tokens"]) >= 0.35
+                    or bool(si["quotes"] & sj["quotes"])
+                    or bool(si["numbers"] & sj["numbers"])
+                ):
+                    has_shared_signal = True
+                    break
+            if has_shared_signal:
+                break
+        if has_shared_signal:
+            reserved.update(members)
+    return reserved
+
+
 async def _match_to_existing_stories(
     db: AsyncSession,
     articles: list[Article],
@@ -537,6 +639,17 @@ async def _match_to_existing_stories(
             "last_updated_at": row[5],
         }
 
+    # Reserve coherent sub-clusters of this run's own unmatched articles
+    # BEFORE running the matcher. Protects emergent third stories from
+    # being absorbed one-by-one into adjacent attractor clusters. See
+    # _find_new_story_subclusters for the full rationale.
+    reserved_ids = _find_new_story_subclusters(articles)
+    if reserved_ids:
+        logger.info(
+            f"Reserving {len(reserved_ids)} articles as an emerging new-story sub-cluster "
+            f"(skipping the matcher for them)"
+        )
+
     # Build per-article candidate story sets + auto-match / auto-reject
     article_candidates: dict[uuid.UUID, set[uuid.UUID]] = {}
     articles_without_embedding: list[Article] = []
@@ -548,6 +661,10 @@ async def _match_to_existing_stories(
     now_utc = datetime.now(timezone.utc)
 
     for article in articles:
+        # Reserved articles skip matching entirely — they'll flow into
+        # new-cluster creation along with the unmatched remainder.
+        if article.id in reserved_ids:
+            continue
         if not article.embedding or not any(v != 0.0 for v in (article.embedding or [])[:5]):
             articles_without_embedding.append(article)
             continue
