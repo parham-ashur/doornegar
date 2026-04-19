@@ -240,6 +240,12 @@ async def get_story_analyses_batch(
             "diaspora_summary_fa": extra.get("diaspora_summary_fa"),
             "independent_summary_fa": extra.get("independent_summary_fa"),
             "bias_explanation_fa": extra.get("bias_explanation_fa"),
+            # 4-subgroup narrative bullets (principlist/reformist/moderate/radical).
+            # Shape: {"inside": {"principlist": [...], "reformist": [...]},
+            #         "outside": {"moderate": [...], "radical": [...]}}
+            # Surfaced here so the homepage hero card can render the colored
+            # sub-columns without a second fetch per story.
+            "narrative": extra.get("narrative"),
             "scores": extra.get("scores"),
             "source_neutrality": extra.get("source_neutrality"),
             "dispute_score": extra.get("dispute_score"),
