@@ -84,14 +84,11 @@ const FIGURES: ShapeDef[][] = [
     { type: "line", cx: 0.38, cy: 0.78, s: 0.2, colorIdx: 2 },
     { type: "line", cx: 0.62, cy: 0.78, s: 0.2, colorIdx: 2 },
   ],
-  // Boat — small sail, visible mast through the deck line, and an
-  // asymmetric-diamond hull (compressed bottom half) so it reads as a
-  // hull-with-keel rather than the triangle-down version which looked
-  // like the top of an hourglass.
+  // Boat
   [
-    { type: "triangle", cx: 0.55, cy: 0.22, s: 0.15, colorIdx: 2 },  // sail
-    { type: "line", cx: 0.55, cy: 0.4, s: 0.1, colorIdx: 1 },         // mast
-    { type: "diamond", cx: 0.5, cy: 0.65, s: 0.3, colorIdx: 0 },      // hull
+    { type: "triangle", cx: 0.55, cy: 0.3, s: 0.35, colorIdx: 2 },
+    { type: "diamond", cx: 0.5, cy: 0.65, s: 0.5, colorIdx: 0 },
+    { type: "line", cx: 0.5, cy: 0.55, s: 0.4, colorIdx: 1 },
   ],
   // Bird
   [
