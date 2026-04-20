@@ -54,18 +54,23 @@ export async function getBlindspotStories(limit = 20) {
   );
 }
 
-// Story detail — stable between maintenance runs
+// Story detail. 5-minute cache to stay in sync with the homepage's
+// trending endpoint (TRENDING_TTL = 300). A longer TTL here caused
+// article_count mismatches between homepage cards and story pages
+// right after a Niloofar merge — homepage refreshed but detail
+// lagged for up to an hour.
 export async function getStory(id: string) {
   return fetchAPI<import("./types").StoryDetail>(`/api/v1/stories/${id}`, {
-    revalidate: 3600,
+    revalidate: 300,
   });
 }
 
-// Story analysis — stable once generated
+// Story analysis — same 5-min cadence so the bias/side-narrative
+// panels stay in sync with the detail page's article list.
 export async function getStoryAnalysis(id: string) {
   return fetchAPI<import("./types").StoryAnalysis>(
     `/api/v1/stories/${id}/analysis`,
-    { revalidate: 3600 },
+    { revalidate: 300 },
   );
 }
 

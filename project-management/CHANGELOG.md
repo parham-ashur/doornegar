@@ -4,6 +4,58 @@ All notable changes to the Doornegar project are documented here, organized by w
 
 ---
 
+## April 19–20, 2026
+
+### Story arcs feature (new)
+- New `StoryArc` model + `Story.arc_id` / `arc_order` columns. Alembic migration + startup self-heal DDL in `app/main.py`.
+- `GET /api/v1/admin/hitl/arcs/suggestions` — pure-cosine connected-components on `centroid_embedding` over visible stories. Filtered to `article_count ≥ 8` + `source_count ≥ 4` and oversized components split at the longest time gap > 4d so suggestions land at 4–8 chapters.
+- POST/PATCH/DELETE `/admin/hitl/arcs` — curator CRUD. Story detail response now embeds the arc's sibling chapters.
+- `/dashboard/hitl/arcs` — lists suggestions + existing arcs. Each suggestion is collapsible with chapter checkboxes + an arc-title input.
+- **Chapter pill strip** above the story title: current chapter filled-in, others outline-linked, RTL arrows.
+- **«روایت در حال تغییر» drift panel**: one row per side, shows the shortest meaningful loaded word per chapter with arrows showing frame shift across the arc. ✨ marks the current chapter. Data served by new public `GET /api/v1/arcs/{id}/drift`.
+- `journalist_audit.py` merge_stories now clears `arc_id`/`arc_order` on the hidden source story so arcs don't render ghost chapters after a merge.
+
+### HITL source reclassifier (new)
+- `/dashboard/hitl/sources` — lists all sources with inline dropdowns for `production_location` / `state_alignment` / `factional_alignment` + `irgc_affiliated` + `is_active` + a 4-tile summary of source counts per subgroup.
+- Extended `PATCH /api/v1/admin/sources/{slug}` from cosmetic-only fields to include the 3 classification fields with enum validation.
+- Mirrored backend `narrative_group()` logic into `frontend/src/lib/narrativeGroups.ts` as `narrativeGroupOfSource()` so the political-spectrum chart can compute groupings on the client.
+
+### Source reclassifications (post-release manual corrections)
+- **Deactivated** `etemad` (duplicate of `etemad-online`).
+- **HRANA** / **IranWire** / **VOA Farsi**: `factional_alignment` `opposition` → `null` (move to میانه‌رو).
+- **Akhbar-Rooz**: `factional_alignment` `null` → `opposition` (move to رادیکال; left-socialist exile better fits).
+- Three new outside-Iran Farsi sources seeded: **Deutsche Welle Persian** (`rss.dw.com`), **Independent Persian** (`independentpersian.com`), **Akhbar-Rooz** (`akhbar-rooz.com`). All verified to have working RSS with ≥10 items.
+
+### Clustering absorption defense
+- `_find_new_story_subclusters()` in `clustering.py` — before matching new articles against existing stories, find coherent sub-clusters among the incoming batch (cosine ≥ 0.65 + shared title token / quote / number). Reserved articles skip the matcher entirely so they can form a new story instead of being absorbed one-by-one into adjacent attractors. Zero extra LLM calls.
+- `#2 tighter auto-match` and `#3 drift-flagged story splitting` logged in `BACKLOG.md` as follow-ups.
+
+### Niloofar merge passes
+- Three merge-focused passes consolidated 41 small variant stories into their umbrella beats. Targets (all `is_edited=True`): Hormuz/ceasefire hero (370→417a), Islamabad talks (120→170a), Ghalibaf speech (17→38a), Airstrikes (23→55a), Lebanon ceasefire (8→15a). Narratives preserved on edited targets.
+- **Subgroup-silence guard added to the story-analysis prompt**: explicit rule that if a subgroup (principlist/reformist/moderate/radical) has zero articles in the cluster, the LLM must not invent coverage for it. Hand-rewrote the Lebanon ceasefire story's bias_explanation to drop a fabricated «رادیکال بر «سرکوب» و «کشتار»» sentence.
+
+### Cost & performance
+- **Telegram deep-analysis posts-hash cache** in `step_telegram_deep_analysis`: skip the 3-LLM-call pipeline when the post pool hash matches the last run's hash. Estimated 60–80% fewer LLM calls per maintenance run; daily OpenAI spend dropped from ~$1.50/day toward the original ~$0.17/day budget.
+- Story-detail + analysis cache TTL unified at 300s (was 3600s) to match homepage trending TTL. Fixes article_count mismatches between homepage cards and story pages in the first hour after a merge.
+- Pillow + boto3 added to `requirements.txt` + `pyproject.toml` — the HITL stock-image pin endpoint imported both at runtime but they weren't installed.
+
+### UI fixes (homepage + story page)
+- **Chrome gate**: header + footer now render on mobile homepage (were previously hidden by a stale `HIDE_ON_MOBILE` rule for a carousel that no longer exists).
+- **Welcome popup**: `sessionStorage` → `localStorage` so «متوجه شدم» dismiss persists across sessions.
+- **Homepage de-duplication**: same story no longer appears in both تقابل روایت‌ها and بیشترین اختلاف نگاه. Overlap with "most visited" is still allowed.
+- **Update badge**: burst threshold lowered 5 → 2 articles/hour; hourly-signal freshness window extended 2h → 4h. Burst reason text now age-corrects — "X مقاله جدید در H ساعت گذشته" reflects real elapsed time.
+- **Blindspot cards**: «بروزرسانی» badge overlays the image (desktop: bottom-right pill; mobile: footer stripe on the 80×80 thumb).
+- **Hero bias comparison**: added two bullet points from `bias_explanation_fa` above the two-column side split.
+- **Timeline**: «روند پوشش خبری» is now collapsible, Tehran-local day key fixes same-day-splitting on articles straddling midnight UTC.
+- **Political spectrum**: subgroup legend under the chart listing sources per group; tighter box height (min 200px was 280; y-range 8–92% was 15–85%).
+- **Empty-state messages**: story pages without analysis / telegram now show a clear «این خبر تازه ثبت شده است…» note instead of nothing / a terse one-liner.
+- **Persian word swap**: `خوشه` → `خبر` across the LLM prompt + Niloofar agent spec + HITL arcs page.
+
+### Public feedback button
+- New `PublicFeedbackButton` (bottom-left floating on story pages). Posts to `/improvements` with no name/email required. Shows up in admin's Improvement Feedback queue.
+
+---
+
 ## April 18, 2026
 
 ### Homepage polish
