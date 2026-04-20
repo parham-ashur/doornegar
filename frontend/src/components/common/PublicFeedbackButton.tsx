@@ -92,7 +92,7 @@ export default function PublicFeedbackButton({ pagePath, storyId }: Props) {
             <div className="p-4 space-y-3">
               <p className="text-[13px] leading-6 text-slate-500 dark:text-slate-400">
                 هر چیزی دربارهٔ این صفحه به نظرتان می‌رسد بنویسید — خطا، پیشنهاد،
-                انتقاد، ستایش. ما می‌خوانیم.
+                انتقاد. ما می‌خوانیم.
               </p>
               <textarea
                 value={text}
