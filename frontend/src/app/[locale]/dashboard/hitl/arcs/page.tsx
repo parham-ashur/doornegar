@@ -171,8 +171,8 @@ export default function ArcsHitlPage() {
           قوس‌های روایت — پیشنهادها و موجودی
         </h1>
         <p className="text-[13px] text-slate-500 dark:text-slate-400 mt-1 leading-6">
-          خوشه‌هایی از خبرهایِ مرتبط که به‌صورت زمان‌بندی‌شده روی یک قوس روایتی قرار می‌گیرند.
-          با فاصلهٔ شباهت مرکز خوشه ≥ ۰.۵۵ پیشنهاد می‌شوند. کرایو خود انتخاب می‌کنید که کدام‌ها
+          گروه‌هایی از خبرهای مرتبط که به‌صورت زمان‌بندی‌شده روی یک قوس روایتی قرار می‌گیرند.
+          با فاصلهٔ شباهت مرکزِ خبر ≥ ۰.۵۵ پیشنهاد می‌شوند. کرایو خود انتخاب می‌کنید که کدام‌ها
           یک قوس واقعی‌اند.
         </p>
       </div>
@@ -255,7 +255,7 @@ export default function ArcsHitlPage() {
         {loading && <p className="text-[13px] text-slate-400">بارگذاری…</p>}
         {suggestions && suggestions.length === 0 && (
           <p className="text-[13px] text-slate-400">
-            هیچ خوشهٔ ≥ ۳ خبر با شباهت کافی یافت نشد.
+            هیچ گروهی از ≥ ۳ خبر با شباهت کافی یافت نشد.
           </p>
         )}
         {suggestions && suggestions.map((s, i) => {
@@ -269,7 +269,7 @@ export default function ArcsHitlPage() {
               >
                 <div className="flex-1 min-w-0">
                   <h3 className="text-[13px] font-bold text-slate-900 dark:text-white line-clamp-1">
-                    {s.suggested_title_fa || `خوشهٔ ${i + 1}`}
+                    {s.suggested_title_fa || `گروه ${i + 1}`}
                   </h3>
                   <p className="text-[12px] text-slate-400 mt-0.5">
                     {s.chapters.length} چپتر
