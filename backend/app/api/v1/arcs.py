@@ -155,18 +155,35 @@ async def suggest_arcs(
     min_similarity: float = 0.55,
     max_stories: int = 120,
     min_chapters: int = 3,
+    max_chapters: int = 8,
+    min_article_count: int = 8,
+    min_source_count: int = 4,
+    split_gap_days: float = 4.0,
     db: AsyncSession = Depends(get_db),
 ) -> list[ArcSuggestion]:
-    """Compute candidate arcs from visible stories via centroid cosine.
+    """Compute candidate arcs from substantial visible stories.
 
-    Connected components on the similarity graph with
-    cosine >= min_similarity and component size >= min_chapters are
-    proposed. Each candidate's chapters are ordered by first_published_at.
+    An arc chapter should be a *phase*, not a *moment*. Without filters,
+    one hot news cycle (e.g. ceasefire arc with dozens of small
+    follow-up stories) would produce a single connected component of
+    ~50 stories, useless for curation. We therefore:
 
-    Pure cosine math — no LLM. O(n²) over at most `max_stories` visible
-    stories, which is ~150–200 on this dataset. Runs in ~1–2s.
+    1. Only consider stories with article_count >= min_article_count
+       AND source_count >= min_source_count — i.e. substantial beats,
+       not single-outlet micro-variants.
+    2. Connected components on the centroid-cosine graph at
+       min_similarity. Components of size [min_chapters, max_chapters]
+       are proposed directly.
+    3. Oversized components (> max_chapters) are split at the longest
+       time gap between consecutive chapters when that gap exceeds
+       split_gap_days — producing two candidate arcs instead of one
+       bloated one. Applied recursively so a large 20-story component
+       can split into several adjacent arcs.
+
+    Pure cosine + time-gap math. No LLM. Runs in ~1–2s on ~150 stories.
     """
     from app.nlp.embeddings import cosine_similarity as _cs
+    from datetime import timedelta
 
     q = await db.execute(
         select(
@@ -174,11 +191,13 @@ async def suggest_arcs(
             Story.title_fa,
             Story.first_published_at,
             Story.article_count,
+            Story.source_count,
             Story.centroid_embedding,
             Story.arc_id,
         )
         .where(
-            Story.article_count >= 3,
+            Story.article_count >= min_article_count,
+            Story.source_count >= min_source_count,
             Story.trending_score > -10,  # skip hidden/merged remnants
             Story.centroid_embedding.isnot(None),
         )
@@ -217,47 +236,85 @@ async def suggest_arcs(
     for i in range(n):
         components.setdefault(_find(i), []).append(i)
 
+    # Recursively split oversized components at the longest gap when it
+    # exceeds split_gap_days. This turns one 20-chapter monster into
+    # several adjacent 4–8 chapter arcs that each cover one phase.
+    def _split_component(member_indices: list[int]) -> list[list[int]]:
+        sorted_m = sorted(
+            member_indices,
+            key=lambda idx: rows[idx].first_published_at or datetime.min,
+        )
+        if len(sorted_m) <= max_chapters:
+            return [sorted_m]
+        # Find largest chronological gap between consecutive chapters
+        biggest_gap = timedelta(0)
+        split_at = -1
+        for i in range(len(sorted_m) - 1):
+            t1 = rows[sorted_m[i]].first_published_at
+            t2 = rows[sorted_m[i + 1]].first_published_at
+            if not t1 or not t2:
+                continue
+            gap = t2 - t1
+            if gap > biggest_gap:
+                biggest_gap = gap
+                split_at = i
+        # Only split if the biggest gap is meaningful; otherwise trim
+        # to the most recent max_chapters and drop the rest (older
+        # context is less useful for an arc UI anyway).
+        if split_at >= 0 and biggest_gap > timedelta(days=split_gap_days):
+            left = sorted_m[: split_at + 1]
+            right = sorted_m[split_at + 1:]
+            return _split_component(left) + _split_component(right)
+        return [sorted_m[-max_chapters:]]
+
     suggestions: list[ArcSuggestion] = []
     for members in components.values():
         if len(members) < min_chapters:
             continue
-        # Order chapters by first_published_at (earliest first).
-        members_sorted = sorted(
-            members,
-            key=lambda idx: rows[idx].first_published_at or datetime.min,
-        )
-        chapters: list[ArcChapter] = []
-        already_in_arc: list[str] = []
-        for order_idx, idx in enumerate(members_sorted):
-            r = rows[idx]
-            image_url = await _fetch_story_image(db, r.id)
-            chapters.append(
-                ArcChapter(
-                    story_id=str(r.id),
-                    title_fa=r.title_fa,
-                    image_url=image_url,
-                    first_published_at=r.first_published_at,
-                    article_count=r.article_count or 0,
-                    order=order_idx,
-                )
-            )
-            if r.arc_id is not None:
-                already_in_arc.append(str(r.id))
-        # Use the largest chapter's title as the suggested arc title —
-        # curator can rename. Falls back to shortest title if sizes tie.
-        biggest = max(members_sorted, key=lambda idx: rows[idx].article_count or 0)
-        suggested_title = rows[biggest].title_fa
-        suggestions.append(
-            ArcSuggestion(
-                chapters=chapters,
-                already_in_arc_ids=already_in_arc,
-                suggested_title_fa=suggested_title,
-            )
-        )
-
-    # Biggest candidates first so curator sees the most material arcs on top.
+        for split in _split_component(members):
+            if len(split) < min_chapters:
+                continue
+            # Bind so the existing downstream builder can use `members_sorted`.
+            await _emit_suggestion(split, rows, suggestions, db)
     suggestions.sort(key=lambda s: len(s.chapters), reverse=True)
     return suggestions
+
+
+async def _emit_suggestion(
+    members_sorted: list[int],
+    rows: list,
+    suggestions: list[ArcSuggestion],
+    db: AsyncSession,
+) -> None:
+    """Build an ArcSuggestion from an ordered member list and append it."""
+    chapters: list[ArcChapter] = []
+    already_in_arc: list[str] = []
+    for order_idx, idx in enumerate(members_sorted):
+        r = rows[idx]
+        image_url = await _fetch_story_image(db, r.id)
+        chapters.append(
+            ArcChapter(
+                story_id=str(r.id),
+                title_fa=r.title_fa,
+                image_url=image_url,
+                first_published_at=r.first_published_at,
+                article_count=r.article_count or 0,
+                order=order_idx,
+            )
+        )
+        if r.arc_id is not None:
+            already_in_arc.append(str(r.id))
+    # Use the largest chapter's title as the suggested arc title —
+    # curator can rename.
+    biggest = max(members_sorted, key=lambda idx: rows[idx].article_count or 0)
+    suggested_title = rows[biggest].title_fa
+    suggestions.append(
+        ArcSuggestion(
+            chapters=chapters,
+            already_in_arc_ids=already_in_arc,
+            suggested_title_fa=suggested_title,
+        )
+    )
 
 
 # ─── Admin: CRUD ─────────────────────────────────────────
