@@ -22,7 +22,7 @@ export default function WelcomeModal() {
         setTimeout(() => setVisible(true), 400);
         return;
       }
-      const seen = sessionStorage.getItem(STORAGE_KEY);
+      const seen = localStorage.getItem(STORAGE_KEY);
       if (!seen) {
         setTimeout(() => setVisible(true), 800);
       }
@@ -32,7 +32,7 @@ export default function WelcomeModal() {
   const close = () => {
     setVisible(false);
     try {
-      sessionStorage.setItem(STORAGE_KEY, "1");
+      localStorage.setItem(STORAGE_KEY, "1");
     } catch {}
   };
 
