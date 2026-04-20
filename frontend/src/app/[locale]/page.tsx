@@ -392,11 +392,13 @@ export default async function HomePage({
     sorted[0];
   if (hero) usedIds.add(hero.id);
 
-  // Weekly briefing: next 4 not already used
-  // Left-text "در روزهای گذشته" block now renders hero-style cards
-  // (two-side narrative + telegram strip, no image), so each card takes
-  // more vertical space. 3 stories fits the visual budget.
-  const leftTextStories = sorted.filter(s => !usedIds.has(s.id)).slice(0, 3);
+  // Weekly briefing: left-text "در روزهای گذشته" block. Each card is
+  // a hero-style card with two-side narratives + telegram strip (no
+  // image), so it's dense. The companion column on the other side
+  // (تقابل + بیشترین اختلاف نگاه) grew taller than 3 cards, leaving
+  // dead space under روزهای گذشته. 4 cards keeps the two columns
+  // roughly height-matched.
+  const leftTextStories = sorted.filter(s => !usedIds.has(s.id)).slice(0, 4);
   leftTextStories.forEach(s => usedIds.add(s.id));
 
   // Most viewed: top 3. Narrower half-column now (grid-cols-2 cell in
