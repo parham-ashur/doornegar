@@ -282,10 +282,26 @@ export default async function StoryDetailPage({
             />
           </div>
 
-          {/* Timeline — desktop only */}
-          <div className="hidden lg:block">
-            <StoryTimeline articles={story.articles} />
-          </div>
+          {/* Timeline — desktop only, collapsible. Can grow tall on
+              big umbrella stories so we hide it behind a clickable
+              summary; reader expands only if interested. Same pattern
+              as «زمینه خبر» above. */}
+          <details className="hidden lg:block group my-6 border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50">
+            <summary className="flex items-center justify-between cursor-pointer list-none px-4 py-2.5 select-none">
+              <span className="text-[13px] font-bold text-slate-700 dark:text-slate-300">
+                روند پوشش خبری
+              </span>
+              <span
+                aria-hidden="true"
+                className="text-slate-400 text-[11px] transition-transform group-open:rotate-90"
+              >
+                ◀
+              </span>
+            </summary>
+            <div className="px-4 pb-4 pt-2">
+              <StoryTimeline articles={story.articles} />
+            </div>
+          </details>
 
           {/* Articles */}
           <h2 className="mt-6 mb-4 text-base font-black text-slate-900 dark:text-white border-b border-slate-200 dark:border-slate-800 pb-3">

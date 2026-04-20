@@ -105,11 +105,7 @@ export default function StoryTimeline({ articles }: Props) {
   };
 
   return (
-    <div className="my-6" dir="rtl">
-      <h3 className="mb-4 text-[13px] font-black text-slate-900 dark:text-white">
-        روند پوشش خبری
-      </h3>
-
+    <div className="my-0" dir="rtl">
       {/* Column headers */}
       <div className="grid grid-cols-2 gap-3 mb-3">
         <div className="flex items-center gap-1.5">
