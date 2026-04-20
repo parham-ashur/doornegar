@@ -181,7 +181,7 @@ export default function TelegramDiscussions({
                       from the prediction itself. Still available on the
                       story page where the full discourse context makes
                       the ratio meaningful. */}
-                  <p className="text-[13px] leading-5 text-slate-600 dark:text-slate-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                  <p className="text-[13px] leading-5 text-slate-600 dark:text-slate-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-3">
                     {clean(item.text)}
                   </p>
                 </Link>
@@ -204,7 +204,11 @@ export default function TelegramDiscussions({
                   href={`/${locale}/stories/${item.storyId}?tg=claims&hl=${encodeURIComponent(clean(item.text).slice(0, 40))}#telegram`}
                   className="block group border-b border-slate-100 dark:border-slate-800 pb-2 last:border-0 last:pb-0"
                 >
-                  <p className="text-[13px] leading-5 text-slate-600 dark:text-slate-400 group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors">
+                  <p
+                    className={`text-[13px] leading-5 text-slate-600 dark:text-slate-400 group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors ${
+                      cred ? "line-clamp-2" : "line-clamp-3"
+                    }`}
+                  >
                     {clean(item.text)}
                   </p>
                   {cred && (
