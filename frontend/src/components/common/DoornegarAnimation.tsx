@@ -84,11 +84,13 @@ const FIGURES: ShapeDef[][] = [
     { type: "line", cx: 0.38, cy: 0.78, s: 0.2, colorIdx: 2 },
     { type: "line", cx: 0.62, cy: 0.78, s: 0.2, colorIdx: 2 },
   ],
-  // Boat
+  // Boat — sail on top, short mast bridging, hull (apex-down triangle)
+  // with keel at bottom. The older diamond hull at s=0.5 dominated the
+  // canvas and the shapes didn't compose into a readable boat.
   [
-    { type: "triangle", cx: 0.55, cy: 0.3, s: 0.35, colorIdx: 2 },
-    { type: "diamond", cx: 0.5, cy: 0.65, s: 0.5, colorIdx: 0 },
-    { type: "line", cx: 0.5, cy: 0.55, s: 0.4, colorIdx: 1 },
+    { type: "triangle", cx: 0.55, cy: 0.28, s: 0.22, colorIdx: 2 },     // sail
+    { type: "line", cx: 0.55, cy: 0.5, s: 0.1, colorIdx: 1 },            // mast
+    { type: "triangleDown", cx: 0.5, cy: 0.7, s: 0.28, colorIdx: 0 },    // hull (keel down)
   ],
   // Bird
   [
