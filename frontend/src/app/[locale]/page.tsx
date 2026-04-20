@@ -528,6 +528,72 @@ export default async function HomePage({
   secondDisputed = disputedResorted[1] || null;
   thirdDisputed = disputedResorted[2] || null;
 
+  // Pre-compute تقابل روایت‌ها battle items here so we can exclude those
+  // story IDs from بیشترین اختلاف نگاه below. Without this, both boxes
+  // on the right column pulled from the same top-2 disputed stories,
+  // producing duplicate cards. Each story should appear in at most one
+  // of the two boxes (the third — "most visited" — is allowed to repeat).
+  type BattleItem = {
+    storyId: string;
+    title: string;
+    conservative: string;
+    opposition: string;
+    stateSummary: string;
+    diasporaSummary: string;
+  };
+  const battleItems: BattleItem[] = [];
+  const pickShort = (ws: string[]): string => {
+    const cleaned = ws.map(w => w.replace(/[«»]/g, "").trim()).filter(w => w.length >= 4);
+    if (!cleaned.length) return ws[0]?.replace(/[«»]/g, "") || "";
+    cleaned.sort((a, b) => a.length - b.length);
+    return cleaned[0];
+  };
+  // Scan the top 6 disputed candidates so we can still fill 2 battle
+  // items when the very top story lacks loaded_words / bias quotes.
+  for (const story of disputedResorted.slice(0, 6)) {
+    if (battleItems.length >= 2) break;
+    const analysis = allAnalyses[story.id];
+    if (!analysis) continue;
+    const words = analysis.loaded_words;
+    const stateSummary = analysis.state_summary_fa || "";
+    const diasporaSummary = analysis.diaspora_summary_fa || "";
+    const biasText = analysis.bias_explanation_fa;
+    if (words?.conservative?.length && words?.opposition?.length) {
+      battleItems.push({
+        storyId: story.id,
+        title: story.title_fa || "",
+        conservative: `«${pickShort(words.conservative)}»`,
+        opposition: `«${pickShort(words.opposition)}»`,
+        stateSummary,
+        diasporaSummary,
+      });
+      continue;
+    }
+    if (biasText) {
+      const quotes = biasText.match(/«[^»]+»/g);
+      if (quotes && quotes.length >= 2) {
+        battleItems.push({
+          storyId: story.id,
+          title: story.title_fa || "",
+          conservative: quotes[0],
+          opposition: quotes[1],
+          stateSummary,
+          diasporaSummary,
+        });
+        continue;
+      }
+    }
+  }
+  const battleIds = new Set(battleItems.map(b => b.storyId));
+
+  // بیشترین اختلاف نگاه: next disputed stories not already claimed by
+  // the battle box above. Falls back to the mostDisputed/secondDisputed
+  // set when the exclusion leaves nothing, so the box doesn't disappear
+  // on stories with no loaded_words.
+  const disputedForLowerBox = disputedResorted.filter(s => !battleIds.has(s.id)).slice(0, 2);
+  const mostDisputedBottom = disputedForLowerBox[0] || null;
+  const secondDisputedBottom = disputedForLowerBox[1] || null;
+
   const prefetchedTelegram: { storyId: string; analysis: any }[] = [];
   telegramAnalysisIds.forEach((id, i) => {
     if (telegramResults[i]) prefetchedTelegram.push({ storyId: id, analysis: telegramResults[i] });
@@ -841,74 +907,9 @@ export default async function HomePage({
               </span>
               <div className="space-y-5 px-4 pb-6 pt-8 flex-1 flex flex-col justify-between overflow-hidden">
                 {(() => {
-                  type BattleItem = {
-                    storyId: string;
-                    title: string;
-                    conservative: string;
-                    opposition: string;
-                    stateSummary: string;
-                    diasporaSummary: string;
-                  };
-                  const battleItems: BattleItem[] = [];
-
-                  for (const story of [mostDisputed, secondDisputed, thirdDisputed]) {
-                    if (!story) continue;
-                    const analysis = allAnalyses[story.id];
-                    if (!analysis) continue;
-
-                    const words = analysis.loaded_words;
-                    const stateSummary = analysis.state_summary_fa || "";
-                    const diasporaSummary = analysis.diaspora_summary_fa || "";
-                    const biasText = analysis.bias_explanation_fa;
-
-                    if (words?.conservative?.length && words?.opposition?.length) {
-                      // Pick the shortest meaningful phrase from each side's
-                      // loaded-words list. loaded_words[0] can be a long
-                      // string ("شناورهای وابسته به دشمن") that gets truncated
-                      // mid-word in the tight box. Filter out particles
-                      // (< 4 chars) and take the shortest remaining.
-                      const pickShort = (ws: string[]): string => {
-                        const cleaned = ws.map(w => w.replace(/[«»]/g, "").trim()).filter(w => w.length >= 4);
-                        if (!cleaned.length) return ws[0]?.replace(/[«»]/g, "") || "";
-                        cleaned.sort((a, b) => a.length - b.length);
-                        return cleaned[0];
-                      };
-                      battleItems.push({
-                        storyId: story.id,
-                        title: story.title_fa || "",
-                        conservative: `«${pickShort(words.conservative)}»`,
-                        opposition: `«${pickShort(words.opposition)}»`,
-                        stateSummary,
-                        diasporaSummary,
-                      });
-                      continue;
-                    }
-                    if (biasText) {
-                      const quotes = biasText.match(/«[^»]+»/g);
-                      if (quotes && quotes.length >= 2) {
-                        battleItems.push({
-                          storyId: story.id,
-                          title: story.title_fa || "",
-                          conservative: quotes[0],
-                          opposition: quotes[1],
-                          stateSummary,
-                          diasporaSummary,
-                        });
-                        continue;
-                      }
-                    }
-                    if (stateSummary && diasporaSummary) {
-                      battleItems.push({
-                        storyId: story.id,
-                        title: story.title_fa || "",
-                        conservative: "«روایت درون‌مرزی»",
-                        opposition: "«روایت برون‌مرزی»",
-                        stateSummary,
-                        diasporaSummary,
-                      });
-                    }
-                  }
-
+                  // battleItems is pre-computed above the JSX so the
+                  // lower box («بیشترین اختلاف نگاه») can exclude these
+                  // story IDs and avoid duplicating cards.
                   return battleItems.slice(0, 2).map((item, idx) => {
                     const inner = (
                       <>
@@ -968,17 +969,17 @@ export default async function HomePage({
                 up to 2 stories; hide the whole box if nothing qualifies
                 (no empty shells). Top 2 rotate as dispute_score shifts
                 from day to day. */}
-            {(mostDisputed || secondDisputed || thirdDisputed) && (
+            {(mostDisputedBottom || secondDisputedBottom) && (
               <div className="relative flex-1 min-h-0 border border-slate-300 dark:border-slate-600 flex flex-col">
                 <span className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10 text-[15px] font-black text-slate-900 dark:text-white px-3 bg-white dark:bg-[#0a0e1a] whitespace-nowrap">
                   بیشترین اختلاف نگاه
                 </span>
                 <div className="px-4 pb-4 pt-6 flex-1 overflow-hidden">
-                  {/* Cap at 2 stories per Parham's preference — three made
-                      the column feel overfull next to the 2-story تقابل
-                      box above. thirdDisputed still populated for analytics
-                      but not rendered here. */}
-                  {[mostDisputed, secondDisputed].filter(Boolean).map((story, i) => {
+                  {/* Stories shown here are disputed candidates that are
+                      NOT already in the تقابل روایت‌ها box above —
+                      prevents the same story appearing twice on the
+                      right column. */}
+                  {[mostDisputedBottom, secondDisputedBottom].filter(Boolean).map((story, i) => {
                     const s = story!;
                     const analysis = allAnalyses[s.id];
                     const stateSummary = analysis?.state_summary_fa;
