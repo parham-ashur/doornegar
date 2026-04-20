@@ -1363,23 +1363,50 @@ async def patch_source(
     body: dict,
     db: AsyncSession = Depends(get_db),
 ):
-    """Update editable fields on a source (is_active, logo_url, etc.).
+    """Update editable fields on a source.
 
-    Setting is_active=false skips the source in the next ingest run —
-    useful for feeds that are persistently geo-blocked from the server.
+    Editable fields:
+      - is_active: skip source in next ingest run (for dead/geo-blocked feeds)
+      - logo_url, name_fa, name_en: display metadata
+      - state_alignment: one of state/semi_state/independent/diaspora
+      - production_location: inside_iran / outside_iran
+      - factional_alignment: hardline/principlist/reformist/opposition/monarchist/radical/null
+      - irgc_affiliated: bool
+    The three classification fields drive the 4-subgroup narrative
+    taxonomy — edit them to reclassify a source from the HITL sources page.
     """
     result = await db.execute(select(Source).where(Source.slug == slug))
     source = result.scalar_one_or_none()
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
-    allowed = {"logo_url", "name_fa", "name_en", "is_active"}
+
+    STATE_ALIGNMENTS = {"state", "semi_state", "independent", "diaspora"}
+    PRODUCTION_LOCATIONS = {"inside_iran", "outside_iran"}
+    FACTION_VALUES = {"hardline", "principlist", "reformist", "opposition", "monarchist", "radical", None, ""}
+
+    allowed = {
+        "logo_url", "name_fa", "name_en", "is_active",
+        "state_alignment", "production_location", "factional_alignment",
+        "irgc_affiliated",
+    }
     changed = []
     for key in allowed:
-        if key in body:
-            setattr(source, key, body[key])
-            changed.append(key)
+        if key not in body:
+            continue
+        value = body[key]
+        if key == "state_alignment" and value not in STATE_ALIGNMENTS:
+            raise HTTPException(status_code=400, detail=f"state_alignment must be one of {sorted(STATE_ALIGNMENTS)}")
+        if key == "production_location" and value not in PRODUCTION_LOCATIONS:
+            raise HTTPException(status_code=400, detail=f"production_location must be one of {sorted(PRODUCTION_LOCATIONS)}")
+        if key == "factional_alignment":
+            if value not in FACTION_VALUES:
+                raise HTTPException(status_code=400, detail=f"factional_alignment must be one of {sorted(v for v in FACTION_VALUES if v)} or null")
+            if value == "":
+                value = None
+        setattr(source, key, value)
+        changed.append(key)
     if not changed:
-        raise HTTPException(status_code=400, detail=f"No valid fields. Allowed: {allowed}")
+        raise HTTPException(status_code=400, detail=f"No valid fields. Allowed: {sorted(allowed)}")
     await db.commit()
     return {"status": "ok", "slug": slug, "updated": changed, "is_active": source.is_active}
 
