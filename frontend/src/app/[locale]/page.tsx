@@ -997,16 +997,13 @@ export default async function HomePage({
                         </Link>
                         {(stateSummary || diasporaSummary) && (
                           <div className="mt-2 space-y-1">
-                            {/* Clamp raised 2 → 4 lines now that the box
-                                renders only 2 stories (was 3). Uses the
-                                empty vertical space for richer summary. */}
                             {stateSummary && (
-                              <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-4">
+                              <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-3">
                                 <span className="text-[#1e3a5f] dark:text-blue-300 font-medium">• </span>{stateSummary}
                               </p>
                             )}
                             {diasporaSummary && (
-                              <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-4">
+                              <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-3">
                                 <span className="text-[#ea580c] dark:text-orange-400 font-medium">در مقابل </span>{diasporaSummary}
                               </p>
                             )}
