@@ -15,6 +15,7 @@ import EditableTitle from "@/components/feedback/EditableTitle";
 import PriorityControl from "@/components/feedback/PriorityControl";
 import StoryFeedbackOverlay from "@/components/improvement/StoryFeedbackOverlay";
 import PublicFeedbackButton from "@/components/common/PublicFeedbackButton";
+import NarrativeDriftPanel from "@/components/story/NarrativeDriftPanel";
 import { getStory, getSources, getStoryAnalysis } from "@/lib/api";
 import { formatRelativeTime, toFa } from "@/lib/utils";
 
@@ -204,6 +205,7 @@ export default async function StoryDetailPage({
               );
             })}
           </div>
+          <NarrativeDriftPanel arcId={story.arc.id} currentStoryId={id} locale={locale} />
         </div>
       )}
 

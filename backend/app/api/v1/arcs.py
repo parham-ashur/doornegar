@@ -413,3 +413,86 @@ async def get_arc(arc_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> ArcR
     if not arc:
         raise HTTPException(status_code=404, detail="Arc not found")
     return await _arc_to_response(db, arc)
+
+
+# ─── Narrative drift ─────────────────────────────────────
+
+
+class DriftChapter(BaseModel):
+    story_id: str
+    title_fa: str | None
+    first_published_at: datetime | None
+    order: int
+    # Shortest meaningful loaded word for each side of the debate at
+    # this chapter's time. Empty string when that side had nothing
+    # substantial in the bias analysis.
+    inside_word: str
+    outside_word: str
+
+
+class DriftResponse(BaseModel):
+    arc_id: str
+    title_fa: str
+    chapters: list[DriftChapter]
+
+
+def _pick_short_word(words: list[str] | None) -> str:
+    """Shortest >= 4-char phrase from a loaded_words side list."""
+    if not words:
+        return ""
+    cleaned = [w.replace("«", "").replace("»", "").strip() for w in words]
+    cleaned = [w for w in cleaned if len(w) >= 4]
+    if not cleaned:
+        return ""
+    cleaned.sort(key=len)
+    return cleaned[0]
+
+
+@public_router.get("/{arc_id}/drift", response_model=DriftResponse)
+async def get_arc_drift(arc_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> DriftResponse:
+    """Narrative drift across an arc: the dominant loaded word each
+    side of the debate used at each chapter's time. Drives the "روایت
+    در حال تغییر" panel that visualizes how framing shifted as the
+    story unfolded.
+    """
+    import json as _json
+
+    arc = await db.get(StoryArc, arc_id)
+    if not arc:
+        raise HTTPException(status_code=404, detail="Arc not found")
+
+    rows = await db.execute(
+        select(
+            Story.id,
+            Story.title_fa,
+            Story.first_published_at,
+            Story.arc_order,
+            Story.summary_en,
+        )
+        .where(Story.arc_id == arc_id)
+        .order_by(Story.arc_order.asc().nullslast(), Story.first_published_at.asc().nullslast())
+    )
+    chapters: list[DriftChapter] = []
+    for i, r in enumerate(rows.all()):
+        loaded: dict = {}
+        if r.summary_en:
+            try:
+                blob = _json.loads(r.summary_en)
+                loaded = blob.get("loaded_words") or {}
+            except Exception:
+                loaded = {}
+        chapters.append(
+            DriftChapter(
+                story_id=str(r.id),
+                title_fa=r.title_fa,
+                first_published_at=r.first_published_at,
+                order=r.arc_order if r.arc_order is not None else i,
+                inside_word=_pick_short_word(loaded.get("conservative")),
+                outside_word=_pick_short_word(loaded.get("opposition")),
+            )
+        )
+    return DriftResponse(
+        arc_id=str(arc.id),
+        title_fa=arc.title_fa,
+        chapters=chapters,
+    )
