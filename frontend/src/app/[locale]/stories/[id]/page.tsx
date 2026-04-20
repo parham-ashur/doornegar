@@ -14,6 +14,7 @@ import SummaryRating from "@/components/feedback/SummaryRating";
 import EditableTitle from "@/components/feedback/EditableTitle";
 import PriorityControl from "@/components/feedback/PriorityControl";
 import StoryFeedbackOverlay from "@/components/improvement/StoryFeedbackOverlay";
+import PublicFeedbackButton from "@/components/common/PublicFeedbackButton";
 import { getStory, getSources, getStoryAnalysis } from "@/lib/api";
 import { formatRelativeTime, toFa } from "@/lib/utils";
 
@@ -165,6 +166,7 @@ export default async function StoryDetailPage({
       dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
     />
     <StoryFeedbackOverlay storyId={id} storyTitle={title} />
+    <PublicFeedbackButton storyId={id} />
     <div dir="rtl" className="mx-auto max-w-7xl px-4 py-8">
       {/* Arc chapter strip — visible only when this story is part of a
           curated arc. Shows all chapters in chronological order with

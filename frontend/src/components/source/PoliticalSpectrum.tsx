@@ -2,6 +2,12 @@
 
 import { useState } from "react";
 import type { Source } from "@/lib/types";
+import {
+  GROUP_COLORS,
+  GROUP_LABELS_FA,
+  NARRATIVE_GROUP_ORDER,
+  narrativeGroupOfSource,
+} from "@/lib/narrativeGroups";
 
 // Derive a favicon URL from a source's website when the DB has no
 // logo_url. Google's S2 service caches favicons for every domain we
@@ -203,6 +209,39 @@ export default function PoliticalSpectrum({ sources, sourceNeutrality }: Props) 
           ? <> محور عمودی میزان بی‌طرفی پوشش <strong className="text-slate-600 dark:text-slate-300">فقط در همین خبر</strong> را نشان می‌دهد — رسانه‌هایی که بالاتر قرار دارند پوشش متوازن‌تری داشته‌اند.</>
           : <> محور عمودی پس از تحلیل بعدی، میزان بی‌طرفی هر رسانه <strong className="text-slate-600 dark:text-slate-300">فقط در همین خبر</strong> را نشان خواهد داد.</>}
       </p>
+
+      {/* Subgroup legend — shows which sources fall in each of the 4
+          narrative subgroups. Transparency for readers about how we
+          classify sources. Computed locally from source metadata so
+          this stays in sync with the bar/pie-chart percentages above. */}
+      {sources.length > 0 && (
+        <div dir="rtl" className="mt-4 mx-6 border-t border-slate-200 dark:border-slate-800 pt-3 space-y-2">
+          <p className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+            دسته‌بندی زیرگروه‌ها
+          </p>
+          {NARRATIVE_GROUP_ORDER.map((group) => {
+            const members = sources.filter((s) => narrativeGroupOfSource(s) === group);
+            if (members.length === 0) return null;
+            return (
+              <div key={group} className="flex items-start gap-2 text-[13px]">
+                <span
+                  className="inline-block w-2 h-2 mt-1.5 shrink-0"
+                  style={{ backgroundColor: GROUP_COLORS[group] }}
+                />
+                <span
+                  className="font-bold shrink-0"
+                  style={{ color: GROUP_COLORS[group] }}
+                >
+                  {GROUP_LABELS_FA[group]}:
+                </span>
+                <span className="text-slate-600 dark:text-slate-400 leading-6">
+                  {members.map((m) => m.name_fa || m.name_en || m.slug).join("، ")}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

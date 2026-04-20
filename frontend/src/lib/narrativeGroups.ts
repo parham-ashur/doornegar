@@ -61,6 +61,31 @@ export const GROUPS_BY_SIDE: Record<Side, NarrativeGroup[]> = {
 };
 
 /**
+ * Mirror of backend `app.services.narrative_groups.narrative_group`.
+ * Classifies a Source object into one of the four narrative subgroups
+ * based on production_location + factional_alignment + state_alignment.
+ */
+export function narrativeGroupOfSource(source: {
+  production_location?: string | null;
+  factional_alignment?: string | null;
+  state_alignment?: string | null;
+}): NarrativeGroup {
+  const inside = source.production_location === "inside_iran";
+  const faction = source.factional_alignment || null;
+  const state = source.state_alignment || null;
+  if (inside) {
+    if (faction === "hardline" || faction === "principlist" || state === "state") {
+      return "principlist";
+    }
+    return "reformist";
+  }
+  if (faction === "opposition" || faction === "monarchist" || faction === "radical") {
+    return "radical_diaspora";
+  }
+  return "moderate_diaspora";
+}
+
+/**
  * Pull percentages out of a StoryBrief.
  *
  * Backwards compat: if `narrative_groups` is missing (older cached

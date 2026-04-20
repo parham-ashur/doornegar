@@ -27,6 +27,21 @@ function getSide(alignment: string | null | undefined): Side {
 
 export default function StoryTimeline({ articles }: Props) {
   const dayGroups = useMemo(() => {
+    // Tehran-local day key so two articles on the same Iranian day
+    // (the label) always land in the same group, even when their UTC
+    // date crosses midnight. Previously the dayKey used UTC ISO date
+    // while the label used the browser's locale, producing two "۱۹
+    // فروردین" blocks when one article was published before 03:30
+    // Tehran time and another after.
+    const tehranDayKey = (iso: string): string =>
+      new Date(iso).toLocaleDateString("en-CA", { timeZone: "Asia/Tehran" });
+    const tehranLabel = (iso: string): string =>
+      new Date(iso).toLocaleDateString("fa-IR", {
+        timeZone: "Asia/Tehran",
+        month: "short",
+        day: "numeric",
+      });
+
     const withDate = articles
       .filter((a) => a.published_at)
       .sort((a, b) => new Date(a.published_at!).getTime() - new Date(b.published_at!).getTime());
@@ -35,14 +50,19 @@ export default function StoryTimeline({ articles }: Props) {
     const seen = new Map<string, number>();
 
     for (const article of withDate) {
-      const dayKey = new Date(article.published_at!).toISOString().slice(0, 10);
+      const dayKey = tehranDayKey(article.published_at!);
       const side = getSide(article.source_state_alignment);
 
       if (seen.has(dayKey)) {
         groups[seen.get(dayKey)!][side].push(article);
       } else {
         seen.set(dayKey, groups.length);
-        const group = { day: dayKey, label: new Date(article.published_at!).toLocaleDateString("fa-IR", { month: "short", day: "numeric" }), conservative: [] as TimelineArticle[], opposition: [] as TimelineArticle[] };
+        const group = {
+          day: dayKey,
+          label: tehranLabel(article.published_at!),
+          conservative: [] as TimelineArticle[],
+          opposition: [] as TimelineArticle[],
+        };
         group[side].push(article);
         groups.push(group);
       }

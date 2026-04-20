@@ -19,7 +19,11 @@ function FramingTags({ framing }: { framing: string | string[] | null }) {
     <div className="flex items-center gap-1.5 flex-wrap mt-4">
       <span className="text-[13px] text-slate-500">چارچوب‌بندی:</span>
       {items.map((f, i) => (
-        <span key={i} className="px-2 py-0.5 text-[13px] border border-slate-300 dark:border-slate-700 font-medium text-slate-700 dark:text-slate-300">
+        <span
+          key={i}
+          className="framing-keyword px-2 py-0.5 text-[13px] border border-slate-300 dark:border-slate-700 font-medium text-slate-700 dark:text-slate-300"
+          data-keyword={(f || "").trim()}
+        >
           {f}
         </span>
       ))}
