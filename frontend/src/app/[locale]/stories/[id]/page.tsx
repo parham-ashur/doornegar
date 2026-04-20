@@ -15,7 +15,6 @@ import EditableTitle from "@/components/feedback/EditableTitle";
 import PriorityControl from "@/components/feedback/PriorityControl";
 import StoryFeedbackOverlay from "@/components/improvement/StoryFeedbackOverlay";
 import PublicFeedbackButton from "@/components/common/PublicFeedbackButton";
-import NarrativeDriftPanel from "@/components/story/NarrativeDriftPanel";
 import { getStory, getSources, getStoryAnalysis } from "@/lib/api";
 import { formatRelativeTime, toFa } from "@/lib/utils";
 
@@ -120,6 +119,28 @@ export default async function StoryDetailPage({
   const coveringSlugs = new Set(story.articles.map((a) => a.source_slug).filter(Boolean));
   const coveringSources = allSources.filter((s) => coveringSlugs.has(s.slug));
 
+  // Aggregate per-article evidence by source slug so the spectrum
+  // tooltip can show WHY a source got its neutrality number.
+  const sourceEvidence: Record<string, {
+    article_count: number;
+    loaded_total: number;
+    quote_count: number;
+    llm_scores: number[];
+  }> = {};
+  const evidence = analysis?.article_evidence || {};
+  for (const a of story.articles) {
+    const ev = evidence[a.id];
+    if (!a.source_slug || !ev) continue;
+    const agg = sourceEvidence[a.source_slug] ||= {
+      article_count: 0, loaded_total: 0, quote_count: 0, llm_scores: [],
+    };
+    agg.article_count += 1;
+    const hits = ev.loaded_hits || { principlist: 0, reformist: 0, moderate: 0, radical: 0 };
+    agg.loaded_total += (hits.principlist || 0) + (hits.reformist || 0) + (hits.moderate || 0) + (hits.radical || 0);
+    agg.quote_count += ev.quote_count || 0;
+    if (typeof ev.llm_neutrality === "number") agg.llm_scores.push(ev.llm_neutrality);
+  }
+
   // JSON-LD NewsArticle schema — feeds Google News, knowledge panels,
   // rich-result carousels. Must match the visible content: same
   // headline, same publish date, same image. Embedded via <script
@@ -169,46 +190,6 @@ export default async function StoryDetailPage({
     <StoryFeedbackOverlay storyId={id} storyTitle={title} />
     <PublicFeedbackButton storyId={id} />
     <div dir="rtl" className="mx-auto max-w-7xl px-4 py-8">
-      {/* Arc chapter strip — visible only when this story is part of a
-          curated arc. Shows all chapters in chronological order with
-          the current chapter highlighted, each linking to its story. */}
-      {story.arc && story.arc.chapters.length > 1 && (
-        <div className="mb-4 pb-4 border-b border-slate-200 dark:border-slate-800">
-          <div className="flex items-center gap-2 mb-2">
-            <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
-              قوس
-            </span>
-            <h2 className="text-[13px] font-black text-slate-700 dark:text-slate-300">
-              {story.arc.title_fa}
-            </h2>
-          </div>
-          <div className="flex items-center gap-1.5 flex-wrap">
-            {story.arc.chapters.map((ch, i) => {
-              const isCurrent = ch.story_id === id;
-              const isLast = i === story.arc!.chapters.length - 1;
-              return (
-                <span key={ch.story_id} className="flex items-center gap-1.5">
-                  {isCurrent ? (
-                    <span className="border-2 border-slate-900 dark:border-white bg-slate-900 dark:bg-white text-white dark:text-slate-900 px-2 py-0.5 text-[12px] font-bold">
-                      {ch.title_fa || "(بدون عنوان)"}
-                    </span>
-                  ) : (
-                    <Link
-                      href={`/${locale}/stories/${ch.story_id}`}
-                      className="border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:border-slate-900 dark:hover:border-white hover:text-slate-900 dark:hover:text-white px-2 py-0.5 text-[12px] transition-colors"
-                    >
-                      {ch.title_fa || "(بدون عنوان)"}
-                    </Link>
-                  )}
-                  {!isLast && <span className="text-slate-300 dark:text-slate-600 text-[12px]">←</span>}
-                </span>
-              );
-            })}
-          </div>
-          <NarrativeDriftPanel arcId={story.arc.id} currentStoryId={id} locale={locale} />
-        </div>
-      )}
-
       {/* Header */}
       <div className="mb-6 pb-6 border-b border-slate-200 dark:border-slate-800">
         <h1 className="text-2xl font-black leading-snug text-slate-900 dark:text-white md:text-3xl">
@@ -324,13 +305,19 @@ export default async function StoryDetailPage({
             highlightText={hlParam}
           />
 
-          {/* Political spectrum — desktop only */}
-          {coveringSources.length > 0 && (
+          {/* Political spectrum — desktop only. Hidden until the
+              Claude-scored neutrality audit has run for this story
+              (scripts/neutrality_audit.py). The LLM no longer produces
+              these scores, so `source_neutrality` is populated only
+              after a human-supervised pass. */}
+          {coveringSources.length > 0 &&
+            analysis?.source_neutrality &&
+            Object.keys(analysis.source_neutrality).length > 0 && (
             <div className="border-t border-slate-200 dark:border-slate-800 pt-4">
               <h3 className="text-sm font-black text-slate-900 dark:text-white mb-4 pb-2 border-b border-slate-200 dark:border-slate-800">
                 جایگاه رسانه‌ها
               </h3>
-              <PoliticalSpectrum sources={coveringSources} sourceNeutrality={analysis?.source_neutrality || null} />
+              <PoliticalSpectrum sources={coveringSources} sourceNeutrality={analysis.source_neutrality} sourceEvidence={sourceEvidence} />
             </div>
           )}
         </div>

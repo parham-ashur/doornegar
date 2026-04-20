@@ -30,12 +30,52 @@ Niloofar runs through Claude (this assistant) — no OpenAI in the loop. When Pa
        {
          "story_id": "uuid",
          "story_title": "current title (for logging)",
-         "fix_type": "rename_story|update_summary|update_narratives|merge_stories|update_image|update_claim|remove_article",
+         "fix_type": "rename_story|update_summary|update_narratives|merge_stories|update_image|update_claim|remove_article|update_neutrality",
          "fix_data": { ...fix-type-specific payload... }
        }
      ]
    }
    ```
+
+   **Neutrality scoring is part of every audit pass.** The gather JSON
+   now includes per-article `content`, `narrative_group`, `subgroup_fa`,
+   and a deterministic `evidence` dict (loaded-word hits, quote count,
+   word count) alongside each article. For every story where
+   `has_article_neutrality` is false, emit an `update_neutrality`
+   finding. The LLM pipeline no longer produces these scores — you do.
+
+   Rubric (same as the old LLM prompt, now applied by Claude):
+   - **+1.0** fully balanced (rare)
+   - **+0.5 to +0.8** mostly balanced, slight tilt
+   - **0 to +0.4** covers both sides with clear bias
+   - **−0.4 to 0** strong tilt
+   - **−0.5 to −0.8** one-sided
+   - **−1.0** totally one-sided, propaganda register
+
+   Judge each article on its own merits, not on the outlet's reputation.
+   A Kayhan piece that reports both sides deserves +0.3, even if Kayhan's
+   baseline is −0.6. The whole point of keeping this story-level is to
+   catch surprising moments of neutrality (or surprise bias) by outlets
+   you wouldn't expect.
+
+   `update_neutrality` payload shape:
+   ```json
+   {
+     "story_id": "uuid",
+     "story_title": "for logging",
+     "fix_type": "update_neutrality",
+     "fix_data": {
+       "article_neutrality": {
+         "<article_id>": -0.3,
+         "<article_id>": 0.4
+       }
+     }
+   }
+   ```
+
+   The applier aggregates per-source means automatically, stamps
+   `neutrality_source: "claude"` and a timestamp, and the
+   «جایگاه رسانه‌ها» panel becomes visible on the story page.
 
 4. **Applies** the findings file:
    ```bash

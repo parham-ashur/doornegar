@@ -71,12 +71,26 @@ function getSpectrumScore(source: Source): number {
   return 3;
 }
 
+/**
+ * Per-source aggregated evidence. Parent computes this by grouping
+ * `analysis.article_evidence` by the source_slug of each article.
+ * Surfaces on hover so the reader can see WHY a source got its
+ * neutrality number, not just the number itself.
+ */
+export interface SourceEvidence {
+  article_count: number;
+  loaded_total: number;
+  quote_count: number;
+  llm_scores: number[]; // per-article scores in this source
+}
+
 interface Props {
   sources: Source[];
   sourceNeutrality: Record<string, number> | null;
+  sourceEvidence?: Record<string, SourceEvidence> | null;
 }
 
-export default function PoliticalSpectrum({ sources, sourceNeutrality }: Props) {
+export default function PoliticalSpectrum({ sources, sourceNeutrality, sourceEvidence }: Props) {
   const columns: Record<number, { source: Source; neutrality: number }[]> = {};
   for (const s of sources) {
     const score = getSpectrumScore(s);
@@ -197,9 +211,17 @@ export default function PoliticalSpectrum({ sources, sourceNeutrality }: Props) 
                 }}
               >
                 <SourceBadge source={s} borderColor={borderColor} />
-                <div className="hidden md:block absolute -bottom-5 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-800 dark:bg-white text-white dark:text-slate-900 text-[13px] px-2 py-0.5 whitespace-nowrap pointer-events-none z-20 shadow-lg">
-                  {s.name_fa || s.name_en}
-                  {hasNeutrality && n !== 0 && <span className="mr-1 font-mono text-[13px]">({n > 0 ? "+" : ""}{n.toFixed(1)})</span>}
+                <div className="hidden md:block absolute -bottom-1 left-1/2 -translate-x-1/2 translate-y-full opacity-0 group-hover:opacity-100 transition-opacity bg-slate-800 dark:bg-white text-white dark:text-slate-900 text-[12px] px-2 py-1 whitespace-nowrap pointer-events-none z-20 shadow-lg text-right" dir="rtl">
+                  <div className="font-bold">
+                    {s.name_fa || s.name_en}
+                    {hasNeutrality && n !== 0 && <span className="mr-1 font-mono">({n > 0 ? "+" : ""}{n.toFixed(2)})</span>}
+                  </div>
+                  {sourceEvidence?.[s.slug] && (
+                    <div className="text-[10px] opacity-80 mt-0.5 space-y-0.5">
+                      <div>{sourceEvidence[s.slug].article_count} مقاله در این خبر</div>
+                      <div>{sourceEvidence[s.slug].loaded_total} واژهٔ بارگذاری‌شده · {sourceEvidence[s.slug].quote_count} نقل‌قول</div>
+                    </div>
+                  )}
                 </div>
               </div>
             ));

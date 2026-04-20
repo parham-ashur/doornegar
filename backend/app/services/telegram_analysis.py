@@ -396,11 +396,16 @@ def _build_track_records(posts: list) -> str:
 async def analyze_story_telegram(
     db: AsyncSession,
     story_id: str,
+    is_premium: bool = True,
 ) -> dict | None:
     """Two-pass deep analysis of Telegram discourse for a story.
 
-    Pass 1 (nano): Extract facts, themes, contradictions
-    Pass 2 (premium): Deep analysis with cross-story context + channel track records
+    Pass 1 (nano): Extract facts, themes, contradictions — skipped when
+        fewer than 5 analyst posts survive pass-0 (Pass 2 can read them
+        directly, facts extraction adds nothing at that scale).
+    Pass 2 (model depends on is_premium): Deep analysis with cross-story
+        context + channel track records. Top-5 trending stories pass
+        is_premium=True; the rest use the baseline model to cut tokens.
     """
     if not settings.openai_api_key:
         return None
@@ -534,8 +539,16 @@ async def analyze_story_telegram(
     posts_block = "\n".join(lines)
 
     # ── Pass 1: Extract facts (nano, cheap) ──
-    facts_data = await _pass1_extract_facts(posts_block)
-    facts_json = json.dumps(facts_data, ensure_ascii=False, indent=2) if facts_data else "استخراج حقایق ناموفق بود"
+    # Skip Pass 1 when the pool is thin — Pass 2 can read the posts
+    # directly, fact extraction adds no signal on <5 posts and burns a
+    # nano call per qualifying story.
+    if len(posts) < 5:
+        facts_data = None
+        facts_json = "(استخراج حقایق رد شد — تعداد پست‌های تحلیلی کمتر از ۵)"
+        logger.info(f"Telegram story {story_id}: skipping Pass 1 ({len(posts)} posts < 5)")
+    else:
+        facts_data = await _pass1_extract_facts(posts_block)
+        facts_json = json.dumps(facts_data, ensure_ascii=False, indent=2) if facts_data else "استخراج حقایق ناموفق بود"
 
     # ── Context: cross-story memory + track records ──
     cross_context = await _get_cross_story_context(db, story_id)
@@ -563,8 +576,14 @@ async def analyze_story_telegram(
         from app.services.llm_helper import build_openai_params
 
         client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
-        # Use baseline model for pass 2 (better quality)
-        model = getattr(settings, "baseline_model", None) or settings.translation_model
+        # Tier selection: top-5 trending stories use the premium model;
+        # #6-10 drop to baseline. Decided by the caller and passed via
+        # is_premium. Halves Pass 2 cost on non-lead stories while
+        # keeping the hero card tight.
+        if is_premium:
+            model = settings.story_analysis_premium_model
+        else:
+            model = settings.bias_scoring_model
         params = build_openai_params(
             model=model,
             prompt=prompt,

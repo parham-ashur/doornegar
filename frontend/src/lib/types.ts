@@ -231,6 +231,17 @@ export interface StoryAnalysis {
     independent: SideBiasScores | null;
   } | null;
   source_neutrality: Record<string, number> | null;
+  /** Per-article LLM neutrality scores (-1..1), keyed by article id. */
+  article_neutrality: Record<string, number> | null;
+  /** Per-article deterministic evidence. Keyed by article id. */
+  article_evidence: Record<string, {
+    loaded_hits: { principlist: number; reformist: number; moderate: number; radical: number };
+    quote_count: number;
+    word_count: number;
+    llm_neutrality: number | null;
+  }> | null;
+  /** ISO-8601 timestamp; present when analysis was frozen after story maturity. */
+  analysis_locked_at: string | null;
   dispute_score: number | null;
   loaded_words: { conservative: string[]; opposition: string[] } | null;
   narrative_arc: NarrativeArc | null;

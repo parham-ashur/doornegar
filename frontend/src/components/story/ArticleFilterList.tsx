@@ -1,8 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { ExternalLink, Clock } from "lucide-react";
-import { formatRelativeTime } from "@/lib/utils";
+import { Clock } from "lucide-react";
 import ArticleRelevanceButton from "@/components/feedback/ArticleRelevanceButton";
 import type { StoryArticleWithBias } from "@/lib/types";
 
@@ -61,6 +60,58 @@ export default function ArticleFilterList({ articles, storyId, sidebarSync }: Ar
         return true;
       });
 
+  // Group by (Tehran-day × source) so multiple articles from the same
+  // outlet on the same day collapse into one row. Saves vertical space
+  // on umbrella stories where one source publishes 5+ pieces in a day.
+  type Group = {
+    dayKey: string;
+    dayLabel: string;
+    sourceName: string;
+    sourceSlug: string | null;
+    alignment: string | null;
+    items: StoryArticleWithBias[];
+  };
+  const groupsMap = new Map<string, Group>();
+  for (const a of filtered) {
+    const pub = a.published_at ? new Date(a.published_at) : null;
+    const dayKey = pub ? pub.toLocaleDateString("en-CA", { timeZone: "Asia/Tehran" }) : "unknown";
+    const srcKey = a.source_slug || a.source_name_fa || a.source_name_en || "?";
+    const key = `${dayKey}::${srcKey}`;
+    let g = groupsMap.get(key);
+    if (!g) {
+      g = {
+        dayKey,
+        dayLabel: pub
+          ? pub.toLocaleDateString("fa-IR", {
+              timeZone: "Asia/Tehran",
+              year: "numeric",
+              month: "long",
+              day: "numeric",
+            })
+          : "",
+        sourceName: a.source_name_fa || a.source_name_en || "",
+        sourceSlug: a.source_slug,
+        alignment: a.source_state_alignment,
+        items: [],
+      };
+      groupsMap.set(key, g);
+    }
+    g.items.push(a);
+  }
+  const groups = Array.from(groupsMap.values());
+  // Newest day first; within a day order by source name for stability.
+  groups.sort((a, b) => {
+    if (a.dayKey !== b.dayKey) return b.dayKey.localeCompare(a.dayKey);
+    return a.sourceName.localeCompare(b.sourceName);
+  });
+  for (const g of groups) {
+    g.items.sort((x, y) => {
+      const tx = x.published_at ? new Date(x.published_at).getTime() : 0;
+      const ty = y.published_at ? new Date(y.published_at).getTime() : 0;
+      return ty - tx;
+    });
+  }
+
   return (
     <div dir="rtl">
       {/* Filter buttons */}
@@ -90,68 +141,88 @@ export default function ArticleFilterList({ articles, storyId, sidebarSync }: Ar
         })}
       </div>
 
-      {/* Article list */}
-      {filtered.length === 0 ? (
+      {/* Article list — grouped by day × source */}
+      {groups.length === 0 ? (
         <p className="text-sm text-slate-500 text-center py-8">مقاله‌ای یافت نشد</p>
       ) : (
         <div
           className={
-            filtered.length > 5
+            groups.length > 5
               ? "overflow-y-auto scrollbar-thin pr-1"
               : ""
           }
           style={
-            filtered.length > 5
+            groups.length > 5
               ? { maxHeight: "700px" }
               : undefined
           }
         >
           <div className="divide-y divide-slate-200 dark:divide-slate-800">
-            {filtered.map((article) => {
-              const title = article.title_fa || article.title_original;
-              const sourceName = article.source_name_fa || article.source_name_en;
-              const badge = getAlignmentBadge(article.source_state_alignment);
-
+            {groups.map((g) => {
+              const badge = getAlignmentBadge(g.alignment);
+              const head = g.items[0];
               return (
-                <div key={article.id} className="py-4">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-xs font-semibold text-slate-500">{sourceName}</span>
-                      {badge && (
-                        <span className={`text-[11px] font-bold ${badge.color}`}>
-                          {badge.label}
-                        </span>
-                      )}
-                    </div>
-                    <h3 className="text-sm font-bold leading-snug text-slate-900 dark:text-white line-clamp-2">
-                      {title}
-                    </h3>
-                    <div className="flex items-center gap-3 mt-1.5">
-                      {article.published_at && (
-                        <span className="inline-flex items-center gap-1 text-[11px] text-slate-400">
-                          <Clock className="h-3 w-3" />
-                          نشر {formatRelativeTime(article.published_at, "fa")}
-                        </span>
-                      )}
-                      <a
-                        href={article.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-[11px] text-blue-600 dark:text-blue-400 hover:underline"
-                      >
-                        مشاهده مقاله اصلی
-                        <ExternalLink className="h-3 w-3" />
-                      </a>
-                    </div>
-                    {storyId && (
-                      <ArticleRelevanceButton storyId={storyId} articleId={article.id} />
+                <div key={`${g.dayKey}::${g.sourceSlug || g.sourceName}`} className="py-4">
+                  <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                    <span className="text-xs font-semibold text-slate-500">{g.sourceName}</span>
+                    {badge && (
+                      <span className={`text-[11px] font-bold ${badge.color}`}>
+                        {badge.label}
+                      </span>
+                    )}
+                    {g.dayLabel && (
+                      <span className="inline-flex items-center gap-1 text-[11px] text-slate-400">
+                        <Clock className="h-3 w-3" />
+                        {g.dayLabel}
+                        {g.items.length > 1 && (
+                          <span className="mr-1 text-slate-400">· {g.items.length} مقاله</span>
+                        )}
+                      </span>
                     )}
                   </div>
+
+                  {/* Primary title = most recent article in the group. */}
+                  <a
+                    href={head.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block group"
+                  >
+                    <h3 className="text-sm font-bold leading-snug text-slate-900 dark:text-white line-clamp-2 group-hover:underline">
+                      {head.title_fa || head.title_original}
+                    </h3>
+                  </a>
+
+                  {/* Additional same-day titles from this source, stacked
+                      compact so they read as a cluster rather than their
+                      own cards. Each is its own link. */}
+                  {g.items.length > 1 && (
+                    <ul className="mt-1.5 space-y-1 border-r-2 border-slate-200 dark:border-slate-800 pr-2.5">
+                      {g.items.slice(1).map((a) => (
+                        <li key={a.id}>
+                          <a
+                            href={a.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[13px] leading-5 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:underline line-clamp-2"
+                          >
+                            {a.title_fa || a.title_original}
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+
+                  {storyId && (
+                    <div className="mt-1">
+                      <ArticleRelevanceButton storyId={storyId} articleId={head.id} />
+                    </div>
+                  )}
                 </div>
               );
             })}
           </div>
-          {filtered.length > 5 && (
+          {groups.length > 5 && (
             <div className="sticky bottom-0 h-8 bg-gradient-to-t from-white dark:from-[#0a0e1a] to-transparent pointer-events-none" />
           )}
         </div>

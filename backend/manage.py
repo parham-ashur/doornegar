@@ -157,6 +157,8 @@ async def summarize():
         for story in stories:
             articles_info = [
                 {
+                    "id": str(a.id),
+                    "source_slug": a.source.slug if a.source else None,
                     "title": a.title_original or a.title_fa or a.title_en or "",
                     "content": (a.content_text or a.summary or "")[:1500],
                     "source_name_fa": a.source.name_fa if a.source else "نامشخص",

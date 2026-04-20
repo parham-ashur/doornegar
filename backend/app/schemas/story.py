@@ -110,8 +110,16 @@ class StoryAnalysisResponse(BaseModel):
     independent_summary_fa: str | None = None
     bias_explanation_fa: str | None = None
     scores: dict[str, BiasScores | None] | None = None
-    # Per-source neutrality scores for 2D spectrum (-1.0 to +1.0)
+    # Per-source neutrality scores (mean of per-article scores) for 2D spectrum (-1.0 to +1.0)
     source_neutrality: dict[str, float] | None = None
+    # Per-article LLM neutrality scores, keyed by article_id
+    article_neutrality: dict[str, float] | None = None
+    # Per-article deterministic evidence — loaded-word hits, quote count,
+    # word count, and the LLM score alongside. Keyed by article_id.
+    article_evidence: dict[str, dict] | None = None
+    # When analysis was frozen (story matured past 48h past last_updated_at).
+    # Present as ISO-8601 string when set; absent otherwise.
+    analysis_locked_at: str | None = None
     # Dispute score (0-1) for "most disputed" homepage section
     dispute_score: float | None = None
     # Loaded words per side for "words of the week"

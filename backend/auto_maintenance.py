@@ -780,21 +780,48 @@ async def step_summarize():
             ids = sorted(str(a.id) for a in (story_obj.articles or []))
             return _hashlib.md5(",".join(ids).encode()).hexdigest()[:12]
 
+        # Maturity window — once a story has been stable for this long
+        # past its last_updated_at, we freeze the analysis (lock it and
+        # skip re-runs). Prevents per-story neutrality scores drifting
+        # across maintenance runs long after the story stopped evolving.
+        ANALYSIS_LOCK_HOURS = 48
+
         all_candidates: list[Story] = []
+        newly_locked = 0
         for s in scan_candidates:
             if s.summary_fa is None:
                 all_candidates.append(s)
                 continue
             # Check blob for the last-run article hash. If missing or
-            # different → re-analyze.
+            # different → re-analyze. Also read the lock timestamp.
             try:
                 b = _json.loads(s.summary_en) if s.summary_en else {}
             except Exception:
                 b = {}
+            # Already locked → never re-analyze.
+            if isinstance(b, dict) and b.get("analysis_locked_at"):
+                continue
             last_hash = b.get("articles_hash") if isinstance(b, dict) else None
             cur_hash = _articles_hash(s)
-            if last_hash != cur_hash:
+            needs_rerun = (last_hash != cur_hash)
+            # Maturity check — if story is older than the lock window AND
+            # has a real analysis, stamp the lock and skip re-running.
+            lu = s.last_updated_at
+            if lu is not None:
+                if lu.tzinfo is None:
+                    lu = lu.replace(tzinfo=timezone.utc)
+                age_h = (datetime.now(timezone.utc) - lu).total_seconds() / 3600.0
+                if age_h > ANALYSIS_LOCK_HOURS and isinstance(b, dict) and b.get("bias_explanation_fa"):
+                    b["analysis_locked_at"] = datetime.now(timezone.utc).isoformat()
+                    s.summary_en = _json.dumps(b, ensure_ascii=False)
+                    newly_locked += 1
+                    continue
+            if needs_rerun:
                 all_candidates.append(s)
+
+        if newly_locked:
+            logger.info(f"Summarize: locked {newly_locked} mature stories (>{ANALYSIS_LOCK_HOURS}h since last update)")
+            await db.commit()
 
         # 3. Rank by analysis priority (bias-richness, not just article count)
         def _analysis_priority(s: Story) -> float:
@@ -866,6 +893,8 @@ async def step_summarize():
             from app.services.narrative_groups import narrative_group as _ng
             articles_info = [
                 {
+                    "id": str(a.id),
+                    "source_slug": a.source.slug if a.source else None,
                     "title": a.title_original or a.title_fa or a.title_en or "",
                     "content": (a.content_text or a.summary or "")[:content_cap],
                     "source_name_fa": a.source.name_fa if a.source else "نامشخص",
@@ -942,6 +971,14 @@ async def step_summarize():
                     story.title_fa = analysis["title_fa"].strip()
                 if analysis.get("title_en") and analysis["title_en"].strip():
                     story.title_en = analysis["title_en"].strip()
+                # Preserve Claude-scored neutrality across LLM re-runs —
+                # the LLM no longer produces these fields, they come from
+                # scripts/neutrality_audit.py. Read old extras first and
+                # carry them forward.
+                try:
+                    old_extras = _json.loads(story.summary_en) if story.summary_en else {}
+                except Exception:
+                    old_extras = {}
                 extras = {
                     "state_summary_fa": analysis.get("state_summary_fa"),
                     "diaspora_summary_fa": analysis.get("diaspora_summary_fa"),
@@ -950,9 +987,14 @@ async def step_summarize():
                     "scores": analysis.get("scores"),
                     "llm_model_used": chosen_model,
                 }
-                # Store source neutrality scores for 2D spectrum chart
-                if analysis.get("source_neutrality"):
-                    extras["source_neutrality"] = analysis["source_neutrality"]
+                # Carry Claude-scored neutrality forward
+                for k in ("source_neutrality", "article_neutrality", "neutrality_source", "neutrality_scored_at"):
+                    if isinstance(old_extras, dict) and old_extras.get(k) is not None:
+                        extras[k] = old_extras[k]
+                # Deterministic evidence (loaded-word hits, quote count,
+                # word count) per article. Cheap, no LLM — fresh every run.
+                if analysis.get("article_evidence"):
+                    extras["article_evidence"] = analysis["article_evidence"]
                 # Store dispute score for homepage "most disputed" section
                 if analysis.get("dispute_score") is not None:
                     extras["dispute_score"] = analysis["dispute_score"]
@@ -1185,6 +1227,8 @@ async def step_story_quality():
                 from app.services.narrative_groups import narrative_group as _ng2
                 articles_info = [
                     {
+                        "id": str(a.id),
+                        "source_slug": a.source.slug if a.source else None,
                         "title": a.title_original or a.title_fa or a.title_en or "",
                         "content": (a.content_text or a.summary or "")[:1500],
                         "source_name_fa": a.source.name_fa if a.source else "نامشخص",
@@ -1203,16 +1247,24 @@ async def step_story_quality():
                         story.title_fa = analysis["title_fa"].strip()
                     if analysis.get("title_en"):
                         story.title_en = analysis["title_en"].strip()
-                    story.summary_en = _json.dumps({
+                    try:
+                        _old = _json.loads(story.summary_en) if story.summary_en else {}
+                    except Exception:
+                        _old = {}
+                    _new = {
                         "state_summary_fa": analysis.get("state_summary_fa"),
                         "diaspora_summary_fa": analysis.get("diaspora_summary_fa"),
                         "independent_summary_fa": analysis.get("independent_summary_fa"),
                         "bias_explanation_fa": analysis.get("bias_explanation_fa"),
                         "scores": analysis.get("scores"),
-                        "source_neutrality": analysis.get("source_neutrality"),
+                        "article_evidence": analysis.get("article_evidence"),
                         "dispute_score": analysis.get("dispute_score"),
                         "loaded_words": analysis.get("loaded_words"),
-                    }, ensure_ascii=False)
+                    }
+                    for k in ("source_neutrality", "article_neutrality", "neutrality_source", "neutrality_scored_at"):
+                        if isinstance(_old, dict) and _old.get(k) is not None:
+                            _new[k] = _old[k]
+                    story.summary_en = _json.dumps(_new, ensure_ascii=False)
                     stats["summaries_regenerated"] += 1
                     logger.info(f"  Regenerated summary: {story.title_fa[:40]}")
                 except Exception as e:
@@ -2096,7 +2148,22 @@ async def step_telegram_deep_analysis():
     from sqlalchemy import func, select
     from sqlalchemy.orm import selectinload
 
-    stats = {"analyzed": 0, "skipped_unchanged": 0, "skipped_no_data": 0, "errors": 0}
+    stats = {"analyzed": 0, "skipped_unchanged": 0, "skipped_locked": 0, "skipped_no_data": 0, "errors": 0}
+
+    # 48h maturity lock — same principle as step_summarize. Once a story
+    # has been stable for this long past its last_updated_at, freeze its
+    # telegram analysis too; re-runs after that rarely add signal and
+    # burn Pass 2 premium tokens.
+    TELEGRAM_LOCK_HOURS = 48
+    # Top-5 get the premium Pass 2 model; #6-10 drop to the baseline
+    # model to cut token cost without gutting the homepage's lead card.
+    PREMIUM_RANK_LIMIT = 5
+    # Raise the article floor: stories with <5 articles rarely have
+    # enough Telegram discourse to analyze well.
+    ARTICLE_COUNT_FLOOR = 5
+    # Cap the per-run queue — paired with the article floor this keeps
+    # daily Pass 2 calls well under the old ceiling.
+    MAX_STORIES = 10
 
     async with async_session() as db:
         subq = (
@@ -2110,9 +2177,9 @@ async def step_telegram_deep_analysis():
         result = await db.execute(
             select(Story.id, Story.title_fa, subq.c.post_count)
             .join(subq, Story.id == subq.c.story_id)
-            .where(Story.article_count >= 3)
+            .where(Story.article_count >= ARTICLE_COUNT_FLOOR)
             .order_by(Story.trending_score.desc())
-            .limit(15)
+            .limit(MAX_STORIES)
         )
         stories = result.all()
 
@@ -2126,8 +2193,26 @@ async def step_telegram_deep_analysis():
             )
             return _hashlib.sha1("|".join(parts).encode("utf-8")).hexdigest()[:16]
 
-        for story_id, title, post_count in stories:
+        for rank, (story_id, title, post_count) in enumerate(stories, 1):
             try:
+                story_obj = await db.get(Story, story_id)
+
+                # Maturity lock: story is old AND has an existing analysis
+                # → freeze it and never re-run. Also clears the budget
+                # slot for fresher stories.
+                if story_obj and story_obj.last_updated_at and isinstance(story_obj.telegram_analysis, dict) and story_obj.telegram_analysis:
+                    lu = story_obj.last_updated_at
+                    if lu.tzinfo is None:
+                        lu = lu.replace(tzinfo=timezone.utc)
+                    age_h = (datetime.now(timezone.utc) - lu).total_seconds() / 3600.0
+                    if age_h > TELEGRAM_LOCK_HOURS:
+                        if not story_obj.telegram_analysis.get("telegram_locked_at"):
+                            locked = dict(story_obj.telegram_analysis)
+                            locked["telegram_locked_at"] = datetime.now(timezone.utc).isoformat()
+                            story_obj.telegram_analysis = locked
+                        stats["skipped_locked"] += 1
+                        continue
+
                 # Fetch the live pool with the same filters analyze_story_telegram
                 # uses so the hash reflects what the analyzer would see.
                 pool_q = await db.execute(
@@ -2139,20 +2224,24 @@ async def step_telegram_deep_analysis():
                 pool = list(pool_q.scalars().all())
                 cur_hash = _posts_hash(pool) if pool else ""
 
-                story_obj = await db.get(Story, story_id)
                 if story_obj and isinstance(story_obj.telegram_analysis, dict):
                     prev_hash = story_obj.telegram_analysis.get("posts_hash")
                     if prev_hash and prev_hash == cur_hash:
                         stats["skipped_unchanged"] += 1
                         continue
 
-                analysis = await analyze_story_telegram(db, str(story_id))
+                # Top-5 use the premium Pass 2 model; the rest drop to
+                # baseline. Rank is the trending-ordered position from
+                # the SQL above.
+                is_premium = rank <= PREMIUM_RANK_LIMIT
+                analysis = await analyze_story_telegram(db, str(story_id), is_premium=is_premium)
                 if analysis:
                     analysis["posts_hash"] = cur_hash
                     if story_obj:
                         story_obj.telegram_analysis = analysis
                     stats["analyzed"] += 1
-                    logger.info(f"Telegram analysis for '{title}': {len(analysis.get('predictions', []))} predictions")
+                    tier = "premium" if is_premium else "baseline"
+                    logger.info(f"Telegram analysis [{tier}] for '{title}': {len(analysis.get('predictions', []))} predictions")
                 else:
                     stats["skipped_no_data"] += 1
             except Exception as e:

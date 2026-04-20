@@ -615,6 +615,63 @@ async def apply_fix(finding: dict) -> str:
                 return f"✗ شماره ادعا نامعتبر: {idx}"
             return "✗ تحلیل تلگرام یافت نشد"
 
+        elif fix_type == "update_neutrality":
+            # Payload: {"article_neutrality": {"<article_id>": -0.3, ...}}
+            # Aggregates to per-source means and stamps neutrality_source.
+            import json as _json
+            from datetime import datetime, timezone
+            story = await db.get(Story, story_id)
+            if not story:
+                return "✗ خبر یافت نشد"
+            raw_scores = fix_data.get("article_neutrality") or {}
+            if not isinstance(raw_scores, dict) or not raw_scores:
+                return "✗ article_neutrality خالی است"
+
+            # Clamp and coerce
+            article_scores: dict[str, float] = {}
+            for k, v in raw_scores.items():
+                try:
+                    article_scores[str(k)] = max(-1.0, min(1.0, float(v)))
+                except (TypeError, ValueError):
+                    continue
+            if not article_scores:
+                return "✗ هیچ امتیاز معتبری ارائه نشده"
+
+            # Need source info per article — load articles with source
+            from sqlalchemy.orm import selectinload as _sel
+            from app.models.article import Article as _Article
+            res = await db.execute(
+                select(Story).options(_sel(Story.articles).selectinload(_Article.source))
+                .where(Story.id == story_id)
+            )
+            story = res.scalar_one_or_none()
+            if not story:
+                return "✗ خبر یافت نشد"
+
+            per_source: dict[str, list[float]] = {}
+            for a in story.articles:
+                score = article_scores.get(str(a.id))
+                if score is None or not a.source:
+                    continue
+                per_source.setdefault(a.source.slug, []).append(score)
+            source_neutrality = {
+                slug: sum(v) / len(v) for slug, v in per_source.items()
+            }
+
+            try:
+                blob = _json.loads(story.summary_en) if story.summary_en else {}
+            except Exception:
+                blob = {}
+            if not isinstance(blob, dict):
+                blob = {}
+            blob["article_neutrality"] = article_scores
+            blob["source_neutrality"] = source_neutrality
+            blob["neutrality_source"] = "claude"
+            blob["neutrality_scored_at"] = datetime.now(timezone.utc).isoformat()
+            story.summary_en = _json.dumps(blob, ensure_ascii=False)
+            await db.commit()
+            return f"✓ بی‌طرفی ثبت شد ({len(article_scores)} مقاله → {len(source_neutrality)} رسانه)"
+
         elif fix_type == "pipeline_change":
             return f"📝 پیشنهاد ثبت شد: {fix_data.get('pipeline_description', '?')[:100]}"
 
@@ -665,13 +722,28 @@ async def gather_stories_json(limit: int = 25) -> dict:
             except Exception:
                 blob = {}
 
-        # Alignment distribution + article list
+        # Alignment distribution + article list. Include full-ish content
+        # and deterministic evidence so the same Niloofar audit session
+        # can also score per-article neutrality (−1..+1) without needing
+        # a second script run.
+        from app.services.narrative_groups import narrative_group as _ng
+        from app.services.story_analysis import _compute_article_evidence
+        SUBGROUP_FA_LOCAL = {
+            "principlist": "اصول‌گرا",
+            "reformist": "اصلاح‌طلب",
+            "moderate_diaspora": "میانه‌رو",
+            "radical_diaspora": "رادیکال",
+        }
         alignment_counts: dict[str, int] = {}
         articles_out: list[dict] = []
         for a in story.articles:
             if a.source:
                 align = a.source.state_alignment or "unknown"
                 alignment_counts[align] = alignment_counts.get(align, 0) + 1
+            content = (a.content_text or a.summary or "")[:2500]
+            art_dict = {"title": a.title_original or a.title_fa or a.title_en or "", "content": content}
+            evidence = _compute_article_evidence(art_dict) if a.source else None
+            group = _ng(a.source) if a.source else None
             articles_out.append({
                 "id": str(a.id),
                 "title_fa": (a.title_fa or a.title_original or "بدون عنوان")[:200],
@@ -679,6 +751,10 @@ async def gather_stories_json(limit: int = 25) -> dict:
                 "source_slug": a.source.slug if a.source else None,
                 "source_name_fa": a.source.name_fa if a.source else None,
                 "alignment": a.source.state_alignment if a.source else None,
+                "narrative_group": group,
+                "subgroup_fa": SUBGROUP_FA_LOCAL.get(group or "", "نامشخص"),
+                "content": content,
+                "evidence": evidence,
             })
 
         # Telegram claims (can be strings or dicts depending on pipeline version)
@@ -712,6 +788,10 @@ async def gather_stories_json(limit: int = 25) -> dict:
             "alignment_distribution": alignment_counts,
             "articles": articles_out[:15],
             "telegram_claims": claims_out[:8],
+            # Neutrality state — tells the auditor whether this story
+            # already has Claude-scored neutrality (skip) or needs a pass.
+            "neutrality_source": blob.get("neutrality_source"),
+            "has_article_neutrality": bool(blob.get("article_neutrality")),
         })
 
     return output
@@ -757,6 +837,7 @@ async def apply_from_file(path: str) -> dict:
         "merge_stories",
         "update_image",
         "update_claim",
+        "update_neutrality",
     }
 
     for i, finding in enumerate(findings, 1):

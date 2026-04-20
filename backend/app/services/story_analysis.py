@@ -31,6 +31,59 @@ SUBGROUP_LABELS_FA = {
 }
 
 
+# Loaded-word dictionaries per subgroup — deterministic bias signals.
+# Mirror the vocabulary examples in the LLM prompt so the evidence we
+# surface in the UI matches the framing rubric. Persian surface forms;
+# substring match is fine because these are full words, not roots.
+LOADED_WORDS_FA = {
+    "principlist": [
+        "فتنه", "اغتشاش", "شهید", "شهدا", "مقاومت", "دشمن",
+        "عوامل بیگانه", "ضدانقلاب", "تحریم ظالمانه", "محور مقاومت",
+        "پیروزی", "استکبار",
+    ],
+    "reformist": [
+        "اصلاحات", "گفت‌وگو", "جامعه مدنی", "حقوق شهروندی",
+        "مسئولیت‌پذیری", "راه‌حل سیاسی", "مذاکره",
+    ],
+    "moderate": [
+        "معترضان", "کشته‌شدگان", "نیروهای امنیتی", "حقوق بشر",
+        "شفافیت", "گزارش‌گر",
+    ],
+    "radical": [
+        "قیام", "سرکوب", "کشتار", "رژیم", "رژیم ایران",
+        "براندازی", "زندانی سیاسی", "جمهوری اسلامی",
+    ],
+}
+
+
+def _compute_article_evidence(art: dict) -> dict:
+    """Deterministic per-article bias features — no LLM.
+
+    Counts loaded-word hits per subgroup, direct-quote markers (« »),
+    and rough word count from the body. Used alongside the LLM
+    neutrality score to make the number auditable.
+    """
+    text = (art.get("content") or "") + " " + (art.get("title") or "")
+    hits: dict[str, int] = {}
+    for subgroup, words in LOADED_WORDS_FA.items():
+        c = 0
+        for w in words:
+            if not w:
+                continue
+            c += text.count(w)
+        hits[subgroup] = c
+    # Quote markers — Persian guillemet pair. Count matched pairs by
+    # taking the min of opening/closing so unbalanced quotes don't
+    # inflate the number.
+    quote_open = text.count("«")
+    quote_close = text.count("»")
+    return {
+        "loaded_hits": hits,
+        "quote_count": min(quote_open, quote_close),
+        "word_count": len(text.split()),
+    }
+
+
 def _narrative_group_from_dict(art: dict) -> str:
     """Derive a narrative subgroup from a plain article dict.
 
@@ -128,22 +181,6 @@ bias_explanation_fa باید **عمیق، مشخص و بدون هم‌پوشان
 # مثلاً: conservative: ["پیروزی بزرگ", "محور مقاومت", "تسلیم دشمن"]
 # مثلاً: opposition: ["آتش‌بس شکننده", "قطع اینترنت", "بحران انسانی"]
 
-# امتیاز بی‌طرفی رسانه‌ها (برای نمودار جایگاه رسانه‌ها)
-
-برای هر رسانه‌ای که در این مجموعه مقالات حضور دارد، یک امتیاز بی‌طرفی بدهید.
-
-مقیاس روشن و نامتقارن نیست — خنثی بودن سخت و نادر است، اکثر رسانه‌ها تمایلی دارند. دست‌ودل‌بازی در دادن امتیازهای بالا پذیرفته نیست، اما بُخل هم همین‌طور: اگر گزارش واقعاً هر دو طرف را با واژگان خنثی پوشش داده، امتیاز ۰.۸+ بدهید بدون تردید.
-
-- **۱.۰**: پوشش کاملاً متوازن — هر دو طرف با فرصت برابر نقل شده‌اند، بدون واژگان بارگذاری‌شده، ارقام از منابع مستقل ذکر شده‌اند، هیچ قاب‌بندی ارزیابی‌گرانه ندارد. نمونهٔ نادر.
-- **۰.۵ تا ۰.۸**: گزارش عمدتاً متوازن با تمایل جزئی — هر دو طرف نقل شده‌اند ولی یکی کمی برجسته‌تر، یا چند واژهٔ انتخابی، یا ترتیب ارائه.
-- **۰.۰ تا ۰.۴**: گزارش دو طرف را نقل می‌کند اما با تمایل مشخص — قاب‌بندی یک طرف قوی‌تر، واژگان هشداردهنده فقط برای یک طرف، آمار انتخابی.
-- **−۰.۴ تا ۰.۰**: تمایل قوی — عمدتاً روایت یک طرف، طرف مقابل فقط برای نمایش پاسخ یا رد شود، واژگان بارگذاری‌شده.
-- **−۰.۵ تا −۰.۸**: یک‌طرفه — فقط روایت یک سمت با نقل کوتاه و بی‌اعتنا از طرف مقابل، لحن تبلیغاتی یا هشداردهنده، واژگان بارگذاری‌شده بدون گیومه.
-- **−۱.۰**: تماماً یک‌طرفه — فقط یک روایت، بدون هیچ اشاره‌ای به طرف مقابل، لحن تبلیغاتی مستقیم.
-
-- فرمت: slug رسانه → عدد. مثلاً: {{"bbc-persian": 0.7, "fars-news": -0.6, "tabnak": 0.1}}
-- فقط slugهایی که در لیست مقالات بالا آمده‌اند. از ذکر رسانه‌های غایب خودداری کن.
-
 # خروجی
 
 فقط JSON. بدون توضیح اضافی، بدون بلوک کد markdown.
@@ -170,10 +207,6 @@ bias_explanation_fa باید **عمیق، مشخص و بدون هم‌پوشان
     "state": {{"framing": ["حداکثر ۳ از: مقاومت، پیروزی، قربانی، تهدید، بحران، امنیت، حقوق بشر، اقتصادی، دخالت خارجی، خنثی"]}},
     "diaspora": {{"framing": ["حداکثر ۳"]}},
     "independent": {{"framing": ["حداکثر ۳"]}}
-  }},
-  "source_neutrality": {{
-    "<slug رسانه ۱>": <عدد -1.0 تا 1.0>,
-    "<slug رسانه ۲>": <عدد -1.0 تا 1.0>
   }},
   "dispute_score": <عدد 0.0 تا 1.0 — میزان تناقض بین روایت‌ها. 0=توافق، 0.5=اختلاف قابل‌توجه، 1=تناقض کامل>,
   "loaded_words": {{
@@ -441,7 +474,27 @@ async def generate_story_analysis(
         )
         response = await client.chat.completions.create(**params)
         response_text = response.choices[0].message.content
-        return _parse_analysis_response(response_text)
+        result = _parse_analysis_response(response_text)
+
+        # Compute deterministic per-article evidence (loaded-word hits,
+        # quote count, word count) so the local Claude audit can read
+        # them directly without re-running the extractor. Neutrality
+        # scores themselves are no longer produced by the LLM — they
+        # come from scripts/neutrality_audit.py (Claude-scored).
+        article_evidence: dict[str, dict] = {}
+        for art in articles_with_sources:
+            art_id = art.get("id")
+            if not art_id:
+                continue
+            article_evidence[art_id] = _compute_article_evidence(art)
+
+        result["article_evidence"] = article_evidence or None
+        # Never overwrite an existing Claude-scored neutrality with the
+        # LLM's (none) — the caller merges this with the story's prior
+        # analysis blob.
+        result.pop("article_neutrality", None)
+        result.pop("source_neutrality", None)
+        return result
 
     except openai.APIError as e:
         logger.error(f"OpenAI API error for story {story.id}: {e}")
@@ -476,7 +529,7 @@ def _parse_analysis_response(response_text: str) -> dict:
         "independent_summary_fa": None,
         "bias_explanation_fa": None,
         "scores": None,
-        "source_neutrality": None,
+        "article_neutrality": None,
         "dispute_score": None,
         "loaded_words": None,
         "narrative_arc": None,
