@@ -629,11 +629,13 @@ export default async function HomePage({
       {/* ═══ TOP SECTION: Blind spots | Hero | Telegram ═══ */}
       <div className="grid grid-cols-12 gap-0 border-b-2 border-slate-300 dark:border-slate-700">
 
-        {/* RIGHT: Telegram discussions — no fixed max-height; CSS grid
-            stretches this column to match the hero's natural height
-            (image + title + bias + tg strip ≈ 780px). Previously
-            capped at 700px which left a visible gap under the hero. */}
-        <div className="col-span-3 py-6 pl-6 border-l border-slate-200 dark:border-slate-800 flex flex-col overflow-hidden">
+        {/* RIGHT: Telegram discussions. Cap at ~780px so the hero card
+            (image 16:9 + title + bias + tg strip) drives the row height
+            instead of the sidebar. Lifting the cap made the sidebar
+            content grow taller than the hero and pushed the whole row
+            down; restoring a slightly-larger-than-700 ceiling keeps
+            everything aligned. */}
+        <div className="col-span-3 py-6 pl-6 border-l border-slate-200 dark:border-slate-800 flex flex-col overflow-hidden" style={{ maxHeight: 780 }}>
           <h3 className="text-[15px] font-black text-slate-900 dark:text-white mb-3 pb-2 border-b border-slate-200 dark:border-slate-800 shrink-0">
             تحلیل روایت‌های تلگرام
           </h3>
