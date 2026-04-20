@@ -206,7 +206,7 @@ export default function TelegramDiscussions({
                 >
                   <p
                     className={`text-[13px] leading-5 text-slate-600 dark:text-slate-400 group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors ${
-                      cred ? "line-clamp-2" : "line-clamp-3"
+                      cred ? "line-clamp-3" : "line-clamp-4"
                     }`}
                   >
                     {clean(item.text)}
