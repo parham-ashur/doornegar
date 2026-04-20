@@ -544,11 +544,15 @@ async def apply_fix(finding: dict) -> str:
                 )
             except Exception:
                 pass
-            # Hide source story
+            # Hide source story. Also clear any arc membership so arc
+            # displays don't show an empty "ghost" chapter for the now-
+            # merged story.
             source = await db.get(Story, story_id)
             if source:
                 source.article_count = 0
                 source.trending_score = -100
+                source.arc_id = None
+                source.arc_order = None
             # Recount target
             actual = (await db.execute(
                 select(func.count(Article.id)).where(Article.story_id == target_id)
