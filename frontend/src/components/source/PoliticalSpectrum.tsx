@@ -103,8 +103,10 @@ export default function PoliticalSpectrum({ sources, sourceNeutrality }: Props) 
 
   return (
     <div>
-      {/* Chart — NO dir=rtl, we position manually */}
-      <div className="relative mx-6" style={{ height: Math.max(280, sources.length * 40) }}>
+      {/* Chart — NO dir=rtl, we position manually. Height grows with
+          source count but stays tight at low counts so small stories
+          don't show empty space above/below the logos. */}
+      <div className="relative mx-6" style={{ height: Math.max(200, sources.length * 30) }}>
 
         {/* X-axis gradient line */}
         <div className="absolute z-0 flex items-center" style={{ top: "50%", transform: "translateY(-50%)", left: "8%", right: "8%" }}>
@@ -126,7 +128,7 @@ export default function PoliticalSpectrum({ sources, sourceNeutrality }: Props) 
           <div
             key={i}
             className="absolute w-px bg-slate-200 dark:bg-slate-700/30 z-0"
-            style={{ left: `${10 + (i / 5) * 80}%`, top: "15%", bottom: "15%" }}
+            style={{ left: `${10 + (i / 5) * 80}%`, top: "8%", bottom: "8%" }}
           />
         ))}
 
@@ -145,12 +147,15 @@ export default function PoliticalSpectrum({ sources, sourceNeutrality }: Props) 
                 let yPct: number;
                 if (hasNeutrality) {
                   const clampedN = Math.max(-1, Math.min(1, n));
-                  yPct = 15 + (1 - (clampedN + 1) / 2) * 70;
+                  // Use 8% → 92% vertical range (was 15% → 85%) so
+                  // logos hug the top/bottom edges and the chart box
+                  // doesn't show wide empty bands.
+                  yPct = 8 + (1 - (clampedN + 1) / 2) * 84;
                 } else {
                   if (items.length === 1) {
                     yPct = 50;
                   } else {
-                    yPct = 20 + (idx / (items.length - 1)) * 60;
+                    yPct = 12 + (idx / (items.length - 1)) * 76;
                   }
                 }
 
