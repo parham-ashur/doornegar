@@ -685,12 +685,12 @@ export default async function HomePage({
                   {" "}{heroTelegram.discourse_summary}
                 </p>
                 {heroTelegram.predictions && heroTelegram.predictions.length > 0 && (
-                  <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-1">
+                  <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1">
                     <span className="font-bold text-blue-500">پیش‌بینی:</span> {predictionText(heroTelegram.predictions[0])}
                   </p>
                 )}
                 {heroTelegram.key_claims && heroTelegram.key_claims.length > 0 && (
-                  <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-1">
+                  <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1">
                     <span className="font-bold text-amber-500">ادعا:</span> {claimText(heroTelegram.key_claims[0])}
                   </p>
                 )}
@@ -807,12 +807,12 @@ export default async function HomePage({
                           {" "}{tg.discourse_summary}
                         </p>
                         {tg.predictions && tg.predictions.length > 0 && (
-                          <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-1">
+                          <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1">
                             <span className="font-bold text-blue-500">پیش‌بینی:</span> {predictionText(tg.predictions[0])}
                           </p>
                         )}
                         {tg.key_claims && tg.key_claims.length > 0 && (
-                          <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-1">
+                          <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1">
                             <span className="font-bold text-amber-500">ادعا:</span> {claimText(tg.key_claims[0])}
                           </p>
                         )}
@@ -1094,12 +1094,12 @@ export default async function HomePage({
                           <p key={j} className="text-[14px] leading-5 text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-2">• {b}</p>
                         ))}
                         {tg?.predictions && tg.predictions.length > 0 && (
-                          <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-2">
+                          <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1">
                             <span className="font-bold text-blue-500">پیش‌بینی:</span> {predictionText(tg.predictions[0])}
                           </p>
                         )}
                         {tg?.key_claims && tg.key_claims.length > 0 && (
-                          <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-2">
+                          <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-0.5">
                             <span className="font-bold text-amber-500">ادعا:</span> {claimText(tg.key_claims[0])}
                           </p>
                         )}
@@ -1255,12 +1255,12 @@ function MobileHome({
               {" "}{heroTelegram.discourse_summary}
             </p>
             {firstPredictionText && (
-              <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-500 mt-1.5 line-clamp-2">
+              <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-500 mt-1.5">
                 <span className="font-bold text-blue-500">پیش‌بینی:</span> {firstPredictionText}
               </p>
             )}
             {firstClaimText && (
-              <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-500 mt-1 line-clamp-2">
+              <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-500 mt-1">
                 <span className="font-bold text-amber-500">ادعا:</span> {firstClaimText}
               </p>
             )}
