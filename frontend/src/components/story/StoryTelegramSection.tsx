@@ -114,11 +114,13 @@ export default function StoryTelegramSection({ storyId, initialTab, highlightTex
 
   if (noData || !analysis) {
     return (
-      <p className="text-[13px] text-slate-400">
-        {postCount > 0
-          ? `${postCount} پست — تحلیل عمیق در اجرای بعدی`
-          : "هنوز پستی از تلگرام دریافت نشده"}
-      </p>
+      <div className="border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/40 p-3">
+        <p className="text-[13px] leading-6 text-slate-500 dark:text-slate-400">
+          {postCount > 0
+            ? `تا الان ${postCount} پست مرتبط در تلگرام جمع شده است، اما برای تحلیل عمیق (پیش‌بینی‌ها، ادعاهای کلیدی، اجماع و اختلاف) به تعداد بیشتری پست از کانال‌های تحلیلی نیاز داریم. به‌محض رسیدن تعداد لازم، این بخش خودکار تکمیل می‌شود.`
+            : "این خبر هنوز در کانال‌های تحلیلی تلگرام بازتاب نیافته است. به‌محض انتشار تعداد مناسبی پست، پیش‌بینی‌ها و ادعاهای کلیدی در همین بخش نمایش داده می‌شوند."}
+        </p>
+      </div>
     );
   }
 

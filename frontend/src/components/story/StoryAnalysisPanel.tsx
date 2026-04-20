@@ -77,7 +77,23 @@ export default function StoryAnalysisPanel({ analysis }: { analysis: StoryAnalys
     analysis?.diaspora_summary_fa ||
     analysis?.narrative?.inside ||
     analysis?.narrative?.outside;
-  if (!analysis || !hasBias) return null;
+  // Empty-state: story is too new / coverage too thin for a comparison.
+  // Explain why and that it will auto-fill, instead of hiding the section
+  // entirely or showing empty tabs.
+  if (!analysis || !hasBias) {
+    return (
+      <div dir="rtl" className="border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/40 p-4">
+        <h3 className="text-[13px] font-black text-slate-700 dark:text-slate-300 mb-2">
+          تحلیل سوگیری و مقایسهٔ روایت‌ها
+        </h3>
+        <p className="text-[13px] leading-6 text-slate-500 dark:text-slate-400">
+          این خبر تازه ثبت شده است. برای مقایسهٔ روایت درون‌مرزی و برون‌مرزی و تحلیل سوگیری،
+          به پوشش از چند رسانه از هر دو طرف نیاز داریم. به‌محض آماده‌شدن تحلیل، این بخش
+          به‌طور خودکار پُر می‌شود.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div dir="rtl">
