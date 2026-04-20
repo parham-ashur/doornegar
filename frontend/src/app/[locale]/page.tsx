@@ -864,11 +864,22 @@ export default async function HomePage({
                     const biasText = analysis.bias_explanation_fa;
 
                     if (words?.conservative?.length && words?.opposition?.length) {
+                      // Pick the shortest meaningful phrase from each side's
+                      // loaded-words list. loaded_words[0] can be a long
+                      // string ("شناورهای وابسته به دشمن") that gets truncated
+                      // mid-word in the tight box. Filter out particles
+                      // (< 4 chars) and take the shortest remaining.
+                      const pickShort = (ws: string[]): string => {
+                        const cleaned = ws.map(w => w.replace(/[«»]/g, "").trim()).filter(w => w.length >= 4);
+                        if (!cleaned.length) return ws[0]?.replace(/[«»]/g, "") || "";
+                        cleaned.sort((a, b) => a.length - b.length);
+                        return cleaned[0];
+                      };
                       battleItems.push({
                         storyId: story.id,
                         title: story.title_fa || "",
-                        conservative: `«${words.conservative[0].replace(/[«»]/g, "")}»`,
-                        opposition: `«${words.opposition[0].replace(/[«»]/g, "")}»`,
+                        conservative: `«${pickShort(words.conservative)}»`,
+                        opposition: `«${pickShort(words.opposition)}»`,
                         stateSummary,
                         diasporaSummary,
                       });
