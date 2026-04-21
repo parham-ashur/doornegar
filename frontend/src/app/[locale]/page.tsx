@@ -980,12 +980,12 @@ export default async function HomePage({
                         {(item.stateSummary || item.diasporaSummary) && (
                           <div className="mt-3 space-y-1">
                             {item.stateSummary && (
-                              <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">
+                              <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-3">
                                 <span className="text-[#1e3a5f] dark:text-blue-300 font-bold">• </span>{item.stateSummary}
                               </p>
                             )}
                             {item.diasporaSummary && (
-                              <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">
+                              <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-3">
                                 <span className="text-[#ea580c] dark:text-orange-400 font-bold">در مقابل </span>{item.diasporaSummary}
                               </p>
                             )}
