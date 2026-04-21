@@ -1112,6 +1112,25 @@ export default function DashboardPage() {
         </button>
       </div>
 
+      {/* Hub banner — new workflow-oriented landing. Links explicitly
+          rather than auto-redirecting so existing muscle memory still
+          lands here. */}
+      <a
+        href="/fa/dashboard/hub"
+        className="mb-6 flex items-center justify-between gap-3 border border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/30 px-4 py-3 hover:border-blue-500 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <span className="text-lg">⚡</span>
+          <div>
+            <p className="text-sm font-bold text-blue-900 dark:text-blue-200">New: Workflow Hub</p>
+            <p className="text-xs text-blue-700 dark:text-blue-300">
+              Today's attention items, project priorities (IID legal + product), and keyboard-navigable HITL queue in one place.
+            </p>
+          </div>
+        </div>
+        <span className="text-xs font-mono text-blue-600 dark:text-blue-400">open →</span>
+      </a>
+
       {/* Stat Cards */}
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard icon={<Newspaper className="h-5 w-5 text-blue-600 dark:text-blue-400" />} iconBg="bg-blue-100 dark:bg-blue-900/20" label="Total Articles" value={d.articles.total.toLocaleString()} sub={`${d.articles.last_24h} in last 24h`} />
