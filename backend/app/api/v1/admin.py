@@ -1844,6 +1844,99 @@ async def cost_pricing():
     }
 
 
+# === Maintenance step triggers (for the /dashboard/actions page) ===
+# These expose individual maintenance steps as one-click buttons on the
+# admin dashboard. All are admin-gated. Responses include stats so the
+# dashboard can render "what just happened" without a second call.
+
+@router.post("/maintenance/recluster-orphans", dependencies=[Depends(require_admin)])
+async def trigger_recluster_orphans():
+    """Retry-cluster orphan articles older than 6h with a looser 0.40
+    cosine threshold. Pure math, zero LLM. Caps at 500/run."""
+    try:
+        import sys
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[3]
+        if str(root) not in sys.path:
+            sys.path.insert(0, str(root))
+        from auto_maintenance import step_recluster_orphans
+        stats = await step_recluster_orphans()
+        return {"status": "ok", "stats": stats}
+    except Exception as e:
+        logger.exception("recluster-orphans failed")
+        return {"status": "error", "error": str(e)}
+
+
+@router.post("/maintenance/merge-tiny-cosine", dependencies=[Depends(require_admin)])
+async def trigger_merge_tiny_cosine():
+    """Deterministic pre-merge: fold pairs of stories with
+    article_count ≤ 4 and centroid cosine ≥ 0.60 into the larger one.
+    Pure math, zero LLM."""
+    try:
+        from app.database import async_session
+        from app.services.clustering import _merge_tiny_by_cosine
+        async with async_session() as db:
+            merged = await _merge_tiny_by_cosine(db)
+        return {"status": "ok", "stats": {"merged": merged}}
+    except Exception as e:
+        logger.exception("merge-tiny-cosine failed")
+        return {"status": "error", "error": str(e)}
+
+
+@router.post("/maintenance/prune-stagnant", dependencies=[Depends(require_admin)])
+async def trigger_prune_stagnant():
+    """Delete 1-article stories older than 48h and 2-4 article stories
+    older than 14 days. Safe — is_edited stories are preserved."""
+    try:
+        import sys
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[3]
+        if str(root) not in sys.path:
+            sys.path.insert(0, str(root))
+        from auto_maintenance import step_prune_stagnant
+        stats = await step_prune_stagnant()
+        return {"status": "ok", "stats": stats}
+    except Exception as e:
+        logger.exception("prune-stagnant failed")
+        return {"status": "error", "error": str(e)}
+
+
+@router.post("/maintenance/prune-noise", dependencies=[Depends(require_admin)])
+async def trigger_prune_noise():
+    """Drop unlinked/unprocessed articles and Telegram posts with
+    too-short content. Includes the <200-char RSS orphan sweep."""
+    try:
+        import sys
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[3]
+        if str(root) not in sys.path:
+            sys.path.insert(0, str(root))
+        from auto_maintenance import step_prune_noise
+        stats = await step_prune_noise()
+        return {"status": "ok", "stats": stats}
+    except Exception as e:
+        logger.exception("prune-noise failed")
+        return {"status": "error", "error": str(e)}
+
+
+@router.post("/maintenance/recompute-centroids", dependencies=[Depends(require_admin)])
+async def trigger_recompute_centroids():
+    """Recompute centroid_embedding for stories whose centroid is NULL.
+    Needed after merges and manual article moves. Pure math."""
+    try:
+        import sys
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[3]
+        if str(root) not in sys.path:
+            sys.path.insert(0, str(root))
+        from auto_maintenance import step_recompute_centroids
+        stats = await step_recompute_centroids()
+        return {"status": "ok", "stats": stats}
+    except Exception as e:
+        logger.exception("recompute-centroids failed")
+        return {"status": "error", "error": str(e)}
+
+
 # === Social Media Posting ===
 
 @router.get("/social/preview")

@@ -1866,6 +1866,19 @@ export default function DashboardPage() {
           Open Cost →
         </a>
       </div>
+
+      {/* Maintenance actions */}
+      <div className="mt-6 border border-slate-200 dark:border-slate-800 p-5 flex items-center justify-between">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Maintenance Actions</h2>
+          <p className="text-xs text-slate-500 mt-1">
+            One-click triggers for every maintenance step — retry-cluster orphans, merge tiny duplicates, prune stagnant stories, run ingest/cluster/bias on demand. Each action is tagged free / LLM-light / LLM-heavy.
+          </p>
+        </div>
+        <a href="./dashboard/actions" className="border border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/10 px-4 py-2 text-sm text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/20">
+          Open Actions →
+        </a>
+      </div>
     </div>
   );
 }
