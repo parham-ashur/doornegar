@@ -416,9 +416,10 @@ async def analyze_story_telegram(
     Pass 1 (nano): Extract facts, themes, contradictions — skipped when
         fewer than 5 analyst posts survive pass-0 (Pass 2 can read them
         directly, facts extraction adds nothing at that scale).
-    Pass 2 (model depends on is_premium): Deep analysis with cross-story
-        context + channel track records. Top-5 trending stories pass
-        is_premium=True; the rest use the baseline model to cut tokens.
+    Pass 2 (gpt-4o-mini, both tiers): Deep analysis with cross-story
+        context + channel track records. is_premium is still passed by
+        the caller (top-5 vs #6-10) so the cost ledger keeps the tier
+        breakdown, but both tiers now share the same cheaper model.
     """
     if not settings.openai_api_key:
         return None
@@ -589,23 +590,20 @@ async def analyze_story_telegram(
         from app.services.llm_helper import build_openai_params
 
         client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
-        # Tier selection: top-5 trending stories use the premium model;
-        # #6-10 drop to baseline. Decided by the caller and passed via
-        # is_premium. Halves Pass 2 cost on non-lead stories while
-        # keeping the hero card tight.
-        if is_premium:
-            model = settings.story_analysis_premium_model
-        else:
-            model = settings.bias_scoring_model
+        # Both tiers now use bias_scoring_model (gpt-4o-mini). The
+        # premium tier used to call gpt-5-mini ($2/Mtok output) on the
+        # top-5 trending stories, which dominated the monthly bill
+        # (~$0.42/day alone) for a quality lift that wasn't visible on
+        # the hero card. is_premium is still passed through so the
+        # cost dashboard keeps the tier breakdown.
+        model = settings.bias_scoring_model
         params = build_openai_params(
             model=model,
             prompt=prompt,
-            # 2000 is enough for the Pass 2 JSON (predictions array,
-            # key_claims, worldviews, consensus, missing_voices) —
-            # responses rarely exceed 1500 in practice. 3000 was
-            # over-provisioned and cost ~33% more per call on the line
-            # item that already dominates the monthly bill.
-            max_tokens=2000,
+            # 1200 is tight but sufficient: Pass 2 responses (predictions
+            # array, key_claims, worldviews, consensus, missing_voices)
+            # sit around 1100-1400 tokens in practice. Was 2000.
+            max_tokens=1200,
             temperature=0.2,
         )
         response = await client.chat.completions.create(**params)
