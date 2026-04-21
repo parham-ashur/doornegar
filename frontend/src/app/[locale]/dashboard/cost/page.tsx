@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { Fragment, useEffect, useState, useCallback } from "react";
 import { DollarSign, RefreshCw, AlertTriangle } from "lucide-react";
 import { adminHeaders, hasAdminToken } from "../hitl/_auth";
 
@@ -37,6 +37,7 @@ type TopStory = {
   article_count: number | null;
   calls: number;
   cost: number;
+  by_purpose?: Array<{ purpose: string; calls: number; cost: number }>;
 };
 
 const WINDOWS: { key: string; label: string }[] = [
@@ -73,6 +74,7 @@ export default function CostDashboardPage() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [calls, setCalls] = useState<Call[]>([]);
   const [topStories, setTopStories] = useState<TopStory[]>([]);
+  const [expandedStory, setExpandedStory] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [filter, setFilter] = useState<{ model?: string; purpose?: string }>({});
@@ -217,18 +219,49 @@ export default function CostDashboardPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                    {topStories.map(s => (
-                      <tr key={s.story_id} className="hover:bg-slate-50 dark:hover:bg-slate-900/30">
-                        <td className="px-3 py-2">
-                          <a href={`/fa/stories/${s.story_id}`} className="hover:underline text-blue-600 dark:text-blue-400">
-                            {s.title_fa || "(بدون عنوان)"}
-                          </a>
-                        </td>
-                        <td className="px-3 py-2 text-slate-500">{s.article_count ?? "—"}</td>
-                        <td className="px-3 py-2 text-slate-500">{fmtNum(s.calls)}</td>
-                        <td className="px-3 py-2 font-mono">{fmt$(s.cost)}</td>
-                      </tr>
-                    ))}
+                    {topStories.map(s => {
+                      const isOpen = expandedStory === s.story_id;
+                      return (
+                        <Fragment key={s.story_id}>
+                          <tr
+                            className="hover:bg-slate-50 dark:hover:bg-slate-900/30 cursor-pointer"
+                            onClick={() => setExpandedStory(isOpen ? null : s.story_id)}
+                          >
+                            <td className="px-3 py-2">
+                              <span className="text-slate-400 mr-1">{isOpen ? "▾" : "▸"}</span>
+                              <a
+                                href={`/fa/stories/${s.story_id}`}
+                                className="hover:underline text-blue-600 dark:text-blue-400"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {s.title_fa || "(بدون عنوان)"}
+                              </a>
+                            </td>
+                            <td className="px-3 py-2 text-slate-500">{s.article_count ?? "—"}</td>
+                            <td className="px-3 py-2 text-slate-500">{fmtNum(s.calls)}</td>
+                            <td className="px-3 py-2 font-mono">{fmt$(s.cost)}</td>
+                          </tr>
+                          {isOpen && s.by_purpose && s.by_purpose.length > 0 && (
+                            <tr className="bg-slate-50 dark:bg-slate-900/40">
+                              <td colSpan={4} className="px-6 py-3">
+                                <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">تفکیک بر اساس هدف</div>
+                                <table className="w-full text-xs">
+                                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                                    {s.by_purpose.map(p => (
+                                      <tr key={p.purpose}>
+                                        <td className="py-1 font-mono text-slate-600 dark:text-slate-300">{p.purpose}</td>
+                                        <td className="py-1 text-left text-slate-500 w-20">{fmtNum(p.calls)} فراخوان</td>
+                                        <td className="py-1 text-left font-mono w-24">{fmt$(p.cost)}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

@@ -1812,7 +1812,12 @@ async def cost_top_stories(
     limit: int = 20,
     db: AsyncSession = Depends(get_db),
 ):
-    """Top stories by LLM spend over the last `days` days."""
+    """Top stories by LLM spend over the last `days` days.
+
+    Each row also includes a `by_purpose` list — the same call data
+    grouped by purpose tag — so the cost dashboard can explain where
+    an expensive story's calls came from without a second round-trip.
+    """
     days = max(1, min(days, 90))
     limit = max(1, min(limit, 100))
     from sqlalchemy import text as _text
@@ -1830,7 +1835,36 @@ async def cost_top_stories(
         ORDER BY cost DESC
         LIMIT {limit}
     """))).mappings().all()
-    return {"stories": [dict(r) for r in rows]}
+
+    stories = [dict(r) for r in rows]
+    if not stories:
+        return {"stories": stories}
+
+    # Per-story purpose breakdown, in one query. Keeps the endpoint O(1)
+    # round-trips regardless of how many stories we return.
+    story_ids = [s["story_id"] for s in stories]
+    purpose_rows = (await db.execute(_text(f"""
+        SELECT story_id,
+               purpose,
+               COUNT(*) AS calls,
+               SUM(total_cost) AS cost
+        FROM llm_usage_logs
+        WHERE story_id = ANY(:ids)
+          AND timestamp >= NOW() - INTERVAL '{days} days'
+        GROUP BY story_id, purpose
+        ORDER BY cost DESC
+    """), {"ids": story_ids})).mappings().all()
+
+    by_story: dict = {}
+    for r in purpose_rows:
+        by_story.setdefault(r["story_id"], []).append({
+            "purpose": r["purpose"],
+            "calls": r["calls"],
+            "cost": float(r["cost"] or 0),
+        })
+    for s in stories:
+        s["by_purpose"] = by_story.get(s["story_id"], [])
+    return {"stories": stories}
 
 
 @router.get("/cost/pricing", dependencies=[Depends(require_admin)])
