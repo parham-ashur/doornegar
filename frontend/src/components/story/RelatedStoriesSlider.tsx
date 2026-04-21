@@ -77,7 +77,7 @@ export default function RelatedStoriesSlider({
                 )}
                 {isArcSibling && (
                   <span className="absolute top-2 right-2 text-[10px] font-bold px-2 py-0.5 bg-blue-600 text-white">
-                    همان روایت
+                    روایت نزدیک
                   </span>
                 )}
               </div>
