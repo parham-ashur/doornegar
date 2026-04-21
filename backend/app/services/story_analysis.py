@@ -314,6 +314,7 @@ async def _pass1_extract_facts(
 
     try:
         from app.services.llm_helper import build_openai_params
+        from app.services.llm_usage import log_llm_usage
         client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
         params = build_openai_params(
             model=settings.translation_model,  # gpt-4.1-nano — cheapest
@@ -322,6 +323,11 @@ async def _pass1_extract_facts(
             temperature=0,
         )
         response = await client.chat.completions.create(**params)
+        await log_llm_usage(
+            model=settings.translation_model,
+            purpose="story_analysis.pass1_facts",
+            usage=response.usage,
+        )
         text = response.choices[0].message.content.strip()
         if "```json" in text:
             text = text.split("```json")[1].split("```")[0].strip()
@@ -464,15 +470,27 @@ async def generate_story_analysis(
 
     try:
         from app.services.llm_helper import build_openai_params
+        from app.services.llm_usage import log_llm_usage
 
         client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
+        chosen_model = model or settings.story_analysis_model
         params = build_openai_params(
-            model=model or settings.story_analysis_model,
+            model=chosen_model,
             prompt=prompt,
             max_tokens=max_tokens,
             temperature=0.3,
         )
         response = await client.chat.completions.create(**params)
+        # Tier tag: premium vs baseline so the dashboard can show which
+        # tier drove the spend without us re-parsing the model name.
+        tier = "premium" if chosen_model == settings.story_analysis_premium_model else "baseline"
+        await log_llm_usage(
+            model=chosen_model,
+            purpose=f"story_analysis.main.{tier}",
+            usage=response.usage,
+            story_id=story.id,
+            meta={"include_analyst_factors": bool(include_analyst_factors)},
+        )
         response_text = response.choices[0].message.content
         result = _parse_analysis_response(response_text)
 

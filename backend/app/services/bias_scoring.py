@@ -249,7 +249,7 @@ async def score_article_bias(
     )
 
     try:
-        response_text = await _call_llm(prompt)
+        response_text = await _call_llm(prompt, article_id=article.id)
         scores = _parse_llm_response(response_text)
         if scores is None:
             return None
@@ -368,13 +368,13 @@ async def score_unscored_articles(
     return stats
 
 
-async def _call_llm(prompt: str) -> str:
+async def _call_llm(prompt: str, *, article_id=None) -> str:
     """Call the configured LLM and return the response text.
 
     Tries OpenAI first (more reliable), falls back to Anthropic.
     """
     if settings.openai_api_key:
-        return await _call_openai(prompt)
+        return await _call_openai(prompt, article_id=article_id)
     elif settings.anthropic_api_key:
         return await _call_anthropic(prompt)
     else:
@@ -402,11 +402,12 @@ async def _call_anthropic(prompt: str) -> str:
     return message.content[0].text
 
 
-async def _call_openai(prompt: str) -> str:
-    """Call OpenAI API."""
+async def _call_openai(prompt: str, *, article_id=None) -> str:
+    """Call OpenAI API and log usage for the cost dashboard."""
     import openai
 
     from app.services.llm_helper import build_openai_params
+    from app.services.llm_usage import log_llm_usage
 
     client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
     params = build_openai_params(
@@ -416,6 +417,12 @@ async def _call_openai(prompt: str) -> str:
         temperature=0,
     )
     response = await client.chat.completions.create(**params)
+    await log_llm_usage(
+        model=settings.bias_scoring_model,
+        purpose="bias_scoring",
+        usage=response.usage,
+        article_id=article_id,
+    )
     return response.choices[0].message.content
 
 

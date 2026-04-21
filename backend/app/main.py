@@ -59,6 +59,29 @@ async def lifespan(app: FastAPI):
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )""",
                 "CREATE INDEX IF NOT EXISTS idx_stories_arc_id ON stories(arc_id)",
+                # LLM usage / cost ledger — every OpenAI call logged here.
+                """CREATE TABLE IF NOT EXISTS llm_usage_logs (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    model VARCHAR(80) NOT NULL,
+                    purpose VARCHAR(80) NOT NULL,
+                    input_tokens INTEGER DEFAULT 0,
+                    cached_input_tokens INTEGER DEFAULT 0,
+                    output_tokens INTEGER DEFAULT 0,
+                    input_cost DOUBLE PRECISION DEFAULT 0,
+                    cached_cost DOUBLE PRECISION DEFAULT 0,
+                    output_cost DOUBLE PRECISION DEFAULT 0,
+                    total_cost DOUBLE PRECISION DEFAULT 0,
+                    story_id UUID,
+                    article_id UUID,
+                    priced BOOLEAN DEFAULT TRUE,
+                    meta JSONB
+                )""",
+                "CREATE INDEX IF NOT EXISTS idx_llm_usage_ts ON llm_usage_logs(timestamp DESC)",
+                "CREATE INDEX IF NOT EXISTS idx_llm_usage_model ON llm_usage_logs(model)",
+                "CREATE INDEX IF NOT EXISTS idx_llm_usage_purpose ON llm_usage_logs(purpose)",
+                "CREATE INDEX IF NOT EXISTS idx_llm_usage_story ON llm_usage_logs(story_id)",
+                "CREATE INDEX IF NOT EXISTS idx_llm_usage_total ON llm_usage_logs(total_cost DESC)",
             ):
                 try:
                     await db.execute(text(ddl))

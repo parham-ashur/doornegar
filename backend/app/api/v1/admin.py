@@ -1665,9 +1665,183 @@ async def trigger_llm_clustering(db: AsyncSession = Depends(get_db)):
 
 @router.get("/costs")
 async def get_llm_costs():
-    """Get current session LLM cost tracking."""
+    """Legacy in-process session stats. Dashboard uses /cost/* instead."""
     from app.services.llm_utils import get_session_stats
     return get_session_stats()
+
+
+# === LLM cost dashboard ===
+# All endpoints below read from llm_usage_logs, populated on every LLM
+# call via app.services.llm_usage.log_llm_usage. Admin-gated.
+
+_COST_WINDOWS = {
+    "24h": "1 day",
+    "7d":  "7 days",
+    "30d": "30 days",
+    "90d": "90 days",
+}
+
+
+@router.get("/cost/summary", dependencies=[Depends(require_admin)])
+async def cost_summary(
+    window: str = "7d",
+    db: AsyncSession = Depends(get_db),
+):
+    """Aggregated cost picture for a rolling window.
+
+    Returns total $, call count, and breakdowns by model + purpose.
+    window: one of 24h / 7d / 30d / 90d.
+    """
+    interval = _COST_WINDOWS.get(window, "7 days")
+    from sqlalchemy import text as _text
+    totals = (await db.execute(_text(f"""
+        SELECT
+            COALESCE(SUM(total_cost), 0) AS total_cost,
+            COALESCE(SUM(input_cost), 0) AS input_cost,
+            COALESCE(SUM(cached_cost), 0) AS cached_cost,
+            COALESCE(SUM(output_cost), 0) AS output_cost,
+            COALESCE(SUM(input_tokens), 0) AS input_tokens,
+            COALESCE(SUM(cached_input_tokens), 0) AS cached_input_tokens,
+            COALESCE(SUM(output_tokens), 0) AS output_tokens,
+            COUNT(*) AS calls
+        FROM llm_usage_logs
+        WHERE timestamp >= NOW() - INTERVAL '{interval}'
+    """))).mappings().one()
+
+    by_model = (await db.execute(_text(f"""
+        SELECT model,
+               COUNT(*) AS calls,
+               SUM(total_cost) AS cost,
+               SUM(input_tokens) AS input_tokens,
+               SUM(output_tokens) AS output_tokens
+        FROM llm_usage_logs
+        WHERE timestamp >= NOW() - INTERVAL '{interval}'
+        GROUP BY model
+        ORDER BY cost DESC
+    """))).mappings().all()
+
+    by_purpose = (await db.execute(_text(f"""
+        SELECT purpose,
+               COUNT(*) AS calls,
+               SUM(total_cost) AS cost,
+               SUM(input_tokens) AS input_tokens,
+               SUM(output_tokens) AS output_tokens
+        FROM llm_usage_logs
+        WHERE timestamp >= NOW() - INTERVAL '{interval}'
+        GROUP BY purpose
+        ORDER BY cost DESC
+    """))).mappings().all()
+
+    # Daily series for the stacked bar
+    daily = (await db.execute(_text(f"""
+        SELECT DATE_TRUNC('day', timestamp) AS day,
+               purpose,
+               SUM(total_cost) AS cost
+        FROM llm_usage_logs
+        WHERE timestamp >= NOW() - INTERVAL '{interval}'
+        GROUP BY day, purpose
+        ORDER BY day ASC
+    """))).mappings().all()
+
+    # Today vs yesterday deltas
+    today = (await db.execute(_text("""
+        SELECT COALESCE(SUM(total_cost), 0) AS cost, COUNT(*) AS calls
+        FROM llm_usage_logs
+        WHERE timestamp >= DATE_TRUNC('day', NOW())
+    """))).mappings().one()
+    yesterday = (await db.execute(_text("""
+        SELECT COALESCE(SUM(total_cost), 0) AS cost, COUNT(*) AS calls
+        FROM llm_usage_logs
+        WHERE timestamp >= DATE_TRUNC('day', NOW() - INTERVAL '1 day')
+          AND timestamp < DATE_TRUNC('day', NOW())
+    """))).mappings().one()
+
+    unpriced_count = (await db.execute(_text(f"""
+        SELECT COUNT(*) FROM llm_usage_logs
+        WHERE timestamp >= NOW() - INTERVAL '{interval}' AND priced = FALSE
+    """))).scalar() or 0
+
+    return {
+        "window": window,
+        "totals": dict(totals),
+        "today": dict(today),
+        "yesterday": dict(yesterday),
+        "by_model": [dict(r) for r in by_model],
+        "by_purpose": [dict(r) for r in by_purpose],
+        "daily": [dict(r) for r in daily],
+        "unpriced_count": unpriced_count,
+    }
+
+
+@router.get("/cost/calls", dependencies=[Depends(require_admin)])
+async def cost_calls(
+    limit: int = 100,
+    model: str | None = None,
+    purpose: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Recent LLM call rows. Optional filters by model and/or purpose."""
+    limit = max(1, min(limit, 500))
+    from sqlalchemy import text as _text
+    where = ["1=1"]
+    params: dict = {"limit": limit}
+    if model:
+        where.append("model = :model")
+        params["model"] = model
+    if purpose:
+        where.append("purpose = :purpose")
+        params["purpose"] = purpose
+
+    sql = f"""
+        SELECT id, timestamp, model, purpose,
+               input_tokens, cached_input_tokens, output_tokens,
+               input_cost, cached_cost, output_cost, total_cost,
+               story_id, article_id, priced, meta
+        FROM llm_usage_logs
+        WHERE {' AND '.join(where)}
+        ORDER BY timestamp DESC
+        LIMIT :limit
+    """
+    rows = (await db.execute(_text(sql), params)).mappings().all()
+    return {"calls": [dict(r) for r in rows]}
+
+
+@router.get("/cost/top-stories", dependencies=[Depends(require_admin)])
+async def cost_top_stories(
+    days: int = 7,
+    limit: int = 20,
+    db: AsyncSession = Depends(get_db),
+):
+    """Top stories by LLM spend over the last `days` days."""
+    days = max(1, min(days, 90))
+    limit = max(1, min(limit, 100))
+    from sqlalchemy import text as _text
+    rows = (await db.execute(_text(f"""
+        SELECT l.story_id,
+               s.title_fa,
+               s.article_count,
+               COUNT(*) AS calls,
+               SUM(l.total_cost) AS cost
+        FROM llm_usage_logs l
+        LEFT JOIN stories s ON s.id = l.story_id
+        WHERE l.story_id IS NOT NULL
+          AND l.timestamp >= NOW() - INTERVAL '{days} days'
+        GROUP BY l.story_id, s.title_fa, s.article_count
+        ORDER BY cost DESC
+        LIMIT {limit}
+    """))).mappings().all()
+    return {"stories": [dict(r) for r in rows]}
+
+
+@router.get("/cost/pricing", dependencies=[Depends(require_admin)])
+async def cost_pricing():
+    """Static pricing-table reference + list of models we've seen but
+    can't price yet."""
+    from app.services.llm_pricing import pricing_table, unknown_models_seen
+    return {
+        "pricing": pricing_table(),
+        "unknown_models": unknown_models_seen(),
+    }
 
 
 # === Social Media Posting ===

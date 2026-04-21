@@ -337,9 +337,10 @@ def _build_articles_block(articles: list, source_names: dict[str, str] | None = 
 # ---------------------------------------------------------------------------
 
 
-async def _call_openai(prompt: str, max_tokens: int = 4096) -> dict:
+async def _call_openai(prompt: str, max_tokens: int = 4096, *, purpose: str = "clustering.cluster_new") -> dict:
     """Send a prompt to the configured clustering LLM and return parsed JSON."""
     from app.services.llm_helper import build_openai_params
+    from app.services.llm_usage import log_llm_usage
 
     def _sync_call():
         client = OpenAI(api_key=settings.openai_api_key)
@@ -353,12 +354,19 @@ async def _call_openai(prompt: str, max_tokens: int = 4096) -> dict:
             response = client.chat.completions.create(**params)
             response_text = response.choices[0].message.content
             logger.debug(f"OpenAI response: {response_text[:300]}")
-            return _parse_llm_response(response_text)
+            return _parse_llm_response(response_text), response.usage
         except Exception as e:
             logger.error(f"OpenAI API error: {e}")
-            return {}
+            return {}, None
 
-    return await asyncio.get_event_loop().run_in_executor(None, _sync_call)
+    parsed, usage = await asyncio.get_event_loop().run_in_executor(None, _sync_call)
+    if usage is not None:
+        await log_llm_usage(
+            model=settings.clustering_model,
+            purpose=purpose,
+            usage=usage,
+        )
+    return parsed
 
 
 # ---------------------------------------------------------------------------
@@ -799,7 +807,7 @@ async def _match_to_existing_stories(
         )
 
         await _keepalive(db)
-        result_json = await _call_openai(prompt, max_tokens=4096)
+        result_json = await _call_openai(prompt, max_tokens=4096, purpose="clustering.match_existing")
         matches = result_json.get("matches", [])
 
         # Process matches
@@ -1101,7 +1109,7 @@ async def _cluster_new_articles(
         articles_block = _build_articles_block(batch, source_names)
         prompt = CLUSTERING_PROMPT.format(articles_block=articles_block)
         await _keepalive(db)
-        result_json = await _call_openai(prompt, max_tokens=4096)
+        result_json = await _call_openai(prompt, max_tokens=4096, purpose="clustering.cluster_new")
 
         for group in result_json.get("groups", []):
             article_ids_in_prompt = group.get("article_ids", [])
@@ -1271,7 +1279,7 @@ async def _merge_hidden_stories(db: AsyncSession) -> int:
 
     prompt = MERGE_PROMPT.format(stories_block=stories_block)
     await _keepalive(db)
-    result_json = await _call_openai(prompt, max_tokens=2048)
+    result_json = await _call_openai(prompt, max_tokens=2048, purpose="clustering.merge_hidden")
     merge_groups = result_json.get("merge_groups", [])
 
     if not merge_groups:
@@ -1397,7 +1405,7 @@ async def merge_similar_visible_stories(db: AsyncSession) -> int:
 
     prompt = VISIBLE_MERGE_PROMPT.format(stories_block=stories_block)
     await _keepalive(db)
-    result_json = await _call_openai(prompt, max_tokens=2048)
+    result_json = await _call_openai(prompt, max_tokens=2048, purpose="clustering.merge_visible")
     merge_groups = result_json.get("merge_groups", [])
 
     if not merge_groups:

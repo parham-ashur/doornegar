@@ -172,6 +172,13 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
                     temperature=0,
                 )
                 resp = client.chat.completions.create(**params)
+                from app.services.llm_usage import log_llm_usage
+                await log_llm_usage(
+                    model=settings.translation_model,
+                    purpose="translation.title",
+                    usage=resp.usage,
+                    meta={"batch_size": len(batch)},
+                )
                 lines = resp.choices[0].message.content.strip().split("\n")
                 for i, article in enumerate(batch):
                     if i < len(lines):

@@ -552,6 +552,13 @@ async def step_backfill_farsi_titles():
                     temperature=0,
                 )
                 resp = client.chat.completions.create(**params)
+                from app.services.llm_usage import log_llm_usage
+                await log_llm_usage(
+                    model=settings.translation_model,
+                    purpose="translation.backfill_title",
+                    usage=resp.usage,
+                    meta={"batch_size": len(batch)},
+                )
                 lines = resp.choices[0].message.content.strip().split("\n")
                 for i, article in enumerate(batch):
                     if i >= len(lines):
@@ -1704,6 +1711,12 @@ Analyst post:
                     temperature=0.2,
                 )
                 resp = client.chat.completions.create(**params)
+                from app.services.llm_usage import log_llm_usage
+                await log_llm_usage(
+                    model=settings.bias_scoring_model,
+                    purpose="analyst_takes.extract",
+                    usage=resp.usage,
+                )
                 raw_response = resp.choices[0].message.content.strip()
 
                 # Clean markdown fences if present
@@ -1836,6 +1849,13 @@ async def step_verify_predictions():
                     temperature=0,
                 )
                 response = await client.chat.completions.create(**params)
+                from app.services.llm_usage import log_llm_usage
+                await log_llm_usage(
+                    model=settings.translation_model,
+                    purpose="predictions.verify",
+                    usage=response.usage,
+                    story_id=story.id,
+                )
                 text = response.choices[0].message.content.strip()
 
                 # Parse JSON
@@ -2741,6 +2761,13 @@ async def step_quality_postprocess():
                     temperature=0,
                 )
                 response = await client.chat.completions.create(**params)
+                from app.services.llm_usage import log_llm_usage
+                await log_llm_usage(
+                    model=settings.translation_model,
+                    purpose="quality_postprocess",
+                    usage=response.usage,
+                    story_id=story.id,
+                )
                 text_out = response.choices[0].message.content.strip()
                 if "```json" in text_out:
                     text_out = text_out.split("```json")[1].split("```")[0].strip()
@@ -3172,6 +3199,13 @@ async def step_detect_silences():
                         temperature=0.3,
                     )
                     resp = client.chat.completions.create(**params)
+                    from app.services.llm_usage import log_llm_usage
+                    await log_llm_usage(
+                        model=settings.translation_model,
+                        purpose="detect_silences",
+                        usage=resp.usage,
+                        story_id=story.id,
+                    )
                     hypothesis = resp.choices[0].message.content.strip()
 
                     extra["silence_analysis"]["hypothesis_fa"] = hypothesis
@@ -3409,6 +3443,13 @@ async def step_fix_issues():
                         temperature=0,
                     )
                     resp = client.chat.completions.create(**params)
+                    from app.services.llm_usage import log_llm_usage
+                    await log_llm_usage(
+                        model=settings.translation_model,
+                        purpose="fix_issues.translate",
+                        usage=resp.usage,
+                        meta={"batch_size": len(batch)},
+                    )
                     lines = resp.choices[0].message.content.strip().split("\n")
                     for i, article in enumerate(batch):
                         if i < len(lines):
@@ -3933,6 +3974,13 @@ async def step_niloofar_editorial():
 
         try:
             response = await client.chat.completions.create(**params)
+            from app.services.llm_usage import log_llm_usage
+            await log_llm_usage(
+                model=settings.translation_model,
+                purpose="niloofar.editorial",
+                usage=response.usage,
+                story_id=story.id,
+            )
             context_text = response.choices[0].message.content.strip()
             context_data = {
                 "context": context_text,
@@ -4128,6 +4176,13 @@ JSON با این ساختار:
 
         try:
             response = await client.chat.completions.create(**params)
+            from app.services.llm_usage import log_llm_usage
+            await log_llm_usage(
+                model=settings.translation_model,
+                purpose="niloofar.polish_telegram",
+                usage=response.usage,
+                story_id=story.id,
+            )
             content = response.choices[0].message.content.strip()
             parsed = _json.loads(content)
             polished_preds = parsed.get("predictions") or []

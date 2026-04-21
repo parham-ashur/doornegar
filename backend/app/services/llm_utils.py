@@ -83,6 +83,13 @@ async def _call_openai(
         temperature=temperature,
     )
 
+    from app.services.llm_usage import log_llm_usage
+    await log_llm_usage(
+        model=model,
+        purpose="llm_utils.generic",
+        usage=response.usage,
+    )
+
     text = response.choices[0].message.content or ""
     input_tokens = response.usage.prompt_tokens if response.usage else 0
     output_tokens = response.usage.completion_tokens if response.usage else 0

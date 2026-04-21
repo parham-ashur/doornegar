@@ -192,6 +192,13 @@ async def _pass0_classify_posts(
         )
         params["response_format"] = {"type": "json_object"}
         response = await client.chat.completions.create(**params)
+        from app.services.llm_usage import log_llm_usage
+        await log_llm_usage(
+            model=settings.bias_scoring_model,
+            purpose="telegram.pass0_classify",
+            usage=response.usage,
+            meta={"post_count": len(posts)},
+        )
         content = response.choices[0].message.content.strip()
         parsed = json.loads(content)
         labels = parsed.get("labels") or []
@@ -234,6 +241,12 @@ async def _pass1_extract_facts(posts_block: str) -> dict | None:
             temperature=0,
         )
         response = await client.chat.completions.create(**params)
+        from app.services.llm_usage import log_llm_usage
+        await log_llm_usage(
+            model=settings.translation_model,
+            purpose="telegram.pass1_facts",
+            usage=response.usage,
+        )
         text = response.choices[0].message.content.strip()
         if "```json" in text:
             text = text.split("```json")[1].split("```")[0].strip()
@@ -596,6 +609,14 @@ async def analyze_story_telegram(
             temperature=0.2,
         )
         response = await client.chat.completions.create(**params)
+        from app.services.llm_usage import log_llm_usage
+        tier = "premium" if is_premium else "baseline"
+        await log_llm_usage(
+            model=model,
+            purpose=f"telegram.pass2.{tier}",
+            usage=response.usage,
+            story_id=story_id,
+        )
         text = response.choices[0].message.content.strip()
 
         if "```json" in text:

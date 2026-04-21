@@ -1853,6 +1853,19 @@ export default function DashboardPage() {
           Open HITL →
         </a>
       </div>
+
+      {/* LLM cost dashboard */}
+      <div className="mt-6 border border-slate-200 dark:border-slate-800 p-5 flex items-center justify-between">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-900 dark:text-white">LLM Cost Dashboard</h2>
+          <p className="text-xs text-slate-500 mt-1">
+            Per-call OpenAI spend by model, purpose, and story. Today vs yesterday, rolling 7/30/90 day views, and the top-20 most expensive stories.
+          </p>
+        </div>
+        <a href="./dashboard/cost" className="border border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/10 px-4 py-2 text-sm text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/20">
+          Open Cost →
+        </a>
+      </div>
     </div>
   );
 }

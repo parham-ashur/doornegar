@@ -229,6 +229,12 @@ async def generate_topic_analysis(
             max_tokens=4096,
             temperature=0.3,
         )
+        from app.services.llm_usage import log_llm_usage
+        await log_llm_usage(
+            model="gpt-4o-mini",
+            purpose="topic.analysis",
+            usage=response.usage,
+        )
         response_text = response.choices[0].message.content
         return _parse_response(response_text)
 
@@ -288,6 +294,12 @@ async def generate_analyst_perspectives(
             messages=[{"role": "user", "content": prompt}],
             max_tokens=4096,
             temperature=0.7,
+        )
+        from app.services.llm_usage import log_llm_usage
+        await log_llm_usage(
+            model="gpt-4o-mini",
+            purpose="topic.analysts",
+            usage=response.usage,
         )
         result = _parse_response(response.choices[0].message.content)
         return result.get("analysts", [])
