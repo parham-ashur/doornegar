@@ -221,19 +221,30 @@ async def get_telegram_analysis(
         channel_stats.append({"name": title, "type": ch_type, "posts": cnt})
     total_posts = sum(c["posts"] for c in channel_stats)
 
-    # Serve from cache if fresh and not force-refreshing
+    # Serve any existing cache immediately — fresh OR stale. Synchronous
+    # regeneration on the request path used to block the user for
+    # 5–15 s (Pass 0 + Pass 1 + Pass 2 LLM calls) whenever the 48h TTL
+    # expired, which was the main source of the "تحلیل روایت‌های تلگرام
+    # takes forever" reports. Staleness is tolerable: news analysis
+    # doesn't move much in 2–7 days, and auto_maintenance refreshes the
+    # top-10 trending stories daily. force_refresh (admin only) still
+    # bypasses everything.
     story_result = await db.execute(select(Story).where(Story.id == story_id))
     story = story_result.scalar_one_or_none()
-    if story and not force_refresh and _cache_is_fresh(story.telegram_analysis):
+    if story and not force_refresh and story.telegram_analysis:
         return {
             "status": "ok",
             "analysis": story.telegram_analysis,
             "channels": channel_stats,
             "total_posts": total_posts,
             "cached": True,
+            "fresh": _cache_is_fresh(story.telegram_analysis),
         }
 
-    # Cache is stale/missing — regenerate
+    # No cache at all — this is the only path that still regenerates
+    # synchronously. Happens once per story (the first visitor pays,
+    # subsequent visits are instant). Cold hits on non-trending stories
+    # remain the unavoidable exception; everything else is O(db read).
     from app.services.telegram_analysis import analyze_story_telegram
     result = await analyze_story_telegram(db, str(story_id))
     if result is None:
