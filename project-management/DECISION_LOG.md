@@ -203,6 +203,53 @@ Tracks key decisions, their reasoning, and any alternatives considered.
 **Why**: Helps identify mobile UX issues. If a bug report comes from mobile, it might be a responsive layout problem. No privacy concern — it's the same info any web server logs.
 **Status**: Implemented ✓
 
+## 2026-04-21
+
+### D026: Neutrality scoring moved from LLM to Claude-local
+**Decision**: Strip the neutrality rubric + `article_neutrality` field from the OpenAI story-analysis prompt. Instead, Claude (in-session, via `scripts/neutrality_audit.py` or integrated into the Niloofar audit) scores each article −1 to +1 against the same rubric. Results are written as `article_neutrality: {article_id: score}` + derived per-source means into each story's `summary_en`.
+**Why**: Per-story LLM neutrality was drifting between maintenance runs — the same article got different scores on consecutive runs, because the rubric is subjective and the model has no cross-story calibration. Claude scoring once-per-story, written with `summary_source: "claude"`, is stable. The جایگاه رسانه‌ها panel is hidden until a Claude score exists — no more misleading numbers.
+**Trade-off**: Requires manual Niloofar passes for new stories. Mitigated by integrating neutrality into the same Niloofar run that writes preliminaries, and preserving scores across LLM re-runs so edits aren't clobbered.
+**Status**: Implemented ✓
+
+### D027: 48-hour maturity lock on story analysis
+**Decision**: Once `last_updated_at > 48h` AND the story has a full analysis, stamp `analysis_locked_at` on the blob and never re-run `step_summarize` for it. Same principle extended to `step_telegram_deep_analysis` via `telegram_locked_at`.
+**Why**: Re-running analysis on settled stories burns tokens without changing the output — the article set isn't growing, the event is done. The articles_hash check already skipped most re-runs, but residual drift still triggered calls. An explicit 48h lock is cleaner and frees the premium-tier budget for newer stories.
+**Status**: Implemented ✓
+
+### D028: Tighter match gate for small target stories
+**Decision**: In `_match_to_existing_stories`, when candidate target story has `article_count < 10`, raise the pre-LLM cosine floor from 0.30 → 0.45 AND require one concrete signal overlap (token-jaccard ≥ 0.15, shared quote, or shared number) before the pair reaches the LLM.
+**Why**: Five top-50 stories in the 2026-04-21 audit had drift — off-topic articles (Trump/Epstein in a factory-fire cluster, Lebanon/Hezbollah in a Qom-munitions cluster, etc.) got absorbed via loose 0.30 cosine + lenient LLM confirmation. Small stories have thin centroids that drift easily. Mature stories (≥10 articles) keep the looser gate because their centroids are robust.
+**Trade-off**: Some borderline-correct matches on small stories will land as orphans, picked up later by `step_recluster_orphans` or future runs. Quality > recall.
+**Status**: Implemented ✓
+
+### D029: «این سمت» forbidden in Niloofar side-summaries
+**Decision**: Niloofar's state_summary_fa / diaspora_summary_fa must lead with the viewpoint as a direct claim («توانمندی‌های ارتش در حال تضعیف است») rather than reported speech («این سمت به تضعیف ارتش اشاره می‌کند»). Rule restated with before/after examples inside the preliminary-summary workflow in `niloofar.md`.
+**Why**: The colored UI markers (blue/orange) and column headings already identify which side the text belongs to. Opening with «این سمت» creates ambiguous prose — «در مقابل این سمت به سرکوب معترضان تأکید دارد» — where the reader can't tell whose side «این سمت» refers to without reading the content. The rule existed in the full-audit section but was slipping in preliminary writes.
+**Enforcement**: Seven stories rewritten retroactively via `update_narratives` findings. Future preliminary writes check this rule explicitly.
+**Status**: Implemented ✓
+
+### D030: Per-call LLM cost ledger
+**Decision**: Every OpenAI chat-completion writes one row to `llm_usage_logs` with model, purpose tag, token counts, cost components, story/article attribution, and meta JSONB. `log_llm_usage()` helper swallows its own errors so DB hiccups never break the calling pipeline.
+**Why**: OpenAI's dashboard gives daily model totals but not per-step or per-story breakdowns. The 2026-04-21 session proved attribution matters — the $1.65/day spend was traceable to specific steps once logged (`story_analysis.main.premium` + `telegram.pass2.premium` + `bias_scoring` dominated). Without purpose tagging we couldn't tell which cost cut would help.
+**Cost**: One INSERT per LLM call. ~1000 rows/day ≈ nothing on Postgres.
+**Trade-off**: Estimate diverges ~1-3% from OpenAI's invoice (rounding, unreported retries). Acceptable for attribution.
+**Status**: Implemented ✓
+
+### D031: Maintenance actions dashboard
+**Decision**: New `/dashboard/actions` admin page with one-click buttons for 9 maintenance steps tagged free / LLM-light / LLM-heavy. Five new `/admin/maintenance/*` endpoints wrap existing maintenance functions.
+**Why**: The maintenance pipeline ran once daily at 04:00 UTC. Between runs, operators couldn't manually trigger a cleanup (e.g. "merge tiny stories now" after a Niloofar editorial pass, or "retry-cluster orphans after I deleted drift articles"). A button grid keeps free/safe actions 1-click-away while confirming on LLM-heavy ones.
+**Status**: Implemented ✓
+
+### D032: Niloofar writes preliminary summaries before OpenAI pipeline
+**Decision**: When `step_summarize` hasn't yet reached a visible story (327 of 349 stories were empty at session start), Niloofar writes a preliminary summary via `write_preliminary_summary` fix_type — filling title, summary_fa, narratives, bias_explanation in one DB write. Stamps `is_edited=true` + `summary_source: "niloofar_preliminary"`.
+**Why**: Visible stories with no narrative are a terrible user experience. The daily maintenance run reaches maybe 15 stories; the long tail sits empty for up to 24h. Niloofar (Claude-in-session, free to Parham) can fill the gap the same day the story becomes visible, with better editorial voice than the OpenAI pipeline would produce anyway.
+**Status**: Implemented ✓
+
+### D033: Ingest bloat controls
+**Decision**: Add short-article filter (<200 chars → drop), stagnant-story pruning (1-article >48h, 2-4-article >14d → delete), URL-path exclusions for the 12 biggest Iranian outlets (sport/entertainment/lifestyle paths), cosine-pre-merge for tiny stories (article_count ≤ 4 + centroid cosine ≥ 0.60 → union-find merge), and second-chance orphan reclustering at 0.40 cosine.
+**Why**: At session start, 37% of 24h articles were orphans, 88% of stories were tiny, 3,844 were hidden. Pipeline was paying embedding/NLP/clustering costs on content that never surfaced. Combined changes dropped orphan rate to 10% and absorbed 3,195 tiny stories on first cosine-merge run.
+**Status**: Implemented ✓
+
 ## Pending Decisions
 
 ### P001: Cloud provider for production (partially resolved)

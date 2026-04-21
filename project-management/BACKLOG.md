@@ -1,40 +1,84 @@
 # Doornegar - Backlog
 
-**Last updated**: 2026-04-19 (clustering absorption defense)
+**Last updated**: 2026-04-21 (cost dashboard + maintenance actions + Niloofar preliminary workflow)
 
-## Clustering — absorption defense (in progress)
+## Clustering — absorption defense
 
-**Context**: Two existing "attractor" stories can gobble up articles/posts that really belong to a third, distinct-but-related story. Example: a "Pakistan role in ceasefire negotiations" story + a "ceasefire" story can absorb articles about a "Pakistan security concerns" angle because cosine similarity is high enough that each candidate looks plausible in isolation. Result: the third story never reaches the 5-article visibility threshold.
+**Context**: Two existing "attractor" stories can gobble up articles/posts that really belong to a third, distinct-but-related story.
 
 ### Shipped
-- [x] **#1 Co-unmatched sub-cluster reservation** (`clustering.py:_find_new_story_subclusters`). Before the matcher runs, group this run's incoming articles by cosine ≥ 0.65 + shared identity signal (title-token Jaccard ≥ 0.35, shared quote, or shared number). Any component of ≥ 2 articles is reserved — skipped by the matcher and flows into new-cluster creation. Zero extra LLM calls.
+- [x] **#1 Co-unmatched sub-cluster reservation** (2026-04-19). Reserved articles skip the matcher; zero extra LLM calls.
+- [x] **Small-target match gate** (2026-04-21). Candidate target with `article_count < 10` gets cosine floor 0.30 → 0.45 AND requires signal overlap (token jaccard ≥ 0.15, shared quote, or shared number). Fixes the drift observed in the 2026-04-21 audit (5 top-50 stories had off-topic articles via loose cosine + lenient LLM).
 
-### Planned (not shipped — order matters)
+### Planned
 
-- [ ] **#3 Drift-flagged story splitting (dry-run first)** — `audit_cluster_drift` already flags clusters whose internal pairwise cosine drops below 0.50 but only emits a warning. Add graph-connected-components split on those clusters.
-  - **Blast radius is high** — re-assigns articles between existing stories. Ship behind a dry-run flag first: surface proposed splits in a HITL dashboard view, Parham approves/rejects each, then flip an "apply" button per split.
-  - After a few days of reviewed dry-runs, consider auto-apply for high-confidence splits (e.g. min-pair cosine ≤ 0.30 and two clean components ≥ 3 articles each).
-  - No LLM calls.
-
-- [ ] **#2 Tighter auto-match (only if #1 isn't enough)** — drop AUTO_MATCH_COSINE from 0.85 → 0.80 and require stronger shared signal (shared named entity beyond country, or shared quote). Moves borderline matches from deterministic auto-match into the LLM middle band.
-  - Only worth doing if post-#1 observation still shows topical-adjacency absorption.
-  - Cost impact: +$0.10–0.30/month (20–40% more LLM matching calls). Within budget.
-  - Risk: the LLM's "reject by default" prompt sometimes rejects correct matches; this change could cause invisible quality regressions on edge cases.
-  - Tune thresholds only after we have a baseline from #1 in production.
+- [ ] **#3 Drift-flagged story splitting (dry-run first)** — `audit_cluster_drift` already flags clusters whose internal pairwise cosine drops below 0.50. Add graph-connected-components split on those clusters. Ship behind a dry-run flag first — Parham approves/rejects per split in a HITL view. No LLM calls.
+- [ ] **#2 Tighter auto-match (only if #1 + small-target gate aren't enough)** — drop AUTO_MATCH_COSINE 0.85 → 0.80. Tune only after observing the 2026-04-21 gate in production.
 
 ---
 
-## Cost reduction — telegram analysis (in progress)
+## Cost reduction
 
-**Context**: Today's OpenAI spend is ~$1.50/day (→$45/mo). The bleed is `step_telegram_deep_analysis` — top-15 stories × 3 LLM calls × 6 maintenance runs/day = 270 calls/day, re-running the full 3-pass pipeline even when the post set didn't change.
+**Context**: 2026-04-21 daily spend was $1.65/day. Target: ~$0.50/day.
 
-### Shipped
-- [x] **Posts-hash cache in step_telegram_deep_analysis** (auto_maintenance.py:2081). Compute stable hash of post IDs + text lengths; skip the LLM pipeline when the hash matches what's already stored on `story.telegram_analysis.posts_hash`. Estimated: 60–80% fewer calls, ~$15–25/mo saved, zero quality loss.
+### Shipped this week
+- [x] **Posts-hash cache in step_telegram_deep_analysis** (2026-04-19).
+- [x] **bias_scoring one-per-source-per-story** (2026-04-21). ~50% fewer gpt-4o-mini calls on hot stories.
+- [x] **Telegram maturity lock at 48h** (2026-04-21).
+- [x] **Telegram Pass 2 tiered model** — top-5 premium, #6-10 baseline (2026-04-21).
+- [x] **Pass 2 max_tokens 3000 → 2000** (2026-04-21).
+- [x] **Telegram article_count ≥5 floor** + per-run cap 15 → 10 + Pass 1 skip when <5 posts (2026-04-21).
+- [x] **Story-analysis premium top-16 → top-5** (2026-04-21).
+- [x] **Neutrality moved from LLM to Claude-local** (2026-04-21).
+
+### Still planned
+- [ ] **Rate-limit telegram re-analysis to once per 6h** even when hash drifts slightly. Not urgent — the 48h maturity lock covers most of the case.
+- [ ] **Batch bias scoring** — 5-10 articles per call. Low priority now that we only score 1-per-source-per-story.
+
+---
+
+## Ingest bloat reduction — shipped (2026-04-21)
+
+**Context**: 37% of ingested articles orphaned in 24h; 88% of stories tiny (2-4 articles); 3,844 hidden stories.
+
+- [x] **Short-article filter** in `step_prune_noise` — RSS orphans with <200 chars older than 1h deleted.
+- [x] **step_prune_stagnant** — 1-article stories >48h and 2-4-article stories >14d. First run: 367 stories.
+- [x] **step_recluster_orphans** — retries orphans >6h old at 0.40 cosine. First day: ~653 attached across 4 passes.
+- [x] **SOURCE_URL_EXCLUSIONS** — per-source URL-path blacklist for 12 big Iranian outlets.
+- [x] **_merge_tiny_by_cosine** — union-find pre-merge at 0.60 cosine. First run: 3,195 tiny stories absorbed.
 
 ### Planned
-- [ ] **Rate-limit re-analysis to once per 6h** even when the hash drifts slightly (single-post edits / reorders shouldn't justify $0.008). Add a `min_regen_interval_hours = 6` guard alongside the hash check.
-- [ ] **Top-12 instead of top-15** for the maintenance sweep. The bottom 3 stories in that window rarely have ≥5 posts and end up analyzed-then-ignored on the homepage.
-- [ ] **Batch bias scoring** — currently 1 LLM call per article, up to 150/run. Batch 5–10 articles per call. Requires prompt redesign + careful output parsing. Medium risk, ~$2/mo saved. Only do if the telegram-cache win isn't enough.
+- [ ] Revisit after 7 days of production data. If orphan rate stays ≤10% and hidden-story count stays ≤1000, the bloat is under control. Otherwise tune the URL exclusions + cosine thresholds based on what's drifting in.
+
+---
+
+## Dashboards — shipped (2026-04-21)
+
+### LLM cost dashboard (`/dashboard/cost`)
+- [x] Per-call `llm_usage_logs` ledger, 16 purpose tags across 14 call sites
+- [x] Today/yesterday/window totals, by-model/by-purpose tables, daily stacked bars, top-20 stories, last-100 calls feed
+- [x] Pricing table reference + unknown-model flagging
+
+### Maintenance actions (`/dashboard/actions`)
+- [x] 9 one-click triggers tagged free / LLM-light / LLM-heavy
+- [x] Five new admin endpoints under `/admin/maintenance/*`
+
+### Planned
+- [ ] **Budget alerts on /dashboard/cost** — email or Telegram notification when daily spend exceeds threshold.
+- [ ] **Embeddings instrumentation** — skipped for now; sync API complicates integration. ~1% of total cost.
+
+---
+
+## Niloofar workflow — shipped (2026-04-21)
+
+- [x] `write_preliminary_summary` fix_type — one DB write fills title + summary_fa + narratives + bias_explanation.
+- [x] `needs_preliminary` + `summary_source` flags in gather JSON.
+- [x] Per-article neutrality via `update_neutrality` fix_type — Claude-local, keyed by article_id.
+- [x] Voice rule hardened: explicit «NEVER این سمت» in preliminary block with before/after examples.
+
+### Planned
+- [ ] **Split-story fix_type** — `split_story` that takes a list of article_ids to move to a new story. Useful for cleaning drift clusters manually.
+- [ ] **Auto-merge suggestion in gather** — surface candidate merges (centroid cosine ≥ 0.75 between two visible stories) directly in the gather JSON.
 
 ---
 

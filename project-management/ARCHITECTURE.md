@@ -308,6 +308,15 @@ doornegar/
 | POST | `/api/v1/admin/force-resummarize` | **Fire-and-forget** background job to regenerate summaries/narratives/bias for top N visible non-is_edited stories with the premium model. Returns a job id; poll the status endpoint. Filters is_edited=False to protect curation. |
 | GET | `/api/v1/admin/force-resummarize/status` | Live state of the running/last force-resummarize job (total, processed, regenerated, failed, current_story_title, model). Frontend polls every 3s. |
 | GET | `/api/v1/admin/maintenance/logs` | Durable log rows from `maintenance_logs` table — includes both nightly-cron entries and force-resummarize completions with per-story failure breakdown. |
+| POST | `/api/v1/admin/maintenance/recluster-orphans` | Second-chance clustering for orphan articles >6h old at looser 0.40 cosine. Pure math, caps at 500/run. |
+| POST | `/api/v1/admin/maintenance/merge-tiny-cosine` | Deterministic union-find merge: stories with article_count ≤4 and centroid cosine ≥0.60 collapse into the larger one. |
+| POST | `/api/v1/admin/maintenance/prune-stagnant` | Delete 1-article stories >48h and 2-4-article stories >14d. Skips is_edited. |
+| POST | `/api/v1/admin/maintenance/prune-noise` | Drop Telegram posts and RSS orphans with <200 chars of content. |
+| POST | `/api/v1/admin/maintenance/recompute-centroids` | Rebuild centroid_embedding for stories with NULL centroid (needed after merges). |
+| GET | `/api/v1/admin/cost/summary` | Rolling 24h/7d/30d/90d totals, per-model and per-purpose breakdowns, daily trend for the stacked bar. |
+| GET | `/api/v1/admin/cost/calls` | Last N rows of `llm_usage_logs` with filters by model and purpose. |
+| GET | `/api/v1/admin/cost/top-stories` | Top-N most expensive stories in the window, linking to story pages. |
+| GET | `/api/v1/admin/cost/pricing` | Pricing table reference + unknown-model flags. |
 
 ### Background-job state modules
 
@@ -371,3 +380,94 @@ on output (`narrative.inside.principlist`, etc., each 2–3 bullets).
 The older `state_summary_fa` / `diaspora_summary_fa` fields are
 populated by joining bullets for consumers that haven't migrated yet.
 - **production_location**: iran / abroad
+
+## LLM cost ledger
+
+Every OpenAI chat-completion call across the pipeline writes one row
+to `llm_usage_logs` via `app.services.llm_usage.log_llm_usage()`. The
+helper is called after each call, takes `response.usage` and derives
+cost from `app.services.llm_pricing.estimate_cost()`, and swallows its
+own errors so a DB hiccup can't break the calling pipeline. Table DDL
+is part of the startup self-heal block in `main.py` lifespan.
+
+Schema:
+- `timestamp`, `model`, `purpose` (tag string)
+- `input_tokens`, `cached_input_tokens`, `output_tokens`
+- `input_cost`, `cached_cost`, `output_cost`, `total_cost`
+- `story_id`, `article_id` (nullable attribution)
+- `priced` (false when the model wasn't in the pricing table)
+- `meta` JSONB (batch size, tier label, etc.)
+
+Pricing resolution uses longest-prefix match so dated snapshots
+(`gpt-4o-mini-2024-07-18`) price correctly against the base entry
+(`gpt-4o-mini`). Unknown models log zero-cost rows and surface in the
+`/cost/pricing` endpoint's `unknown_models` array so an operator knows
+which entries to add.
+
+Purpose taxonomy (16 tags across 14 call sites):
+- `bias_scoring`
+- `story_analysis.pass1_facts`, `story_analysis.main.{baseline,premium}`
+- `telegram.pass0_classify`, `telegram.pass1_facts`, `telegram.pass2.{baseline,premium}`
+- `clustering.{match_existing,cluster_new,merge_hidden,merge_visible}`
+- `analyst_takes.extract`, `predictions.verify`, `detect_silences`
+- `quality_postprocess`, `niloofar.{editorial,polish_telegram}`
+- `topic.{analysis,analysts}`
+- `translation.{title,backfill_title,fix_issues}`
+- `llm_utils.generic`
+
+Dashboard at `/dashboard/cost` reads the ledger via four admin
+endpoints (`/cost/{summary,calls,top-stories,pricing}`) and renders
+today/yesterday/window totals, by-model and by-purpose tables (clickable
+to filter the calls feed), daily stacked-bar trend colored by top-5
+purpose, top-20 most expensive stories, and a last-100 calls feed with
+filters.
+
+## Niloofar workflow
+
+Niloofar is a chat-session editorial agent, not an OpenAI call path.
+The `niloofar.md` spec in `.claude/agents/` defines her voice rules,
+the JSON schema she emits, and the fix_types available to her.
+
+**Invocation**: Parham says "run Niloofar" in the Claude Code session.
+
+**Gather**: Claude runs `scripts/journalist_audit.py` (no `--llm` flag
+is default; legacy OpenAI mode is behind `--llm --apply`). The script
+dumps top-N trending stories as JSON with per-article content +
+deterministic evidence + flags:
+- `needs_preliminary: bool` — `summary_fa` null/empty or `bias_explanation_fa` missing
+- `has_article_neutrality: bool`
+- `summary_source` (`"niloofar_preliminary"`, `"claude"` for neutrality, or null)
+
+**Audit**: Claude reads the JSON, decides per story whether to emit
+`write_preliminary_summary` (filling title + summary + narratives +
+bias in one write), `update_narratives` (editing existing), `merge_stories`,
+`update_neutrality` (article_id → score), `remove_article`, etc. Writes
+to `/tmp/niloofar_findings.json`.
+
+**Apply**: `python scripts/journalist_audit.py --apply-from <path>` —
+no LLM, just direct DB writes. Stamps `is_edited=true` on edits so the
+nightly pipeline won't clobber editorial decisions. For preliminaries,
+also stamps `summary_source: "niloofar_preliminary"` so the cost
+dashboard can distinguish these from full audits.
+
+**Voice rules** (enforced via spec, not code):
+- Lead with viewpoint as direct claim (never «این سمت …»).
+- Null out silent sides rather than invent stock phrases.
+- For preliminaries, keep summary_fa to 20–30 Farsi words and
+  bias_explanation to 3–5 bullets.
+
+## Maintenance actions
+
+`/dashboard/actions` exposes 9 maintenance steps as one-click buttons
+tagged by cost:
+- **free** — retry-cluster orphans, merge tiny cosine, recompute
+  centroids, prune stagnant, prune noise, ingest RSS+Telegram
+- **llm-light** — NLP process (translation only)
+- **llm-heavy** (confirm dialog) — cluster new articles, bias-score
+  unscored articles
+
+Each backend endpoint under `/admin/maintenance/*` wraps an existing
+maintenance step and returns `{status, stats}` so the UI renders
+"what just happened" without a second call. `step_recluster_orphans`,
+`_merge_tiny_by_cosine`, `step_prune_stagnant`, `step_prune_noise`,
+and `step_recompute_centroids` are exposed.

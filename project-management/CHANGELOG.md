@@ -4,6 +4,89 @@ All notable changes to the Doornegar project are documented here, organized by w
 
 ---
 
+## April 21, 2026
+
+### Neutrality: moved from LLM to local Claude
+- Per-story neutrality is no longer emitted by the OpenAI story-analysis prompt. Removed the «امتیاز بی‌طرفی» section and the `article_neutrality` output field from `STORY_ANALYSIS_PROMPT` in `story_analysis.py`. Cost savings are modest per call (~15% prompt shrink) but the bigger win is quality: scores stop drifting between runs.
+- New per-article evidence extractor `_compute_article_evidence()` — deterministic Python, counts loaded-word hits per subgroup (principlist / reformist / moderate / radical), «» quote pairs, and word count. Runs on every story analysis; zero extra cost.
+- `scripts/neutrality_audit.py` (new) — `--export` dumps top-N trending + non-locked + not-yet-scored stories to JSON with full article text + evidence; Claude reads, scores each article −1..+1; `--apply <path>` writes `article_neutrality` + per-source aggregate + `neutrality_source: "claude"` + `neutrality_scored_at` into each story's `summary_en`.
+- «جایگاه رسانه‌ها» political-spectrum panel on story pages is **hidden until Claude-scored neutrality exists for that story** — no more misleading numbers from fluctuating LLM calls.
+- Hover tooltip on source badge surfaces evidence: article count in this story, total loaded-word hits, total quote count.
+- Maturity lock on story analysis: once `last_updated_at > 48h` AND analysis exists, stamp `analysis_locked_at` and skip LLM re-runs forever. Story-summarize loop carries Claude-scored neutrality across any residual re-runs so edits aren't clobbered.
+
+### Niloofar preliminary-summary workflow (new)
+- **327 of 349 visible stories had empty narratives** at session start because `step_summarize` only reaches a handful per run. Niloofar now fills the gap.
+- New fix_type `write_preliminary_summary` in `journalist_audit.py` — one DB write fills title, summary_fa, per-side summaries, bias_explanation. Stamps `is_edited=true` and tags blob with `summary_source: "niloofar_preliminary"` so the cost dashboard distinguishes these from full audits.
+- Gather JSON adds `needs_preliminary: bool` and `summary_source` flags per story so the audit knows which need writing vs. auditing.
+- `.claude/agents/niloofar.md` updated with: (1) preliminary-summary writing rules (20–30 word summary, 3–5 bullet bias, null out silent sides rather than invent stock phrases); (2) hard rule against opening side summaries with «این سمت …» / «این رسانه‌ها …» / «آن سمت …» with before/after examples. The rule existed in the full-audit section but was slipping in preliminaries.
+- Two Niloofar-through-Claude runs this session produced **30 preliminary summaries + 32 neutrality scorings + 11 merges + 24 drift removals**. Remaining homepage-visible stories with empty narratives: zero.
+
+### Cost dashboard (new)
+- **Per-call OpenAI usage ledger** — every chat-completion now writes one row to `llm_usage_logs` with model, purpose tag, token counts, cost components, story/article attribution, meta JSONB. Self-heal DDL added to `main.py` lifespan.
+- `app/services/llm_pricing.py` — PRICING dict mirroring the standard tier on platform.openai.com/docs/pricing (2026-04-21 snapshot). `estimate_cost()` handles dated snapshot resolution (gpt-4o-mini-2024-07-18 → gpt-4o-mini) via longest-prefix match; unknown models log zero-cost but are listed in the dashboard's «بدون قیمت‌گذاری» banner.
+- `app/services/llm_usage.py` — `log_llm_usage()` helper called after every LLM call, wrapped in try/except so a DB hiccup never breaks the calling pipeline.
+- **16 purpose tags** instrumented across 14 call sites: `bias_scoring`, `story_analysis.pass1_facts`, `story_analysis.main.{baseline,premium}`, `telegram.pass0_classify`, `telegram.pass1_facts`, `telegram.pass2.{baseline,premium}`, `clustering.{match_existing,cluster_new,merge_hidden,merge_visible}`, `analyst_takes.extract`, `predictions.verify`, `detect_silences`, `quality_postprocess`, `niloofar.{editorial,polish_telegram}`, `topic.{analysis,analysts}`, `translation.{title,backfill_title,fix_issues}`, `llm_utils.generic`. Embeddings (sync API) intentionally not yet instrumented — trivial cost, complex integration.
+- `GET /admin/cost/{summary,calls,top-stories,pricing}` — window-scoped aggregates, recent-calls feed, top-20 most expensive stories, pricing reference.
+- **`/dashboard/cost` admin page**: top tiles (today/yesterday/window/tokens + today-vs-yesterday delta), by-model and by-purpose tables (click to filter calls feed), daily stacked-bar trend colored by top-5 purpose, top-20 most expensive stories linking to story pages, last-100 calls feed with filters.
+
+### Maintenance actions dashboard (new)
+- `/dashboard/actions` — one-click triggers for every useful maintenance step. Each button tagged green `free` / amber `LLM-light` / red `LLM-heavy`. LLM-heavy buttons show a confirm dialog.
+- Nine actions grouped across four categories:
+  - **Clustering** (all free): retry-cluster orphans · merge near-duplicate tiny stories (cosine ≥ 0.60) · recompute centroids
+  - **Ingest & NLP**: ingest RSS+Telegram (free) · NLP process (LLM-light) · cluster new articles (LLM-heavy)
+  - **Analysis**: bias-score unscored articles (LLM-heavy)
+  - **Cleanup** (all free): prune stagnant tinies · prune noise
+- Five new admin endpoints under `/admin/maintenance/*` mirror the existing trigger pattern.
+- Niloofar remains a chat-session workflow — a callout at the bottom explains how to invoke.
+
+### Cost reductions (on top of the dashboard)
+- **bias_scoring one-per-source-per-story** — NOT EXISTS subquery before sending to LLM; a single Fars article tells us Fars's angle on a story, the other five add no signal. Roughly halves gpt-4o-mini volume on hot stories.
+- `premium_story_top_n` dropped **16 → 5** in `config.py` — only top-5 trending stories get gpt-5-mini for story analysis; #6+ fall back to gpt-4o-mini. Mirrors the telegram Pass 2 tiering.
+- **Telegram Pass 2 max_tokens 3000 → 2000** — output rarely exceeds 1500 in practice. Cuts the single largest line item.
+- **Telegram maturity lock at 48h** + article-count floor ≥5 + queue cap 10 + Pass 1 skip when <5 analyst posts survive. Telegram deep-analysis spend drops materially.
+- Tiered Pass 2 model: top-5 premium (gpt-5-mini), #6-10 baseline (gpt-4o-mini).
+
+### Ingest bloat reduction
+- `step_prune_noise` extended to also delete RSS-origin orphans with `content_text < 200 chars` older than 1h — catches feed stubs / navigation fragments that were ~29% of orphan volume.
+- `step_prune_stagnant` (new) — deletes 1-article stories >48h old and 2-4-article stories >14 days old. First run: 367 stories pruned. Registered in FULL_PIPELINE before `archive_stale`.
+- `step_recluster_orphans` (new) — orphan articles >6h old try against all multi-article story centroids at looser 0.40 cosine threshold. Zero LLM. 500-row cap per run. **First three passes attached 503 orphans**; a fourth post-cleanup pass added 66. Article orphan rate (7d) dropped **37% → 10%**.
+- `SOURCE_URL_EXCLUSIONS` in `ingestion.py` — per-slug URL-path substrings dropped at ingest for 12 biggest Iranian outlets (sport / entertainment / art-culture / life-style paths). Cuts ~150-300 RSS rows/day.
+- `_merge_tiny_by_cosine()` (new) in `clustering.py` — union-find over stories with `article_count ≤ 4` and centroid cosine ≥ 0.60. Called as a pre-merge before `_merge_hidden_stories` so the LLM-based merge gets a cleaner input. **First production run absorbed 3,195 tiny stories** in ~12 minutes; hidden-story count fell from ~3,849 → ~654.
+
+### Clustering-drift root cause fix
+- `_match_to_existing_stories` in `clustering.py`: when candidate target story has `article_count < 10`, raise cosine floor from 0.30 → 0.45 AND require at least one concrete signal overlap (token-jaccard ≥ 0.15, shared quote, or shared number) before the pair reaches the LLM. Fixes the pattern observed in the audit: five top-50 stories had drift (Trump/Epstein in a factory-fire cluster, Lebanon/Hezbollah in a Qom-munitions cluster, etc.) because loose cosine + lenient LLM absorbed off-topic articles into thin-centroid stories.
+- `story_sig` now carries `article_count` alongside the existing tokens/quotes/numbers/last_updated_at — used inline by the per-pair check, no extra query.
+
+### Homepage تقابل / بیشترین اختلاف gating + layout
+- **Both-side-narrative gate**: a story only enters تقابل روایت‌ها or بیشترین اختلاف نگاه if both `state_summary_fa` AND `diaspora_summary_fa` are ≥60 chars AND neither opens with a meta-commentary pattern («پوشش برون‌مرزی …»، «روایت متمایزی شکل نگرفت»، «هیچ رسانه …»). Stops stories whose diaspora side was empty or described absence-of-coverage from appearing in a «compare two narratives» slot.
+- **Equal-height splits** on both boxes (first iteration) — wrapping each item in `flex-1 min-h-0 overflow-hidden` so stories share vertical space 50/50.
+- **Line-clamp bumped 2 → 3** on the تقابل روایت‌ها bullets so they match the بیشترین اختلاف نگاه box and diaspora bullets aren't visually squeezed to one line.
+- **Natural-height items** (final iteration) — replaced `flex-1 min-h-0 overflow-hidden` on each item with `block` / content-height after the 50/50 split was clipping bullets mid-way. Parent box keeps its own `overflow-hidden` as a safety net.
+
+### Homepage article-list grouping
+- `ArticleFilterList.tsx` — articles on the story page are now grouped by (Tehran-day × source). Multiple same-day articles from the same outlet collapse into one row with the newest article as the primary link + the rest as a compact right-border list.
+
+### Arc strip + drift panel removed from story pages (temporary)
+- The chapter pill strip and «روایت در حال تغییر» drift panel were removed from `/stories/[id]/page.tsx`. The component + backend `/arcs/{id}/drift` endpoint are kept for future reuse. Rationale: arcs need more editorial curation before exposing.
+
+### Niloofar voice rule hardening
+- Seven stories had preliminary summaries opening with «این سمت بر X تأکید دارد» — a pattern explicitly forbidden in the niloofar.md full-audit section but slipping in preliminary writes. Rewrote all seven via `update_narratives` findings to lead with the viewpoint directly. Example: «این سمت به تضعیف ارتش اشاره کرده …» → «توانمندی‌های ارتش جمهوری اسلامی در حال تضعیف است …».
+- `niloofar.md` updated with an explicit NEVER-این-سمت rule inside the preliminary-summary workflow block, with before/after examples.
+
+### Session stats
+- Commits: 10+ (feature-group commits with co-authored-by)
+- Merges executed: 15 (8 Islamabad-talks + 4 first gathering batch + 3 second gathering batch)
+- Drift articles removed: 24 across 5 stories
+- Orphans attached: 569 (first recluster_orphans batch) + 66 (post-cleanup pass)
+- Tiny-cosine merges: 3,195
+- Stories rewrite (voice fix): 7
+- Preliminary summaries written: 30 (28 round 1 + 2 round 2)
+- Neutrality scores applied: 32 (28 + 4)
+- Admin endpoints added: 5 (maintenance triggers) + 4 (cost) = 9
+- New dashboard pages: 2 (`/dashboard/cost`, `/dashboard/actions`)
+
+---
+
 ## April 19–20, 2026
 
 ### Story arcs feature (new)
