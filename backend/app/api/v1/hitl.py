@@ -467,6 +467,82 @@ async def update_story_narrative(
 # ─── 4. Stock-image picker (Unsplash) ────────────────────────
 
 
+@router.get("/stories-without-image")
+async def stories_without_image(
+    limit: int = Query(30, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return visible stories that don't have a usable cover image.
+
+    "Usable" = at least one article with a non-logo, non-icon image_url,
+    OR a manual_image_url override stored in summary_en. A story
+    surfaces here when every article's image is missing/bad AND no
+    manual override has been pinned — the homepage card would fall
+    back to a source logo, which looks broken.
+
+    Ordered by trending_score DESC so the most-visible gaps rise to
+    the top of the HITL queue.
+    """
+    import json as _json
+
+    result = await db.execute(
+        select(Story)
+        .options(selectinload(Story.articles))
+        .where(Story.article_count >= 5)
+        .order_by(Story.trending_score.desc(), Story.first_published_at.desc().nullslast())
+        .limit(500)
+    )
+    stories = result.scalars().all()
+
+    def _is_bad(url: str | None) -> bool:
+        if not url:
+            return True
+        u = url.lower()
+        return (
+            "favicon" in u
+            or "/icon" in u
+            or "logo" in u
+            or "sprite" in u
+            or u.endswith(".svg")
+            or "1x1" in u
+            or "placeholder" in u
+        )
+
+    def _has_manual(story: Story) -> bool:
+        if not story.is_edited or not story.summary_en:
+            return False
+        try:
+            blob = _json.loads(story.summary_en)
+        except Exception:
+            return False
+        candidate = blob.get("manual_image_url")
+        return bool(candidate and not _is_bad(candidate))
+
+    def _has_article_image(story: Story) -> bool:
+        return any(
+            a.image_url and not _is_bad(a.image_url)
+            for a in (story.articles or [])
+        )
+
+    gaps = []
+    for s in stories:
+        if _has_manual(s) or _has_article_image(s):
+            continue
+        gaps.append({
+            "id": str(s.id),
+            "slug": s.slug,
+            "title_fa": s.title_fa,
+            "article_count": s.article_count,
+            "source_count": s.source_count,
+            "first_published_at": s.first_published_at.isoformat() if s.first_published_at else None,
+            "trending_score": s.trending_score,
+        })
+        if len(gaps) >= limit:
+            break
+
+    return {"stories": gaps, "count": len(gaps)}
+
+
 @router.get("/unsplash-search")
 async def unsplash_search(
     q: str = Query(..., min_length=2, max_length=200),

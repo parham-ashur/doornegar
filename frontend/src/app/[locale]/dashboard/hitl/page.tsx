@@ -1,12 +1,51 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { adminHeaders, hasAdminToken } from "./_auth";
+
+const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+type ImageGap = {
+  id: string;
+  slug: string;
+  title_fa: string;
+  article_count: number;
+  source_count: number;
+  first_published_at: string | null;
+  trending_score: number;
+};
 
 export default function HitlIndex() {
   const router = useRouter();
   const [storyId, setStoryId] = useState("");
+  const [gaps, setGaps] = useState<ImageGap[] | null>(null);
+  const [loadingGaps, setLoadingGaps] = useState(false);
+
+  // Fetch stories needing cover images on mount (admin-gated endpoint;
+  // page already assumes an admin token exists in localStorage).
+  useEffect(() => {
+    if (!hasAdminToken()) return;
+    let cancelled = false;
+    setLoadingGaps(true);
+    fetch(`${API}/api/v1/admin/hitl/stories-without-image?limit=30`, {
+      headers: adminHeaders(),
+      cache: "no-store",
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (cancelled) return;
+        setGaps(d?.stories || []);
+      })
+      .catch(() => {
+        if (!cancelled) setGaps([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingGaps(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   const tiles = [
     {
@@ -75,7 +114,56 @@ export default function HitlIndex() {
         ))}
       </div>
 
+      {/* Stories without a cover image — queue of work */}
       <div className="mt-8 border border-slate-200 dark:border-slate-800 p-4">
+        <div className="flex items-baseline justify-between mb-3">
+          <h2 className="text-[13px] font-black text-slate-900 dark:text-white">
+            خبرهای بدون تصویر
+          </h2>
+          <span className="text-[11px] text-slate-400">
+            {loadingGaps ? "در حال بارگذاری…" : gaps ? `${gaps.length} خبر` : ""}
+          </span>
+        </div>
+        <p className="text-[13px] text-slate-500 dark:text-slate-400 mb-3 leading-6">
+          این خبرها در صفحهٔ اصلی با لوگوی رسانه پر می‌شوند. یک تصویر مناسب‌تر از Unsplash انتخاب کن تا کارت خبر تمیز دیده شود.
+        </p>
+        {gaps && gaps.length === 0 && !loadingGaps && (
+          <p className="text-[13px] text-emerald-600 dark:text-emerald-400">
+            ✓ هیچ خبر پرتراکیکی بدون تصویر نیست.
+          </p>
+        )}
+        {gaps && gaps.length > 0 && (
+          <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+            {gaps.map((g) => (
+              <li key={g.id} className="py-2 flex items-center gap-3">
+                <div className="flex-1 min-w-0">
+                  <Link
+                    href={`/fa/stories/${g.id}`}
+                    target="_blank"
+                    className="block text-[13px] text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 truncate"
+                  >
+                    {g.title_fa || "(بدون عنوان)"}
+                  </Link>
+                  <div className="text-[11px] text-slate-400 mt-0.5">
+                    {g.source_count} رسانه · {g.article_count} مقاله
+                    {g.first_published_at && (
+                      <> · {new Date(g.first_published_at).toLocaleDateString("fa-IR")}</>
+                    )}
+                  </div>
+                </div>
+                <Link
+                  href={`/fa/dashboard/hitl/stock-images/${g.id}`}
+                  className="shrink-0 text-[12px] font-bold px-3 py-1.5 bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:opacity-90"
+                >
+                  انتخاب تصویر
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div className="mt-6 border border-slate-200 dark:border-slate-800 p-4">
         <h2 className="text-[13px] font-black text-slate-900 dark:text-white mb-1">
           ویرایش خبر خاص
         </h2>
