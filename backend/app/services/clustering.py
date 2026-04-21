@@ -634,6 +634,9 @@ async def _match_to_existing_stories(
                 story_recent_titles[sid].append(t_fa)
 
     # Per-story token/quote/number sets (story title + top-3 titles + summary).
+    # Also track article_count — small stories have thin centroids that drift
+    # easily when an off-topic article matches on generic vocabulary alone,
+    # so we demand stronger evidence before sending them to the LLM.
     story_sig: dict[uuid.UUID, dict[str, set]] = {}
     for sid, row in story_by_id.items():
         title_fa = row[1]
@@ -645,6 +648,7 @@ async def _match_to_existing_stories(
             "quotes": _quoted_phrases(corpus),
             "numbers": _number_tokens(corpus),
             "last_updated_at": row[5],
+            "article_count": row[3],
         }
 
     # Reserve coherent sub-clusters of this run's own unmatched articles
@@ -711,8 +715,25 @@ async def _match_to_existing_stories(
                 auto_match_count += 1
                 break  # one story is enough; stop scanning
 
-            # Otherwise — ambiguous middle band, send to LLM.
-            if sim >= EMBEDDING_SIM_THRESHOLD:
+            # Otherwise — ambiguous middle band, send to LLM. Small
+            # target stories (article_count < 10) get a tighter gate:
+            # raise the cosine floor to 0.45 AND require at least one
+            # concrete signal overlap (token jaccard ≥ 0.15, shared
+            # quote, or shared number). This is the fix for the drift
+            # pattern where off-topic articles matched a small story
+            # on generic vocabulary and the LLM rubber-stamped.
+            target_ac = sig.get("article_count") or 0
+            target_small = target_ac and target_ac < 10
+            effective_threshold = 0.45 if target_small else EMBEDDING_SIM_THRESHOLD
+            if sim >= effective_threshold:
+                if target_small:
+                    has_signal = (
+                        _jaccard(a_tokens, sig.get("tokens") or set()) >= 0.15
+                        or bool(a_quotes & (sig.get("quotes") or set()))
+                        or bool(a_numbers & (sig.get("numbers") or set()))
+                    )
+                    if not has_signal:
+                        continue
                 candidates.add(story_id)
 
         # Record LLM candidates only for articles NOT auto-matched
