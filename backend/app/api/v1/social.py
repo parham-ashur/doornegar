@@ -221,14 +221,15 @@ async def get_telegram_analysis(
         channel_stats.append({"name": title, "type": ch_type, "posts": cnt})
     total_posts = sum(c["posts"] for c in channel_stats)
 
-    # Serve any existing cache immediately — fresh OR stale. Synchronous
-    # regeneration on the request path used to block the user for
-    # 5–15 s (Pass 0 + Pass 1 + Pass 2 LLM calls) whenever the 48h TTL
-    # expired, which was the main source of the "تحلیل روایت‌های تلگرام
-    # takes forever" reports. Staleness is tolerable: news analysis
-    # doesn't move much in 2–7 days, and auto_maintenance refreshes the
-    # top-10 trending stories daily. force_refresh (admin only) still
-    # bypasses everything.
+    # Read-only path: the user-facing endpoint never regenerates. Cache
+    # is filled exclusively by step_telegram_deep_analysis in
+    # auto_maintenance, which has a posts_hash guard, a 48h maturity
+    # lock, rank-based tier tagging, and runs once per maintenance
+    # cycle. Before this change the endpoint regenerated on any empty
+    # cache, which combined with wipe-on-reassignment (every new post
+    # link wipes the cache to None) produced a 85-calls-in-a-day loop
+    # on hot stories. force_refresh (admin-only) remains the escape
+    # hatch for manually rebuilding a specific story.
     story_result = await db.execute(select(Story).where(Story.id == story_id))
     story = story_result.scalar_one_or_none()
     if story and not force_refresh and story.telegram_analysis:
@@ -241,16 +242,25 @@ async def get_telegram_analysis(
             "fresh": _cache_is_fresh(story.telegram_analysis),
         }
 
-    # No cache at all — this is the only path that still regenerates
-    # synchronously. Happens once per story (the first visitor pays,
-    # subsequent visits are instant). Cold hits on non-trending stories
-    # remain the unavoidable exception; everything else is O(db read).
+    if not force_refresh:
+        # Empty cache + not an admin force. Tell the frontend so the
+        # user gets the "awaiting analysis" message. The next
+        # auto_maintenance cycle will fill this in if the story is in
+        # the top-N trending pool.
+        return {
+            "status": "no_data",
+            "message": "Analysis pending — next maintenance cycle will generate it",
+            "channels": channel_stats,
+            "total_posts": total_posts,
+        }
+
+    # Admin force_refresh path only. This is the single entry point
+    # that still triggers synchronous regeneration.
     from app.services.telegram_analysis import analyze_story_telegram
     result = await analyze_story_telegram(db, str(story_id))
     if result is None:
         return {"status": "no_data", "message": "Not enough Telegram posts for analysis", "channels": channel_stats, "total_posts": total_posts}
 
-    # Stamp with cache time so future reads can check freshness
     result["cached_at"] = datetime.now(timezone.utc).isoformat()
 
     if story:
