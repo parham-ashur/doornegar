@@ -427,8 +427,7 @@ async def step_prune_noise():
 
         # Candidates: un-embedded Telegram-originated articles. We
         # identify these by url prefix — convert_telegram_posts_to_articles
-        # stamps them with `https://t.me/{channel}/{msg}`. RSS articles
-        # virtually never fail the threshold so we don't touch them.
+        # stamps them with `https://t.me/{channel}/{msg}`.
         art_rows = (await db.execute(
             _text("""
                 SELECT id, title_fa, title_original, content_text
@@ -451,11 +450,35 @@ async def step_prune_noise():
             await db.execute(delete(Article).where(Article.id.in_(art_to_delete)))
             stats["articles_deleted"] = len(art_to_delete)
 
+        # Second pass — RSS-origin orphans with content_text < 200 chars.
+        # These are usually feed stubs (nav fragments, "click to read",
+        # empty bodies). Running after NLP has had a chance (ingested
+        # >1h ago) so we don't prune articles still mid-extraction.
+        # Restrict to story_id IS NULL so we never touch something that
+        # made it into a cluster — there's a reason it landed there.
+        SHORT_THRESHOLD = 200
+        rss_short_rows = (await db.execute(
+            _text("""
+                SELECT id
+                FROM articles
+                WHERE story_id IS NULL
+                  AND url NOT LIKE 'https://t.me/%'
+                  AND ingested_at < NOW() - INTERVAL '1 hour'
+                  AND (content_text IS NULL OR LENGTH(content_text) < :th)
+            """), {"th": SHORT_THRESHOLD}
+        )).all()
+        stats["rss_short_checked"] = len(rss_short_rows)
+        if rss_short_rows:
+            ids = [row.id for row in rss_short_rows]
+            await db.execute(delete(Article).where(Article.id.in_(ids)))
+            stats["rss_short_deleted"] = len(ids)
+
         await db.commit()
 
     logger.info(
         f"Prune noise: tg {stats['tg_deleted']}/{stats['tg_checked']}, "
-        f"articles {stats['articles_deleted']}/{stats['articles_checked']}"
+        f"tg-articles {stats['articles_deleted']}/{stats['articles_checked']}, "
+        f"rss-short {stats.get('rss_short_deleted', 0)}/{stats.get('rss_short_checked', 0)}"
     )
     return stats
 
@@ -640,6 +663,94 @@ async def step_cluster():
     async with async_session() as db:
         stats = await cluster_articles(db)
     logger.info(f"Clustering: {stats}")
+    return stats
+
+
+async def step_recluster_orphans():
+    """Second-chance clustering for articles stranded by the main pass.
+
+    Runs after step_cluster. Targets articles whose story_id is still
+    NULL more than 6 hours after ingestion — late arrivals whose
+    "sibling" articles existed when the first pass ran but hadn't
+    formed a cluster yet, or articles that narrowly missed the default
+    0.45 cosine threshold.
+
+    Uses centroid cosine against existing non-locked stories with a
+    looser threshold (0.40). Pure math, no LLM — cheap. Attaches the
+    orphan if it finds any story whose centroid is close enough.
+
+    Intentionally conservative: only matches against stories with
+    article_count >= 2 (already multi-source, so a match is meaningful)
+    and skips stories with a Niloofar is_edited flag so human-curated
+    arcs don't pick up misfit articles.
+    """
+    from sqlalchemy import select, update
+    from app.database import async_session
+    from app.models.article import Article
+    from app.models.story import Story
+    from app.nlp.embeddings import cosine_similarity as _cs
+
+    RETRY_THRESHOLD = 0.40
+    MIN_ORPHAN_AGE_HOURS = 6
+    MAX_PER_RUN = 500
+
+    stats = {"checked": 0, "attached": 0}
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=MIN_ORPHAN_AGE_HOURS)
+
+    async with async_session() as db:
+        # Candidates: orphan articles with embeddings, old enough
+        orphans = (await db.execute(
+            select(Article.id, Article.embedding).where(
+                Article.story_id.is_(None),
+                Article.embedding.isnot(None),
+                Article.ingested_at < cutoff,
+            ).limit(MAX_PER_RUN)
+        )).all()
+
+        if not orphans:
+            return stats
+
+        # Load all eligible stories once (cheaper than per-article query)
+        stories = (await db.execute(
+            select(Story.id, Story.centroid_embedding).where(
+                Story.article_count >= 2,
+                Story.centroid_embedding.isnot(None),
+                Story.is_edited.is_(False),
+            )
+        )).all()
+
+        if not stories:
+            return stats
+
+        stats["checked"] = len(orphans)
+        attached_ids: dict[str, object] = {}  # article_id -> story_id
+
+        for art_id, emb in orphans:
+            best_sim = 0.0
+            best_story = None
+            for sid, cent in stories:
+                try:
+                    sim = _cs(emb, cent)
+                except Exception:
+                    continue
+                if sim > best_sim:
+                    best_sim = sim
+                    best_story = sid
+            if best_story and best_sim >= RETRY_THRESHOLD:
+                attached_ids[art_id] = best_story
+
+        for art_id, sid in attached_ids.items():
+            await db.execute(
+                update(Article).where(Article.id == art_id).values(story_id=sid)
+            )
+        stats["attached"] = len(attached_ids)
+        await db.commit()
+
+    if stats["attached"]:
+        logger.info(
+            f"Recluster orphans: {stats['attached']}/{stats['checked']} "
+            f"attached at ≥{RETRY_THRESHOLD} cosine"
+        )
     return stats
 
 
@@ -1912,6 +2023,67 @@ async def step_feedback_health():
         for alert in stats["alerts"]:
             logger.warning(f"  ⚠ {alert}")
 
+    return stats
+
+
+async def step_prune_stagnant():
+    """Delete small stories that have stopped growing.
+
+    Two tiers, both targeting stories that will never reach the
+    article_count ≥ 5 visibility threshold:
+
+    - 1-article stories older than 48h → these are one-offs that no other
+      source picked up. They bloat the hidden-story count without ever
+      surfacing. The article gets unlinked (returns to orphan pool) and
+      the story row is deleted.
+    - 2-4 article stories older than 14 days → a story that has been
+      stable at 2-4 for two weeks is not coming back. Same treatment.
+
+    Runs before step_archive_stale so the 60-day sweep doesn't also
+    re-process these rows. Idempotent — a second run is a no-op once the
+    small-stagnant set is empty.
+    """
+    from sqlalchemy import select, update, delete
+    from app.database import async_session
+    from app.models.story import Story
+    from app.models.article import Article
+
+    stats = {"singles_pruned": 0, "smalls_pruned": 0}
+    now = datetime.now(timezone.utc)
+    singles_cutoff = now - timedelta(hours=48)
+    smalls_cutoff = now - timedelta(days=14)
+
+    async with async_session() as db:
+        # Tier 1 — 1-article stories >48h
+        singles = (await db.execute(
+            select(Story.id).where(
+                Story.article_count == 1,
+                Story.last_updated_at < singles_cutoff,
+                Story.is_edited.is_(False),
+            )
+        )).scalars().all()
+        if singles:
+            await db.execute(update(Article).where(Article.story_id.in_(singles)).values(story_id=None))
+            await db.execute(delete(Story).where(Story.id.in_(singles)))
+            stats["singles_pruned"] = len(singles)
+
+        # Tier 2 — 2-4 article stories >14 days with no recent updates
+        smalls = (await db.execute(
+            select(Story.id).where(
+                Story.article_count.between(2, 4),
+                Story.last_updated_at < smalls_cutoff,
+                Story.is_edited.is_(False),
+            )
+        )).scalars().all()
+        if smalls:
+            await db.execute(update(Article).where(Article.story_id.in_(smalls)).values(story_id=None))
+            await db.execute(delete(Story).where(Story.id.in_(smalls)))
+            stats["smalls_pruned"] = len(smalls)
+
+        await db.commit()
+
+    if stats["singles_pruned"] or stats["smalls_pruned"]:
+        logger.info(f"Prune stagnant: {stats}")
     return stats
 
 
@@ -4307,6 +4479,7 @@ FULL_PIPELINE = [
     ("backfill_farsi_titles", "Backfill Farsi titles", "step_backfill_farsi_titles"),
     ("cluster", "Cluster articles into stories", "step_cluster"),
     ("centroids", "Recompute story centroid embeddings", "step_recompute_centroids"),
+    ("recluster_orphans", "Second-chance clustering for 6h+ orphans (looser cosine)", "step_recluster_orphans"),
     ("telegram_link", "Link Telegram posts to stories (embeddings)", "step_telegram_link_posts"),
     # Fix stale mis-links: posts whose best-match story has drifted
     # since they were first attached get moved to where they actually
@@ -4331,6 +4504,7 @@ FULL_PIPELINE = [
     ("detect_silences", "Detect coverage silences", "step_detect_silences"),
     ("detect_coordination", "Detect coordinated messaging", "step_detect_coordination"),
     ("source_health", "Source health", "step_source_health"),
+    ("prune_stagnant", "Prune 1-article (>48h) and 2-4-article (>14d) stagnant stories", "step_prune_stagnant"),
     ("archive_stale", "Archive stale stories", "step_archive_stale"),
     ("recalc_trending", "Recalculate trending", "step_recalculate_trending"),
     ("dedup_articles", "Dedup articles", "step_deduplicate_articles"),
@@ -4371,6 +4545,7 @@ INGEST_ONLY_PIPELINE = [
     ("backfill_farsi_titles", "Backfill Farsi titles", "step_backfill_farsi_titles"),
     ("cluster", "Cluster articles into stories", "step_cluster"),
     ("centroids", "Recompute story centroid embeddings", "step_recompute_centroids"),
+    ("recluster_orphans", "Second-chance clustering for 6h+ orphans (looser cosine)", "step_recluster_orphans"),
     ("telegram_link", "Link Telegram posts to stories (embeddings)", "step_telegram_link_posts"),
     # Keeps newly-ingested images on R2 so the homepage never depends on
     # the origin CDN being reachable from Vercel. Idempotent, capped 300/run.

@@ -23,6 +23,42 @@ from app.models.source import Source
 
 logger = logging.getLogger(__name__)
 
+# Per-source URL-path exclusions. Keyed by source slug; each value is a
+# list of path substrings. If any substring appears in the article URL,
+# the article is skipped at ingest. Intended to drop sports, entertain-
+# ment, lifestyle, horoscope, and weather stories from Iranian general-
+# news outlets whose RSS dumps everything. These sections bloat the
+# article pool without ever clustering with other sources' coverage of
+# the same topic, so they become stagnant 1-2 article stories.
+#
+# Add patterns gradually — false positives hurt more than false
+# negatives here. Check the source's real URL structure before adding.
+SOURCE_URL_EXCLUSIONS: dict[str, list[str]] = {
+    "shargh": ["/sport", "/entertainment", "/art-culture", "/life-style"],
+    "irna": ["/sport", "/entertainment", "/art-culture", "/life"],
+    "khabar-online": ["/sport/", "/entertainment/", "/life/"],
+    "mehr-news": ["/news/sport", "/news/entertainment", "/news/art"],
+    "ilna": ["/بخش-ورزش", "/بخش-فرهنگ-هنر", "/بخش-سبک-زندگی"],
+    "tabnak": ["/fa/news/sport", "/fa/news/entertainment"],
+    "fars-news": ["/sport/", "/entertainment/"],
+    "tasnim": ["/sport/", "/art-culture/"],
+    "etemad": ["/sport/", "/entertainment/"],
+    "entekhab": ["/fa/news/sport", "/fa/news/entertainment"],
+    "isna": ["/sport/", "/art-culture/"],
+    "etemad-online": ["/بخش-ورزش", "/بخش-فرهنگ"],
+}
+
+
+def _url_excluded(url: str, source_slug: str | None) -> bool:
+    """Return True when the URL matches the source's exclusion list."""
+    if not source_slug:
+        return False
+    patterns = SOURCE_URL_EXCLUSIONS.get(source_slug)
+    if not patterns:
+        return False
+    return any(p in url for p in patterns)
+
+
 # URL patterns for favicons, PWA icons, and other non-article thumbnails
 # that RSS feeds sometimes expose as media_content when no real article
 # image exists. Matches the frontend SafeImage filter so rejected URLs
@@ -130,9 +166,18 @@ async def ingest_source(source: Source, db: AsyncSession) -> dict:
             log.articles_found = len(entries)
 
             new_count = 0
+            skipped_url = 0
             for entry in entries:
                 url = entry.get("link", "").strip()
                 if not url:
+                    continue
+
+                # Skip sections we don't cover (sport/entertainment/
+                # lifestyle on big Iranian news outlets). These were
+                # creating 1-2 article stagnant stories and bloating
+                # the hidden-story count.
+                if _url_excluded(url, source.slug):
+                    skipped_url += 1
                     continue
 
                 title = entry.get("title", "").strip()
@@ -200,6 +245,8 @@ async def ingest_source(source: Source, db: AsyncSession) -> dict:
             log.articles_new = new_count
             stats["found"] += log.articles_found
             stats["new"] += new_count
+            if skipped_url:
+                logger.info(f"  {source.slug}: skipped {skipped_url} URLs matching exclusion patterns")
 
         except Exception as e:
             log.status = "error"

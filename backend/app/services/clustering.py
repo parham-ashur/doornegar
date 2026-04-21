@@ -1155,6 +1155,93 @@ async def _cluster_new_articles(
 # ---------------------------------------------------------------------------
 
 
+async def _merge_tiny_by_cosine(db: AsyncSession, threshold: float = 0.60) -> int:
+    """Deterministic pre-merge for near-duplicate tiny stories.
+
+    Finds pairs of stories with article_count ≤ 4 whose centroid
+    embeddings have cosine similarity ≥ threshold (default 0.60) and
+    merges them. Pure math, zero LLM cost — pairs the LLM would
+    obviously merge get handled here first, shrinking the candidate
+    pool for the subsequent LLM merge pass.
+
+    A 2-article + 3-article merge often crosses the article_count ≥ 5
+    visibility floor, so this directly surfaces stories that were
+    stuck in the hidden pool. Conservative on threshold so we don't
+    bad-merge different events that happen to share vocabulary.
+
+    Returns number of stories absorbed.
+    """
+    from app.nlp.embeddings import cosine_similarity as _cs
+    from app.models.social import TelegramPost, SocialSentimentSnapshot
+    from app.models.feedback import RaterFeedback
+
+    rows = (await db.execute(
+        select(Story).where(
+            Story.article_count <= 4,
+            Story.centroid_embedding.isnot(None),
+            Story.is_edited.is_(False),
+        )
+    )).scalars().all()
+    stories = list(rows)
+    if len(stories) < 2:
+        return 0
+
+    # Union-find for transitive merges across a group of 3+ tiny stories
+    parent: dict[str, str] = {str(s.id): str(s.id) for s in stories}
+    def find(x: str) -> str:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+    def union(a: str, b: str) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    # O(n²) cosine; with ≤ few thousand tiny stories that's fine for a
+    # nightly pass. If it ever gets slow, bucket by leading embedding
+    # dim.
+    for i in range(len(stories)):
+        for j in range(i + 1, len(stories)):
+            try:
+                sim = _cs(stories[i].centroid_embedding, stories[j].centroid_embedding)
+            except Exception:
+                continue
+            if sim >= threshold:
+                union(str(stories[i].id), str(stories[j].id))
+
+    # Group by root
+    groups: dict[str, list[Story]] = {}
+    for s in stories:
+        root = find(str(s.id))
+        groups.setdefault(root, []).append(s)
+
+    total_merged = 0
+    for group in groups.values():
+        if len(group) < 2:
+            continue
+        # Keep the biggest; tie-break on last_updated_at newest
+        group.sort(
+            key=lambda s: (s.article_count, s.last_updated_at or datetime.min.replace(tzinfo=timezone.utc)),
+            reverse=True,
+        )
+        keeper = group[0]
+        for victim in group[1:]:
+            await db.execute(update(Article).where(Article.story_id == victim.id).values(story_id=keeper.id))
+            await db.execute(update(TelegramPost).where(TelegramPost.story_id == victim.id).values(story_id=keeper.id))
+            await db.execute(update(RaterFeedback).where(RaterFeedback.story_id == victim.id).values(story_id=keeper.id))
+            from sqlalchemy import delete as _del
+            await db.execute(_del(SocialSentimentSnapshot).where(SocialSentimentSnapshot.story_id == victim.id))
+            await db.delete(victim)
+            total_merged += 1
+        await db.flush()
+        await _refresh_story_metadata(db, keeper.id)
+
+    if total_merged:
+        logger.info(f"Cosine pre-merge: absorbed {total_merged} tiny stories at ≥{threshold} cosine")
+    return total_merged
+
+
 async def _merge_hidden_stories(db: AsyncSession) -> int:
     """Find and merge hidden stories (article_count < 5) that are about the same event.
 
@@ -1551,8 +1638,14 @@ async def cluster_articles(db: AsyncSession) -> dict:
     total_visible = promoted_result.scalar() or 0
     logger.info(f"Total visible stories (article_count >= 5): {total_visible}")
 
-    # ── Step 5: Merge similar hidden stories ──
-    merged_count = await _merge_hidden_stories(db)
+    # ── Step 5a: Cheap cosine pre-merge for near-duplicate tinies ──
+    # This runs before the LLM merge so the candidate pool handed to
+    # the LLM is smaller (and the obvious dupes are already handled
+    # for free).
+    pre_merged = await _merge_tiny_by_cosine(db)
+
+    # ── Step 5b: LLM-based merge of surviving hidden stories ──
+    merged_count = pre_merged + await _merge_hidden_stories(db)
 
     # Count remaining unclustered after all steps
     unclustered_result = await db.execute(
