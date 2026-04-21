@@ -587,7 +587,12 @@ async def analyze_story_telegram(
         params = build_openai_params(
             model=model,
             prompt=prompt,
-            max_tokens=3000,
+            # 2000 is enough for the Pass 2 JSON (predictions array,
+            # key_claims, worldviews, consensus, missing_voices) —
+            # responses rarely exceed 1500 in practice. 3000 was
+            # over-provisioned and cost ~33% more per call on the line
+            # item that already dominates the monthly bill.
+            max_tokens=2000,
             temperature=0.2,
         )
         response = await client.chat.completions.create(**params)

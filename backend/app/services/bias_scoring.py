@@ -314,10 +314,29 @@ async def score_unscored_articles(
     now = datetime.now(timezone.utc)
     retry_cutoff = now - _td(hours=24)
 
+    # One-per-source-per-story dedup: if any article from this source is
+    # already scored in this same story, skip new ones. A source's
+    # framing on a single story barely varies between its own articles —
+    # scoring 1 Fars article tells us Fars's angle on that story; the
+    # other 4 Fars articles add no signal. Cuts bias_scoring calls by
+    # roughly half on hot stories where big outlets publish repeatedly.
+    from app.models.article import Article as _Art
+    scored_src_story_pairs = (
+        select(_Art.source_id, _Art.story_id)
+        .join(BiasScore, BiasScore.article_id == _Art.id)
+        .where(_Art.story_id.isnot(None))
+        .distinct()
+        .subquery()
+    )
+
     query = select(Article).where(
         Article.id.notin_(scored_article_ids),
         Article.story_id.isnot(None),
         (Article.llm_failed_at.is_(None)) | (Article.llm_failed_at < retry_cutoff),
+        ~select(1).where(
+            (scored_src_story_pairs.c.source_id == Article.source_id)
+            & (scored_src_story_pairs.c.story_id == Article.story_id)
+        ).exists(),
     )
 
     # Only score articles in visible stories (saves ~60% of bias scoring cost)
