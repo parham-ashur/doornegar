@@ -74,3 +74,24 @@ export async function getStoryAnalysis(id: string) {
   );
 }
 
+// Related stories slider — arc siblings first, then cosine neighbors.
+// Longer revalidate (10 min) since related sets barely change.
+export type RelatedStory = {
+  id: string;
+  slug: string;
+  title_fa: string;
+  title_en: string;
+  article_count: number;
+  source_count: number;
+  first_published_at: string | null;
+  arc_id: string | null;
+  image_url: string | null;
+};
+
+export async function getRelatedStories(id: string, limit = 8) {
+  return fetchAPI<{ stories: RelatedStory[]; count: number }>(
+    `/api/v1/stories/${id}/related?limit=${limit}`,
+    { revalidate: 600 },
+  );
+}
+

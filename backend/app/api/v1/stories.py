@@ -546,6 +546,137 @@ async def article_positions(
     return JSONResponse(content=positions)
 
 
+@router.get("/{story_id}/related")
+@_limiter.limit("120/minute")
+async def get_related_stories(
+    request: Request,
+    story_id: uuid.UUID,
+    limit: int = Query(8, ge=1, le=20),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return stories related to `story_id`, arc-siblings first, then
+    cosine-similar neighbors by centroid embedding.
+
+    Used by the bottom-of-page «خبرهای مرتبط» slider on story pages.
+    Excludes the source story, hidden stories (article_count<5), and
+    de-duplicates when an arc sibling is also a close cosine match.
+    """
+    from app.nlp.embeddings import cosine_similarity
+
+    source = (await db.execute(select(Story).where(Story.id == story_id))).scalar_one_or_none()
+    if not source:
+        raise HTTPException(status_code=404, detail="Story not found")
+
+    picked_ids: list[uuid.UUID] = []
+    seen: set[uuid.UUID] = {story_id}
+
+    # ── Arc siblings first (curated grouping) ──
+    if source.arc_id:
+        arc_result = await db.execute(
+            select(Story)
+            .where(
+                Story.arc_id == source.arc_id,
+                Story.id != story_id,
+                Story.article_count >= 5,
+            )
+            .order_by(Story.arc_order.asc().nullslast(), Story.first_published_at.desc().nullslast())
+            .limit(limit)
+        )
+        for s in arc_result.scalars().all():
+            if s.id not in seen:
+                picked_ids.append(s.id)
+                seen.add(s.id)
+
+    # ── Cosine-similar fill if we still need more ──
+    need = limit - len(picked_ids)
+    if need > 0 and isinstance(source.centroid_embedding, list) and source.centroid_embedding:
+        # Pull candidates with centroids. 500 is plenty — visible stories
+        # rarely exceed that and the loop is O(N) cosine.
+        cand_result = await db.execute(
+            select(Story)
+            .where(
+                Story.id != story_id,
+                Story.article_count >= 5,
+                Story.centroid_embedding.isnot(None),
+            )
+            .order_by(Story.first_published_at.desc().nullslast())
+            .limit(500)
+        )
+        src_vec = source.centroid_embedding
+        scored: list[tuple[float, Story]] = []
+        for s in cand_result.scalars().all():
+            if s.id in seen:
+                continue
+            c = s.centroid_embedding
+            if not isinstance(c, list) or not c or any(v is None for v in c):
+                continue
+            try:
+                sim = cosine_similarity(src_vec, c)
+            except (TypeError, ValueError):
+                continue
+            if sim >= 0.45:
+                scored.append((sim, s))
+        scored.sort(key=lambda t: -t[0])
+        for _, s in scored[:need]:
+            picked_ids.append(s.id)
+            seen.add(s.id)
+
+    if not picked_ids:
+        return {"stories": []}
+
+    # Fetch the picked stories with articles eagerly loaded so we can
+    # pick a representative image per card without extra round trips.
+    detail_result = await db.execute(
+        select(Story)
+        .options(selectinload(Story.articles).selectinload(Article.source))
+        .where(Story.id.in_(picked_ids))
+    )
+    by_id = {s.id: s for s in detail_result.scalars().all()}
+
+    def _is_bad_img(url: str | None) -> bool:
+        if not url:
+            return True
+        u = url.lower()
+        return (
+            "favicon" in u or "icon" in u or "logo" in u or "sprite" in u
+            or u.endswith(".svg") or "1x1" in u or "placeholder" in u
+        )
+
+    def _pick_image(s: Story) -> str | None:
+        # Prefer stable R2 images, then articles with real images, then
+        # source logo as a last resort.
+        r2_prefix = settings.r2_public_url or ""
+        for a in s.articles or []:
+            if a.image_url and not _is_bad_img(a.image_url):
+                if r2_prefix and a.image_url.startswith(r2_prefix):
+                    return a.image_url
+        for a in s.articles or []:
+            if a.image_url and not _is_bad_img(a.image_url):
+                return a.image_url
+        for a in s.articles or []:
+            if a.source and a.source.logo_url and not _is_bad_img(a.source.logo_url):
+                return a.source.logo_url
+        return None
+
+    out = []
+    for sid in picked_ids:
+        s = by_id.get(sid)
+        if not s:
+            continue
+        out.append({
+            "id": str(s.id),
+            "slug": s.slug,
+            "title_fa": s.title_fa,
+            "title_en": s.title_en,
+            "article_count": s.article_count,
+            "source_count": s.source_count,
+            "first_published_at": s.first_published_at.isoformat() if s.first_published_at else None,
+            "arc_id": str(s.arc_id) if s.arc_id else None,
+            "image_url": _pick_image(s),
+        })
+    return {"stories": out, "count": len(out)}
+
+
 @router.get("/{story_id}", response_model=StoryDetail)
 async def get_story(
     story_id: uuid.UUID,

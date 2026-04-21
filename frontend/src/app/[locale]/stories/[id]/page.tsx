@@ -15,7 +15,8 @@ import EditableTitle from "@/components/feedback/EditableTitle";
 import PriorityControl from "@/components/feedback/PriorityControl";
 import StoryFeedbackOverlay from "@/components/improvement/StoryFeedbackOverlay";
 import PublicFeedbackButton from "@/components/common/PublicFeedbackButton";
-import { getStory, getSources, getStoryAnalysis } from "@/lib/api";
+import { getStory, getSources, getStoryAnalysis, getRelatedStories } from "@/lib/api";
+import RelatedStoriesSlider from "@/components/story/RelatedStoriesSlider";
 import { formatRelativeTime, toFa } from "@/lib/utils";
 
 export async function generateMetadata({
@@ -88,20 +89,23 @@ export default async function StoryDetailPage({
   const hlParam = typeof sp.hl === "string" ? sp.hl : null;
   setRequestLocale(locale);
 
-  // Fetch story, analysis, and sources in parallel (no waterfall)
+  // Fetch story, analysis, sources, and related stories in parallel (no waterfall)
   let story;
   let analysis = null;
   let allSources: any[] = [];
+  let relatedStories: any[] = [];
 
   try {
-    const [storyResult, analysisResult, sourcesResult] = await Promise.all([
+    const [storyResult, analysisResult, sourcesResult, relatedResult] = await Promise.all([
       getStory(id),
       getStoryAnalysis(id).catch(() => null),
       getSources().then(d => d.sources).catch(() => []),
+      getRelatedStories(id, 8).catch(() => ({ stories: [] })),
     ]);
     story = storyResult;
     analysis = analysisResult;
     allSources = sourcesResult;
+    relatedStories = relatedResult?.stories || [];
   } catch {
     return (
       <div dir="rtl" className="mx-auto max-w-7xl px-4 py-16 text-center">
@@ -322,6 +326,14 @@ export default async function StoryDetailPage({
           )}
         </div>
       </div>
+
+      {/* Related stories — arc siblings first, then cosine-similar
+          neighbors. Horizontal-scroll slider. */}
+      <RelatedStoriesSlider
+        stories={relatedStories}
+        currentArcId={story.arc?.id ?? null}
+        locale={locale}
+      />
     </div>
     </FeedbackProvider>
   );
