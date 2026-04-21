@@ -52,6 +52,34 @@
 
 ---
 
+## Homepage performance (next session priority)
+
+**Context**: 2026-04-21 profiling showed TTFB 0.3-0.4s (loading.tsx streams instantly) but full body 15s. The 15s is Vercel's SSR waiting on serial backend waves: trending(2.7s) → batch-analyses(0.9s) → 5 telegram fetches(1-2s) + Vercel function overhead. Real browsers render incrementally so users see content filling in, not a 15s blank wait — but below-fold content is still 10+ seconds away.
+
+### Planned
+
+- [ ] **Per-section Suspense boundaries in page.tsx** — the top-level is one 1300-line async function awaiting everything upfront. Extract these into separate async server components wrapped in `<Suspense fallback={SectionSkeleton}>`:
+  - Hero card (stays synchronous — above fold, needs to paint first)
+  - Blindspots grid (await trending only)
+  - Right column boxes (await analyses batch)
+  - Telegram sidebar (await 5 telegram endpoints — slowest wave; biggest win from parking it behind Suspense)
+  - Most-visited strip (below fold)
+  - Weekly digest / words-of-week sections
+  - Each async component fetches its own data instead of being passed props — Next.js automatically dedupes fetch() calls with the same URL+cache config within a request.
+  - Derived state currently computed at the top (battleItems, allAnalyses merging) needs to either move into the component that uses it OR be passed via a shared server-computed context.
+
+- [ ] **Speed up `/stories/trending`** — 2.7s TTFB on a list endpoint. Likely a JOIN against articles/sources with heavy payload (all articles' thumbnails, source metadata, etc.). Profile the query with `EXPLAIN ANALYZE` and either (a) move aggregations to a materialized view refreshed every 5 min, or (b) drop unused fields from the response.
+
+- [ ] **Cache `/api/v1/sources` at Cloudflare edge** — changes maybe weekly. Safely cacheable with `Cache-Control: s-maxage=3600, stale-while-revalidate=86400`. Would cut 1.2s out of wave 1.
+
+### Shipped as prep
+- [x] `loading.tsx` matches real homepage grid so Suspense fallback swap-in is visually stable (2026-04-21)
+- [x] next/font replaces render-blocking @import (2026-04-21, -400-800ms)
+- [x] preconnect to R2 image CDN (2026-04-21, -100-200ms on LCP)
+- [x] Pre-warm curl after every deploy (saved as memory)
+
+---
+
 ## Dashboards — shipped (2026-04-21)
 
 ### LLM cost dashboard (`/dashboard/cost`)

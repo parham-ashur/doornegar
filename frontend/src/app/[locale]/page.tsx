@@ -573,10 +573,15 @@ export default async function HomePage({
     cleaned.sort((a, b) => a.length - b.length);
     return cleaned[0];
   };
-  // Scan the top 6 disputed candidates so we can still fill 2 battle
-  // items when the very top story lacks loaded_words / bias quotes.
-  for (const story of disputedResorted.slice(0, 6)) {
-    if (battleItems.length >= 2) break;
+  // Scan the top 12 disputed candidates so we can reliably fill the
+  // 4-story تقابل روایت‌ها box — previously 2 slots here + 2 in the
+  // separate بیشترین اختلاف نگاه box. The two boxes shared ~80% of
+  // selection logic and only differed in visuals (word pair vs
+  // percentage); merging into one 4-story box reduces duplication
+  // and keeps the stronger word-pair affordance. On quiet news days
+  // the box may render 2-3 items instead of 4 — acceptable.
+  for (const story of disputedResorted.slice(0, 12)) {
+    if (battleItems.length >= 4) break;
     const analysis = allAnalyses[story.id];
     if (!analysis) continue;
     if (!hasTwoRealNarratives(analysis)) continue;
@@ -611,18 +616,6 @@ export default async function HomePage({
     }
   }
   const battleIds = new Set(battleItems.map(b => b.storyId));
-
-  // بیشترین اختلاف نگاه: next disputed stories not already claimed by
-  // the battle box above. Also requires both-side narratives — without
-  // the gate, stories whose diaspora_summary is empty (or meta-
-  // commentary about the absence of coverage) appeared here with only
-  // a blue «درون‌مرزی» bullet, which defeats the whole point of the box.
-  const disputedForLowerBox = disputedResorted
-    .filter(s => !battleIds.has(s.id))
-    .filter(s => hasTwoRealNarratives(allAnalyses[s.id]))
-    .slice(0, 2);
-  const mostDisputedBottom = disputedForLowerBox[0] || null;
-  const secondDisputedBottom = disputedForLowerBox[1] || null;
 
   const prefetchedTelegram: { storyId: string; analysis: any }[] = [];
   telegramAnalysisIds.forEach((id, i) => {
@@ -921,12 +914,11 @@ export default async function HomePage({
             </div>
           </div>
 
-          {/* Row 1 right column is now stacked: تقابل روایت‌ها on top,
-              بیشترین اختلاف نگاه below (2 stories each). Each box
-              claims flex-1 so they split the column height driven by
-              leftTextStories. If there are no disputed candidates the
-              bottom box is hidden entirely and تقابل takes the whole
-              column — no empty shells. */}
+          {/* Row 1 right column: a single تقابل روایت‌ها box showing up
+              to 4 disputed stories with word-pair visuals. Previously
+              split across two boxes (تقابل + بیشترین اختلاف نگاه) that
+              shared ~80% of selection logic and only differed in
+              visuals; consolidated 2026-04-21. */}
           <div className="col-span-5 pr-6 flex flex-col gap-4">
             <div className="relative flex-1 min-h-0 border border-slate-300 dark:border-slate-600 flex flex-col">
               {/* Box title sits ON the outer top border, centered, with
@@ -951,7 +943,7 @@ export default async function HomePage({
                   // both items grow to their content and the parent's
                   // overflow-hidden catches the rare overflow at the
                   // bottom rather than mid-item.
-                  return battleItems.slice(0, 2).map((item, idx) => {
+                  return battleItems.slice(0, 4).map((item, idx) => {
                     const inner = (
                       <>
                         {/* Full title — was line-clamp-1 before; Parham
@@ -1006,59 +998,14 @@ export default async function HomePage({
                 })()}
               </div>
             </div>
-            {/* بیشترین اختلاف نگاه — bottom half of the column. Show
-                up to 2 stories; hide the whole box if nothing qualifies
-                (no empty shells). Top 2 rotate as dispute_score shifts
-                from day to day. */}
-            {(mostDisputedBottom || secondDisputedBottom) && (
-              <div className="relative flex-1 min-h-0 border border-slate-300 dark:border-slate-600 flex flex-col">
-                <span className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10 text-[15px] font-black text-slate-900 dark:text-white px-3 bg-white dark:bg-[#0a0e1a] whitespace-nowrap">
-                  بیشترین اختلاف نگاه
-                </span>
-                <div className="px-4 pb-4 pt-6 flex-1 flex flex-col overflow-hidden">
-                  {/* Stories shown here are disputed candidates that are
-                      NOT already in the تقابل روایت‌ها box above —
-                      prevents the same story appearing twice on the
-                      right column. Each story gets `flex-1 min-h-0` so
-                      both split the available height evenly — same fix
-                      as تقابل روایت‌ها above. */}
-                  {[mostDisputedBottom, secondDisputedBottom].filter(Boolean).map((story, i) => {
-                    const s = story!;
-                    const analysis = allAnalyses[s.id];
-                    const stateSummary = analysis?.state_summary_fa;
-                    const diasporaSummary = analysis?.diaspora_summary_fa;
-                    return (
-                      <div key={s.id} className={`flex-1 min-h-0 overflow-hidden py-3 ${i > 0 ? "border-t border-slate-100 dark:border-slate-800/60" : ""}`}>
-                        <Link href={`/${locale}/stories/${s.id}`} className="group block">
-                          <h4 className="text-[17px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
-                            {s.title_fa}
-                          </h4>
-                          <UpdateBadge story={s} className="mt-1" />
-                          <div className="mt-1 flex items-center justify-end gap-3 text-[13px]">
-                            <span className="text-[#1e3a5f] dark:text-blue-300 font-medium">درون‌مرزی {toFa(s.state_pct)}٪</span>
-                            <span className="text-[#ea580c] dark:text-orange-400 font-medium">برون‌مرزی {toFa(s.diaspora_pct)}٪</span>
-                          </div>
-                        </Link>
-                        {(stateSummary || diasporaSummary) && (
-                          <div className="mt-2 space-y-1">
-                            {stateSummary && (
-                              <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">
-                                <span className="text-[#1e3a5f] dark:text-blue-300 font-medium">• </span>{stateSummary}
-                              </p>
-                            )}
-                            {diasporaSummary && (
-                              <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">
-                                <span className="text-[#ea580c] dark:text-orange-400 font-medium">در مقابل </span>{diasporaSummary}
-                              </p>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
+            {/* بیشترین اختلاف نگاه removed 2026-04-21: it duplicated
+                ~80% of the تقابل روایت‌ها selection logic and only
+                differed in visuals (percentage vs word pair). The
+                word-pair affordance is stronger, so we consolidated
+                into a single 4-story تقابل box above. The dispute
+                percentage is still visible on every individual story
+                card elsewhere on the homepage — no information lost.
+            */}
           </div>
         </div>
       )}
