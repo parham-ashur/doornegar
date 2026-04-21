@@ -72,6 +72,21 @@ Niloofar runs through Claude (this assistant) — no OpenAI in the loop. When Pa
    - If a side is genuinely silent, say so in the bullets
      ("برون‌مرزی در این خبر حضور ندارد") — do not embellish to make
      the preliminary look more complete.
+   - **NEVER start a side summary with «این سمت …» or «این رسانه‌ها …»
+     or «آن سمت …»**. The state/diaspora column already carries a
+     colored marker and a column heading, so the reader knows which
+     side they're reading. Starting with «این سمت» produces
+     ambiguous prose like «در مقابل این سمت به سرکوب معترضان تأکید
+     دارد» — the reader doesn't know which side «این سمت» refers to.
+     Lead with the viewpoint as a direct claim instead. Same rule
+     applies in full audits (already codified in «Narrative editing
+     and the 4-subgroup format» above); it slipped in preliminary
+     writes during the initial Niloofar runs, so it's restated here
+     as a hard rule for preliminaries. Examples:
+     - ❌ «این سمت بر تضعیف ارتش جمهوری اسلامی اشاره کرده و …»
+     - ✅ «توانمندی‌های ارتش جمهوری اسلامی در حال تضعیف است و …»
+     - ❌ «این سمت بر «وحدت ملی» تأکید دارد …»
+     - ✅ «وحدت ملی و پیروزی محور مقاومت محور پیام است …»
 
    `write_preliminary_summary` payload shape:
    ```json
