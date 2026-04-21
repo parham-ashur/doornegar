@@ -19,6 +19,14 @@ import { getStory, getSources, getStoryAnalysis, getRelatedStories } from "@/lib
 import RelatedStoriesSlider from "@/components/story/RelatedStoriesSlider";
 import { formatRelativeTime, toFa } from "@/lib/utils";
 
+// Serve the page as ISR with a 5-minute revalidate window — matches
+// the getStory/getStoryAnalysis fetch cache. Accessing searchParams
+// in this server component would opt out of ISR, so the tg/hl deep
+// link params are now read client-side inside StatsPanel via
+// useSearchParams() instead. First visitor after revalidate triggers
+// one SSR; subsequent readers get the cached HTML edge-served.
+export const revalidate = 300;
+
 export async function generateMetadata({
   params,
 }: {
@@ -78,15 +86,10 @@ export async function generateMetadata({
 
 export default async function StoryDetailPage({
   params,
-  searchParams,
 }: {
   params: Promise<{ locale: string; id: string }>;
-  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
   const { locale, id } = await params;
-  const sp = await searchParams;
-  const tgParam = typeof sp.tg === "string" ? sp.tg : null;
-  const hlParam = typeof sp.hl === "string" ? sp.hl : null;
   setRequestLocale(locale);
 
   // Fetch story, analysis, sources, and related stories in parallel (no waterfall)
@@ -264,8 +267,6 @@ export default async function StoryDetailPage({
               articleCount={story.article_count}
               sourceCount={story.source_count}
               containerId="telegram-mobile"
-              initialTab={tgParam}
-              highlightText={hlParam}
             />
           </div>
 
@@ -305,8 +306,6 @@ export default async function StoryDetailPage({
             storyId={id}
             articleCount={story.article_count}
             sourceCount={story.source_count}
-            initialTab={tgParam}
-            highlightText={hlParam}
           />
 
           {/* Political spectrum — desktop only. Hidden until the

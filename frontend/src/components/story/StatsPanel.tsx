@@ -2,6 +2,7 @@
 
 import { BarChart3, MessageCircle, VolumeX, Radio, TrendingUp, Eye } from "lucide-react";
 import { useState, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import type { StoryAnalysis } from "@/lib/types";
 import { toFa } from "@/lib/utils";
 import StoryTelegramSection from "./StoryTelegramSection";
@@ -12,8 +13,8 @@ export default function StatsPanel({
   articleCount,
   sourceCount,
   containerId = "telegram",
-  initialTab = null,
-  highlightText = null,
+  initialTab: initialTabProp = null,
+  highlightText: highlightTextProp = null,
 }: {
   analysis: StoryAnalysis | null;
   storyId?: string;
@@ -23,6 +24,15 @@ export default function StatsPanel({
   initialTab?: string | null;
   highlightText?: string | null;
 }) {
+  // Read tg/hl from the URL client-side so the enclosing page can stay
+  // static-cacheable (the story page's server component no longer has
+  // to accept searchParams, which would otherwise force dynamic mode).
+  // Prop values still win if a caller (e.g. the rate page) passes them
+  // explicitly — that keeps existing usages unchanged.
+  const searchParams = useSearchParams();
+  const initialTab = initialTabProp ?? searchParams?.get("tg") ?? null;
+  const highlightText = highlightTextProp ?? searchParams?.get("hl") ?? null;
+
   const hasTelegramIntent = !!(initialTab || highlightText);
   const [showTelegram, setShowTelegram] = useState(hasTelegramIntent);
 
