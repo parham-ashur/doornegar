@@ -615,6 +615,58 @@ async def apply_fix(finding: dict) -> str:
                 return f"✗ شماره ادعا نامعتبر: {idx}"
             return "✗ تحلیل تلگرام یافت نشد"
 
+        elif fix_type == "write_preliminary_summary":
+            # New-story writeup: one DB touch for title + summary_fa +
+            # state/diaspora summaries + bias_explanation. Used when
+            # step_summarize hasn't reached the story yet (a visible
+            # story stuck at summary_fa = NULL). Stamps is_edited and
+            # tags summary_source: niloofar_preliminary so dashboards
+            # and the cost logs can tell these apart from full audits.
+            import json as _json
+            from datetime import datetime, timezone
+            story = await db.get(Story, story_id)
+            if not story:
+                return "✗ خبر یافت نشد"
+
+            new_title = fix_data.get("new_title_fa")
+            new_summary = fix_data.get("new_summary_fa")
+            if not new_summary:
+                return "✗ new_summary_fa الزامی است"
+
+            if new_title and new_title.strip():
+                story.title_fa = new_title.strip()
+            if fix_data.get("new_title_en"):
+                story.title_en = fix_data["new_title_en"].strip()
+
+            story.summary_fa = new_summary.strip()
+            if hasattr(story, "is_edited"):
+                story.is_edited = True
+
+            try:
+                blob = _json.loads(story.summary_en) if story.summary_en else {}
+            except Exception:
+                blob = {}
+            if not isinstance(blob, dict):
+                blob = {}
+
+            for key, fa_key in [
+                ("new_state_summary_fa", "state_summary_fa"),
+                ("new_diaspora_summary_fa", "diaspora_summary_fa"),
+                ("new_independent_summary_fa", "independent_summary_fa"),
+                ("new_bias_explanation_fa", "bias_explanation_fa"),
+            ]:
+                val = fix_data.get(key)
+                if val is not None:
+                    blob[fa_key] = val.strip() if isinstance(val, str) else val
+
+            blob["summary_source"] = "niloofar_preliminary"
+            blob["niloofar_written_at"] = datetime.now(timezone.utc).isoformat()
+            story.summary_en = _json.dumps(blob, ensure_ascii=False)
+            await db.commit()
+
+            filled = sum(1 for k in ("state_summary_fa", "diaspora_summary_fa", "bias_explanation_fa") if blob.get(k))
+            return f"✓ پیش‌نویس نیلوفر ثبت شد ({filled} فیلد پر شد)"
+
         elif fix_type == "update_neutrality":
             # Payload: {"article_neutrality": {"<article_id>": -0.3, ...}}
             # Aggregates to per-source means and stamps neutrality_source.
@@ -792,6 +844,16 @@ async def gather_stories_json(limit: int = 25) -> dict:
             # already has Claude-scored neutrality (skip) or needs a pass.
             "neutrality_source": blob.get("neutrality_source"),
             "has_article_neutrality": bool(blob.get("article_neutrality")),
+            # Preliminary-summary state: flag stories where the LLM
+            # summarize step hasn't populated summary_fa / narratives
+            # yet. Niloofar writes a preliminary version for these so
+            # the site doesn't show empty story cards while the
+            # pipeline catches up.
+            "needs_preliminary": (
+                not (story.summary_fa and story.summary_fa.strip())
+                or not blob.get("bias_explanation_fa")
+            ),
+            "summary_source": blob.get("summary_source"),
         })
 
     return output
@@ -838,6 +900,7 @@ async def apply_from_file(path: str) -> dict:
         "update_image",
         "update_claim",
         "update_neutrality",
+        "write_preliminary_summary",
     }
 
     for i, finding in enumerate(findings, 1):

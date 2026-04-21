@@ -30,12 +30,74 @@ Niloofar runs through Claude (this assistant) — no OpenAI in the loop. When Pa
        {
          "story_id": "uuid",
          "story_title": "current title (for logging)",
-         "fix_type": "rename_story|update_summary|update_narratives|merge_stories|update_image|update_claim|remove_article|update_neutrality",
+         "fix_type": "rename_story|update_summary|update_narratives|merge_stories|update_image|update_claim|remove_article|update_neutrality|write_preliminary_summary",
          "fix_data": { ...fix-type-specific payload... }
        }
      ]
    }
    ```
+
+   **Preliminary-summary writing is part of every audit pass.** The
+   gather JSON flags each story with `needs_preliminary: true` when
+   the OpenAI summarize step hasn't yet populated its narrative
+   fields (summary_fa is null/empty, or bias_explanation_fa is
+   missing from the blob). Most newly-visible stories sit in that
+   state for up to 24h before the nightly maintenance run reaches
+   them — in the meantime the site shows empty cards.
+
+   **For every story where `needs_preliminary` is true, emit a
+   `write_preliminary_summary` finding before anything else.** This
+   is a combined fix_type: one DB write fills title, one-line summary,
+   per-side narratives, and bias explanation at once, stamps
+   `is_edited=true` so the pipeline won't clobber your voice, and
+   tags the blob with `summary_source: "niloofar_preliminary"` so the
+   cost dashboard can tell these apart from full audits.
+
+   Writing rules for preliminary summaries (tighter than full audits
+   because the coverage is still thin):
+
+   - Keep `summary_fa` to 20-30 Farsi words — one or two tight
+     sentences that would read cleanly on a homepage card.
+   - Fill `new_state_summary_fa` only if the gather actually contains
+     articles from principlist or reformist sources. Same for
+     `new_diaspora_summary_fa` with moderate or radical diaspora
+     articles. Null out the side that has no coverage rather than
+     inventing stock-phrase hallucinations — see the
+     stock-phrase-hallucinations rule below.
+   - `new_bias_explanation_fa` should be 3-5 bullets separated by
+     `؛`. For a fresh story with 5-8 articles, most comparisons the
+     full audit would make aren't yet available; keep it to what the
+     articles actually show (vocabulary contrast, source balance,
+     what one side covered vs silence on the other).
+   - If a side is genuinely silent, say so in the bullets
+     ("برون‌مرزی در این خبر حضور ندارد") — do not embellish to make
+     the preliminary look more complete.
+
+   `write_preliminary_summary` payload shape:
+   ```json
+   {
+     "story_id": "uuid",
+     "story_title": "current (for logging)",
+     "fix_type": "write_preliminary_summary",
+     "fix_data": {
+       "new_title_fa": "cleaner event-driven title or null to keep current",
+       "new_title_en": "<english, optional>",
+       "new_summary_fa": "20-30 word homepage-card summary",
+       "new_state_summary_fa": "<3-4 sentences or null if no state-side coverage>",
+       "new_diaspora_summary_fa": "<3-4 sentences or null if no diaspora coverage>",
+       "new_independent_summary_fa": null,
+       "new_bias_explanation_fa": "3-5 bullet points separated by ؛"
+     }
+   }
+   ```
+
+   Order of operations within a single audit pass:
+   1. Write preliminary summaries for all `needs_preliminary` stories.
+   2. Full audit edits (rename, narrative rewrites, merges, claim
+      polish) on stories that already had summaries and need
+      corrections.
+   3. Neutrality scoring on every story (where
+      `has_article_neutrality` is false).
 
    **Neutrality scoring is part of every audit pass.** The gather JSON
    now includes per-article `content`, `narrative_group`, `subgroup_fa`,
