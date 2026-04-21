@@ -541,6 +541,31 @@ export default async function HomePage({
     stateSummary: string;
     diasporaSummary: string;
   };
+  // Gate for both تقابل and بیشترین اختلاف — require real narratives on
+  // both sides. Empty summaries fail. Meta-commentary like «پوشش
+  // برون‌مرزی در این خبر محدود به ...» or «روایت برون‌مرزی متمایزی شکل
+  // نگرفت» is factually correct but describes the absence of a view
+  // rather than being the view itself — it reads cut off next to the
+  // opposing side's real narrative. A story missing one side's view
+  // belongs in the main list, not in a «compare two narratives» slot.
+  const META_PATTERNS = [
+    /^پوشش\s+(برون‌مرزی|درون‌مرزی)/,
+    /روایت[^.]{0,40}(متمایز|شکل\s+نگرفت|غایب)/,
+    /هیچ\s+رسانه/,
+    /در\s+این\s+خبر\s+حضور\s+ندارن/,
+  ];
+  const hasTwoRealNarratives = (
+    a: { state_summary_fa?: string | null; diaspora_summary_fa?: string | null } | null | undefined,
+  ): boolean => {
+    if (!a) return false;
+    const ss = (a.state_summary_fa || "").trim();
+    const ds = (a.diaspora_summary_fa || "").trim();
+    if (ss.length < 60 || ds.length < 60) return false;
+    for (const re of META_PATTERNS) {
+      if (re.test(ss) || re.test(ds)) return false;
+    }
+    return true;
+  };
   const battleItems: BattleItem[] = [];
   const pickShort = (ws: string[]): string => {
     const cleaned = ws.map(w => w.replace(/[«»]/g, "").trim()).filter(w => w.length >= 4);
@@ -554,6 +579,7 @@ export default async function HomePage({
     if (battleItems.length >= 2) break;
     const analysis = allAnalyses[story.id];
     if (!analysis) continue;
+    if (!hasTwoRealNarratives(analysis)) continue;
     const words = analysis.loaded_words;
     const stateSummary = analysis.state_summary_fa || "";
     const diasporaSummary = analysis.diaspora_summary_fa || "";
@@ -587,10 +613,14 @@ export default async function HomePage({
   const battleIds = new Set(battleItems.map(b => b.storyId));
 
   // بیشترین اختلاف نگاه: next disputed stories not already claimed by
-  // the battle box above. Falls back to the mostDisputed/secondDisputed
-  // set when the exclusion leaves nothing, so the box doesn't disappear
-  // on stories with no loaded_words.
-  const disputedForLowerBox = disputedResorted.filter(s => !battleIds.has(s.id)).slice(0, 2);
+  // the battle box above. Also requires both-side narratives — without
+  // the gate, stories whose diaspora_summary is empty (or meta-
+  // commentary about the absence of coverage) appeared here with only
+  // a blue «درون‌مرزی» bullet, which defeats the whole point of the box.
+  const disputedForLowerBox = disputedResorted
+    .filter(s => !battleIds.has(s.id))
+    .filter(s => hasTwoRealNarratives(allAnalyses[s.id]))
+    .slice(0, 2);
   const mostDisputedBottom = disputedForLowerBox[0] || null;
   const secondDisputedBottom = disputedForLowerBox[1] || null;
 
