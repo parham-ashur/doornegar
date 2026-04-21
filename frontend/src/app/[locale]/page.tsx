@@ -252,20 +252,27 @@ function UpdateBadge({ story, className = "mt-1.5" }: { story: StoryBrief; class
   return null;
 }
 
+// ─── ISR caching ─────────────────────────────────────────────
+// Regenerate the rendered HTML every 5 minutes. Inside that window,
+// every visitor gets a ~0.5s cache hit at the Vercel edge instead of
+// the 10-15s full SSR.
+//
+// CRITICAL: this only works because this component no longer reads
+// `searchParams` — any searchParams access in a Server Component
+// automatically forces the page into dynamic (uncached) mode, and
+// that was exactly what made the homepage slow. The `?desktop=1` dev
+// override was the only reader; it was for forcing desktop layout on
+// mobile viewports (use devtools viewport toggle instead).
+export const revalidate = 300;
+
 // ─── Main page ─────────────────────────────────────────────────
 
 export default async function HomePage({
   params: { locale },
-  searchParams,
 }: {
   params: { locale: string };
-  searchParams?: Promise<{ desktop?: string }> | { desktop?: string };
 }) {
   setRequestLocale(locale);
-  // ?desktop=1 is still honored by the stories-beta carousel's 7th slot
-  // iframe; it hides the mobile layout so the desktop layout renders alone.
-  const sp = (await Promise.resolve(searchParams)) ?? {};
-  const forceDesktop = sp.desktop === "1";
   // Stage 1: all independent fetches in parallel — trending,
   // blindspots, weekly digest. None depend on story IDs.
   const [stories, blindspots, weeklyDigestData] = await Promise.all([
@@ -627,10 +634,13 @@ export default async function HomePage({
 
       {/* ════════════════════════════════════════════ */}
       {/* MOBILE LAYOUT — original scrolling list (phones only) */}
-      {/* The new stories-carousel design is available at /stories-beta */}
-      {/* while we iterate on it. Swap back here when ready. */}
+      {/* Gated purely by CSS (md:hidden) so this Server Component can */}
+      {/* stay cache-eligible. The previous JS-based forceDesktop flag  */}
+      {/* forced the whole page into dynamic (uncached) mode because    */}
+      {/* it read searchParams. Desktop-on-mobile testing now uses      */}
+      {/* Chrome DevTools' viewport toggle — no code path needed.       */}
       {/* ════════════════════════════════════════════ */}
-      {!forceDesktop && (
+      <div className="md:hidden">
         <MobileHome
           hero={hero}
           stories={sorted}
@@ -642,12 +652,12 @@ export default async function HomePage({
           heroTelegram={heroTelegram}
           prefetchedTelegram={prefetchedTelegram}
         />
-      )}
+      </div>
 
       {/* ════════════════════════════════════════════ */}
-      {/* DESKTOP LAYOUT (tablet and up, or force-enabled) */}
+      {/* DESKTOP LAYOUT (tablet and up) */}
       {/* ════════════════════════════════════════════ */}
-      <div className={forceDesktop ? "block" : "hidden md:block"}>
+      <div className="hidden md:block">
 
       {/* ═══ TOP SECTION: Blind spots | Hero | Telegram ═══ */}
       <div className="grid grid-cols-12 gap-0 border-b-2 border-slate-300 dark:border-slate-700">
