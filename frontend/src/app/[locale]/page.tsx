@@ -944,11 +944,13 @@ export default async function HomePage({
                   // lower box («بیشترین اختلاف نگاه») can exclude these
                   // story IDs and avoid duplicating cards.
                   //
-                  // Each item gets `flex-1 min-h-0 overflow-hidden` so
-                  // the two stories split the box height evenly — the
-                  // second story no longer gets squeezed when the first
-                  // has a longer title. Any content that doesn't fit is
-                  // clipped symmetrically, same on both cards.
+                  // Items size naturally (content-height). Previous
+                  // attempt used `flex-1 min-h-0 overflow-hidden` so
+                  // both items split 50/50 — that clipped the second
+                  // bullet on whichever item had more content. Now
+                  // both items grow to their content and the parent's
+                  // overflow-hidden catches the rare overflow at the
+                  // bottom rather than mid-item.
                   return battleItems.slice(0, 2).map((item, idx) => {
                     const inner = (
                       <>
@@ -994,11 +996,11 @@ export default async function HomePage({
                       </>
                     );
                     return item.storyId ? (
-                      <Link key={idx} href={`/${locale}/stories/${item.storyId}`} className="group flex-1 min-h-0 overflow-hidden flex flex-col">
+                      <Link key={idx} href={`/${locale}/stories/${item.storyId}`} className="group block">
                         {inner}
                       </Link>
                     ) : (
-                      <div key={idx} className="flex-1 min-h-0 overflow-hidden flex flex-col">{inner}</div>
+                      <div key={idx}>{inner}</div>
                     );
                   });
                 })()}
