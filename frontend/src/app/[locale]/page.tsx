@@ -763,14 +763,14 @@ export default async function HomePage({
                       <div className="border-r-2 border-[#1e3a5f] pr-3">
                         <p className="text-[13px] font-bold text-[#1e3a5f] dark:text-blue-300 mb-1">روایت درون‌مرزی</p>
                         <UpdateDeltaCallout story={hero} field="state" className="mb-1.5" />
-                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">{stateSummary}</p>
+                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-3">{stateSummary}</p>
                       </div>
                     )}
                     {diasporaSummary && (
                       <div className="border-r-2 border-[#ea580c] pr-3">
                         <p className="text-[13px] font-bold text-[#ea580c] dark:text-orange-400 mb-1">روایت برون‌مرزی</p>
                         <UpdateDeltaCallout story={hero} field="diaspora" className="mb-1.5" />
-                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">{diasporaSummary}</p>
+                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-3">{diasporaSummary}</p>
                       </div>
                     )}
                   </div>
