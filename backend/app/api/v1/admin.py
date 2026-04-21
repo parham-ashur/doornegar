@@ -1357,6 +1357,87 @@ async def unclaim_story_articles(
     }
 
 
+@router.post("/stories/{story_id}/resync", dependencies=[Depends(require_admin)])
+async def resync_story(
+    story_id: str,
+    recount: bool = True,
+    regenerate_summary: bool = False,
+    regenerate_telegram: bool = False,
+    force_edited: bool = False,
+    db: AsyncSession = Depends(get_db),
+):
+    """Fix drift in denormalized fields on a single story and optionally
+    trigger regeneration of its summary / telegram analysis.
+
+    Typical use: rater flags a mismatch between the article count in the
+    page header ("5 مقاله") and the actual length of the articles list
+    (6). That happens when story.article_count got stale vs the current
+    Article.story_id membership. This endpoint recomputes article_count
+    and source_count from live data.
+
+    regenerate_summary=True additionally clears summary_fa + summary_en
+    so the next auto_maintenance cycle re-runs story_analysis with the
+    current article mix. Useful when the bias-comparison narratives are
+    stale relative to the current source set — e.g. a rater notes that
+    "radical media didn't cover this" is no longer accurate after a
+    radical source was linked.
+
+    is_edited=True stories are protected by default (Niloofar's
+    hand-curated summaries survive). Pass force_edited=true to override.
+
+    regenerate_telegram=True clears telegram_analysis so the next
+    auto_maintenance cycle re-runs the Telegram pipeline.
+    """
+    import uuid as _uuid
+    from sqlalchemy import func as _func
+    from app.models.article import Article
+    from app.models.story import Story
+
+    try:
+        story_uuid = _uuid.UUID(story_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid story_id")
+
+    story_result = await db.execute(select(Story).where(Story.id == story_uuid))
+    story = story_result.scalar_one_or_none()
+    if not story:
+        raise HTTPException(status_code=404, detail="Story not found")
+
+    out: dict = {"status": "ok", "story_id": story_id, "actions": []}
+
+    if recount:
+        actual_articles = (await db.execute(
+            select(_func.count(Article.id)).where(Article.story_id == story_uuid)
+        )).scalar() or 0
+        actual_sources = (await db.execute(
+            select(_func.count(_func.distinct(Article.source_id))).where(Article.story_id == story_uuid)
+        )).scalar() or 0
+        out["article_count"] = {"old": story.article_count, "new": int(actual_articles)}
+        out["source_count"] = {"old": story.source_count, "new": int(actual_sources)}
+        story.article_count = int(actual_articles)
+        story.source_count = int(actual_sources)
+        out["actions"].append("recount")
+
+    if regenerate_summary:
+        if story.is_edited and not force_edited:
+            out["summary_skipped"] = "is_edited=True (pass force_edited=true to override)"
+        else:
+            story.summary_fa = None
+            story.summary_en = None
+            # Clearing is_edited too so the auto pipeline stops skipping it.
+            if story.is_edited and force_edited:
+                story.is_edited = False
+                out["actions"].append("is_edited_reset")
+            out["actions"].append("summary_cleared")
+
+    if regenerate_telegram:
+        story.telegram_analysis = None
+        out["actions"].append("telegram_cleared")
+
+    await db.commit()
+    return out
+
+
 @router.patch("/sources/{slug}", dependencies=[Depends(require_admin)])
 async def patch_source(
     slug: str,
