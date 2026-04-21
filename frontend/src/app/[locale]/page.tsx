@@ -908,11 +908,17 @@ export default async function HomePage({
               <span className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10 text-[15px] font-black text-slate-900 dark:text-white px-3 bg-white dark:bg-[#0a0e1a] whitespace-nowrap">
                 تقابل روایت‌ها
               </span>
-              <div className="space-y-5 px-4 pb-6 pt-8 flex-1 flex flex-col justify-between overflow-hidden">
+              <div className="px-4 pb-6 pt-8 flex-1 flex flex-col gap-4 overflow-hidden">
                 {(() => {
                   // battleItems is pre-computed above the JSX so the
                   // lower box («بیشترین اختلاف نگاه») can exclude these
                   // story IDs and avoid duplicating cards.
+                  //
+                  // Each item gets `flex-1 min-h-0 overflow-hidden` so
+                  // the two stories split the box height evenly — the
+                  // second story no longer gets squeezed when the first
+                  // has a longer title. Any content that doesn't fit is
+                  // clipped symmetrically, same on both cards.
                   return battleItems.slice(0, 2).map((item, idx) => {
                     const inner = (
                       <>
@@ -958,11 +964,11 @@ export default async function HomePage({
                       </>
                     );
                     return item.storyId ? (
-                      <Link key={idx} href={`/${locale}/stories/${item.storyId}`} className="group block">
+                      <Link key={idx} href={`/${locale}/stories/${item.storyId}`} className="group flex-1 min-h-0 overflow-hidden flex flex-col">
                         {inner}
                       </Link>
                     ) : (
-                      <div key={idx}>{inner}</div>
+                      <div key={idx} className="flex-1 min-h-0 overflow-hidden flex flex-col">{inner}</div>
                     );
                   });
                 })()}
@@ -977,18 +983,20 @@ export default async function HomePage({
                 <span className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10 text-[15px] font-black text-slate-900 dark:text-white px-3 bg-white dark:bg-[#0a0e1a] whitespace-nowrap">
                   بیشترین اختلاف نگاه
                 </span>
-                <div className="px-4 pb-4 pt-6 flex-1 overflow-hidden">
+                <div className="px-4 pb-4 pt-6 flex-1 flex flex-col overflow-hidden">
                   {/* Stories shown here are disputed candidates that are
                       NOT already in the تقابل روایت‌ها box above —
                       prevents the same story appearing twice on the
-                      right column. */}
+                      right column. Each story gets `flex-1 min-h-0` so
+                      both split the available height evenly — same fix
+                      as تقابل روایت‌ها above. */}
                   {[mostDisputedBottom, secondDisputedBottom].filter(Boolean).map((story, i) => {
                     const s = story!;
                     const analysis = allAnalyses[s.id];
                     const stateSummary = analysis?.state_summary_fa;
                     const diasporaSummary = analysis?.diaspora_summary_fa;
                     return (
-                      <div key={s.id} className={`py-3 ${i > 0 ? "border-t border-slate-100 dark:border-slate-800/60" : ""}`}>
+                      <div key={s.id} className={`flex-1 min-h-0 overflow-hidden py-3 ${i > 0 ? "border-t border-slate-100 dark:border-slate-800/60" : ""}`}>
                         <Link href={`/${locale}/stories/${s.id}`} className="group block">
                           <h4 className="text-[17px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
                             {s.title_fa}
