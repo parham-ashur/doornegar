@@ -6,8 +6,11 @@ const config: Config = {
   theme: {
     extend: {
       fontFamily: {
-        persian: ["Vazirmatn", "Tahoma", "sans-serif"],
-        latin: ["IBM Plex Sans", "system-ui", "sans-serif"],
+        // Resolve via next/font's CSS variables so self-hosted Google
+        // Fonts apply; fall back to the literal names in case the var
+        // is unset during a build/dev quirk.
+        persian: ["var(--font-persian)", "Vazirmatn", "Tahoma", "sans-serif"],
+        latin: ["var(--font-latin)", "IBM Plex Sans", "system-ui", "sans-serif"],
       },
       colors: {
         // Source alignment colors
