@@ -20,22 +20,33 @@ function seededRandom(seed: number): () => number {
   };
 }
 
-// ─── Warm starlight palette ────────────────────────────
-// Colors chosen to read on both light and dark backgrounds.
-const STAR_COLORS = [
-  "#b48a4e",
-  "#7a8ba0",
-  "#a4763e",
-  "#8596aa",
-  "#b08660",
-  "#6b88a5",
-  "#ab7c55",
-];
+// ─── Two-side palette ──────────────────────────────────
+// Echoes the bias UI elsewhere on the site:
+//   inside  (درون‌مرزی) — navy  (#1e3a5f light / #93c5fd dark)
+//   outside (برون‌مرزی) — orange (#ea580c light / #fb923c dark)
+// Each constellation's stars are split between the two sides so the
+// whole shape only emerges when you read both colors together.
+const COLOR_INSIDE_LIGHT = "#1e3a5f";
+const COLOR_INSIDE_DARK  = "#93c5fd";
+const COLOR_OUTSIDE_LIGHT = "#ea580c";
+const COLOR_OUTSIDE_DARK  = "#fb923c";
+const COLOR_LINE_LIGHT = "#94a3b8";
+const COLOR_LINE_DARK  = "#64748b";
+
+function getThemeColors(isDark: boolean) {
+  return {
+    inside:  isDark ? COLOR_INSIDE_DARK  : COLOR_INSIDE_LIGHT,
+    outside: isDark ? COLOR_OUTSIDE_DARK : COLOR_OUTSIDE_LIGHT,
+    line:    isDark ? COLOR_LINE_DARK    : COLOR_LINE_LIGHT,
+  };
+}
 
 // ─── Constellations ────────────────────────────────────
 // Each shape is designed to read at 110×110 with 5–8 stars. Coordinates
-// are normalized 0-1 and scaled into an 82% centered box.
-interface Star { x: number; y: number; bright?: boolean; }
+// are normalized 0-1 and scaled into an 82% centered box. `side: 1`
+// means the star is drawn in the outside (orange) color; omitted
+// means inside (navy).
+interface Star { x: number; y: number; bright?: boolean; side?: 0 | 1; }
 interface Constellation {
   name_fa: string;
   icon: string;
@@ -44,19 +55,19 @@ interface Constellation {
 }
 
 const CONSTELLATIONS: Constellation[] = [
-  // 1. Orion — شکارگر با کمربند سه‌ستاره
+  // 1. Orion — left half inside, right half outside
   {
     name_fa: "جبار",
     icon: "🌟",
     stars: [
-      { x: 0.50, y: 0.10 },
-      { x: 0.28, y: 0.25, bright: true },
-      { x: 0.70, y: 0.27 },
-      { x: 0.40, y: 0.52 },
-      { x: 0.50, y: 0.52 },
-      { x: 0.60, y: 0.52 },
-      { x: 0.30, y: 0.85, bright: true },
-      { x: 0.72, y: 0.83 },
+      { x: 0.50, y: 0.10 },                                  // head (in)
+      { x: 0.28, y: 0.25, bright: true },                    // L shoulder (in)
+      { x: 0.70, y: 0.27, side: 1 },                         // R shoulder (out)
+      { x: 0.40, y: 0.52 },                                  // belt L (in)
+      { x: 0.50, y: 0.52 },                                  // belt M (in)
+      { x: 0.60, y: 0.52, side: 1 },                         // belt R (out)
+      { x: 0.30, y: 0.85, bright: true },                    // L foot (in)
+      { x: 0.72, y: 0.83, side: 1 },                         // R foot (out)
     ],
     lines: [
       [0, 1], [0, 2],
@@ -65,7 +76,7 @@ const CONSTELLATIONS: Constellation[] = [
       [3, 6], [5, 7],
     ],
   },
-  // 2. Big Dipper
+  // 2. Big Dipper — bowl inside, handle outside
   {
     name_fa: "دب اکبر",
     icon: "🥄",
@@ -74,29 +85,29 @@ const CONSTELLATIONS: Constellation[] = [
       { x: 0.40, y: 0.32, bright: true },
       { x: 0.42, y: 0.55 },
       { x: 0.20, y: 0.65 },
-      { x: 0.58, y: 0.42 },
-      { x: 0.75, y: 0.30 },
-      { x: 0.92, y: 0.22 },
+      { x: 0.58, y: 0.42, side: 1 },
+      { x: 0.75, y: 0.30, side: 1 },
+      { x: 0.92, y: 0.22, side: 1 },
     ],
     lines: [
       [0, 1], [1, 2], [2, 3], [3, 0],
       [2, 4], [4, 5], [5, 6],
     ],
   },
-  // 3. Cassiopeia — the W
+  // 3. Cassiopeia — alternating W
   {
     name_fa: "ذات‌الکرسی",
     icon: "👑",
     stars: [
       { x: 0.10, y: 0.50 },
-      { x: 0.30, y: 0.72 },
+      { x: 0.30, y: 0.72, side: 1 },
       { x: 0.50, y: 0.45, bright: true },
-      { x: 0.68, y: 0.72 },
+      { x: 0.68, y: 0.72, side: 1 },
       { x: 0.90, y: 0.52 },
     ],
     lines: [[0, 1], [1, 2], [2, 3], [3, 4]],
   },
-  // 4. Cygnus — swan / Northern Cross
+  // 4. Cygnus — vertical arm inside, wings outside
   {
     name_fa: "قوس",
     icon: "🦢",
@@ -104,25 +115,25 @@ const CONSTELLATIONS: Constellation[] = [
       { x: 0.50, y: 0.10, bright: true },
       { x: 0.50, y: 0.50 },
       { x: 0.50, y: 0.90 },
-      { x: 0.12, y: 0.48 },
-      { x: 0.88, y: 0.52 },
+      { x: 0.12, y: 0.48, side: 1 },
+      { x: 0.88, y: 0.52, side: 1 },
     ],
     lines: [[0, 1], [1, 2], [3, 1], [1, 4]],
   },
-  // 5. Lyra — the harp
+  // 5. Lyra — Vega + upper strings inside, lower inside/outside mix
   {
     name_fa: "چنگ",
     icon: "🎼",
     stars: [
       { x: 0.50, y: 0.12, bright: true },
       { x: 0.32, y: 0.42 },
-      { x: 0.68, y: 0.40 },
+      { x: 0.68, y: 0.40, side: 1 },
       { x: 0.28, y: 0.78 },
-      { x: 0.72, y: 0.80 },
+      { x: 0.72, y: 0.80, side: 1 },
     ],
     lines: [[0, 1], [0, 2], [1, 2], [1, 3], [2, 4], [3, 4]],
   },
-  // 6. Scorpius — distinctive S-curve
+  // 6. Scorpius — head/body inside, tail/stinger outside
   {
     name_fa: "عقرب",
     icon: "🦂",
@@ -131,29 +142,29 @@ const CONSTELLATIONS: Constellation[] = [
       { x: 0.22, y: 0.48 },
       { x: 0.35, y: 0.55, bright: true },
       { x: 0.48, y: 0.62 },
-      { x: 0.60, y: 0.68 },
-      { x: 0.72, y: 0.68 },
-      { x: 0.82, y: 0.55 },
-      { x: 0.76, y: 0.40 },
+      { x: 0.60, y: 0.68, side: 1 },
+      { x: 0.72, y: 0.68, side: 1 },
+      { x: 0.82, y: 0.55, side: 1 },
+      { x: 0.76, y: 0.40, side: 1 },
     ],
     lines: [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [5, 6], [6, 7]],
   },
-  // 7. Pleiades — the Seven Sisters cluster
+  // 7. Pleiades — alternating cluster
   {
     name_fa: "ثریا",
     icon: "✨",
     stars: [
       { x: 0.35, y: 0.35, bright: true },
-      { x: 0.55, y: 0.30 },
+      { x: 0.55, y: 0.30, side: 1 },
       { x: 0.50, y: 0.48 },
-      { x: 0.68, y: 0.42 },
+      { x: 0.68, y: 0.42, side: 1 },
       { x: 0.40, y: 0.58 },
-      { x: 0.62, y: 0.62 },
+      { x: 0.62, y: 0.62, side: 1 },
       { x: 0.48, y: 0.72, bright: true },
     ],
     lines: [[0, 1], [1, 3], [3, 5], [5, 6], [6, 4], [4, 0]],
   },
-  // 8. Sailboat
+  // 8. Sailboat — sail inside, hull outside
   {
     name_fa: "قایق",
     icon: "⛵",
@@ -161,9 +172,9 @@ const CONSTELLATIONS: Constellation[] = [
       { x: 0.55, y: 0.10 },
       { x: 0.20, y: 0.62 },
       { x: 0.55, y: 0.65 },
-      { x: 0.15, y: 0.78 },
-      { x: 0.50, y: 0.92 },
-      { x: 0.88, y: 0.78 },
+      { x: 0.15, y: 0.78, side: 1 },
+      { x: 0.50, y: 0.92, side: 1 },
+      { x: 0.88, y: 0.78, side: 1 },
     ],
     lines: [
       [0, 2],
@@ -172,14 +183,14 @@ const CONSTELLATIONS: Constellation[] = [
       [3, 2], [5, 2],
     ],
   },
-  // 9. Crown
+  // 9. Crown — left half outside, right half inside, center bridges
   {
     name_fa: "تاج",
     icon: "👑",
     stars: [
-      { x: 0.12, y: 0.68 },
-      { x: 0.26, y: 0.38 },
-      { x: 0.40, y: 0.55 },
+      { x: 0.12, y: 0.68, side: 1 },
+      { x: 0.26, y: 0.38, side: 1 },
+      { x: 0.40, y: 0.55, side: 1 },
       { x: 0.50, y: 0.22, bright: true },
       { x: 0.60, y: 0.55 },
       { x: 0.74, y: 0.38 },
@@ -187,7 +198,7 @@ const CONSTELLATIONS: Constellation[] = [
     ],
     lines: [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [5, 6], [0, 6]],
   },
-  // 10. Kite
+  // 10. Kite — kite inside, tail outside
   {
     name_fa: "بادبادک",
     icon: "🪁",
@@ -196,13 +207,13 @@ const CONSTELLATIONS: Constellation[] = [
       { x: 0.78, y: 0.32 },
       { x: 0.50, y: 0.55 },
       { x: 0.22, y: 0.32 },
-      { x: 0.56, y: 0.70 },
-      { x: 0.44, y: 0.82 },
-      { x: 0.55, y: 0.92 },
+      { x: 0.56, y: 0.70, side: 1 },
+      { x: 0.44, y: 0.82, side: 1 },
+      { x: 0.55, y: 0.92, side: 1 },
     ],
     lines: [[0, 1], [1, 2], [2, 3], [3, 0], [2, 4], [4, 5], [5, 6]],
   },
-  // 11. Hourglass
+  // 11. Hourglass — top inside, bottom outside, center bridges
   {
     name_fa: "ساعت شنی",
     icon: "⏳",
@@ -210,23 +221,23 @@ const CONSTELLATIONS: Constellation[] = [
       { x: 0.22, y: 0.12 },
       { x: 0.78, y: 0.12 },
       { x: 0.50, y: 0.50, bright: true },
-      { x: 0.22, y: 0.88 },
-      { x: 0.78, y: 0.88 },
+      { x: 0.22, y: 0.88, side: 1 },
+      { x: 0.78, y: 0.88, side: 1 },
     ],
     lines: [[0, 1], [0, 2], [1, 2], [2, 3], [2, 4], [3, 4]],
   },
-  // 12. Cypress tree — iconic Persian secular symbol
+  // 12. Cypress — zigzag sides alternating
   {
     name_fa: "سرو",
     icon: "🌲",
     stars: [
       { x: 0.50, y: 0.08, bright: true },
       { x: 0.36, y: 0.28 },
-      { x: 0.64, y: 0.28 },
+      { x: 0.64, y: 0.28, side: 1 },
       { x: 0.30, y: 0.50 },
-      { x: 0.70, y: 0.50 },
+      { x: 0.70, y: 0.50, side: 1 },
       { x: 0.36, y: 0.72 },
-      { x: 0.64, y: 0.72 },
+      { x: 0.64, y: 0.72, side: 1 },
       { x: 0.50, y: 0.92 },
     ],
     lines: [
@@ -236,7 +247,7 @@ const CONSTELLATIONS: Constellation[] = [
       [5, 7], [6, 7],
     ],
   },
-  // 13. Butterfly
+  // 13. Butterfly — body inside, right wing outside, left wing inside
   {
     name_fa: "پروانه",
     icon: "🦋",
@@ -245,9 +256,9 @@ const CONSTELLATIONS: Constellation[] = [
       { x: 0.50, y: 0.50 },
       { x: 0.50, y: 0.78 },
       { x: 0.12, y: 0.22 },
-      { x: 0.88, y: 0.22 },
+      { x: 0.88, y: 0.22, side: 1 },
       { x: 0.18, y: 0.82 },
-      { x: 0.82, y: 0.82 },
+      { x: 0.82, y: 0.82, side: 1 },
     ],
     lines: [
       [0, 1], [1, 2],
@@ -257,16 +268,16 @@ const CONSTELLATIONS: Constellation[] = [
       [1, 6], [6, 2],
     ],
   },
-  // 14. Tulip
+  // 14. Tulip — left petal inside, right petal outside, stem inside
   {
     name_fa: "لاله",
     icon: "🌷",
     stars: [
       { x: 0.32, y: 0.28 },
       { x: 0.50, y: 0.15, bright: true },
-      { x: 0.68, y: 0.28 },
+      { x: 0.68, y: 0.28, side: 1 },
       { x: 0.35, y: 0.52 },
-      { x: 0.65, y: 0.52 },
+      { x: 0.65, y: 0.52, side: 1 },
       { x: 0.50, y: 0.92 },
     ],
     lines: [
@@ -276,7 +287,7 @@ const CONSTELLATIONS: Constellation[] = [
       [3, 5], [4, 5],
     ],
   },
-  // 15. Bow
+  // 15. Bow — bow inside, arrow outside
   {
     name_fa: "کمان",
     icon: "🏹",
@@ -286,7 +297,7 @@ const CONSTELLATIONS: Constellation[] = [
       { x: 0.42, y: 0.50, bright: true },
       { x: 0.36, y: 0.68 },
       { x: 0.22, y: 0.88 },
-      { x: 0.88, y: 0.50 },
+      { x: 0.88, y: 0.50, side: 1 },
     ],
     lines: [
       [0, 1], [1, 2], [2, 3], [3, 4],
@@ -294,19 +305,19 @@ const CONSTELLATIONS: Constellation[] = [
       [2, 5],
     ],
   },
-  // 16. Compass rose — 8-point navigation star
+  // 16. Compass rose — cardinals inside, diagonals outside
   {
     name_fa: "قطب‌نما",
     icon: "🧭",
     stars: [
       { x: 0.50, y: 0.05 },
-      { x: 0.66, y: 0.34 },
+      { x: 0.66, y: 0.34, side: 1 },
       { x: 0.95, y: 0.50 },
-      { x: 0.66, y: 0.66 },
+      { x: 0.66, y: 0.66, side: 1 },
       { x: 0.50, y: 0.95 },
-      { x: 0.34, y: 0.66 },
+      { x: 0.34, y: 0.66, side: 1 },
       { x: 0.05, y: 0.50 },
-      { x: 0.34, y: 0.34 },
+      { x: 0.34, y: 0.34, side: 1 },
       { x: 0.50, y: 0.50, bright: true },
     ],
     lines: [
@@ -370,7 +381,6 @@ export default function DoornegarAnimation({ size = "footer" }: { size?: Size })
   const pathsRef = useRef<StarPath[]>([]);
   const fieldStarsRef = useRef<FieldStar[]>([]);
   const constellationRef = useRef<Constellation | null>(null);
-  const colorRef = useRef<string>(STAR_COLORS[0]);
 
   // 10s to fully form: 5.5s stars drift in, 4.5s lines connect.
   const duration = 10000;
@@ -381,9 +391,7 @@ export default function DoornegarAnimation({ size = "footer" }: { size?: Size })
 
     const seed = seedRef.current;
     const constellation = CONSTELLATIONS[seed % CONSTELLATIONS.length];
-    const starColor = STAR_COLORS[seed % STAR_COLORS.length];
     constellationRef.current = constellation;
-    colorRef.current = starColor;
 
     const resize = () => {
       const rect = canvas.getBoundingClientRect();
@@ -468,7 +476,7 @@ export default function DoornegarAnimation({ size = "footer" }: { size?: Size })
 
       const constellation = constellationRef.current!;
       const paths = pathsRef.current;
-      const color = colorRef.current;
+      const themeColors = getThemeColors(isDark);
 
       // ── Phase split ──
       //   0.00 → 0.55 : stars drift in (per-star delays up to 0.30)
@@ -523,7 +531,7 @@ export default function DoornegarAnimation({ size = "footer" }: { size?: Size })
         ctx.beginPath();
         ctx.moveTo(posA.x, posA.y);
         ctx.lineTo(ex, ey);
-        ctx.strokeStyle = hexWithAlpha(color, 0.40);
+        ctx.strokeStyle = hexWithAlpha(themeColors.line, 0.55);
         ctx.lineWidth = 0.8;
         ctx.lineCap = "round";
         ctx.stroke();
@@ -534,8 +542,11 @@ export default function DoornegarAnimation({ size = "footer" }: { size?: Size })
         const starDef = constellation.stars[i];
         const pos = starPositions[i];
 
-        const baseR = starDef.bright ? 2.2 : 1.5;
-        const glowR = starDef.bright ? 5.5 : 3.5;
+        const baseR = starDef.bright ? 2.4 : 1.7;
+        const glowR = starDef.bright ? 6 : 4;
+
+        // Pick the star's side color
+        const starColor = starDef.side === 1 ? themeColors.outside : themeColors.inside;
 
         // Post-formation twinkle: gentle sinusoidal brightness shimmer
         const twinkle = formedAtRef.current > 0
@@ -545,15 +556,15 @@ export default function DoornegarAnimation({ size = "footer" }: { size?: Size })
 
         // Glow halo
         const glow = ctx.createRadialGradient(pos.x, pos.y, 0, pos.x, pos.y, glowR);
-        glow.addColorStop(0, hexWithAlpha(color, 0.38 * alpha));
-        glow.addColorStop(1, hexWithAlpha(color, 0));
+        glow.addColorStop(0, hexWithAlpha(starColor, 0.42 * alpha));
+        glow.addColorStop(1, hexWithAlpha(starColor, 0));
         ctx.fillStyle = glow;
         ctx.beginPath();
         ctx.arc(pos.x, pos.y, glowR, 0, Math.PI * 2);
         ctx.fill();
 
         // Core
-        ctx.fillStyle = hexWithAlpha(color, alpha);
+        ctx.fillStyle = hexWithAlpha(starColor, alpha);
         ctx.beginPath();
         ctx.arc(pos.x, pos.y, baseR, 0, Math.PI * 2);
         ctx.fill();
