@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Index, String, Text, func
+from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -52,6 +52,13 @@ class Article(Base):
     # Set when step_fix_images last HEAD-checked this article's image_url;
     # checks within the last 24h are skipped to avoid wasted HTTP calls
     image_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # How many times this article has been sent to cluster_new without
+    # joining a viable (≥5-article) group. Articles at the max (3) are
+    # skipped on future runs — prevents orphan articles from being
+    # re-sent to the LLM forever.
+    cluster_attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
 
     # Relationships
     source: Mapped["Source"] = relationship(back_populates="articles")  # noqa: F821

@@ -59,6 +59,11 @@ async def lifespan(app: FastAPI):
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )""",
                 "CREATE INDEX IF NOT EXISTS idx_stories_arc_id ON stories(arc_id)",
+                # Orphan-retirement counter — filters out articles that
+                # repeatedly fail to cluster, so they don't keep paying
+                # the LLM tax on every pipeline run.
+                "ALTER TABLE articles ADD COLUMN IF NOT EXISTS cluster_attempts INTEGER NOT NULL DEFAULT 0",
+                "CREATE INDEX IF NOT EXISTS idx_articles_unclustered_retry ON articles(ingested_at) WHERE story_id IS NULL AND cluster_attempts < 3",
                 # LLM usage / cost ledger — every OpenAI call logged here.
                 """CREATE TABLE IF NOT EXISTS llm_usage_logs (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

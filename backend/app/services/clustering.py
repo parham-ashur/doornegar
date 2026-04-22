@@ -309,8 +309,9 @@ def _parse_llm_response(response_text: str) -> dict:
 def _build_articles_block(articles: list, source_names: dict[str, str] | None = None) -> str:
     """Build the numbered article list for the clustering prompt.
 
-    Includes title + first ~400 chars of content so the LLM can actually
-    understand what each article is about, not just match on title keywords.
+    Title + first ~150 chars of content is enough for the LLM to group
+    by specific event. 400 chars was overkill for a grouping task and
+    doubled token cost with no measurable quality win.
 
     source_names: optional pre-extracted mapping of article.id -> source name
     """
@@ -321,10 +322,9 @@ def _build_articles_block(articles: list, source_names: dict[str, str] | None = 
             sname = source_names.get(str(article.id), "Unknown")
         else:
             sname = "Unknown"
-        # First ~400 chars of content (or fall back to summary); strip whitespace
         body = (article.content_text or article.summary or "").strip()
         # Collapse whitespace so token usage is predictable
-        body = " ".join(body.split())[:400]
+        body = " ".join(body.split())[:150]
         if body:
             lines.append(f"{i}. [{sname}] {title}\n    {body}")
         else:
@@ -1102,6 +1102,37 @@ def _compute_centroid(embeddings: list[list[float] | None]) -> list[float] | Non
 # Step 3: Cluster unmatched articles into new stories
 # ---------------------------------------------------------------------------
 
+# Minimum articles required to create a new story from cluster_new.
+# Matches the visibility floor (article_count >= 5) — stories below this
+# would be hidden anyway, and each hidden story is an LLM call whose
+# output will be merged or deleted by maintenance.
+CLUSTER_NEW_GROUP_FLOOR = 5
+
+# Articles that have been sent to cluster_new this many times without
+# joining a viable group become orphans — skipped on future runs.
+MAX_CLUSTER_ATTEMPTS = 3
+
+
+def _dedup_signature(article: Article) -> str:
+    """Compute a content signature for dedup bucketing.
+
+    Articles with identical signatures are near-duplicates (same wire
+    story picked up by multiple feeds, or same feed delivering content
+    twice under different URLs). The LLM only needs to see one
+    representative per bucket; sibling articles attach to whichever
+    story the representative lands in.
+    """
+    import hashlib
+
+    title = (article.title_original or article.title_fa or article.title_en or "").strip()
+    title_norm = " ".join(title.lower().split())[:80]
+
+    body = (article.content_text or article.summary or "").strip()
+    body_norm = " ".join(body.split())[:400]
+
+    raw = f"{title_norm}||{body_norm}"
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
 
 async def _cluster_new_articles(
     db: AsyncSession,
@@ -1111,21 +1142,49 @@ async def _cluster_new_articles(
 ) -> tuple[int, int]:
     """Cluster unmatched articles into new stories via LLM.
 
+    Pipeline:
+    1. Bucket articles by content signature — only one representative
+       per bucket goes to the LLM, siblings attach to the same story.
+    2. LLM groups representatives into candidate stories.
+    3. After sibling expansion, groups below CLUSTER_NEW_GROUP_FLOOR
+       (5 articles) are rejected. Their articles get cluster_attempts++.
+    4. Articles that reach MAX_CLUSTER_ATTEMPTS are no longer returned
+       by the step 1 query, so they won't be sent here again.
+
     Returns (new_stories_published, new_stories_hidden).
     """
-    if len(articles) < 2:
-        logger.info(f"Only {len(articles)} unmatched articles — skipping new clustering")
+    if len(articles) < CLUSTER_NEW_GROUP_FLOOR:
+        logger.info(
+            f"Only {len(articles)} unmatched articles "
+            f"(floor={CLUSTER_NEW_GROUP_FLOOR}) — skipping new clustering"
+        )
         return 0, 0
 
-    logger.info(f"Clustering {len(articles)} unmatched articles into new stories")
+    # --- Dedup: bucket articles by content signature ---
+    buckets: dict[str, list[Article]] = {}
+    for a in articles:
+        sig = _dedup_signature(a)
+        buckets.setdefault(sig, []).append(a)
+
+    representatives: list[Article] = [bucket[0] for bucket in buckets.values()]
+    dupes_saved = len(articles) - len(representatives)
+    if dupes_saved > 0:
+        logger.info(
+            f"Dedup: {len(articles)} articles → {len(representatives)} "
+            f"representatives ({dupes_saved} near-duplicates attached to siblings)"
+        )
+
+    logger.info(
+        f"Clustering {len(representatives)} representatives into new stories"
+    )
 
     all_groups: list[dict] = []
 
-    for batch_start in range(0, len(articles), BATCH_SIZE):
-        batch = articles[batch_start: batch_start + BATCH_SIZE]
+    for batch_start in range(0, len(representatives), BATCH_SIZE):
+        batch = representatives[batch_start: batch_start + BATCH_SIZE]
         logger.info(
             f"Sending batch {batch_start // BATCH_SIZE + 1} "
-            f"({len(batch)} articles) to OpenAI for clustering"
+            f"({len(batch)} representatives) to OpenAI for clustering"
         )
         articles_block = _build_articles_block(batch, source_names)
         prompt = CLUSTERING_PROMPT.format(articles_block=articles_block)
@@ -1134,15 +1193,18 @@ async def _cluster_new_articles(
 
         for group in result_json.get("groups", []):
             article_ids_in_prompt = group.get("article_ids", [])
-            group_articles = []
+            group_articles: list[Article] = []
             for idx in article_ids_in_prompt:
                 actual_index = idx - 1
                 if 0 <= actual_index < len(batch):
-                    group_articles.append(batch[actual_index])
+                    rep = batch[actual_index]
+                    # Expand the representative back to all its dupe siblings
+                    rep_sig = _dedup_signature(rep)
+                    group_articles.extend(buckets.get(rep_sig, [rep]))
                 else:
                     logger.warning(f"LLM returned out-of-range article ID: {idx}")
 
-            if len(group_articles) >= 2:
+            if len(group_articles) >= CLUSTER_NEW_GROUP_FLOOR:
                 all_groups.append({
                     "articles": group_articles,
                     "title_fa": group.get("title_fa", ""),
@@ -1150,7 +1212,27 @@ async def _cluster_new_articles(
                     "topics": group.get("topics", []),
                 })
 
-    logger.info(f"LLM returned {len(all_groups)} valid groups from unmatched articles")
+    # Collect IDs of articles that made it into a viable group
+    grouped_ids: set = set()
+    for g in all_groups:
+        for a in g["articles"]:
+            grouped_ids.add(a.id)
+
+    # Everything we sent to the LLM that didn't end up in a viable group
+    # gets its attempt counter bumped. Next run, articles at
+    # MAX_CLUSTER_ATTEMPTS are filtered out of the unmatched pool.
+    ungrouped_ids = [a.id for a in articles if a.id not in grouped_ids]
+    if ungrouped_ids:
+        await db.execute(
+            update(Article)
+            .where(Article.id.in_(ungrouped_ids))
+            .values(cluster_attempts=Article.cluster_attempts + 1)
+        )
+        logger.info(
+            f"Bumped cluster_attempts on {len(ungrouped_ids)} ungrouped articles"
+        )
+
+    logger.info(f"LLM returned {len(all_groups)} viable groups (≥{CLUSTER_NEW_GROUP_FLOOR} articles)")
 
     published = 0
     hidden = 0
@@ -1170,10 +1252,10 @@ async def _cluster_new_articles(
                 f"Created published story '{story.slug}' with {story.article_count} articles"
             )
         else:
+            # Should not happen given the floor, but keep the log for safety
             hidden += 1
             logger.info(
-                f"Created hidden story '{story.slug}' with {story.article_count} articles "
-                f"(below threshold, hidden)"
+                f"Created hidden story '{story.slug}' with {story.article_count} articles"
             )
 
     return published, hidden
@@ -1613,12 +1695,18 @@ async def cluster_articles(db: AsyncSession) -> dict:
     cutoff = datetime.now(timezone.utc) - timedelta(days=30)
 
     # ── Step 1: Get unclustered articles from the last 30 days ──
+    # Skip orphans that have already been sent to cluster_new
+    # MAX_CLUSTER_ATTEMPTS times without joining a viable group.
+    # Without this gate, articles with no duplicates (e.g. niche
+    # single-source pieces) cycle through cluster_new on every
+    # pipeline run, paying the LLM tax indefinitely.
     result = await db.execute(
         select(Article)
         .options(joinedload(Article.source))
         .where(
             Article.story_id.is_(None),
             Article.ingested_at >= cutoff,
+            Article.cluster_attempts < MAX_CLUSTER_ATTEMPTS,
         )
         .order_by(Article.published_at.desc().nullslast())
     )
@@ -1694,6 +1782,18 @@ async def cluster_articles(db: AsyncSession) -> dict:
         )
     )
     aged_orphans = orphan_result.scalar() or 0
+
+    # Retired orphans — in-window articles that hit MAX_CLUSTER_ATTEMPTS
+    # without forming a viable group. Tracked for cost-visibility; these
+    # no longer cost LLM dollars because they're filtered out of step 1.
+    retired_result = await db.execute(
+        select(func.count(Article.id)).where(
+            Article.story_id.is_(None),
+            Article.ingested_at >= cutoff,
+            Article.cluster_attempts >= MAX_CLUSTER_ATTEMPTS,
+        )
+    )
+    retired_orphans = retired_result.scalar() or 0
     if aged_orphans > 0:
         logger.warning(
             "%d articles have story_id=NULL and ingested >30d ago — "
@@ -1710,6 +1810,7 @@ async def cluster_articles(db: AsyncSession) -> dict:
         "merged": merged_count,
         "unclustered": unclustered_count,
         "aged_orphans": aged_orphans,
+        "retired_orphans": retired_orphans,
     }
     logger.info(f"Incremental clustering complete: {stats}")
     return stats
