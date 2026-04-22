@@ -20,275 +20,332 @@ function seededRandom(seed: number): () => number {
   };
 }
 
-// ─── Muted color palettes (rotated daily) ──────────────
-const PALETTES = [
-  ["#b07d62", "#7a9e8e", "#8a9ab5"],
-  ["#c4886d", "#6b8f71", "#7986a8"],
-  ["#a0855e", "#5e9b8a", "#9a7fb0"],
-  ["#c97b7b", "#7bab8a", "#7b9cc9"],
-  ["#8b7355", "#5a8a7a", "#8b7aaa"],
-  ["#a38d6d", "#6da08e", "#6d8aaa"],
-  ["#b5856b", "#6b9980", "#856bb5"],
+// ─── Warm starlight palette ────────────────────────────
+// Colors chosen to read on both light and dark backgrounds.
+const STAR_COLORS = [
+  "#b48a4e",
+  "#7a8ba0",
+  "#a4763e",
+  "#8596aa",
+  "#b08660",
+  "#6b88a5",
+  "#ab7c55",
 ];
 
-// ─── Figures ───────────────────────────────────────────
-// "triangle" points apex-up (base on bottom), "triangleDown" points apex-down
-// (base on top). The two together are what you need for hexagrams and
-// hourglasses — pairing two apex-up triangles just stacks them.
-type ShapeType = "triangle" | "triangleDown" | "square" | "circle" | "diamond" | "line";
-interface ShapeDef {
-  type: ShapeType;
-  cx: number; cy: number;
-  s: number;
-  colorIdx: number;
+// ─── Constellations ────────────────────────────────────
+// Each shape is designed to read at 110×110 with 5–8 stars. Coordinates
+// are normalized 0-1 and scaled into an 82% centered box.
+interface Star { x: number; y: number; bright?: boolean; }
+interface Constellation {
+  name_fa: string;
+  icon: string;
+  stars: Star[];
+  lines: [number, number][];
 }
 
-const FIGURE_ICONS = [
-  "🏠", "🌳", "🧑", "⛵", "🐦", "⛰️",
-  "⭐", "🌸", "🐱", "👑", "🏮", "🐟",
-  "⏳", "🔑", "👁️", "🦋", "☂️", "🌙",
-];
-
-const FIGURE_NAMES_FA = [
-  "خانه", "درخت", "انسان", "قایق", "پرنده", "کوه",
-  "ستاره", "گل", "گربه", "تاج", "فانوس", "ماهی",
-  "ساعت شنی", "کلید", "چشم", "پروانه", "چتر", "ماه",
+const CONSTELLATIONS: Constellation[] = [
+  // 1. Orion — شکارگر با کمربند سه‌ستاره
+  {
+    name_fa: "جبار",
+    icon: "🌟",
+    stars: [
+      { x: 0.50, y: 0.10 },
+      { x: 0.28, y: 0.25, bright: true },
+      { x: 0.70, y: 0.27 },
+      { x: 0.40, y: 0.52 },
+      { x: 0.50, y: 0.52 },
+      { x: 0.60, y: 0.52 },
+      { x: 0.30, y: 0.85, bright: true },
+      { x: 0.72, y: 0.83 },
+    ],
+    lines: [
+      [0, 1], [0, 2],
+      [1, 3], [2, 5],
+      [3, 4], [4, 5],
+      [3, 6], [5, 7],
+    ],
+  },
+  // 2. Big Dipper
+  {
+    name_fa: "دب اکبر",
+    icon: "🥄",
+    stars: [
+      { x: 0.18, y: 0.45 },
+      { x: 0.40, y: 0.32, bright: true },
+      { x: 0.42, y: 0.55 },
+      { x: 0.20, y: 0.65 },
+      { x: 0.58, y: 0.42 },
+      { x: 0.75, y: 0.30 },
+      { x: 0.92, y: 0.22 },
+    ],
+    lines: [
+      [0, 1], [1, 2], [2, 3], [3, 0],
+      [2, 4], [4, 5], [5, 6],
+    ],
+  },
+  // 3. Cassiopeia — the W
+  {
+    name_fa: "ذات‌الکرسی",
+    icon: "👑",
+    stars: [
+      { x: 0.10, y: 0.50 },
+      { x: 0.30, y: 0.72 },
+      { x: 0.50, y: 0.45, bright: true },
+      { x: 0.68, y: 0.72 },
+      { x: 0.90, y: 0.52 },
+    ],
+    lines: [[0, 1], [1, 2], [2, 3], [3, 4]],
+  },
+  // 4. Cygnus — swan / Northern Cross
+  {
+    name_fa: "قوس",
+    icon: "🦢",
+    stars: [
+      { x: 0.50, y: 0.10, bright: true },
+      { x: 0.50, y: 0.50 },
+      { x: 0.50, y: 0.90 },
+      { x: 0.12, y: 0.48 },
+      { x: 0.88, y: 0.52 },
+    ],
+    lines: [[0, 1], [1, 2], [3, 1], [1, 4]],
+  },
+  // 5. Lyra — the harp
+  {
+    name_fa: "چنگ",
+    icon: "🎼",
+    stars: [
+      { x: 0.50, y: 0.12, bright: true },
+      { x: 0.32, y: 0.42 },
+      { x: 0.68, y: 0.40 },
+      { x: 0.28, y: 0.78 },
+      { x: 0.72, y: 0.80 },
+    ],
+    lines: [[0, 1], [0, 2], [1, 2], [1, 3], [2, 4], [3, 4]],
+  },
+  // 6. Scorpius — distinctive S-curve
+  {
+    name_fa: "عقرب",
+    icon: "🦂",
+    stars: [
+      { x: 0.15, y: 0.35 },
+      { x: 0.22, y: 0.48 },
+      { x: 0.35, y: 0.55, bright: true },
+      { x: 0.48, y: 0.62 },
+      { x: 0.60, y: 0.68 },
+      { x: 0.72, y: 0.68 },
+      { x: 0.82, y: 0.55 },
+      { x: 0.76, y: 0.40 },
+    ],
+    lines: [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [5, 6], [6, 7]],
+  },
+  // 7. Pleiades — the Seven Sisters cluster
+  {
+    name_fa: "ثریا",
+    icon: "✨",
+    stars: [
+      { x: 0.35, y: 0.35, bright: true },
+      { x: 0.55, y: 0.30 },
+      { x: 0.50, y: 0.48 },
+      { x: 0.68, y: 0.42 },
+      { x: 0.40, y: 0.58 },
+      { x: 0.62, y: 0.62 },
+      { x: 0.48, y: 0.72, bright: true },
+    ],
+    lines: [[0, 1], [1, 3], [3, 5], [5, 6], [6, 4], [4, 0]],
+  },
+  // 8. Sailboat
+  {
+    name_fa: "قایق",
+    icon: "⛵",
+    stars: [
+      { x: 0.55, y: 0.10 },
+      { x: 0.20, y: 0.62 },
+      { x: 0.55, y: 0.65 },
+      { x: 0.15, y: 0.78 },
+      { x: 0.50, y: 0.92 },
+      { x: 0.88, y: 0.78 },
+    ],
+    lines: [
+      [0, 2],
+      [0, 1], [1, 2],
+      [3, 4], [4, 5],
+      [3, 2], [5, 2],
+    ],
+  },
+  // 9. Crown
+  {
+    name_fa: "تاج",
+    icon: "👑",
+    stars: [
+      { x: 0.12, y: 0.68 },
+      { x: 0.26, y: 0.38 },
+      { x: 0.40, y: 0.55 },
+      { x: 0.50, y: 0.22, bright: true },
+      { x: 0.60, y: 0.55 },
+      { x: 0.74, y: 0.38 },
+      { x: 0.88, y: 0.68 },
+    ],
+    lines: [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [5, 6], [0, 6]],
+  },
+  // 10. Kite
+  {
+    name_fa: "بادبادک",
+    icon: "🪁",
+    stars: [
+      { x: 0.50, y: 0.10 },
+      { x: 0.78, y: 0.32 },
+      { x: 0.50, y: 0.55 },
+      { x: 0.22, y: 0.32 },
+      { x: 0.56, y: 0.70 },
+      { x: 0.44, y: 0.82 },
+      { x: 0.55, y: 0.92 },
+    ],
+    lines: [[0, 1], [1, 2], [2, 3], [3, 0], [2, 4], [4, 5], [5, 6]],
+  },
+  // 11. Hourglass
+  {
+    name_fa: "ساعت شنی",
+    icon: "⏳",
+    stars: [
+      { x: 0.22, y: 0.12 },
+      { x: 0.78, y: 0.12 },
+      { x: 0.50, y: 0.50, bright: true },
+      { x: 0.22, y: 0.88 },
+      { x: 0.78, y: 0.88 },
+    ],
+    lines: [[0, 1], [0, 2], [1, 2], [2, 3], [2, 4], [3, 4]],
+  },
+  // 12. Minaret
+  {
+    name_fa: "گلدسته",
+    icon: "🕌",
+    stars: [
+      { x: 0.50, y: 0.08 },
+      { x: 0.42, y: 0.20 },
+      { x: 0.58, y: 0.20 },
+      { x: 0.40, y: 0.34 },
+      { x: 0.60, y: 0.34 },
+      { x: 0.42, y: 0.90 },
+      { x: 0.58, y: 0.90 },
+    ],
+    lines: [[0, 1], [0, 2], [1, 3], [2, 4], [3, 4], [3, 5], [4, 6], [5, 6]],
+  },
+  // 13. Butterfly
+  {
+    name_fa: "پروانه",
+    icon: "🦋",
+    stars: [
+      { x: 0.50, y: 0.22 },
+      { x: 0.50, y: 0.50 },
+      { x: 0.50, y: 0.78 },
+      { x: 0.12, y: 0.22 },
+      { x: 0.88, y: 0.22 },
+      { x: 0.18, y: 0.82 },
+      { x: 0.82, y: 0.82 },
+    ],
+    lines: [
+      [0, 1], [1, 2],
+      [0, 3], [3, 1],
+      [0, 4], [4, 1],
+      [1, 5], [5, 2],
+      [1, 6], [6, 2],
+    ],
+  },
+  // 14. Tulip
+  {
+    name_fa: "لاله",
+    icon: "🌷",
+    stars: [
+      { x: 0.32, y: 0.28 },
+      { x: 0.50, y: 0.15, bright: true },
+      { x: 0.68, y: 0.28 },
+      { x: 0.35, y: 0.52 },
+      { x: 0.65, y: 0.52 },
+      { x: 0.50, y: 0.92 },
+    ],
+    lines: [
+      [0, 1], [1, 2],
+      [0, 3], [2, 4],
+      [3, 4],
+      [3, 5], [4, 5],
+    ],
+  },
+  // 15. Bow
+  {
+    name_fa: "کمان",
+    icon: "🏹",
+    stars: [
+      { x: 0.22, y: 0.12 },
+      { x: 0.36, y: 0.32 },
+      { x: 0.42, y: 0.50, bright: true },
+      { x: 0.36, y: 0.68 },
+      { x: 0.22, y: 0.88 },
+      { x: 0.88, y: 0.50 },
+    ],
+    lines: [
+      [0, 1], [1, 2], [2, 3], [3, 4],
+      [0, 4],
+      [2, 5],
+    ],
+  },
+  // 16. Hexagram — Star of David
+  {
+    name_fa: "ستاره داود",
+    icon: "✡️",
+    stars: [
+      { x: 0.50, y: 0.08 },
+      { x: 0.14, y: 0.66 },
+      { x: 0.86, y: 0.66 },
+      { x: 0.14, y: 0.34 },
+      { x: 0.86, y: 0.34 },
+      { x: 0.50, y: 0.92 },
+    ],
+    lines: [
+      [0, 1], [1, 2], [2, 0],
+      [3, 4], [4, 5], [5, 3],
+    ],
+  },
 ];
 
 export function getTodayIcon(): string {
-  return FIGURE_ICONS[seedFromDate() % FIGURE_ICONS.length];
+  return CONSTELLATIONS[seedFromDate() % CONSTELLATIONS.length].icon;
 }
 
 export function getTodayName(): string {
-  return FIGURE_NAMES_FA[seedFromDate() % FIGURE_NAMES_FA.length];
+  return CONSTELLATIONS[seedFromDate() % CONSTELLATIONS.length].name_fa;
 }
 
-const FIGURES: ShapeDef[][] = [
-  // House
-  [
-    { type: "triangle", cx: 0.5, cy: 0.25, s: 0.5, colorIdx: 0 },
-    { type: "square", cx: 0.5, cy: 0.6, s: 0.4, colorIdx: 1 },
-    { type: "square", cx: 0.5, cy: 0.75, s: 0.12, colorIdx: 2 },
-  ],
-  // Tree
-  [
-    { type: "triangle", cx: 0.5, cy: 0.2, s: 0.5, colorIdx: 1 },
-    { type: "triangle", cx: 0.5, cy: 0.4, s: 0.4, colorIdx: 1 },
-    { type: "square", cx: 0.5, cy: 0.7, s: 0.1, colorIdx: 0 },
-    { type: "circle", cx: 0.5, cy: 0.12, s: 0.08, colorIdx: 2 },
-  ],
-  // Person
-  [
-    { type: "circle", cx: 0.5, cy: 0.2, s: 0.15, colorIdx: 0 },
-    { type: "triangle", cx: 0.5, cy: 0.5, s: 0.35, colorIdx: 1 },
-    { type: "line", cx: 0.38, cy: 0.78, s: 0.2, colorIdx: 2 },
-    { type: "line", cx: 0.62, cy: 0.78, s: 0.2, colorIdx: 2 },
-  ],
-  // Boat
-  [
-    { type: "triangle", cx: 0.55, cy: 0.3, s: 0.35, colorIdx: 2 },
-    { type: "diamond", cx: 0.5, cy: 0.65, s: 0.5, colorIdx: 0 },
-    { type: "line", cx: 0.5, cy: 0.55, s: 0.4, colorIdx: 1 },
-  ],
-  // Bird
-  [
-    { type: "circle", cx: 0.65, cy: 0.35, s: 0.08, colorIdx: 0 },
-    { type: "triangle", cx: 0.4, cy: 0.35, s: 0.3, colorIdx: 1 },
-    { type: "triangle", cx: 0.35, cy: 0.5, s: 0.25, colorIdx: 2 },
-  ],
-  // Mountain
-  [
-    { type: "triangle", cx: 0.5, cy: 0.35, s: 0.6, colorIdx: 1 },
-    { type: "triangle", cx: 0.75, cy: 0.5, s: 0.35, colorIdx: 2 },
-    { type: "circle", cx: 0.25, cy: 0.25, s: 0.1, colorIdx: 0 },
-  ],
-  // Star — two equal triangles sharing a center form a hexagram (Star of
-  // David / ستاره داود). Before, both pointed up so the result was two
-  // stacked triangles, not a star.
-  [
-    { type: "triangle", cx: 0.5, cy: 0.5, s: 0.3, colorIdx: 0 },
-    { type: "triangleDown", cx: 0.5, cy: 0.5, s: 0.3, colorIdx: 0 },
-    { type: "circle", cx: 0.5, cy: 0.5, s: 0.07, colorIdx: 2 },
-  ],
-  // Flower
-  [
-    { type: "circle", cx: 0.5, cy: 0.4, s: 0.12, colorIdx: 0 },
-    { type: "diamond", cx: 0.5, cy: 0.22, s: 0.15, colorIdx: 1 },
-    { type: "diamond", cx: 0.35, cy: 0.4, s: 0.15, colorIdx: 1 },
-    { type: "diamond", cx: 0.65, cy: 0.4, s: 0.15, colorIdx: 2 },
-    { type: "diamond", cx: 0.5, cy: 0.58, s: 0.15, colorIdx: 2 },
-    { type: "line", cx: 0.5, cy: 0.78, s: 0.2, colorIdx: 1 },
-  ],
-  // Cat
-  [
-    { type: "circle", cx: 0.5, cy: 0.35, s: 0.2, colorIdx: 0 },
-    { type: "triangle", cx: 0.38, cy: 0.2, s: 0.1, colorIdx: 0 },
-    { type: "triangle", cx: 0.62, cy: 0.2, s: 0.1, colorIdx: 0 },
-    { type: "square", cx: 0.5, cy: 0.6, s: 0.22, colorIdx: 1 },
-    { type: "line", cx: 0.7, cy: 0.65, s: 0.18, colorIdx: 2 },
-  ],
-  // Crown
-  [
-    { type: "square", cx: 0.5, cy: 0.6, s: 0.35, colorIdx: 1 },
-    { type: "triangle", cx: 0.3, cy: 0.35, s: 0.18, colorIdx: 0 },
-    { type: "triangle", cx: 0.5, cy: 0.3, s: 0.2, colorIdx: 0 },
-    { type: "triangle", cx: 0.7, cy: 0.35, s: 0.18, colorIdx: 0 },
-    { type: "circle", cx: 0.5, cy: 0.45, s: 0.06, colorIdx: 2 },
-  ],
-  // Lantern
-  [
-    { type: "triangle", cx: 0.5, cy: 0.2, s: 0.15, colorIdx: 2 },
-    { type: "diamond", cx: 0.5, cy: 0.45, s: 0.25, colorIdx: 0 },
-    { type: "circle", cx: 0.5, cy: 0.45, s: 0.1, colorIdx: 1 },
-    { type: "line", cx: 0.5, cy: 0.7, s: 0.12, colorIdx: 2 },
-  ],
-  // Fish
-  [
-    { type: "diamond", cx: 0.45, cy: 0.5, s: 0.3, colorIdx: 1 },
-    { type: "triangle", cx: 0.75, cy: 0.5, s: 0.2, colorIdx: 2 },
-    { type: "circle", cx: 0.35, cy: 0.45, s: 0.05, colorIdx: 0 },
-  ],
-  // Hourglass (ساعت شنی): top triangle apex-down, bottom apex-up, meeting
-  // at the pinch point in the middle so the shape reads as a real hourglass.
-  [
-    { type: "triangleDown", cx: 0.5, cy: 0.3, s: 0.22, colorIdx: 0 },
-    { type: "triangle", cx: 0.5, cy: 0.7, s: 0.22, colorIdx: 2 },
-    { type: "circle", cx: 0.5, cy: 0.5, s: 0.04, colorIdx: 1 },
-  ],
-  // Key
-  [
-    { type: "circle", cx: 0.35, cy: 0.4, s: 0.18, colorIdx: 0 },
-    { type: "square", cx: 0.55, cy: 0.4, s: 0.06, colorIdx: 1 },
-    { type: "square", cx: 0.7, cy: 0.5, s: 0.06, colorIdx: 2 },
-    { type: "square", cx: 0.78, cy: 0.5, s: 0.06, colorIdx: 2 },
-  ],
-  // Eye
-  [
-    { type: "diamond", cx: 0.5, cy: 0.5, s: 0.35, colorIdx: 1 },
-    { type: "circle", cx: 0.5, cy: 0.5, s: 0.15, colorIdx: 0 },
-    { type: "circle", cx: 0.5, cy: 0.5, s: 0.06, colorIdx: 2 },
-  ],
-  // Butterfly
-  [
-    { type: "diamond", cx: 0.3, cy: 0.4, s: 0.22, colorIdx: 1 },
-    { type: "diamond", cx: 0.7, cy: 0.4, s: 0.22, colorIdx: 2 },
-    { type: "diamond", cx: 0.3, cy: 0.6, s: 0.18, colorIdx: 2 },
-    { type: "diamond", cx: 0.7, cy: 0.6, s: 0.18, colorIdx: 1 },
-    { type: "line", cx: 0.5, cy: 0.5, s: 0.3, colorIdx: 0 },
-  ],
-  // Umbrella
-  [
-    { type: "circle", cx: 0.5, cy: 0.35, s: 0.3, colorIdx: 0 },
-    { type: "line", cx: 0.5, cy: 0.6, s: 0.25, colorIdx: 1 },
-    { type: "diamond", cx: 0.5, cy: 0.8, s: 0.08, colorIdx: 2 },
-  ],
-  // Moon and stars
-  [
-    { type: "circle", cx: 0.4, cy: 0.45, s: 0.25, colorIdx: 0 },
-    { type: "triangle", cx: 0.7, cy: 0.3, s: 0.08, colorIdx: 1 },
-    { type: "triangle", cx: 0.75, cy: 0.55, s: 0.06, colorIdx: 2 },
-    { type: "triangle", cx: 0.6, cy: 0.65, s: 0.07, colorIdx: 1 },
-  ],
-];
+// ─── Helpers ───────────────────────────────────────────
 
-// ─── Convert shape to line segments ────────────────────
-interface Segment {
-  x1: number; y1: number; x2: number; y2: number;
-  color: string;
-  cx1: number; cy1: number; cx2: number; cy2: number;
-  // S-curve drift control points
-  drift1x: number; drift1y: number;
-  drift2x: number; drift2y: number;
+function hexWithAlpha(hex: string, alpha: number): string {
+  const a = Math.max(0, Math.min(1, alpha));
+  const hex8 = Math.round(a * 255).toString(16).padStart(2, "0");
+  return hex + hex8;
 }
 
-function shapeToSegments(
-  shape: ShapeDef, bx: number, by: number, bw: number, bh: number,
-  color: string, rng: () => number, fullW: number, fullH: number,
-): Segment[] {
-  const cx = bx + shape.cx * bw;
-  const cy = by + shape.cy * bh;
-  const s = shape.s * Math.min(bw, bh) * 0.5;
-  const segs: Segment[] = [];
-
-  const addSeg = (x1: number, y1: number, x2: number, y2: number) => {
-    // Chaos start: scattered far, as if drifting in space
-    const angle1 = rng() * Math.PI * 2;
-    const dist1 = fullW * 0.4 + rng() * fullW * 0.6;
-    const angle2 = rng() * Math.PI * 2;
-    const dist2 = fullW * 0.4 + rng() * fullW * 0.6;
-    // S-curve midpoints: offset from the straight path
-    const mid1x = (x1 + rng() * fullW) * 0.5 + (rng() - 0.5) * fullW * 0.4;
-    const mid1y = (y1 + rng() * fullH) * 0.5 + (rng() - 0.5) * fullH * 0.4;
-    const mid2x = (x2 + rng() * fullW) * 0.5 + (rng() - 0.5) * fullW * 0.4;
-    const mid2y = (y2 + rng() * fullH) * 0.5 + (rng() - 0.5) * fullH * 0.4;
-
-    segs.push({
-      x1, y1, x2, y2, color,
-      cx1: fullW * 0.5 + Math.cos(angle1) * dist1,
-      cy1: fullH * 0.5 + Math.sin(angle1) * dist1,
-      cx2: fullW * 0.5 + Math.cos(angle2) * dist2,
-      cy2: fullH * 0.5 + Math.sin(angle2) * dist2,
-      drift1x: mid1x, drift1y: mid1y,
-      drift2x: mid2x, drift2y: mid2y,
-    });
-  };
-
-  switch (shape.type) {
-    case "triangle":
-      addSeg(cx, cy - s, cx - s, cy + s);
-      addSeg(cx - s, cy + s, cx + s, cy + s);
-      addSeg(cx + s, cy + s, cx, cy - s);
-      break;
-    case "triangleDown":
-      addSeg(cx, cy + s, cx - s, cy - s);
-      addSeg(cx - s, cy - s, cx + s, cy - s);
-      addSeg(cx + s, cy - s, cx, cy + s);
-      break;
-    case "square":
-      addSeg(cx - s, cy - s, cx + s, cy - s);
-      addSeg(cx + s, cy - s, cx + s, cy + s);
-      addSeg(cx + s, cy + s, cx - s, cy + s);
-      addSeg(cx - s, cy + s, cx - s, cy - s);
-      break;
-    case "circle": {
-      const n = 8;
-      for (let i = 0; i < n; i++) {
-        const a1 = (i / n) * Math.PI * 2;
-        const a2 = ((i + 1) / n) * Math.PI * 2;
-        addSeg(cx + Math.cos(a1) * s, cy + Math.sin(a1) * s, cx + Math.cos(a2) * s, cy + Math.sin(a2) * s);
-      }
-      break;
-    }
-    case "diamond":
-      addSeg(cx, cy - s, cx + s, cy);
-      addSeg(cx + s, cy, cx, cy + s * 0.5);
-      addSeg(cx, cy + s * 0.5, cx - s, cy);
-      addSeg(cx - s, cy, cx, cy - s);
-      break;
-    case "line":
-      addSeg(cx, cy - s, cx, cy + s);
-      break;
-  }
-  return segs;
-}
-
-// Smooth S-curve: chaos → drift through space → settle
-// Uses cubic hermite for a natural, organic path with no sudden changes
-function sCurve(chaos: number, drift: number, target: number, t: number): number {
-  // Smooth step function for overall easing
-  const smooth = t * t * (3 - 2 * t); // smoothstep 0→1
-
+// Chaos → midpoint → target, smoothstep on each half. Same feel as the
+// previous animation but applied per-star instead of per-segment.
+function sCurve(a: number, mid: number, b: number, t: number): number {
   if (t < 0.5) {
-    // First half: chaos → drift with gentle acceleration
     const p = t / 0.5;
-    const ease = p * p * (3 - 2 * p); // smoothstep
-    return chaos + (drift - chaos) * ease;
+    const ease = p * p * (3 - 2 * p);
+    return a + (mid - a) * ease;
   } else {
-    // Second half: drift → target with gentle deceleration
     const p = (t - 0.5) / 0.5;
-    const ease = p * p * (3 - 2 * p); // smoothstep
-    return drift + (target - drift) * ease;
+    const ease = p * p * (3 - 2 * p);
+    return mid + (b - mid) * ease;
   }
+}
+
+interface StarPath {
+  x0: number; y0: number;
+  mx: number; my: number;
+  x: number; y: number;
+  delay: number;
+}
+
+interface FieldStar {
+  x: number; y: number; r: number; alpha: number; twinkleOffset: number;
 }
 
 // ─── Component ─────────────────────────────────────────
@@ -297,20 +354,27 @@ export default function DoornegarAnimation({ size = "footer" }: { size?: Size })
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animRef = useRef<number>(0);
   const startRef = useRef<number>(0);
-  const formedAtRef = useRef<number>(0); // timestamp when figure completed
-  const segmentsRef = useRef<Segment[]>([]);
+  const formedAtRef = useRef<number>(0);
   const seedRef = useRef(seedFromDate());
   const triggeredRef = useRef(false);
 
-  const duration = 14000; // 14 seconds to form — slow and meditative
+  const pathsRef = useRef<StarPath[]>([]);
+  const fieldStarsRef = useRef<FieldStar[]>([]);
+  const constellationRef = useRef<Constellation | null>(null);
+  const colorRef = useRef<string>(STAR_COLORS[0]);
+
+  // 10s to fully form: 5.5s stars drift in, 4.5s lines connect.
+  const duration = 10000;
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const seed = seedRef.current;
-    const palette = PALETTES[seed % PALETTES.length];
-    const figure = FIGURES[seed % FIGURES.length];
+    const constellation = CONSTELLATIONS[seed % CONSTELLATIONS.length];
+    const starColor = STAR_COLORS[seed % STAR_COLORS.length];
+    constellationRef.current = constellation;
+    colorRef.current = starColor;
 
     const resize = () => {
       const rect = canvas.getBoundingClientRect();
@@ -322,20 +386,39 @@ export default function DoornegarAnimation({ size = "footer" }: { size?: Size })
 
       const w = rect.width;
       const h = rect.height;
-      const boxSize = Math.min(w, h) * 0.8;
+      const boxSize = Math.min(w, h) * 0.82;
       const bx = (w - boxSize) / 2;
       const by = (h - boxSize) / 2;
 
       const rng = seededRandom(seed);
-      const allSegs: Segment[] = [];
-      for (const shape of figure) {
-        const color = palette[shape.colorIdx % palette.length];
-        allSegs.push(...shapeToSegments(shape, bx, by, boxSize, boxSize, color, rng, w, h));
-      }
-      segmentsRef.current = allSegs;
+
+      pathsRef.current = constellation.stars.map((s, i) => {
+        const x = bx + s.x * boxSize;
+        const y = by + s.y * boxSize;
+        const angle = rng() * Math.PI * 2;
+        const dist = w * 0.55 + rng() * w * 0.35;
+        const mx = w * 0.5 + (rng() - 0.5) * w * 0.35;
+        const my = h * 0.5 + (rng() - 0.5) * h * 0.35;
+        // Stagger arrivals over the first 30% of the arrival phase
+        const delay = (i / constellation.stars.length) * 0.30;
+        return {
+          x0: w * 0.5 + Math.cos(angle) * dist,
+          y0: h * 0.5 + Math.sin(angle) * dist,
+          mx, my, x, y, delay,
+        };
+      });
+
+      // Background field stars — static decorative dust to suggest depth
+      const fieldCount = 9;
+      fieldStarsRef.current = Array.from({ length: fieldCount }, () => ({
+        x: rng() * w,
+        y: rng() * h,
+        r: 0.3 + rng() * 0.8,
+        alpha: 0.10 + rng() * 0.18,
+        twinkleOffset: rng() * Math.PI * 2,
+      }));
     };
 
-    // Cache dimensions — only update on resize
     let cachedW = 0, cachedH = 0;
     const updateCachedSize = () => {
       const r = canvas.getBoundingClientRect();
@@ -359,68 +442,113 @@ export default function DoornegarAnimation({ size = "footer" }: { size?: Size })
       ctx.fillStyle = isDark ? "#0a0e1a" : "#ffffff";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      const centerX = w / 2;
-      const centerY = h / 2;
-      const radius = Math.min(w, h) / 2 - 1;
-      ctx.save();
-
-      const lineWidth = 2;
-
-      // Track when the figure completed forming
       if (progress >= 1 && formedAtRef.current === 0) {
         formedAtRef.current = timestamp;
       }
 
-      // Slow rotation — starts from zero after forming, ramps up gently
-      if (formedAtRef.current > 0) {
-        const sinceFormed = (timestamp - formedAtRef.current) * 0.001; // seconds since formed
-        // Ease into rotation over 3 seconds, then constant
-        const rampUp = Math.min(sinceFormed / 3, 1);
-        const ease = rampUp * rampUp * (3 - 2 * rampUp); // smoothstep
-        const angle = sinceFormed * 0.06 * ease; // 0.06 rad/s ≈ 1 turn per 105s
-        ctx.translate(centerX, centerY);
-        ctx.rotate(angle);
-        ctx.translate(-centerX, -centerY);
+      // ── Background field stars (fade in over first 2s) ──
+      const fieldFade = Math.min(progress / 0.2, 1);
+      const fieldColor = isDark ? "#ffffff" : "#334155";
+      for (const fs of fieldStarsRef.current) {
+        const twinkle = 0.75 + 0.25 * Math.sin(time * 1.4 + fs.twinkleOffset);
+        ctx.fillStyle = hexWithAlpha(fieldColor, fs.alpha * fieldFade * twinkle);
+        ctx.beginPath();
+        ctx.arc(fs.x, fs.y, fs.r, 0, Math.PI * 2);
+        ctx.fill();
       }
 
-      // Line opacity: fade in during first 20% of formation
-      const baseOpacity = progress < 0.2 ? progress / 0.2 : 1;
+      const constellation = constellationRef.current!;
+      const paths = pathsRef.current;
+      const color = colorRef.current;
 
-      for (let i = 0; i < segmentsRef.current.length; i++) {
-        const seg = segmentsRef.current[i];
+      // ── Phase split ──
+      //   0.00 → 0.55 : stars drift in (per-star delays up to 0.30)
+      //   0.55 → 1.00 : lines draw sequentially
+      const STAR_PHASE_END = 0.55;
 
-        // Each segment has a slightly staggered timing for organic feel
-        const stagger = (i / segmentsRef.current.length) * 0.15; // up to 15% delay
-        const segProgress = Math.max(0, Math.min((progress - stagger) / (1 - stagger), 1));
+      // Current positions of each star
+      const starPositions: { x: number; y: number; arrived: boolean; fadeIn: number }[] = [];
 
-        let px1: number, py1: number, px2: number, py2: number;
+      for (let i = 0; i < constellation.stars.length; i++) {
+        const p = paths[i];
+        const starProgress = Math.max(
+          0,
+          Math.min((progress - p.delay) / Math.max(0.01, STAR_PHASE_END - p.delay), 1)
+        );
 
-        if (segProgress < 1) {
-          px1 = sCurve(seg.cx1, seg.drift1x, seg.x1, segProgress);
-          py1 = sCurve(seg.cy1, seg.drift1y, seg.y1, segProgress);
-          px2 = sCurve(seg.cx2, seg.drift2x, seg.x2, segProgress);
-          py2 = sCurve(seg.cy2, seg.drift2y, seg.y2, segProgress);
+        let px: number, py: number;
+        if (starProgress >= 1) {
+          px = p.x;
+          py = p.y;
         } else {
-          px1 = seg.x1;
-          py1 = seg.y1;
-          px2 = seg.x2;
-          py2 = seg.y2;
+          px = sCurve(p.x0, p.mx, p.x, starProgress);
+          py = sCurve(p.y0, p.my, p.y, starProgress);
         }
 
-        // Segment opacity: fades in with its own timing
-        const segOpacity = segProgress < 0.3 ? segProgress / 0.3 : 1;
-        const opacity = Math.round(baseOpacity * segOpacity * 255).toString(16).padStart(2, "0");
+        // Fade in over the first 20% of each star's individual arrival
+        const fadeIn = Math.min(starProgress / 0.2, 1);
+        starPositions.push({ x: px, y: py, arrived: starProgress >= 1, fadeIn });
+      }
+
+      // ── Draw connecting lines ──
+      const linePhase = Math.max(0, Math.min((progress - STAR_PHASE_END) / (1 - STAR_PHASE_END), 1));
+      const totalLines = constellation.lines.length;
+
+      for (let li = 0; li < totalLines; li++) {
+        const [a, b] = constellation.lines[li];
+        const posA = starPositions[a];
+        const posB = starPositions[b];
+        if (!posA.arrived || !posB.arrived) continue;
+
+        const slotStart = li / totalLines;
+        const slotEnd = (li + 1) / totalLines;
+        const lineProgress = Math.max(
+          0,
+          Math.min((linePhase - slotStart) / (slotEnd - slotStart), 1)
+        );
+        if (lineProgress <= 0) continue;
+
+        const ex = posA.x + (posB.x - posA.x) * lineProgress;
+        const ey = posA.y + (posB.y - posA.y) * lineProgress;
 
         ctx.beginPath();
-        ctx.moveTo(px1, py1);
-        ctx.lineTo(px2, py2);
-        ctx.strokeStyle = seg.color + opacity;
-        ctx.lineWidth = lineWidth;
+        ctx.moveTo(posA.x, posA.y);
+        ctx.lineTo(ex, ey);
+        ctx.strokeStyle = hexWithAlpha(color, 0.40);
+        ctx.lineWidth = 0.8;
         ctx.lineCap = "round";
         ctx.stroke();
       }
 
-      ctx.restore();
+      // ── Draw stars (with glow + post-formation twinkle) ──
+      for (let i = 0; i < constellation.stars.length; i++) {
+        const starDef = constellation.stars[i];
+        const pos = starPositions[i];
+
+        const baseR = starDef.bright ? 2.2 : 1.5;
+        const glowR = starDef.bright ? 5.5 : 3.5;
+
+        // Post-formation twinkle: gentle sinusoidal brightness shimmer
+        const twinkle = formedAtRef.current > 0
+          ? 0.82 + 0.18 * Math.sin(time * 1.8 + i * 1.37)
+          : 1.0;
+        const alpha = pos.fadeIn * twinkle;
+
+        // Glow halo
+        const glow = ctx.createRadialGradient(pos.x, pos.y, 0, pos.x, pos.y, glowR);
+        glow.addColorStop(0, hexWithAlpha(color, 0.38 * alpha));
+        glow.addColorStop(1, hexWithAlpha(color, 0));
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, glowR, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Core
+        ctx.fillStyle = hexWithAlpha(color, alpha);
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, baseR, 0, Math.PI * 2);
+        ctx.fill();
+      }
 
       animRef.current = requestAnimationFrame(draw);
     };
@@ -430,7 +558,7 @@ export default function DoornegarAnimation({ size = "footer" }: { size?: Size })
 
     const handleResize = () => { resize(); updateCachedSize(); };
 
-    // Scroll-triggered: start animation when canvas enters viewport
+    // Scroll-triggered: start when the canvas enters the viewport
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting && !triggeredRef.current) {
@@ -464,7 +592,7 @@ export default function DoornegarAnimation({ size = "footer" }: { size?: Size })
         className={sizeClasses[size]}
         style={{ display: "block" }}
         role="img"
-        aria-label="تصویر انتزاعی روزانه دورنگر"
+        aria-label={`صورت فلکی امروز: ${name}`}
       />
       <span className="doornegar-tooltip absolute -bottom-6 left-1/2 -translate-x-1/2 px-2 py-0.5 text-[10px] font-medium text-slate-500 dark:text-slate-400 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 whitespace-nowrap pointer-events-none">
         {name}
