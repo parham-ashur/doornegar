@@ -801,7 +801,10 @@ async def link_posts_by_embedding(db: AsyncSession, threshold: float = 0.35) -> 
         }
 
     post_texts = [(p.text or "")[:500] for p in remaining_posts]
-    embeddings = generate_embeddings_batch(post_texts, batch_size=100)
+    import asyncio as _asyncio
+    embeddings = await _asyncio.to_thread(
+        generate_embeddings_batch, post_texts, 100
+    )
 
     linked_by_embedding = 0
     via_article_rescue = 0
@@ -968,7 +971,10 @@ async def reassign_posts_by_embedding(
     # uses so the vector space matches story centroids exactly.
     from app.nlp.embeddings import generate_embeddings_batch
     post_texts = [(p.text or "")[:500] for p in posts]
-    embeddings = generate_embeddings_batch(post_texts, batch_size=100)
+    import asyncio as _asyncio
+    embeddings = await _asyncio.to_thread(
+        generate_embeddings_batch, post_texts, 100
+    )
 
     moves: dict[str, int] = {}  # story_id -> net delta
     reassigned = 0

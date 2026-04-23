@@ -1279,8 +1279,12 @@ async def re_embed_all_articles(
             pass
         texts.append(raw)
 
-    # Generate in batches
-    embeddings = generate_embeddings_batch(texts, batch_size=100)
+    # Generate in batches — offload to thread so retries don't block
+    # the API event loop.
+    import asyncio as _asyncio
+    embeddings = await _asyncio.to_thread(
+        generate_embeddings_batch, texts, 100
+    )
 
     updated = 0
     for article, embedding in zip(articles, embeddings):
@@ -1291,6 +1295,55 @@ async def re_embed_all_articles(
     await db.commit()
     logger.info(f"Re-embedded {updated}/{len(articles)} articles with OpenAI")
     return {"status": "ok", "total": len(articles), "embedded": updated}
+
+
+@router.get("/embedding/health")
+async def embedding_health(db: AsyncSession = Depends(get_db)):
+    """Zero-vector rate across recent articles — catches silent embedding failures.
+
+    A zero-filled 384-dim vector passes `is not None` but breaks every
+    cosine downstream. Watch this endpoint (or the log line on each
+    pipeline run) if cluster_new cost or orphan rate spikes — rising
+    zero rate is the earliest signal that OpenAI's embeddings endpoint
+    is degraded.
+    """
+    from sqlalchemy import text as _text
+    windows = [("1h", "1 hour"), ("24h", "24 hours"), ("7d", "7 days"), ("30d", "30 days")]
+    out: dict = {}
+    for label, interval in windows:
+        row = (await db.execute(_text(
+            f"""
+            SELECT
+              count(*) FILTER (WHERE embedding IS NOT NULL) AS with_emb,
+              count(*) FILTER (WHERE embedding IS NULL) AS null_emb,
+              count(*) FILTER (
+                WHERE embedding IS NOT NULL
+                  AND NOT EXISTS (
+                    SELECT 1 FROM jsonb_array_elements_text(embedding) v
+                    WHERE v::float <> 0
+                  )
+              ) AS all_zero,
+              count(*) AS total
+            FROM articles
+            WHERE ingested_at >= NOW() - interval '{interval}'
+            """
+        ))).one()
+        total = row.total or 0
+        all_zero = row.all_zero or 0
+        null_emb = row.null_emb or 0
+        out[label] = {
+            "total": total,
+            "with_embedding": row.with_emb or 0,
+            "null_embedding": null_emb,
+            "all_zero": all_zero,
+            "healthy": max(0, total - null_emb - all_zero),
+            "zero_pct": round(100 * all_zero / max(1, total), 1),
+            "null_pct": round(100 * null_emb / max(1, total), 1),
+        }
+    # Worst-recent as the top-level alert flag
+    worst = out["24h"]
+    out["alert"] = worst["zero_pct"] >= 10 or worst["null_pct"] >= 10
+    return out
 
 
 @router.post("/nullify-localhost-images")

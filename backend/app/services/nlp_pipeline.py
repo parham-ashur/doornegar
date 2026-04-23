@@ -122,7 +122,12 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
                 embeddable_articles.append(article)
 
         if texts_for_embedding:
-            embeddings = generate_embeddings_batch(texts_for_embedding)
+            # Offload the blocking OpenAI call (including retry sleeps)
+            # to a thread so the event loop stays responsive.
+            import asyncio as _asyncio
+            embeddings = await _asyncio.to_thread(
+                generate_embeddings_batch, texts_for_embedding
+            )
             skipped = 0
             for article, embedding in zip(embeddable_articles, embeddings):
                 # Treat None as "unknown" — leave any existing embedding

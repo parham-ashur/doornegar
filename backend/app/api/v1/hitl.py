@@ -136,7 +136,10 @@ async def telegram_triage(
         story_article_embs.setdefault(str(sid), []).append(cleaned)
 
     post_texts = [(p.text or "")[:500] for p in posts]
-    embeddings = generate_embeddings_batch(post_texts, batch_size=100)
+    import asyncio as _asyncio
+    embeddings = await _asyncio.to_thread(
+        generate_embeddings_batch, post_texts, 100
+    )
 
     items: list[TriagePost] = []
     band_counts = {

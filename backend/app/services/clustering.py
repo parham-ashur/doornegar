@@ -1223,13 +1223,26 @@ async def _cluster_new_articles(
     # MAX_CLUSTER_ATTEMPTS are filtered out of the unmatched pool.
     ungrouped_ids = [a.id for a in articles if a.id not in grouped_ids]
     if ungrouped_ids:
-        await db.execute(
+        # Commit the bump immediately in its own transaction so it
+        # survives any later failure in step 5 (merge_tiny_by_cosine
+        # / merge_hidden). Previously the bump was persisted by the
+        # outer db.commit() in cluster_articles — but a partial merge
+        # failure would roll the whole thing back, leaving every
+        # article stuck at cluster_attempts=0 forever.
+        # synchronize_session=False skips the SQLAlchemy attempt to
+        # reflect the change into in-memory objects; it's a bulk
+        # update on a column nothing else in this function reads.
+        result = await db.execute(
             update(Article)
             .where(Article.id.in_(ungrouped_ids))
             .values(cluster_attempts=Article.cluster_attempts + 1)
+            .execution_options(synchronize_session=False)
         )
+        await db.commit()
+        rowcount = getattr(result, "rowcount", None)
         logger.info(
-            f"Bumped cluster_attempts on {len(ungrouped_ids)} ungrouped articles"
+            f"Bumped cluster_attempts on {len(ungrouped_ids)} ungrouped articles "
+            f"(rows_affected={rowcount})"
         )
 
     logger.info(f"LLM returned {len(all_groups)} viable groups (≥{CLUSTER_NEW_GROUP_FLOOR} articles)")

@@ -487,6 +487,7 @@ async def step_process():
     """Step 2: NLP processing — translate, embed, extract keywords."""
     from app.database import async_session
     from app.services.nlp_pipeline import process_unprocessed_articles
+    from sqlalchemy import text as _text
 
     total_processed = 0
     async with async_session() as db:
@@ -497,6 +498,37 @@ async def step_process():
             if batch < 50:
                 break
             logger.info(f"  Processed batch: {batch}")
+
+        # Coverage probe — catches silent embedding failures. A zero-filled
+        # vector passes `is not None` but breaks every cosine downstream,
+        # so we sample the last 24h and log a warning above the threshold.
+        row = (await db.execute(_text(
+            """
+            SELECT count(*) AS total,
+                   count(*) FILTER (
+                     WHERE embedding IS NOT NULL
+                       AND NOT EXISTS (
+                         SELECT 1 FROM jsonb_array_elements_text(embedding) v
+                         WHERE v::float <> 0
+                       )
+                   ) AS all_zero
+            FROM articles
+            WHERE ingested_at >= NOW() - interval '24 hours'
+            """
+        ))).one()
+        total = row.total or 0
+        zeros = row.all_zero or 0
+        pct = 100 * zeros / max(1, total)
+        if total:
+            if pct >= 10:
+                logger.warning(
+                    f"Embedding health: {zeros}/{total} articles ingested in last 24h "
+                    f"have all-zero embeddings ({pct:.1f}%) — OpenAI embeddings may be degraded"
+                )
+            else:
+                logger.info(
+                    f"Embedding health: {zeros}/{total} zero-vectors in last 24h ({pct:.1f}%)"
+                )
 
     logger.info(f"NLP: {total_processed} articles processed")
     return {"processed": total_processed}
