@@ -22,8 +22,11 @@ def main() -> None:
     print(f"\nCalling generate_embedding(...) on: {sample!r}")
     try:
         vec = generate_embedding(sample)
-        nonzero = sum(1 for v in vec if v != 0.0)
-        print(f"  len={len(vec)}  nonzero_count={nonzero}  first5={vec[:5]}")
+        if vec is None:
+            print("  returned None (retries exhausted or no API key)")
+        else:
+            nonzero = sum(1 for v in vec if v != 0.0)
+            print(f"  len={len(vec)}  nonzero_count={nonzero}  first5={vec[:5]}")
     except Exception as e:
         print(f"  EXCEPTION: {type(e).__name__}: {e}")
 
@@ -35,8 +38,11 @@ def main() -> None:
             "آزمایش سه",
         ])
         for i, v in enumerate(vecs):
-            nz = sum(1 for x in v if x != 0.0)
-            print(f"  [{i}] len={len(v)}  nonzero_count={nz}  first3={v[:3]}")
+            if v is None:
+                print(f"  [{i}] None")
+            else:
+                nz = sum(1 for x in v if x != 0.0)
+                print(f"  [{i}] len={len(v)}  nonzero_count={nz}  first3={v[:3]}")
     except Exception as e:
         print(f"  EXCEPTION: {type(e).__name__}: {e}")
 

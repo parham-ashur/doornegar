@@ -123,8 +123,22 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
 
         if texts_for_embedding:
             embeddings = generate_embeddings_batch(texts_for_embedding)
+            skipped = 0
             for article, embedding in zip(embeddable_articles, embeddings):
+                # Treat None as "unknown" — leave any existing embedding
+                # intact. Never overwrite with zero vectors: a zeroed
+                # embedding silently breaks every cosine comparison
+                # downstream, forcing the matcher to auto-reject and
+                # pushing every article into cluster_new.
+                if embedding is None:
+                    skipped += 1
+                    continue
                 article.embedding = embedding
+            if skipped:
+                logger.warning(
+                    f"Embedding: skipped {skipped}/{len(embeddings)} articles "
+                    f"after retries — their embedding column was left unchanged"
+                )
 
     except Exception as e:
         logger.error(f"Embedding generation failed: {e}")
