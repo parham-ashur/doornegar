@@ -7,8 +7,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.config import settings
 
 PHONE = "+33760552000"
-CODE = "96318"
-HASH = "73952ce973a64a3e14"
+CODE = "52255"
+HASH = "8186c4c707475de098"
 
 async def main():
     from telethon import TelegramClient
