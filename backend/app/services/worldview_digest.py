@@ -48,9 +48,18 @@ from app.services.narrative_groups import (
 logger = logging.getLogger(__name__)
 
 # ─── Preconditions (mirror scripts/audit_worldview_coverage.py) ──────
-MIN_SOURCES = 3
+# Bias-analysis runs on a sampled subset of articles for cost reasons
+# (bias_scoring step picks top-trending / recent stories, not every
+# article). So coverage percentages typically land in the 3-10% range
+# even on a healthy pipeline. We gate on the ABSOLUTE count of analyzed
+# articles (enough to sample 10 diverse narratives from) rather than a
+# percentage floor. MIN_SOURCES = 2 tolerates bundles that only have two
+# tracked outlets (e.g. radical_diaspora early on); the ≥2-sources-per-
+# belief floor downstream still keeps individual beliefs from being
+# derived from a single outlet.
+MIN_SOURCES = 2
 MIN_ARTICLES = 20
-MIN_BIAS_COVERAGE_PCT = 75
+MIN_ANALYZED_ARTICLES = 50
 
 # Grounding floor: every published belief must be backed by ≥3 articles
 # from ≥2 distinct sources. Enforced after the LLM returns.
@@ -94,16 +103,24 @@ class BundleAggregate:
     absences: list[str] = field(default_factory=list)
 
     def passes_preconditions(self) -> tuple[bool, list[str]]:
+        analyzed = self._analyzed_count()
         failures = []
         if self.source_count < MIN_SOURCES:
             failures.append(f"sources={self.source_count} < {MIN_SOURCES}")
         if self.article_count < MIN_ARTICLES:
             failures.append(f"articles={self.article_count} < {MIN_ARTICLES}")
-        if self.bias_coverage_pct < MIN_BIAS_COVERAGE_PCT:
+        if analyzed < MIN_ANALYZED_ARTICLES:
             failures.append(
-                f"bias_coverage={self.bias_coverage_pct:.1f}% < {MIN_BIAS_COVERAGE_PCT}%"
+                f"analyzed_articles={analyzed} < {MIN_ANALYZED_ARTICLES} "
+                f"(coverage {self.bias_coverage_pct:.1f}%)"
             )
         return (not failures, failures)
+
+    def _analyzed_count(self) -> int:
+        """How many articles in this bundle have a bias narrative to sample from."""
+        if self.article_count == 0:
+            return 0
+        return round(self.article_count * self.bias_coverage_pct / 100)
 
 
 # ─── Step 1–2: SQL pull + join ───────────────────────────────────────

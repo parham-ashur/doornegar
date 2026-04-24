@@ -47,9 +47,12 @@ from app.services.narrative_groups import (
 )
 
 
-MIN_SOURCES = 3
+# Bias-analysis coverage is sampled (top-trending / recent), not wall-to-
+# wall; typical coverage is 3-10%. Gate on an absolute count of analyzed
+# articles (enough to sample 10 diverse narratives) instead of percentage.
+MIN_SOURCES = 2
 MIN_ARTICLES = 20
-MIN_BIAS_COVERAGE_PCT = 75
+MIN_ANALYZED_ARTICLES = 50
 
 
 @dataclass
@@ -59,13 +62,17 @@ class BundleStats:
     source_count: int
     bias_coverage_pct: float
 
+    @property
+    def analyzed_count(self) -> int:
+        return round(self.article_count * self.bias_coverage_pct / 100) if self.article_count else 0
+
     def preconditions(self) -> list[tuple[str, bool]]:
         return [
             (f"sources ≥ {MIN_SOURCES}", self.source_count >= MIN_SOURCES),
             (f"articles ≥ {MIN_ARTICLES}", self.article_count >= MIN_ARTICLES),
             (
-                f"bias_coverage ≥ {MIN_BIAS_COVERAGE_PCT}%",
-                self.bias_coverage_pct >= MIN_BIAS_COVERAGE_PCT,
+                f"analyzed_articles ≥ {MIN_ANALYZED_ARTICLES}",
+                self.analyzed_count >= MIN_ANALYZED_ARTICLES,
             ),
         ]
 
@@ -175,7 +182,7 @@ def _print_report(
         f"{window_end.date().isoformat()} (UTC, end-exclusive)"
     )
     print()
-    print(f"{'bundle':<20} {'articles':>8} {'sources':>8} {'bias%':>8}   verdict")
+    print(f"{'bundle':<20} {'articles':>8} {'sources':>8} {'analyzed':>9}   verdict")
     print("-" * 70)
     all_pass = True
     for g in NARRATIVE_GROUPS_ORDER:
@@ -185,7 +192,7 @@ def _print_report(
             all_pass = False
         print(
             f"{s.bundle:<20} {s.article_count:>8d} {s.source_count:>8d} "
-            f"{s.bias_coverage_pct:>7.1f}%   {verdict}"
+            f"{s.analyzed_count:>8d}   {verdict}"
         )
         if not s.passes:
             for name, ok in s.preconditions():
@@ -194,7 +201,7 @@ def _print_report(
     print()
     print(
         f"Preconditions: sources≥{MIN_SOURCES}, articles≥{MIN_ARTICLES}, "
-        f"bias_coverage≥{MIN_BIAS_COVERAGE_PCT}%"
+        f"analyzed_articles≥{MIN_ANALYZED_ARTICLES}"
     )
     print(f"Overall: {'ALL PASS' if all_pass else 'SOME FAIL — synthesis will be gated per-bundle'}")
     return all_pass
