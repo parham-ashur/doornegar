@@ -20,6 +20,7 @@ not what readers or any demographic group believes.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import date, datetime
 
@@ -29,7 +30,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.admin import require_admin
-from app.database import get_db
+from app.database import async_session, get_db
 from app.models.worldview_digest import WorldviewDigest
 from app.services.narrative_groups import (
     NARRATIVE_GROUPS_ORDER,
@@ -167,10 +168,29 @@ async def get_bundle_detail(
 # ─── Admin trigger (on-demand run) ───────────────────────────────────
 
 
+async def _run_synthesis_detached(anchor: date | None) -> None:
+    """Run the weekly synthesis in its own DB session, detached from the
+    originating request. Called via asyncio.create_task() below so the
+    HTTP response can return immediately — synthesis takes ~30-90s
+    across 4 bundles and otherwise trips Cloudflare's 100s edge timeout.
+    """
+    try:
+        async with async_session() as db:
+            stats = await generate_worldview_digests(db, anchor=anchor)
+            logger.info(
+                "admin/generate complete: bundles=%s total_cost=$%s",
+                {k: v.get("status") for k, v in stats.get("per_bundle", {}).items()},
+                stats.get("total_cost_usd", 0),
+            )
+    except Exception:
+        logger.exception("worldview_digest background synthesis failed")
+
+
 @router.post(
     "/admin/generate",
     dependencies=[Depends(require_admin)],
-    summary="Run worldview synthesis now (bypasses the Monday gate).",
+    status_code=202,
+    summary="Kick off worldview synthesis in the background (returns 202).",
 )
 async def admin_generate(
     anchor: date | None = Query(
@@ -181,15 +201,19 @@ async def admin_generate(
             "uses today's week anchor."
         ),
     ),
-    db: AsyncSession = Depends(get_db),
 ):
-    """Synthesize the 4 bundles on demand.
+    """Fire-and-forget synthesis trigger.
 
-    Intended for first-publish / preview / retry flows. Respects all
-    the same preconditions as the weekly cron — insufficient bundles
-    persist with status='insufficient' instead of being synthesized.
-    Cost is logged under purpose='worldview_digest' just like the
-    scheduled run.
+    Returns 202 Accepted immediately; the actual work runs in a detached
+    asyncio task so long synthesis runs (4 bundles × OpenAI calls) don't
+    hit Cloudflare's 100s edge timeout. Poll GET /worldviews/current to
+    see when the new rows land — `generated_at` advances on each bundle.
+
+    Same preconditions + same cost logging as the scheduled Monday run.
     """
-    stats = await generate_worldview_digests(db, anchor=anchor)
-    return {"status": "ok", "stats": stats}
+    asyncio.create_task(_run_synthesis_detached(anchor))
+    return {
+        "status": "accepted",
+        "message": "Synthesis running in background. Poll /api/v1/worldviews/current to see results.",
+        "anchor": anchor.isoformat() if anchor else None,
+    }
