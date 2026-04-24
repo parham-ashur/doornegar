@@ -112,6 +112,28 @@ async def lifespan(app: FastAPI):
                 "CREATE INDEX IF NOT EXISTS idx_llm_usage_purpose ON llm_usage_logs(purpose)",
                 "CREATE INDEX IF NOT EXISTS idx_llm_usage_story ON llm_usage_logs(story_id)",
                 "CREATE INDEX IF NOT EXISTS idx_llm_usage_total ON llm_usage_logs(total_cost DESC)",
+                # Worldview digests — one row per (bundle, week). Bundle is
+                # the 4-subgroup taxonomy; the card describes what OUTLETS
+                # in that bundle told their readers over the window. Read
+                # by /api/v1/worldviews/*.
+                """CREATE TABLE IF NOT EXISTS worldview_digests (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    bundle VARCHAR(24) NOT NULL,
+                    window_start DATE NOT NULL,
+                    window_end DATE NOT NULL,
+                    status VARCHAR(20) NOT NULL DEFAULT 'ok',
+                    synthesis_fa JSONB,
+                    evidence_fa JSONB,
+                    article_count INTEGER NOT NULL DEFAULT 0,
+                    source_count INTEGER NOT NULL DEFAULT 0,
+                    coverage_pct DOUBLE PRECISION NOT NULL DEFAULT 0,
+                    model_used VARCHAR(80),
+                    token_cost_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
+                    generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    CONSTRAINT uq_worldview_bundle_window UNIQUE (bundle, window_start)
+                )""",
+                "CREATE INDEX IF NOT EXISTS idx_worldview_window ON worldview_digests(window_start DESC, bundle)",
+                "CREATE INDEX IF NOT EXISTS idx_worldview_bundle_recent ON worldview_digests(bundle, generated_at DESC)",
             ):
                 try:
                     await db.execute(text(ddl))

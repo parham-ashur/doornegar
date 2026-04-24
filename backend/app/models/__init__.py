@@ -15,6 +15,7 @@ from app.models.suggestion import SourceSuggestion
 from app.models.topic import Topic, TopicArticle
 from app.models.user import User
 from app.models.user_submission import UserSubmission
+from app.models.worldview_digest import WorldviewDigest
 
 __all__ = [
     "Analyst",
@@ -37,4 +38,5 @@ __all__ = [
     "TopicArticle",
     "User",
     "UserSubmission",
+    "WorldviewDigest",
 ]
