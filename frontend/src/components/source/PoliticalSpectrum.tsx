@@ -133,9 +133,16 @@ export default function PoliticalSpectrum({ sources, sourceNeutrality, sourceEvi
         <div className="absolute text-[13px] font-medium text-[#1e3a5f] dark:text-blue-300 z-10" style={{ top: "50%", right: 0, transform: "translateY(8px)" }}>درون‌مرزی</div>
         <div className="absolute text-[13px] font-medium text-[#ea580c] dark:text-orange-400 z-10" style={{ top: "50%", left: 0, transform: "translateY(8px)" }}>برون‌مرزی</div>
 
-        {/* Y-axis labels */}
-        <div className="absolute z-0 text-[13px] text-slate-400 dark:text-slate-500" style={{ right: 0, top: 2 }}>بی‌طرف</div>
-        <div className="absolute z-0 text-[13px] text-slate-400 dark:text-slate-500" style={{ right: 0, bottom: 2 }}>یک‌جانبه</div>
+        {/* Y-axis labels — only surface when neutrality scores exist.
+            Without them the vertical placement is cosmetic (spread by
+            column), and labeling the axis "بی‌طرف / یک‌جانبه" would
+            lie to the reader. */}
+        {hasNeutrality && (
+          <>
+            <div className="absolute z-0 text-[13px] text-slate-400 dark:text-slate-500" style={{ right: 0, top: 2 }}>بی‌طرف</div>
+            <div className="absolute z-0 text-[13px] text-slate-400 dark:text-slate-500" style={{ right: 0, bottom: 2 }}>یک‌جانبه</div>
+          </>
+        )}
 
         {/* Column separators */}
         {[1, 2, 3, 4].map(i => (
@@ -229,12 +236,14 @@ export default function PoliticalSpectrum({ sources, sourceNeutrality, sourceEvi
         </div>
       </div>
 
-      {/* Caption */}
+      {/* Caption — horizontal axis always means the same thing. Only
+          mention the vertical axis when neutrality scores are populated;
+          otherwise the vertical position carries no information. */}
       <p dir="rtl" className="text-[13px] text-slate-400 dark:text-slate-500 mt-3 leading-5 mx-6">
         محور افقی جایگاه سیاسی رسانه را نشان می‌دهد — از رسانه‌های درون‌مرزی (راست) تا رسانه‌های برون‌مرزی (چپ).
-        {hasNeutrality
-          ? <> محور عمودی میزان بی‌طرفی پوشش <strong className="text-slate-600 dark:text-slate-300">فقط در همین خبر</strong> را نشان می‌دهد — رسانه‌هایی که بالاتر قرار دارند پوشش متوازن‌تری داشته‌اند.</>
-          : <> محور عمودی پس از تحلیل بعدی، میزان بی‌طرفی هر رسانه <strong className="text-slate-600 dark:text-slate-300">فقط در همین خبر</strong> را نشان خواهد داد.</>}
+        {hasNeutrality && (
+          <> محور عمودی میزان بی‌طرفی پوشش <strong className="text-slate-600 dark:text-slate-300">فقط در همین خبر</strong> را نشان می‌دهد — رسانه‌هایی که بالاتر قرار دارند پوشش متوازن‌تری داشته‌اند.</>
+        )}
       </p>
 
       {/* Subgroup legend — shows which sources fall in each of the 4

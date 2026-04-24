@@ -308,19 +308,18 @@ export default async function StoryDetailPage({
             sourceCount={story.source_count}
           />
 
-          {/* Political spectrum — desktop only. Hidden until the
-              Claude-scored neutrality audit has run for this story
-              (scripts/neutrality_audit.py). The LLM no longer produces
-              these scores, so `source_neutrality` is populated only
-              after a human-supervised pass. */}
-          {coveringSources.length > 0 &&
-            analysis?.source_neutrality &&
-            Object.keys(analysis.source_neutrality).length > 0 && (
+          {/* Political spectrum — desktop only. Always rendered when
+              the story has covering sources; the component itself
+              falls back to "horizontal axis only" layout (no Y-axis
+              labels, no neutrality explanation) when scores aren't
+              populated yet. The vertical axis fills in after the
+              Claude-scored neutrality audit runs for this story. */}
+          {coveringSources.length > 0 && (
             <div className="border-t border-slate-200 dark:border-slate-800 pt-4">
               <h3 className="text-sm font-black text-slate-900 dark:text-white mb-4 pb-2 border-b border-slate-200 dark:border-slate-800">
                 جایگاه رسانه‌ها
               </h3>
-              <PoliticalSpectrum sources={coveringSources} sourceNeutrality={analysis.source_neutrality} sourceEvidence={sourceEvidence} />
+              <PoliticalSpectrum sources={coveringSources} sourceNeutrality={analysis?.source_neutrality ?? null} sourceEvidence={sourceEvidence} />
             </div>
           )}
         </div>
