@@ -64,6 +64,7 @@ STEP_TIMEOUTS_SEC = {
     "niloofar_polish_telegram": 900,
     "quality_postprocess": 1800,
     "weekly_digest": 900,
+    "worldview_digests": 600,      # 4 LLM calls, compact input, weekly
 }
 
 
@@ -2937,6 +2938,35 @@ async def step_weekly_digest():
     return {"file": str(digest_file), "new_articles": new_articles, "new_stories": new_stories}
 
 
+async def step_worldview_digests():
+    """Weekly worldview synthesis — one card per 4-subgroup bundle.
+
+    Monday-only. For each bundle (principlist, reformist, moderate_diaspora,
+    radical_diaspora), aggregates the past 7 days of articles + bias
+    analyses into a compact frequency table, then calls Claude once to
+    synthesize a worldview card describing what those OUTLETS told their
+    readers (not what readers believe). Bundles that fail preconditions
+    (<3 sources, <20 articles, <75% bias coverage) get status='insufficient'
+    rows so the UI can render a "not enough signal" placeholder instead
+    of hiding them.
+    """
+    now = datetime.now()
+    if now.weekday() != 0:
+        return {"skipped": True, "reason": "Not Monday"}
+
+    from app.database import async_session
+    from app.services.worldview_digest import generate_worldview_digests
+
+    async with async_session() as db:
+        stats = await generate_worldview_digests(db)
+
+    logger.info(
+        f"Worldview digests: {len(stats.get('per_bundle', {}))} bundles processed, "
+        f"total cost ${stats.get('total_cost_usd', 0):.4f}"
+    )
+    return stats
+
+
 async def step_uptime_check():
     """Ping production services to verify they're up."""
     import httpx
@@ -4643,6 +4673,7 @@ FULL_PIPELINE = [
     # including it here keeps the signal fresh at that hour too.
     ("detect_hourly_updates", "Flag significant intra-day story updates", "step_detect_hourly_updates"),
     ("weekly_digest", "Weekly digest", "step_weekly_digest"),
+    ("worldview_digests", "Weekly worldview synthesis (4 bundles)", "step_worldview_digests"),
 ]
 
 # Lightweight pipeline for the ingest-only cron — keeps the homepage fresh
