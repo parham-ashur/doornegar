@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ThumbsUp, ThumbsDown } from "lucide-react";
+import { ThumbsDown } from "lucide-react";
 import { useFeedback } from "./FeedbackProvider";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -11,17 +11,20 @@ interface ArticleRelevanceButtonProps {
   articleId: string;
 }
 
+// Only the "نامرتبط" button remains — clicking replaces the button with
+// a thank-you message in the same typography. Feedback on "relevant"
+// articles isn't useful signal (relevant is the default assumption);
+// the value is letting readers flag wrongly-clustered pieces.
 export default function ArticleRelevanceButton({ storyId, articleId }: ArticleRelevanceButtonProps) {
   const { isRater, token } = useFeedback();
-  const [selected, setSelected] = useState<boolean | null>(null);
+  const [done, setDone] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  async function handleClick(isRelevant: boolean) {
-    if (submitting || selected !== null) return;
+  async function handleClick() {
+    if (submitting || done) return;
     setSubmitting(true);
     try {
       if (isRater && token) {
-        // Authenticated rater path
         const res = await fetch(`${API}/api/v1/feedback/article-relevance`, {
           method: "POST",
           headers: {
@@ -31,12 +34,11 @@ export default function ArticleRelevanceButton({ storyId, articleId }: ArticleRe
           body: JSON.stringify({
             story_id: storyId,
             article_id: articleId,
-            is_relevant: isRelevant,
+            is_relevant: false,
           }),
         });
-        if (res.ok) setSelected(isRelevant);
+        if (res.ok) setDone(true);
       } else {
-        // Public feedback path (improvement system)
         const res = await fetch(`${API}/api/v1/improvements`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -44,48 +46,35 @@ export default function ArticleRelevanceButton({ storyId, articleId }: ArticleRe
             target_type: "article",
             target_id: articleId,
             issue_type: "wrong_clustering",
-            reason: isRelevant ? "مقاله مرتبط است" : "مقاله نامرتبط است",
+            reason: "مقاله نامرتبط است",
             device_info: typeof window !== "undefined"
               ? `${window.innerWidth <= 768 ? "mobile" : "desktop"} ${window.innerWidth}×${window.innerHeight}`
               : null,
           }),
         });
-        if (res.ok) setSelected(isRelevant);
+        if (res.ok) setDone(true);
       }
     } catch {}
     setSubmitting(false);
   }
 
+  if (done) {
+    return (
+      <p className="mt-1.5 text-[10px] text-slate-500 dark:text-slate-400">
+        از بازخورد شما ممنونیم؛ گزارش شما ثبت شد.
+      </p>
+    );
+  }
+
   return (
-    <div className="flex items-center gap-2 mt-1.5">
+    <div className="mt-1.5">
       <button
-        onClick={() => handleClick(true)}
-        disabled={submitting || selected !== null}
-        className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] border transition-colors ${
-          selected === true
-            ? "border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-600"
-            : selected !== null
-            ? "border-slate-200 dark:border-slate-700 text-slate-300 dark:text-slate-600 cursor-default"
-            : "border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:border-emerald-400 hover:text-emerald-600 dark:hover:border-emerald-500 dark:hover:text-emerald-400"
-        } disabled:cursor-default`}
-        title="مرتبط"
-      >
-        <ThumbsUp className={`h-3 w-3 ${selected === true ? "fill-current" : ""}`} />
-        <span>مرتبط</span>
-      </button>
-      <button
-        onClick={() => handleClick(false)}
-        disabled={submitting || selected !== null}
-        className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] border transition-colors ${
-          selected === false
-            ? "border-red-500 bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400 dark:border-red-600"
-            : selected !== null
-            ? "border-slate-200 dark:border-slate-700 text-slate-300 dark:text-slate-600 cursor-default"
-            : "border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:border-red-400 hover:text-red-600 dark:hover:border-red-500 dark:hover:text-red-400"
-        } disabled:cursor-default`}
+        onClick={handleClick}
+        disabled={submitting}
+        className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] border border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:border-red-400 hover:text-red-600 dark:hover:border-red-500 dark:hover:text-red-400 transition-colors disabled:cursor-default"
         title="نامرتبط"
       >
-        <ThumbsDown className={`h-3 w-3 ${selected === false ? "fill-current" : ""}`} />
+        <ThumbsDown className="h-3 w-3" />
         <span>نامرتبط</span>
       </button>
     </div>

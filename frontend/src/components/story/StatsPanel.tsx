@@ -1,6 +1,6 @@
 "use client";
 
-import { BarChart3, MessageCircle, VolumeX, Radio, TrendingUp, Eye } from "lucide-react";
+import { BarChart3, MessageCircle, VolumeX, Radio, TrendingUp, Eye, Info } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import type { StoryAnalysis } from "@/lib/types";
@@ -149,11 +149,28 @@ export default function StatsPanel({
         </div>
 
         <div className="space-y-3 text-[13px]">
-          {/* Dispute score */}
+          {/* Dispute score. The score is LLM-generated (not a deterministic
+              formula); the tooltip lets a curious reader see the three
+              reference points the model anchors on. */}
           {analysis?.dispute_score != null && (
             <div>
               <div className="flex items-center justify-between mb-1">
-                <span className="text-slate-500">میزان اختلاف روایت رسانه‌ها</span>
+                <span className="flex items-center gap-1 text-slate-500">
+                  میزان اختلاف روایت رسانه‌ها
+                  <span
+                    className="inline-flex items-center cursor-help text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                    title={
+                      "این امتیاز توسط مدل زبانی محاسبه می‌شود، با سه نقطهٔ مرجع:\n" +
+                      "۰.۰ — دو طرف بر سر واقعیت‌ها توافق دارند (فقط لحن فرق می‌کند)\n" +
+                      "۰.۵ — اختلاف قابل‌توجه در چارچوب‌بندی و واقعیت‌های گزارش‌شده\n" +
+                      "۱.۰ — تناقض کامل؛ ادعاها و واقعیت‌های متضاد\n\n" +
+                      "مدل متن مقاله‌ها را از هر دو سو می‌خواند و بر اساس این معیارها یک عدد بر می‌گرداند."
+                    }
+                    aria-label="توضیح محاسبهٔ امتیاز"
+                  >
+                    <Info className="h-3 w-3" />
+                  </span>
+                </span>
                 <span className={`font-bold ${
                   analysis.dispute_score > 0.7 ? "text-red-500" :
                   analysis.dispute_score > 0.4 ? "text-amber-500" : "text-emerald-500"
