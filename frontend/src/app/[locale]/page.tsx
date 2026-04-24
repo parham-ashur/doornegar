@@ -663,6 +663,8 @@ export default async function HomePage({
           allAnalyses={allAnalyses}
           heroTelegram={heroTelegram}
           prefetchedTelegram={prefetchedTelegram}
+          battleItems={battleItems}
+          weeklyDigestContent={weeklyDigestData?.content || null}
         />
       </div>
 
@@ -1074,7 +1076,7 @@ export default async function HomePage({
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start gap-3">
-                      <span className="text-[32px] font-black text-slate-200 dark:text-slate-700 shrink-0 leading-none mt-1">{toFa(i + 1)}</span>
+                      <span className="text-[64px] font-black text-slate-200 dark:text-slate-700 shrink-0 leading-none -mt-1 w-[72px] text-right">{toFa(i + 1)}</span>
                       <div className="flex-1 min-w-0">
                         {/* Tightened inter-line spacing throughout —
                             mt-1.5 → mt-1, leading-6 → leading-5.
@@ -1143,6 +1145,8 @@ function MobileHome({
   allAnalyses,
   heroTelegram,
   prefetchedTelegram,
+  battleItems,
+  weeklyDigestContent,
 }: {
   hero: StoryBrief | undefined;
   stories: StoryBrief[];
@@ -1153,6 +1157,15 @@ function MobileHome({
   allAnalyses: Record<string, { bias_explanation_fa?: string; state_summary_fa?: string; diaspora_summary_fa?: string } | null>;
   heroTelegram: { discourse_summary?: string; predictions?: any[]; key_claims?: any[] } | null;
   prefetchedTelegram: { storyId: string; analysis: any }[];
+  battleItems: Array<{
+    storyId: string;
+    title: string;
+    conservative: string;
+    opposition: string;
+    stateSummary: string;
+    diasporaSummary: string;
+  }>;
+  weeklyDigestContent: string | null;
 }) {
   if (!hero) return null;
 
@@ -1355,7 +1368,7 @@ function MobileHome({
           <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
             {mobileMostCovered.map((s, i) => (
               <Link key={s.id} href={`/${locale}/stories/${s.id}`} className="group flex items-start gap-3 py-3">
-                <span className="text-[14px] font-black text-slate-200 dark:text-slate-700 shrink-0 w-7 text-center mt-0.5">{toFa(i + 1)}</span>
+                <span className="text-[44px] font-black text-slate-200 dark:text-slate-700 shrink-0 w-12 text-center leading-none -mt-1">{toFa(i + 1)}</span>
                 <div className="flex-1 min-w-0">
                   <h3 className="text-[18px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
                     {s.title_fa}
@@ -1369,6 +1382,59 @@ function MobileHome({
                 </div>
               </Link>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── 4b. تقابل روایت‌ها (narrative clash) ── */}
+      {battleItems.length > 0 && (
+        <div className="px-4 py-5 border-b border-slate-200 dark:border-slate-800">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
+            <span className="text-[15px] font-black text-slate-900 dark:text-white shrink-0">تقابل روایت‌ها</span>
+            <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
+          </div>
+          <div className="space-y-5">
+            {battleItems.slice(0, 3).map((item, idx) => {
+              const inner = (
+                <>
+                  <h4 className="text-[16px] font-bold leading-snug text-slate-900 dark:text-white mb-3 group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
+                    {item.title}
+                  </h4>
+                  <div className="flex gap-0 text-center">
+                    <div className="flex-1 py-2 bg-[#1e3a5f]/10 dark:bg-blue-900/20 border-t-[3px] border-[#1e3a5f]">
+                      <p className="text-[14px] font-black text-[#1e3a5f] dark:text-blue-300 line-clamp-1 px-2">{item.conservative}</p>
+                      <p className="text-[11px] text-[#1e3a5f] dark:text-blue-300 font-medium mt-1">درون‌مرزی</p>
+                    </div>
+                    <div className="flex-1 py-2 bg-[#ea580c]/10 dark:bg-orange-900/20 border-t-[3px] border-[#ea580c]">
+                      <p className="text-[14px] font-black text-[#ea580c] dark:text-orange-400 line-clamp-1 px-2">{item.opposition}</p>
+                      <p className="text-[11px] text-[#ea580c] dark:text-orange-400 font-medium mt-1">برون‌مرزی</p>
+                    </div>
+                  </div>
+                  {(item.stateSummary || item.diasporaSummary) && (
+                    <div className="mt-2.5 space-y-1">
+                      {item.stateSummary && (
+                        <p className="text-[12px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">
+                          <span className="text-[#1e3a5f] dark:text-blue-300 font-bold">• </span>{item.stateSummary}
+                        </p>
+                      )}
+                      {item.diasporaSummary && (
+                        <p className="text-[12px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">
+                          <span className="text-[#ea580c] dark:text-orange-400 font-bold">در مقابل </span>{item.diasporaSummary}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </>
+              );
+              return item.storyId ? (
+                <Link key={idx} href={`/${locale}/stories/${item.storyId}`} className="group block">
+                  {inner}
+                </Link>
+              ) : (
+                <div key={idx}>{inner}</div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -1399,6 +1465,13 @@ function MobileHome({
               );
             })}
           </div>
+        </div>
+      )}
+
+      {/* ── 6. Weekly digest ── */}
+      {weeklyDigestContent && (
+        <div className="px-4 py-5 border-b border-slate-200 dark:border-slate-800">
+          <WeeklyDigest prefetchedContent={weeklyDigestContent} />
         </div>
       )}
 
