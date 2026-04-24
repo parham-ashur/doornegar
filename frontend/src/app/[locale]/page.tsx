@@ -494,16 +494,14 @@ export default async function HomePage({
   // each other. Running them in a single Promise.all cuts the critical
   // path from 4 sequential stages (~5s) to 2 (~3s).
   //
-  // Telegram source pool: top-15 trending fresh stories (falling back to
-  // plain top-15 if fewer than 3 fresh). Only 17 analysts cover most of
-  // Iran's news, so commentary is sparse — top-5 often had 2-3 stories
-  // with no_data (hero + slot-4 today), leaving the sidebar empty even
-  // though other stories further down had rich analysis. 15 gives enough
-  // depth that the sidebar picks up whatever IS available; the component
-  // only renders what it gets, so extra slots are free.
-  const freshTopStories = sorted.filter(isFresh);
-  const telegramSourceStories = freshTopStories.length >= 3 ? freshTopStories : sorted;
-  const telegramAnalysisIds = telegramSourceStories.slice(0, 15).map(s => s.id);
+  // Telegram source pool: top-15 trending, regardless of freshness. The
+  // earlier "prefer fresh (<24h)" gate emptied the sidebar on days where
+  // the newest cluster of stories hadn't cycled through the maintenance
+  // deep-analysis loop yet — all 7 fresh stories returned no_data while
+  // the slightly-older top-trending stories had rich analysis. Trending
+  // rank already skews recent enough; deep-analyses are expensive so we
+  // accept showing a story from 26h ago if that's where the data lives.
+  const telegramAnalysisIds = sorted.slice(0, 15).map(s => s.id);
   // leftTextStories AND mostViewed both get telegram strips now, so
   // fetch their analyses in parallel with everything else. Each group
   // goes into its own lookup map indexed by story id.
