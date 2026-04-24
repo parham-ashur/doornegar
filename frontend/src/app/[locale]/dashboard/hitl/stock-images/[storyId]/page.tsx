@@ -145,8 +145,8 @@ export default function StockImagesPage() {
   if (!authed) {
     return (
       <div>
-        <h1 className="text-xl font-black mb-4">انتخاب تصویر</h1>
-        <p className="text-[13px] mb-3">توکن ادمین:</p>
+        <h1 className="text-xl font-black mb-4">Pick image</h1>
+        <p className="text-[13px] mb-3">Admin token:</p>
         <div className="flex gap-2">
           <input
             type="password"
@@ -163,7 +163,7 @@ export default function StockImagesPage() {
             }}
             className="px-4 py-2 text-[13px] bg-blue-600 text-white"
           >
-            ذخیره
+            Save
           </button>
         </div>
       </div>
@@ -178,17 +178,17 @@ export default function StockImagesPage() {
         rel="noreferrer"
         className="text-[12px] text-blue-500 mb-2 block"
       >
-        ← صفحهٔ خبر
+        ← Open story page
       </a>
       <h1 className="text-xl font-black text-slate-900 dark:text-white mb-4">
-        انتخاب تصویر از Unsplash
+        Pick image from Unsplash
       </h1>
 
       {/* Story context card — gives the curator the title, English
           translation, summary, and basic stats in one panel so they
           don't have to flip between tabs. */}
       {storyLoading && (
-        <div className="mb-5 text-[12px] text-slate-400">در حال بارگذاری اطلاعات خبر…</div>
+        <div className="mb-5 text-[12px] text-slate-400">Loading story context…</div>
       )}
       {story && !storyLoading && (
         <div className="mb-5 border-2 border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 p-4">
@@ -206,17 +206,20 @@ export default function StockImagesPage() {
               {story.summary_fa}
             </p>
           )}
-          <div className="text-[11px] text-slate-400">
-            {story.source_count} رسانه · {story.article_count} مقاله
+          <div className="text-[11px] text-slate-400" dir="ltr">
+            {story.source_count} source{story.source_count === 1 ? "" : "s"} ·{" "}
+            {story.article_count} article{story.article_count === 1 ? "" : "s"}
             {story.first_published_at && (
-              <> · {new Date(story.first_published_at).toLocaleDateString("fa-IR")}</>
+              <> · {new Date(story.first_published_at).toLocaleDateString("en-US")}</>
             )}
           </div>
         </div>
       )}
 
       <p className="text-[13px] text-slate-500 mb-3 leading-6">
-        عبارت جستجو با واژه‌های انگلیسی عنوان خبر از پیش پر شد. می‌توانی قبل از جستجو تغییرش بدهی. Unsplash پرسش فارسی را ضعیف پوشش می‌دهد.
+        Search bar is pre-filled with English keywords from the story title.
+        Edit before searching if you want. Unsplash's Farsi query coverage is
+        weak, so English works better.
       </p>
 
       <div className="flex gap-2 mb-6">
@@ -235,7 +238,7 @@ export default function StockImagesPage() {
           disabled={loading || !query.trim()}
           className="px-5 py-2 text-[13px] bg-blue-600 text-white disabled:opacity-50"
         >
-          {loading ? "..." : "جستجو"}
+          {loading ? "..." : "Search"}
         </button>
       </div>
 
@@ -280,7 +283,7 @@ export default function StockImagesPage() {
                 disabled={pinning === p.id}
                 className="mt-1 w-full px-2 py-1 text-[12px] bg-emerald-600 text-white disabled:opacity-50"
               >
-                {pinning === p.id ? "در حال آپلود..." : "انتخاب این تصویر"}
+                {pinning === p.id ? "Uploading..." : "Pick this image"}
               </button>
             </div>
           </div>
