@@ -113,7 +113,7 @@ def generate_embeddings_batch(
     out: list[list[float] | None] = []
 
     for start in range(0, len(texts), batch_size):
-        batch = [t[:30000] for t in texts[start:start + batch_size]]
+        batch = [t[:20000] for t in texts[start:start + batch_size]]
         out.extend(_embed_batch_with_split(client, batch))
     return out
 
