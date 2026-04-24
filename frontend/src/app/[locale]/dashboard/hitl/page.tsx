@@ -49,6 +49,11 @@ export default function HitlIndex() {
 
   const tiles = [
     {
+      href: "/fa/dashboard/hitl/help",
+      title: "راهنمای ابزارها",
+      desc: "هر ابزار چه می‌کند، چه موقع استفاده کن، و آدرس API هر کدام.",
+    },
+    {
       href: "/fa/dashboard/hitl/submissions",
       title: "ارسال‌های کاربران",
       desc: "بررسی محتوای ارسال‌شده از فرم /submit و اتصال به خبر مناسب.",

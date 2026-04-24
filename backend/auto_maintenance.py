@@ -2398,14 +2398,37 @@ async def step_telegram_deep_analysis():
             .having(func.count(TelegramPost.id) >= 2)
             .subquery()
         )
-        result = await db.execute(
+
+        # Union two pools: top by trending_score (traditional) + top by
+        # last_updated_at (the pool the homepage sidebar draws from).
+        # Without the second pool, fresh stories never get analyzed and
+        # the homepage sidebar stays empty even when the step just ran.
+        # Dedup by id and cap at MAX_STORIES total.
+        trending_result = await db.execute(
             select(Story.id, Story.title_fa, subq.c.post_count)
             .join(subq, Story.id == subq.c.story_id)
             .where(Story.article_count >= ARTICLE_COUNT_FLOOR)
+            .where(Story.frozen_at.is_(None))
             .order_by(Story.trending_score.desc())
             .limit(MAX_STORIES)
         )
-        stories = result.all()
+        fresh_result = await db.execute(
+            select(Story.id, Story.title_fa, subq.c.post_count)
+            .join(subq, Story.id == subq.c.story_id)
+            .where(Story.article_count >= ARTICLE_COUNT_FLOOR)
+            .where(Story.frozen_at.is_(None))
+            .order_by(Story.last_updated_at.desc().nullslast())
+            .limit(MAX_STORIES)
+        )
+        seen_ids: set = set()
+        stories: list = []
+        for row in list(trending_result.all()) + list(fresh_result.all()):
+            if row[0] in seen_ids:
+                continue
+            seen_ids.add(row[0])
+            stories.append(row)
+            if len(stories) >= MAX_STORIES * 2:  # room for both pools
+                break
 
         def _posts_hash(posts: list) -> str:
             # Stable identity of the pool: post ID + text length (+text
