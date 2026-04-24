@@ -766,104 +766,186 @@ async def split_story(
     """Carve a source story into N child stories. Each group names a set
     of article_ids that get moved to a new Story. Optionally wrap the
     children in a new arc. Source story is frozen by default.
-
-    Articles not named in any group stay in the source. Telegram posts
-    that pointed at the source are left alone (they'll re-link on the
-    next pipeline run via the linker).
     """
-    from app.models.story_arc import StoryArc
+    from app.services.story_ops import (
+        SplitGroupInput,
+        StoryOpsError,
+        split_story_into_groups,
+    )
 
-    src = await db.get(Story, story_id)
-    if not src:
-        raise HTTPException(status_code=404, detail="Story not found")
-
-    all_ids: set[uuid.UUID] = set()
-    for g in body.groups:
-        for aid in g.article_ids:
-            if aid in all_ids:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Article {aid} listed in more than one group",
+    try:
+        result = await split_story_into_groups(
+            db,
+            source_id=story_id,
+            groups=[
+                SplitGroupInput(
+                    title_fa=g.title_fa,
+                    title_en=g.title_en,
+                    article_ids=list(g.article_ids),
                 )
-            all_ids.add(aid)
+                for g in body.groups
+            ],
+            arc_title_fa=body.arc_title_fa,
+            arc_slug=body.arc_slug,
+            freeze_source=body.freeze_source,
+        )
+    except StoryOpsError as e:
+        msg = str(e)
+        status = 404 if "not found" in msg.lower() else 400
+        raise HTTPException(status_code=status, detail=msg)
 
-    valid_q = await db.execute(
-        select(Article.id).where(
-            Article.id.in_(all_ids),
-            Article.story_id == story_id,
-        )
-    )
-    valid_ids = {row[0] for row in valid_q.all()}
-    missing = all_ids - valid_ids
-    if missing:
-        raise HTTPException(
-            status_code=400,
-            detail=f"{len(missing)} article_id(s) don't belong to this story",
-        )
-
-    arc_id: uuid.UUID | None = None
-    if body.arc_title_fa:
-        arc = StoryArc(
-            id=uuid.uuid4(),
-            title_fa=body.arc_title_fa,
-            slug=body.arc_slug or f"arc-{uuid.uuid4().hex[:8]}",
-        )
-        db.add(arc)
-        await db.flush()
-        arc_id = arc.id
-
-    created: list[SplitResponseGroup] = []
-    for idx, g in enumerate(body.groups):
-        child_slug = f"{src.slug}-p{idx+1}-{uuid.uuid4().hex[:6]}"
-        child = Story(
-            id=uuid.uuid4(),
-            title_fa=g.title_fa,
-            title_en=g.title_en or g.title_fa,
-            slug=child_slug,
-            article_count=0,
-            source_count=0,
-            split_from_id=src.id,
-            arc_id=arc_id,
-            arc_order=idx if arc_id else None,
-        )
-        db.add(child)
-        await db.flush()
-
-        await db.execute(
-            update(Article)
-            .where(Article.id.in_(g.article_ids))
-            .values(story_id=child.id)
-        )
-        count_q = await db.execute(
-            select(func.count(Article.id)).where(Article.story_id == child.id)
-        )
-        child.article_count = count_q.scalar() or 0
-        src_count_q = await db.execute(
-            select(func.count(func.distinct(Article.source_id))).where(
-                Article.story_id == child.id
-            )
-        )
-        child.source_count = src_count_q.scalar() or 0
-        created.append(
-            SplitResponseGroup(
-                story_id=str(child.id),
-                title_fa=child.title_fa,
-                article_count=child.article_count,
-            )
-        )
-
-    remaining_q = await db.execute(
-        select(func.count(Article.id)).where(Article.story_id == src.id)
-    )
-    remaining = remaining_q.scalar() or 0
-    src.article_count = remaining
-    if body.freeze_source:
-        src.frozen_at = datetime.now(timezone.utc)
-
-    await db.commit()
     return SplitResponse(
-        source_story_id=str(src.id),
-        arc_id=str(arc_id) if arc_id else None,
-        groups=created,
-        remaining_in_source=remaining,
+        source_story_id=str(result.source_story_id),
+        arc_id=str(result.arc_id) if result.arc_id else None,
+        groups=[
+            SplitResponseGroup(
+                story_id=str(g.story_id),
+                title_fa=g.title_fa,
+                article_count=g.article_count,
+            )
+            for g in result.groups
+        ],
+        remaining_in_source=result.remaining_in_source,
     )
+
+
+# ─── Arc scaffold: admin outlines A→B→C→D, system fills ──────
+
+class ScaffoldChapter(BaseModel):
+    title_fa: str
+    title_en: str | None = None
+    story_id: uuid.UUID | None = None
+    hint_keywords: list[str] | None = None
+
+
+class ScaffoldRequest(BaseModel):
+    arc_title_fa: str
+    arc_slug: str | None = None
+    chapters: list[ScaffoldChapter] = Field(..., min_length=1)
+    create_missing: bool = True
+
+
+class ScaffoldChapterResponse(BaseModel):
+    story_id: str
+    title_fa: str
+    article_count: int
+    resolution: Literal["linked_explicit", "linked_match", "created_placeholder"]
+    match_score: float | None = None
+
+
+class ScaffoldResponse(BaseModel):
+    arc_id: str
+    arc_title_fa: str
+    arc_slug: str
+    chapters: list[ScaffoldChapterResponse]
+
+
+@router.post("/arcs/scaffold", response_model=ScaffoldResponse)
+async def scaffold_arc_endpoint(
+    body: ScaffoldRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin names an arc and its chapter titles (with optional story_id
+    or hint_keywords per chapter); system resolves each to an existing
+    story, creating a placeholder if no match and create_missing=True.
+    """
+    from app.services.story_ops import (
+        ChapterInput,
+        StoryOpsError,
+        scaffold_arc,
+    )
+
+    try:
+        result = await scaffold_arc(
+            db,
+            arc_title_fa=body.arc_title_fa,
+            arc_slug=body.arc_slug,
+            chapters=[
+                ChapterInput(
+                    title_fa=c.title_fa,
+                    title_en=c.title_en,
+                    story_id=c.story_id,
+                    hint_keywords=c.hint_keywords,
+                )
+                for c in body.chapters
+            ],
+            create_missing=body.create_missing,
+        )
+    except StoryOpsError as e:
+        msg = str(e)
+        status = 404 if "not found" in msg.lower() else 400
+        raise HTTPException(status_code=status, detail=msg)
+
+    return ScaffoldResponse(
+        arc_id=str(result.arc_id),
+        arc_title_fa=result.arc_title_fa,
+        arc_slug=result.arc_slug,
+        chapters=[
+            ScaffoldChapterResponse(
+                story_id=str(c.story_id),
+                title_fa=c.title_fa,
+                article_count=c.article_count,
+                resolution=c.resolution,
+                match_score=c.match_score,
+            )
+            for c in result.chapters
+        ],
+    )
+
+
+class ScaffoldPreviewRequest(BaseModel):
+    chapters: list[ScaffoldChapter] = Field(..., min_length=1)
+
+
+class ScaffoldPreviewChapter(BaseModel):
+    title_fa: str
+    match_story_id: str | None
+    match_title_fa: str | None
+    match_score: float
+    would_create: bool
+
+
+class ScaffoldPreviewResponse(BaseModel):
+    chapters: list[ScaffoldPreviewChapter]
+
+
+@router.post("/arcs/scaffold-preview", response_model=ScaffoldPreviewResponse)
+async def scaffold_arc_preview(
+    body: ScaffoldPreviewRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Dry-run of scaffold_arc — shows which existing stories would be
+    linked vs created. No writes. Intended for the admin UI to render
+    a confirmation screen before commit.
+    """
+    from app.services.story_ops import find_story_for_chapter
+
+    out: list[ScaffoldPreviewChapter] = []
+    for c in body.chapters:
+        if c.story_id is not None:
+            story = await db.get(Story, c.story_id)
+            out.append(
+                ScaffoldPreviewChapter(
+                    title_fa=c.title_fa,
+                    match_story_id=str(story.id) if story else None,
+                    match_title_fa=story.title_fa if story else None,
+                    match_score=1.0 if story else 0.0,
+                    would_create=False,
+                )
+            )
+            continue
+        match, score = await find_story_for_chapter(
+            db,
+            title_fa=c.title_fa,
+            hint_keywords=c.hint_keywords,
+        )
+        out.append(
+            ScaffoldPreviewChapter(
+                title_fa=c.title_fa,
+                match_story_id=str(match.id) if match else None,
+                match_title_fa=match.title_fa if match else None,
+                match_score=round(score, 3),
+                would_create=match is None,
+            )
+        )
+    return ScaffoldPreviewResponse(chapters=out)
