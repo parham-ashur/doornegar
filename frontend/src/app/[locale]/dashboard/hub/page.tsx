@@ -35,6 +35,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { adminHeaders, hasAdminToken } from "../hitl/_auth";
+import OverviewPanels from "@/components/dashboard/OverviewPanels";
 import {
   RefreshCw, AlertTriangle, CheckCircle2, Circle,
   Inbox, Activity, Keyboard, Gavel, Package, ExternalLink,
@@ -371,6 +372,10 @@ export default function HubPage() {
           <AlertTriangle className="w-4 h-4" /> {err}
         </div>
       )}
+
+      {/* Overview panels — rolled up 7d cost, ingest health, review
+          queue load. Each card links to its full page. */}
+      <OverviewPanels />
 
       {/* ATTENTION */}
       <Section icon={<AlertTriangle className="w-4 h-4 text-amber-500" />} title="Attention" dir="ltr">

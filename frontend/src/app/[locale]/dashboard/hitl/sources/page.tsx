@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { adminHeaders, hasAdminToken } from "../_auth";
 import { narrativeGroupOfSource, GROUP_COLORS, GROUP_LABELS_EN } from "@/lib/narrativeGroups";
+import OutletTabs from "@/components/dashboard/OutletTabs";
 import type { Source } from "@/lib/types";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -157,6 +158,7 @@ export default function SourcesHitlPage() {
 
   return (
     <div>
+      <OutletTabs active="sources" />
       <div className="mb-6">
         <h1 className="text-xl font-black text-slate-900 dark:text-white">
           Source classification

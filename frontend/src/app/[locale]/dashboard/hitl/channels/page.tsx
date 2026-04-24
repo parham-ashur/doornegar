@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { adminHeaders, hasAdminToken } from "../_auth";
+import OutletTabs from "@/components/dashboard/OutletTabs";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -103,6 +104,7 @@ export default function ChannelsPage() {
 
   return (
     <div>
+      <OutletTabs active="channels" />
       <h1 className="text-xl font-black text-slate-900 dark:text-white mb-4">
         Telegram channel classification
       </h1>
