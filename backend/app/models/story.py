@@ -93,6 +93,18 @@ class Story(Base):
     )
     arc_order: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="0-based chapter order inside the arc")
 
+    # Growth guardrails — set by post-cluster pass when a story crosses
+    # size/age thresholds. Tiers: 0=OK, 1=soft warn (100 articles OR 3d),
+    # 2=strong warn (150 OR 5d), 3=propose-freeze (200 OR 7d). HITL-only
+    # decision to actually freeze; once frozen, matcher + merge steps
+    # skip the story. split_from_id points at the story this one was
+    # carved out of during an HITL split.
+    frozen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    split_from_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True, comment="Source story this was split from (soft FK)"
+    )
+    review_tier: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+
     # Relationships
     articles: Mapped[list["Article"]] = relationship(back_populates="story")  # noqa: F821
 

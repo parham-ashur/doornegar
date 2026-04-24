@@ -593,6 +593,7 @@ async def _match_to_existing_stories(
             Story.article_count >= 5,
             Story.article_count < settings.max_cluster_size,
             Story.last_updated_at >= time_cutoff,
+            Story.frozen_at.is_(None),
         )
         .order_by(Story.last_updated_at.desc().nullslast())
     )
@@ -1304,6 +1305,7 @@ async def _merge_tiny_by_cosine(db: AsyncSession, threshold: float = 0.60) -> in
             Story.article_count <= 4,
             Story.centroid_embedding.isnot(None),
             Story.is_edited.is_(False),
+            Story.frozen_at.is_(None),
         )
     )).scalars().all()
     stories = list(rows)
@@ -1373,7 +1375,7 @@ async def _merge_hidden_stories(db: AsyncSession) -> int:
     """
     result = await db.execute(
         select(Story)
-        .where(Story.article_count < 5)
+        .where(Story.article_count < 5, Story.frozen_at.is_(None))
         .order_by(Story.article_count.desc())
     )
     hidden_stories = list(result.scalars().all())
@@ -1474,7 +1476,7 @@ async def merge_similar_visible_stories(db: AsyncSession) -> int:
     """
     result = await db.execute(
         select(Story)
-        .where(Story.article_count >= 5)
+        .where(Story.article_count >= 5, Story.frozen_at.is_(None))
         .order_by(Story.trending_score.desc())
         .limit(50)
     )
@@ -1814,6 +1816,44 @@ async def cluster_articles(db: AsyncSession) -> dict:
             aged_orphans,
         )
 
+    # ── Guardrails: update review_tier on actively-growing stories ──
+    # Tiers flag oversized / too-long-running clusters for HITL review.
+    # Only touches stories updated in the last 24h so aging dormant
+    # stories aren't constantly re-flagged. Frozen stories keep their
+    # tier as-is (the freeze itself was the decision).
+    await db.execute(text(
+        """
+        UPDATE stories SET review_tier = GREATEST(
+          CASE
+            WHEN article_count >= 200 THEN 3
+            WHEN article_count >= 150 THEN 2
+            WHEN article_count >= 100 THEN 1
+            ELSE 0
+          END,
+          CASE
+            WHEN (COALESCE(last_updated_at, now()) - COALESCE(first_published_at, created_at)) >= interval '7 days' THEN 3
+            WHEN (COALESCE(last_updated_at, now()) - COALESCE(first_published_at, created_at)) >= interval '5 days' THEN 2
+            WHEN (COALESCE(last_updated_at, now()) - COALESCE(first_published_at, created_at)) >= interval '3 days' THEN 1
+            ELSE 0
+          END
+        )
+        WHERE frozen_at IS NULL
+          AND last_updated_at >= now() - interval '24 hours'
+        """
+    ))
+    tier_counts = {}
+    for t in (1, 2, 3):
+        r = await db.execute(text(
+            "SELECT COUNT(*) FROM stories WHERE review_tier = :t AND frozen_at IS NULL"
+        ), {"t": t})
+        tier_counts[t] = r.scalar() or 0
+    if tier_counts.get(3, 0) > 0:
+        logger.warning(
+            "Guardrails: %d stories at tier 3 (propose freeze), "
+            "%d at tier 2, %d at tier 1",
+            tier_counts[3], tier_counts[2], tier_counts[1],
+        )
+
     await db.commit()
 
     stats = {
@@ -1862,7 +1902,7 @@ async def audit_cluster_coherence(
     # Self-heal the notes column in case a fresh environment hasn't run
     # the alembic migration yet. Idempotent.
     async with db.begin_nested() if db.in_transaction() else _nullctx():
-        await db.execute(_text(
+        await db.execute(text(
             "ALTER TABLE stories ADD COLUMN IF NOT EXISTS audit_notes JSONB"
         ))
 

@@ -49,6 +49,14 @@ async def lifespan(app: FastAPI):
                 "ALTER TABLE stories ADD COLUMN IF NOT EXISTS audit_notes JSONB",
                 "ALTER TABLE stories ADD COLUMN IF NOT EXISTS arc_id UUID",
                 "ALTER TABLE stories ADD COLUMN IF NOT EXISTS arc_order INTEGER",
+                # Guardrail columns — post-cluster pass flags stories crossing
+                # size/age tiers; HITL can freeze (matcher + merge steps skip
+                # frozen stories). split_from_id breadcrumbs split children.
+                "ALTER TABLE stories ADD COLUMN IF NOT EXISTS frozen_at TIMESTAMPTZ",
+                "ALTER TABLE stories ADD COLUMN IF NOT EXISTS split_from_id UUID",
+                "ALTER TABLE stories ADD COLUMN IF NOT EXISTS review_tier SMALLINT NOT NULL DEFAULT 0",
+                "CREATE INDEX IF NOT EXISTS idx_stories_unfrozen ON stories(updated_at) WHERE frozen_at IS NULL",
+                "CREATE INDEX IF NOT EXISTS idx_stories_review_tier ON stories(review_tier) WHERE review_tier > 0 AND frozen_at IS NULL",
                 """CREATE TABLE IF NOT EXISTS story_arcs (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                     title_fa TEXT NOT NULL,

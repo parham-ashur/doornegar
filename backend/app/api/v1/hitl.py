@@ -681,3 +681,189 @@ async def pin_image_to_story(
         story.is_edited = True
     await db.commit()
     return {"status": "ok", "r2_url": r2_url}
+
+
+# ─── 6. Story guardrail actions: freeze + split ──────────────
+
+class FreezeResponse(BaseModel):
+    story_id: str
+    frozen_at: datetime
+    article_count: int
+
+
+@router.post("/stories/{story_id}/freeze", response_model=FreezeResponse)
+async def freeze_story(story_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    """Mark a story as frozen. Matcher + merge steps skip frozen stories,
+    so no new articles will be attached. Idempotent: re-freezing leaves
+    the original frozen_at untouched.
+    """
+    story = await db.get(Story, story_id)
+    if not story:
+        raise HTTPException(status_code=404, detail="Story not found")
+    if story.frozen_at is None:
+        story.frozen_at = datetime.now(timezone.utc)
+        await db.commit()
+    return FreezeResponse(
+        story_id=str(story.id),
+        frozen_at=story.frozen_at,
+        article_count=story.article_count or 0,
+    )
+
+
+class UnfreezeResponse(BaseModel):
+    story_id: str
+    article_count: int
+
+
+@router.post("/stories/{story_id}/unfreeze", response_model=UnfreezeResponse)
+async def unfreeze_story(story_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    """Reverse a freeze. Clears review_tier too so the next pipeline run
+    re-evaluates it from scratch."""
+    story = await db.get(Story, story_id)
+    if not story:
+        raise HTTPException(status_code=404, detail="Story not found")
+    story.frozen_at = None
+    story.review_tier = 0
+    await db.commit()
+    return UnfreezeResponse(
+        story_id=str(story.id),
+        article_count=story.article_count or 0,
+    )
+
+
+class SplitGroup(BaseModel):
+    title_fa: str
+    title_en: str | None = None
+    article_ids: list[uuid.UUID]
+
+
+class SplitRequest(BaseModel):
+    groups: list[SplitGroup] = Field(..., min_length=1)
+    arc_title_fa: str | None = None
+    arc_slug: str | None = None
+    freeze_source: bool = True
+
+
+class SplitResponseGroup(BaseModel):
+    story_id: str
+    title_fa: str
+    article_count: int
+
+
+class SplitResponse(BaseModel):
+    source_story_id: str
+    arc_id: str | None
+    groups: list[SplitResponseGroup]
+    remaining_in_source: int
+
+
+@router.post("/stories/{story_id}/split", response_model=SplitResponse)
+async def split_story(
+    story_id: uuid.UUID,
+    body: SplitRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Carve a source story into N child stories. Each group names a set
+    of article_ids that get moved to a new Story. Optionally wrap the
+    children in a new arc. Source story is frozen by default.
+
+    Articles not named in any group stay in the source. Telegram posts
+    that pointed at the source are left alone (they'll re-link on the
+    next pipeline run via the linker).
+    """
+    from app.models.story_arc import StoryArc
+
+    src = await db.get(Story, story_id)
+    if not src:
+        raise HTTPException(status_code=404, detail="Story not found")
+
+    all_ids: set[uuid.UUID] = set()
+    for g in body.groups:
+        for aid in g.article_ids:
+            if aid in all_ids:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Article {aid} listed in more than one group",
+                )
+            all_ids.add(aid)
+
+    valid_q = await db.execute(
+        select(Article.id).where(
+            Article.id.in_(all_ids),
+            Article.story_id == story_id,
+        )
+    )
+    valid_ids = {row[0] for row in valid_q.all()}
+    missing = all_ids - valid_ids
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{len(missing)} article_id(s) don't belong to this story",
+        )
+
+    arc_id: uuid.UUID | None = None
+    if body.arc_title_fa:
+        arc = StoryArc(
+            id=uuid.uuid4(),
+            title_fa=body.arc_title_fa,
+            slug=body.arc_slug or f"arc-{uuid.uuid4().hex[:8]}",
+        )
+        db.add(arc)
+        await db.flush()
+        arc_id = arc.id
+
+    created: list[SplitResponseGroup] = []
+    for idx, g in enumerate(body.groups):
+        child_slug = f"{src.slug}-p{idx+1}-{uuid.uuid4().hex[:6]}"
+        child = Story(
+            id=uuid.uuid4(),
+            title_fa=g.title_fa,
+            title_en=g.title_en or g.title_fa,
+            slug=child_slug,
+            article_count=0,
+            source_count=0,
+            split_from_id=src.id,
+            arc_id=arc_id,
+            arc_order=idx if arc_id else None,
+        )
+        db.add(child)
+        await db.flush()
+
+        await db.execute(
+            update(Article)
+            .where(Article.id.in_(g.article_ids))
+            .values(story_id=child.id)
+        )
+        count_q = await db.execute(
+            select(func.count(Article.id)).where(Article.story_id == child.id)
+        )
+        child.article_count = count_q.scalar() or 0
+        src_count_q = await db.execute(
+            select(func.count(func.distinct(Article.source_id))).where(
+                Article.story_id == child.id
+            )
+        )
+        child.source_count = src_count_q.scalar() or 0
+        created.append(
+            SplitResponseGroup(
+                story_id=str(child.id),
+                title_fa=child.title_fa,
+                article_count=child.article_count,
+            )
+        )
+
+    remaining_q = await db.execute(
+        select(func.count(Article.id)).where(Article.story_id == src.id)
+    )
+    remaining = remaining_q.scalar() or 0
+    src.article_count = remaining
+    if body.freeze_source:
+        src.frozen_at = datetime.now(timezone.utc)
+
+    await db.commit()
+    return SplitResponse(
+        source_story_id=str(src.id),
+        arc_id=str(arc_id) if arc_id else None,
+        groups=created,
+        remaining_in_source=remaining,
+    )
