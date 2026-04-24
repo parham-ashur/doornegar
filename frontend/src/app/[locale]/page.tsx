@@ -1065,55 +1065,47 @@ export default async function HomePage({
                   <div className="my-4 mx-auto w-1/2 h-px bg-slate-200/60 dark:bg-slate-700/40" />
                 )}
                 <Link href={`/${locale}/stories/${s.id}`} className="group flex items-stretch gap-6 py-5">
-                  {/* Image first in DOM → visually on the right in RTL.
-                      items-stretch on the Link lets the image match the
-                      row's full content height — Parham's "same height
-                      as each row" spec. Fixed width keeps the layout
-                      predictable; height follows the text block. */}
+                  {/* DOM order: number → image → text. In RTL that
+                      renders visually as [number][image][text] from
+                      right to left, so the rank number sits to the
+                      right of the image (Parham's ask). */}
+                  <span className="text-[64px] font-black text-slate-200 dark:text-slate-700 shrink-0 leading-none -mt-1 w-[72px] text-right self-start">{toFa(i + 1)}</span>
                   <div className="w-48 shrink-0 overflow-hidden bg-slate-100 dark:bg-slate-800 self-stretch">
                     <SafeImage src={s.image_url} className="w-full h-full object-cover" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-start gap-3">
-                      <span className="text-[64px] font-black text-slate-200 dark:text-slate-700 shrink-0 leading-none -mt-1 w-[72px] text-right">{toFa(i + 1)}</span>
-                      <div className="flex-1 min-w-0">
-                        {/* Tightened inter-line spacing throughout —
-                            mt-1.5 → mt-1, leading-6 → leading-5.
-                            Parham's "smaller between two lines" ask. */}
-                        <h3 className="text-[22px] font-black leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
-                          {s.title_fa}
-                        </h3>
-                        <UpdateBadge story={s} className="mt-1" />
-                        <p className="text-[14px] text-slate-400 mt-1">
-                          {toFa(s.article_count)} مقاله · {toFa(s.source_count)} رسانه
-                          {s.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300"> · درون‌مرزی {toFa(s.state_pct)}٪</span>}
-                          {s.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400"> · برون‌مرزی {toFa(s.diaspora_pct)}٪</span>}
-                        </p>
-                        {stateS && (
-                          <p className="text-[14px] leading-5 text-slate-500 dark:text-slate-400 mt-1.5 line-clamp-2">
-                            <span className="text-[#1e3a5f] dark:text-blue-300 font-bold">• </span>{stateS}
-                          </p>
-                        )}
-                        {diasporaS && (
-                          <p className="text-[14px] leading-5 text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-2">
-                            <span className="text-[#ea580c] dark:text-orange-400 font-bold">• </span>{diasporaS}
-                          </p>
-                        )}
-                        {!stateS && !diasporaS && fallbackBullets.map((b, j) => (
-                          <p key={j} className="text-[14px] leading-5 text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-2">• {b}</p>
-                        ))}
-                        {tg?.predictions && tg.predictions.length > 0 && (
-                          <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-2">
-                            <span className="font-bold text-blue-500">پیش‌بینی:</span> {predictionText(tg.predictions[0])}
-                          </p>
-                        )}
-                        {tg?.key_claims && tg.key_claims.length > 0 && (
-                          <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-2">
-                            <span className="font-bold text-amber-500">ادعا:</span> {claimText(tg.key_claims[0])}
-                          </p>
-                        )}
-                      </div>
-                    </div>
+                    <h3 className="text-[22px] font-black leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
+                      {s.title_fa}
+                    </h3>
+                    <UpdateBadge story={s} className="mt-1" />
+                    <p className="text-[14px] text-slate-400 mt-1">
+                      {toFa(s.article_count)} مقاله · {toFa(s.source_count)} رسانه
+                      {s.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300"> · درون‌مرزی {toFa(s.state_pct)}٪</span>}
+                      {s.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400"> · برون‌مرزی {toFa(s.diaspora_pct)}٪</span>}
+                    </p>
+                    {stateS && (
+                      <p className="text-[14px] leading-5 text-slate-500 dark:text-slate-400 mt-1.5 line-clamp-2">
+                        <span className="text-[#1e3a5f] dark:text-blue-300 font-bold">• </span>{stateS}
+                      </p>
+                    )}
+                    {diasporaS && (
+                      <p className="text-[14px] leading-5 text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-2">
+                        <span className="text-[#ea580c] dark:text-orange-400 font-bold">• </span>{diasporaS}
+                      </p>
+                    )}
+                    {!stateS && !diasporaS && fallbackBullets.map((b, j) => (
+                      <p key={j} className="text-[14px] leading-5 text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-2">• {b}</p>
+                    ))}
+                    {tg?.predictions && tg.predictions.length > 0 && (
+                      <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-2">
+                        <span className="font-bold text-blue-500">پیش‌بینی:</span> {predictionText(tg.predictions[0])}
+                      </p>
+                    )}
+                    {tg?.key_claims && tg.key_claims.length > 0 && (
+                      <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-2">
+                        <span className="font-bold text-amber-500">ادعا:</span> {claimText(tg.key_claims[0])}
+                      </p>
+                    )}
                   </div>
                 </Link>
               </div>
