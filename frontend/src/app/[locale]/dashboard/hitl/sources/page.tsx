@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { adminHeaders, hasAdminToken } from "../_auth";
-import { narrativeGroupOfSource, GROUP_COLORS, GROUP_LABELS_FA } from "@/lib/narrativeGroups";
+import { narrativeGroupOfSource, GROUP_COLORS, GROUP_LABELS_EN } from "@/lib/narrativeGroups";
 import type { Source } from "@/lib/types";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -137,13 +137,13 @@ export default function SourcesHitlPage() {
 
   if (!authed) {
     return (
-      <div dir="rtl" className="p-6">
+      <div className="p-6">
         <p className="text-sm text-slate-500">
-          برای دیدن این صفحه، از صفحهٔ{" "}
+          Sign in from the{" "}
           <Link href="/fa/dashboard" className="text-blue-600 hover:underline">
-            داشبورد
+            dashboard
           </Link>{" "}
-          وارد شوید.
+          first to access this page.
         </p>
       </div>
     );
@@ -151,23 +151,22 @@ export default function SourcesHitlPage() {
 
   if (!sources) {
     return (
-      <div dir="rtl" className="p-6 text-[13px] text-slate-400">
-        بارگذاری…
-      </div>
+      <div className="p-6 text-[13px] text-slate-400">Loading…</div>
     );
   }
 
   return (
-    <div dir="rtl">
+    <div>
       <div className="mb-6">
         <h1 className="text-xl font-black text-slate-900 dark:text-white">
-          دسته‌بندی رسانه‌ها
+          Source classification
         </h1>
         <p className="text-[13px] text-slate-500 dark:text-slate-400 mt-1 leading-6">
-          زیرگروهِ هر رسانه (اصول‌گرا، اصلاح‌طلب، میانه‌رو، رادیکال) از سه
-          فیلد محاسبه می‌شود: موقعیت تولید (درون/برون مرز)، همسویی حکومتی، و
-          جناح سیاسی. اگر دسته‌بندی فعلی اشتباه است، همین‌جا اصلاح کنید —
-          تغییر فوری در همهٔ صفحات اعمال می‌شود.
+          Each outlet's narrative subgroup (principlist / reformist / moderate
+          diaspora / radical diaspora) is derived from three fields: production
+          location (inside / outside Iran), state alignment, and political
+          faction. Fix wrong classifications here — changes propagate to every
+          page immediately.
         </p>
       </div>
 
@@ -182,11 +181,11 @@ export default function SourcesHitlPage() {
                   style={{ backgroundColor: GROUP_COLORS[g] }}
                 />
                 <span className="text-[12px] font-bold" style={{ color: GROUP_COLORS[g] }}>
-                  {GROUP_LABELS_FA[g]}
+                  {GROUP_LABELS_EN[g]}
                 </span>
               </div>
               <p className="text-[13px] text-slate-500 dark:text-slate-400 leading-6">
-                {grouped[g].length} رسانه
+                {grouped[g].length} source{grouped[g].length === 1 ? "" : "s"}
               </p>
             </div>
           ))}
@@ -222,7 +221,7 @@ export default function SourcesHitlPage() {
                   {s.website_url || "—"}
                 </p>
                 <p className="text-[11px] mt-0.5" style={{ color: GROUP_COLORS[group] }}>
-                  زیرگروه: {GROUP_LABELS_FA[group]}
+                  Subgroup: {GROUP_LABELS_EN[group]}
                 </p>
               </div>
 
@@ -239,8 +238,8 @@ export default function SourcesHitlPage() {
                     }
                     className="text-[12px] border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1"
                   >
-                    <option value="inside_iran">درون‌مرزی</option>
-                    <option value="outside_iran">برون‌مرزی</option>
+                    <option value="inside_iran">Inside Iran</option>
+                    <option value="outside_iran">Outside Iran</option>
                   </select>
 
                   <select
@@ -253,10 +252,10 @@ export default function SourcesHitlPage() {
                     }
                     className="text-[12px] border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1"
                   >
-                    <option value="state">حکومتی</option>
-                    <option value="semi_state">شبه‌دولتی</option>
-                    <option value="independent">مستقل</option>
-                    <option value="diaspora">برون‌مرزی</option>
+                    <option value="state">State</option>
+                    <option value="semi_state">Semi-state</option>
+                    <option value="independent">Independent</option>
+                    <option value="diaspora">Diaspora</option>
                   </select>
 
                   <select
@@ -270,12 +269,12 @@ export default function SourcesHitlPage() {
                     className="text-[12px] border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1"
                   >
                     <option value="">—</option>
-                    <option value="hardline">تندرو</option>
-                    <option value="principlist">اصول‌گرا</option>
-                    <option value="reformist">اصلاح‌طلب</option>
-                    <option value="opposition">اپوزیسیون</option>
-                    <option value="monarchist">سلطنت‌طلب</option>
-                    <option value="radical">رادیکال</option>
+                    <option value="hardline">Hardline</option>
+                    <option value="principlist">Principlist</option>
+                    <option value="reformist">Reformist</option>
+                    <option value="opposition">Opposition</option>
+                    <option value="monarchist">Monarchist</option>
+                    <option value="radical">Radical</option>
                   </select>
 
                   <label className="flex items-center gap-1 text-[12px] text-slate-600 dark:text-slate-400">
@@ -289,7 +288,7 @@ export default function SourcesHitlPage() {
                         }))
                       }
                     />
-                    سپاه
+                    IRGC
                   </label>
 
                   <label className="flex items-center gap-1 text-[12px] text-slate-600 dark:text-slate-400">
@@ -303,7 +302,7 @@ export default function SourcesHitlPage() {
                         }))
                       }
                     />
-                    فعال
+                    Active
                   </label>
 
                   <button
@@ -312,14 +311,14 @@ export default function SourcesHitlPage() {
                     disabled={!dirty || saving === s.slug}
                     className="text-[12px] font-bold px-3 py-1 bg-slate-900 dark:bg-white text-white dark:text-slate-900 disabled:opacity-40"
                   >
-                    {saving === s.slug ? "…" : "ذخیره"}
+                    {saving === s.slug ? "…" : "Save"}
                   </button>
 
                   {saveStatus === "saved" && (
                     <span className="text-[12px] text-emerald-500">✓</span>
                   )}
                   {saveStatus === "error" && (
-                    <span className="text-[12px] text-rose-500">خطا</span>
+                    <span className="text-[12px] text-rose-500">Error</span>
                   )}
                 </div>
               )}

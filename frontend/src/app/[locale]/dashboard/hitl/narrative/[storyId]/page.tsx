@@ -71,14 +71,14 @@ export default function NarrativeEditor() {
       }),
     });
     setSaving(false);
-    setMsg(res.ok ? "ذخیره شد ✓" : "خطا در ذخیره");
+    setMsg(res.ok ? "Saved ✓" : "Save failed");
   };
 
   if (!authed) {
     return (
       <div>
-        <h1 className="text-xl font-black mb-4">ویرایش روایت</h1>
-        <p className="text-[13px] mb-3">توکن ادمین:</p>
+        <h1 className="text-xl font-black mb-4">Edit narrative</h1>
+        <p className="text-[13px] mb-3">Admin token:</p>
         <div className="flex gap-2">
           <input
             type="password"
@@ -95,31 +95,31 @@ export default function NarrativeEditor() {
             }}
             className="px-4 py-2 text-[13px] bg-blue-600 text-white"
           >
-            ذخیره
+            Save
           </button>
         </div>
       </div>
     );
   }
 
-  if (!data) return <p className="text-[13px]">در حال بارگذاری...</p>;
+  if (!data) return <p className="text-[13px]">Loading…</p>;
 
   return (
     <div>
       <a href={`/fa/stories/${storyId}`} target="_blank" rel="noreferrer" className="text-[12px] text-blue-500 mb-2 block">
-        ← مشاهدهٔ صفحهٔ خبر
+        ← Open story page
       </a>
       <h1 className="text-xl font-black text-slate-900 dark:text-white mb-2">
         {data.title_fa}
       </h1>
       <p className="text-[13px] text-slate-500 mb-6 leading-6">
-        هر بخش — یک بولت در هر خط (دو تا سه بولت در هر زیرگروه).
+        One bullet per line in each field (two or three bullets per subgroup).
       </p>
 
       <div className="space-y-5">
         <div>
           <label className="block text-[13px] font-bold mb-1">
-            تبیین سوگیری (bias_explanation_fa)
+            Bias explanation (bias_explanation_fa)
           </label>
           <textarea
             value={bias}
@@ -132,7 +132,7 @@ export default function NarrativeEditor() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="block text-[13px] font-bold mb-1 text-red-600">
-              اصول‌گرا (داخل)
+              Principlist (inside Iran)
             </label>
             <textarea
               value={p}
@@ -143,7 +143,7 @@ export default function NarrativeEditor() {
           </div>
           <div>
             <label className="block text-[13px] font-bold mb-1 text-amber-600">
-              اصلاح‌طلب (داخل)
+              Reformist (inside Iran)
             </label>
             <textarea
               value={r}
@@ -154,7 +154,7 @@ export default function NarrativeEditor() {
           </div>
           <div>
             <label className="block text-[13px] font-bold mb-1 text-blue-600">
-              میانه‌رو (برون‌مرزی)
+              Moderate diaspora
             </label>
             <textarea
               value={m}
@@ -165,7 +165,7 @@ export default function NarrativeEditor() {
           </div>
           <div>
             <label className="block text-[13px] font-bold mb-1 text-emerald-600">
-              رادیکال (برون‌مرزی)
+              Radical diaspora
             </label>
             <textarea
               value={rad}
@@ -183,7 +183,7 @@ export default function NarrativeEditor() {
             disabled={saving}
             className="px-6 py-2 text-[13px] bg-blue-600 text-white disabled:opacity-50"
           >
-            {saving ? "..." : "ذخیرهٔ روایت"}
+            {saving ? "..." : "Save narrative"}
           </button>
           {msg && <span className="text-[13px] text-emerald-600">{msg}</span>}
         </div>

@@ -76,8 +76,8 @@ export default function ChannelsPage() {
   if (!authed) {
     return (
       <div>
-        <h1 className="text-xl font-black mb-4">دسته‌بندی کانال‌ها</h1>
-        <p className="text-[13px] mb-3">توکن ادمین:</p>
+        <h1 className="text-xl font-black mb-4">Channel classification</h1>
+        <p className="text-[13px] mb-3">Admin token:</p>
         <div className="flex gap-2">
           <input
             type="password"
@@ -94,7 +94,7 @@ export default function ChannelsPage() {
             }}
             className="px-4 py-2 text-[13px] bg-blue-600 text-white"
           >
-            ذخیره
+            Save
           </button>
         </div>
       </div>
@@ -104,15 +104,20 @@ export default function ChannelsPage() {
   return (
     <div>
       <h1 className="text-xl font-black text-slate-900 dark:text-white mb-4">
-        دسته‌بندی کانال‌های تلگرام
+        Telegram channel classification
       </h1>
       <p className="text-[13px] text-slate-500 mb-6 leading-6">
-        نمونهٔ ۳ پست اخیر هر کانال را ببینید و نوع آن را اصلاح کنید. این تغییر بلافاصله
-        روی صف تحلیل (pool) اثر می‌گذارد. انواع کانال:
-        <span dir="ltr" className="font-mono mr-1">news</span> / <span dir="ltr" className="font-mono">commentary</span> / <span dir="ltr" className="font-mono">aggregator</span> / <span dir="ltr" className="font-mono">activist</span> / <span dir="ltr" className="font-mono">political_party</span> / <span dir="ltr" className="font-mono">citizen</span>.
+        Review three recent posts per channel and set the right type. The
+        change hits the analysis pool immediately. Channel types:{" "}
+        <span dir="ltr" className="font-mono">news</span> /{" "}
+        <span dir="ltr" className="font-mono">commentary</span> /{" "}
+        <span dir="ltr" className="font-mono">aggregator</span> /{" "}
+        <span dir="ltr" className="font-mono">activist</span> /{" "}
+        <span dir="ltr" className="font-mono">political_party</span> /{" "}
+        <span dir="ltr" className="font-mono">citizen</span>.
       </p>
 
-      {loading && <p className="text-[13px]">در حال بارگذاری...</p>}
+      {loading && <p className="text-[13px]">Loading…</p>}
 
       <div className="space-y-4">
         {items.map((ch) => (
@@ -127,7 +132,7 @@ export default function ChannelsPage() {
                 </h3>
                 {ch.username && (
                   <span className="text-[12px] text-slate-500" dir="ltr">
-                    @{ch.username} · {ch.post_count} پست
+                    @{ch.username} · {ch.post_count} post{ch.post_count === 1 ? "" : "s"}
                   </span>
                 )}
               </div>
@@ -139,7 +144,7 @@ export default function ChannelsPage() {
                   className="px-2 py-1 text-[13px] border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
                   dir="ltr"
                 >
-                  <option value="">(نامشخص)</option>
+                  <option value="">(unset)</option>
                   {CHANNEL_TYPES.map((t) => (
                     <option key={t} value={t}>
                       {t}
@@ -152,12 +157,12 @@ export default function ChannelsPage() {
                     checked={ch.is_active}
                     onChange={(e) => update(ch.id, { is_active: e.target.checked })}
                   />
-                  فعال
+                  Active
                 </label>
               </div>
             </div>
             {ch.sample_posts.length === 0 && (
-              <p className="text-[12px] text-slate-400">(پست اخیر نیست)</p>
+              <p className="text-[12px] text-slate-400">(no recent posts)</p>
             )}
             <div className="space-y-1">
               {ch.sample_posts.map((s, i) => (
