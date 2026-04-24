@@ -2105,45 +2105,44 @@ async def trigger_recompute_centroids():
         return {"status": "error", "error": str(e)}
 
 
-@router.post("/neutrality/run", dependencies=[Depends(require_admin)], status_code=202)
-async def trigger_neutrality_audit(
-    top: int = 30,
+@router.get("/neutrality/export", dependencies=[Depends(require_admin)])
+async def export_neutrality_audit(
+    top: int = 20,
     include_scored: bool = False,
+    db: AsyncSession = Depends(get_db),
 ):
-    """Kick off the Claude-scored neutrality audit in the background.
+    """Return the JSON payload for a human-in-Claude neutrality audit.
 
-    Picks the top-N trending stories missing neutrality scores (or every
-    top-N if include_scored=true), scores each one's articles with
-    Claude, and writes source_neutrality back so the PoliticalSpectrum
-    figure ("جایگاه رسانه‌ها") appears on those story pages. Returns 202
-    immediately to avoid Cloudflare's 100s edge timeout — watch Railway
-    logs for progress, or poll a scored story's /api/v1/stories/{id}
-    to see when source_neutrality lands.
+    Matches the shape scripts/neutrality_audit.py writes to disk. The
+    operator saves the response, pastes it to a Claude conversation for
+    scoring, then POSTs the scored JSON back to /admin/neutrality/apply.
+
+    Default top=20 to keep the response under a reasonable size for
+    a single paste. Each article's content is already trimmed to 3000
+    chars server-side.
     """
-    import asyncio
-    from app.database import async_session
-    from app.services.neutrality_audit_service import run_neutrality_audit
+    from app.services.neutrality_audit_service import export_for_audit
+    payload = await export_for_audit(db, top_n=top, include_scored=include_scored)
+    return payload
 
-    async def _run() -> None:
-        try:
-            async with async_session() as db:
-                stats = await run_neutrality_audit(
-                    db, top_n=top, include_scored=include_scored,
-                )
-                logger.info(f"neutrality_audit complete: {stats}")
-        except Exception:
-            logger.exception("neutrality_audit background task failed")
 
-    asyncio.create_task(_run())
-    return {
-        "status": "accepted",
-        "message": (
-            "Neutrality audit running in background. Poll /api/v1/stories/{id} "
-            "to see source_neutrality land."
-        ),
-        "top": top,
-        "include_scored": include_scored,
-    }
+@router.post("/neutrality/apply", dependencies=[Depends(require_admin)])
+async def apply_neutrality_audit(
+    payload: list[dict],
+    db: AsyncSession = Depends(get_db),
+):
+    """Accept scored JSON and write source_neutrality into each story.
+
+    Body shape (array of):
+      {"story_id": "...", "article_neutrality": {"<article_id>": float}}
+
+    Invalid entries (missing ids, non-numeric scores, unknown stories)
+    are silently skipped — scores that aren't provided stay absent
+    rather than being defaulted to 0.
+    """
+    from app.services.neutrality_audit_service import apply_scores
+    stats = await apply_scores(db, payload)
+    return {"status": "ok", **stats}
 
 
 # === Social Media Posting ===
