@@ -84,7 +84,7 @@ export default function StockImagesPage() {
         setStory(ctx);
         // Prefill the search bar with English keywords extracted from the
         // story title so the first search is one-click instead of a manual
-        // retype. Curator can edit before hitting جستجو.
+        // retype. Curator can edit before hitting Search.
         if (!query.trim()) {
           setQuery(toSearchQuery(ctx.title_en));
         }
@@ -110,7 +110,7 @@ export default function StockImagesPage() {
       );
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        setMsg(err.detail || "خطای جستجو");
+        setMsg(err.detail || "Search error");
         return;
       }
       const data = await res.json();
@@ -135,10 +135,10 @@ export default function StockImagesPage() {
     setPinning(null);
     if (res.ok) {
       const data = await res.json();
-      setMsg(`پین شد ✓  ${data.r2_url}`);
+      setMsg(`Pinned ✓  ${data.r2_url}`);
     } else {
       const err = await res.json().catch(() => ({}));
-      setMsg(err.detail || "خطا");
+      setMsg(err.detail || "Error");
     }
   };
 
