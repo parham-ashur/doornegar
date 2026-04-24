@@ -3,20 +3,25 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { ChevronDown } from "lucide-react";
 import TelegramAnalyzingAnimation from "@/components/common/TelegramAnalyzingAnimation";
-import { toFa } from "@/lib/utils";
 import { cleanClaim, cleanPrediction } from "@/lib/telegram-text";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 interface TelegramAnalysis {
   discourse_summary: string;
-  predictions: string[];
+  predictions: any[];
+  key_claims: any[];
+  // Niloofar-polished versions — prefer these on the story page too so
+  // channel-name attribution and direct quotes are stripped. Fall back
+  // to raw `predictions`/`key_claims` for stories polished before the
+  // display arrays existed.
+  predictions_display?: any[];
+  key_claims_display?: any[];
   worldviews: {
     pro_regime?: string;
     opposition?: string;
     neutral?: string;
   };
-  key_claims: string[];
   number_battle?: string;
   coordinated_messaging?: string;
   consensus: string;
@@ -140,8 +145,11 @@ export default function StoryTelegramSection({ storyId, initialTab, highlightTex
     return null;
   };
 
-  const predictions = analysis.predictions || [];
-  const claims = analysis.key_claims || [];
+  // Prefer Niloofar-polished versions (channel names stripped, quotes
+  // distilled). Fall back to raw if display arrays haven't been
+  // generated yet for this story.
+  const predictions = analysis.predictions_display || analysis.predictions || [];
+  const claims = analysis.key_claims_display || analysis.key_claims || [];
 
   return (
     <div className="space-y-3 animate-[fadeIn_0.2s_ease-in]">
@@ -179,30 +187,10 @@ export default function StoryTelegramSection({ storyId, initialTab, highlightTex
           <div className="space-y-1.5">
             {activeTab === "predictions" && predictions.map((p, i) => {
               const text = typeof p === "string" ? p : (p as any).text || "";
-              const supporters = typeof p === "object" ? ((p as any).supporters || []) : [];
-              const supporterCount = typeof p === "object" ? (p as any).supporter_count : undefined;
-              const analystsTotal = typeof p === "object" ? (p as any).analysts_total : undefined;
               const isHighlighted = !!(highlightText && clean(text).includes(highlightText));
               return (
                 <div key={i} ref={isHighlighted ? highlightRef : undefined} className={isHighlighted ? "bg-blue-50 dark:bg-blue-900/20 -mx-2 px-2 py-1 border-r-2 border-blue-500" : ""}>
                   <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400">• {clean(text)}</p>
-                  {/* Prefer naming the supporters over a bare ratio —
-                      «۱ از ۱۶ تحلیلگر» read as cryptic next to the
-                      «X پست از Y کانال» line below (numbers didn't
-                      match — direct-link post count vs. total-tracked-
-                      analyst count). Showing the channel name(s) makes
-                      the attribution concrete. Fall back to the count
-                      only when supporter names aren't stored. */}
-                  {supporters.length > 0 ? (
-                    <span className="text-[13px] text-blue-500 dark:text-blue-400 font-medium mr-3">
-                      از: {supporters.slice(0, 3).join("، ")}
-                      {supporters.length > 3 && ` و ${toFa(supporters.length - 3)} کانال دیگر`}
-                    </span>
-                  ) : supporterCount != null && analystsTotal != null && supporterCount > 0 ? (
-                    <span className="text-[13px] text-blue-500 dark:text-blue-400 font-medium mr-3">
-                      {toFa(supporterCount)} از {toFa(analystsTotal)} تحلیلگر
-                    </span>
-                  ) : null}
                 </div>
               );
             })}
