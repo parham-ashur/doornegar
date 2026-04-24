@@ -31,6 +31,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.admin import require_admin
 from app.database import async_session, get_db
+from app.models.article import Article
+from app.models.source import Source
 from app.models.worldview_digest import WorldviewDigest
 from app.services.narrative_groups import (
     NARRATIVE_GROUPS_ORDER,
@@ -63,8 +65,28 @@ class WorldviewCard(BaseModel):
     generated_at: datetime
 
 
+class EvidenceArticle(BaseModel):
+    """One cited article, enriched with human-readable context.
+
+    story_id lets the frontend link each chip to the containing story
+    page (where the article actually lives), so readers aren't sent to
+    /stories/{article_id} which 404s. `url` exposes the original outlet
+    URL for readers who want to read the source directly.
+    """
+    id: str
+    title_fa: str | None = None
+    source_slug: str | None = None
+    source_name_fa: str | None = None
+    story_id: str | None = None
+    url: str | None = None
+    published_at: datetime | None = None
+
+
 class WorldviewDetail(WorldviewCard):
     evidence_fa: dict | None = None
+    # article_id → EvidenceArticle. Populated only on the detail
+    # endpoint; the /current list endpoint returns only card-level data.
+    evidence_articles: dict[str, EvidenceArticle] | None = None
 
 
 class CurrentResponse(BaseModel):
@@ -139,13 +161,63 @@ async def get_current(db: AsyncSession = Depends(get_db)):
     return {"window_start": window_start, "window_end": window_end, "cards": cards}
 
 
+def _collect_article_ids(synthesis: dict | None, evidence: dict | None) -> set[str]:
+    """Pull every article UUID referenced anywhere in the card."""
+    ids: set[str] = set()
+    if isinstance(evidence, dict):
+        for v in evidence.values():
+            if isinstance(v, list):
+                for a in v:
+                    if isinstance(a, str) and a:
+                        ids.add(a)
+    if isinstance(synthesis, dict):
+        for key in ("core_beliefs", "emphasized", "predictions_primed"):
+            for entry in synthesis.get(key) or []:
+                if not isinstance(entry, dict):
+                    continue
+                for a in entry.get("example_article_ids") or []:
+                    if isinstance(a, str) and a:
+                        ids.add(a)
+    return ids
+
+
+async def _load_evidence_articles(
+    db: AsyncSession, article_ids: set[str]
+) -> dict[str, dict]:
+    """One query → {article_id: {title, source, story_id, url, ...}}."""
+    if not article_ids:
+        return {}
+    res = await db.execute(
+        select(Article, Source)
+        .join(Source, Article.source_id == Source.id, isouter=True)
+        .where(Article.id.in_(article_ids))
+    )
+    out: dict[str, dict] = {}
+    for article, source in res.all():
+        out[str(article.id)] = {
+            "id": str(article.id),
+            "title_fa": article.title_fa or article.title_original or article.title_en,
+            "source_slug": source.slug if source else None,
+            "source_name_fa": source.name_fa if source else None,
+            "story_id": str(article.story_id) if article.story_id else None,
+            "url": article.url,
+            "published_at": article.published_at,
+        }
+    return out
+
+
 @router.get("/{bundle}", response_model=WorldviewDetail)
 async def get_bundle_detail(
     bundle: str,
     window: date | None = Query(None, description="Monday of target week (window_start)"),
     db: AsyncSession = Depends(get_db),
 ):
-    """Return a single bundle's worldview card with evidence chain."""
+    """Return a single bundle's worldview card with evidence chain.
+
+    Also enriches every cited article_id with its title, source, URL, and
+    containing story_id so the frontend can render meaningful links
+    instead of raw UUID chips that 404 into /stories/{article_id}.
+    """
     if bundle not in NARRATIVE_GROUPS_ORDER:
         raise HTTPException(
             status_code=404,
@@ -162,7 +234,10 @@ async def get_bundle_detail(
             status_code=404,
             detail="No worldview digest found for that bundle/window yet.",
         )
-    return _to_card(row, include_evidence=True)
+    card = _to_card(row, include_evidence=True)
+    article_ids = _collect_article_ids(row.synthesis_fa, row.evidence_fa)
+    card["evidence_articles"] = await _load_evidence_articles(db, article_ids)
+    return card
 
 
 # ─── Admin trigger (on-demand run) ───────────────────────────────────

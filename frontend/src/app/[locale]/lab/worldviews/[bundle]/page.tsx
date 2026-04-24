@@ -53,6 +53,16 @@ interface Synthesis {
   predictions_primed?: BeliefWithEvidence[];
 }
 
+interface EvidenceArticle {
+  id: string;
+  title_fa: string | null;
+  source_slug: string | null;
+  source_name_fa: string | null;
+  story_id: string | null;
+  url: string | null;
+  published_at: string | null;
+}
+
 interface WorldviewDetail {
   bundle: Bundle;
   bundle_label_fa: string;
@@ -64,6 +74,7 @@ interface WorldviewDetail {
   coverage_pct: number;
   synthesis_fa: Synthesis | null;
   evidence_fa: Record<string, string[]> | null;
+  evidence_articles: Record<string, EvidenceArticle> | null;
   model_used: string | null;
   generated_at: string;
 }
@@ -90,20 +101,72 @@ async function fetchDetail(bundle: string): Promise<WorldviewDetail | null> {
   }
 }
 
-function EvidenceList({ ids, locale }: { ids: string[]; locale: string }) {
+function EvidenceList({
+  ids,
+  articles,
+  locale,
+}: {
+  ids: string[];
+  articles: Record<string, EvidenceArticle> | null;
+  locale: string;
+}) {
   if (!ids || ids.length === 0) return null;
   return (
-    <div className="mt-2 flex flex-wrap gap-2">
-      {ids.map((id) => (
-        <Link
-          key={id}
-          href={`/${locale}/stories/${id}`}
-          className="text-[11px] text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 border border-slate-200 dark:border-slate-700 px-2 py-0.5"
-        >
-          {id.slice(0, 8)}…
-        </Link>
-      ))}
-    </div>
+    <ul className="mt-2 space-y-1.5">
+      {ids.map((id) => {
+        const meta = articles?.[id];
+        // Preferred link target: the CONTAINING STORY page (where this
+        // article actually lives). Falls back to the outlet's original
+        // URL if we don't have a story, and finally to a non-link chip
+        // if we have neither.
+        const storyHref = meta?.story_id ? `/${locale}/stories/${meta.story_id}` : null;
+        const outletUrl = meta?.url || null;
+        const title = meta?.title_fa?.trim() || id.slice(0, 8) + "…";
+        const source = meta?.source_name_fa || meta?.source_slug;
+        const inner = (
+          <>
+            <span className="text-[13px] leading-5 text-slate-700 dark:text-slate-300 line-clamp-2">
+              {title}
+            </span>
+            {source && (
+              <span className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5 block">
+                {source}
+              </span>
+            )}
+          </>
+        );
+        const className =
+          "block group border border-slate-200 dark:border-slate-700 px-2 py-1.5 hover:border-blue-400 dark:hover:border-blue-600 transition-colors";
+        if (storyHref) {
+          return (
+            <li key={id}>
+              <Link href={storyHref} className={className}>
+                {inner}
+              </Link>
+            </li>
+          );
+        }
+        if (outletUrl) {
+          return (
+            <li key={id}>
+              <a
+                href={outletUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={className}
+              >
+                {inner}
+              </a>
+            </li>
+          );
+        }
+        return (
+          <li key={id} className={className + " cursor-default"}>
+            {inner}
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -112,6 +175,7 @@ function BeliefBlock({
   idx,
   item,
   evidence,
+  articles,
   locale,
   accent,
 }: {
@@ -119,6 +183,7 @@ function BeliefBlock({
   idx: number;
   item: BeliefWithEvidence;
   evidence: Record<string, string[]> | null;
+  articles: Record<string, EvidenceArticle> | null;
   locale: string;
   accent: string;
 }) {
@@ -138,7 +203,7 @@ function BeliefBlock({
       {item.note && (
         <p className="text-[12px] leading-5 text-slate-500 dark:text-slate-400 mt-1">{item.note}</p>
       )}
-      <EvidenceList ids={ids} locale={locale} />
+      <EvidenceList ids={ids} articles={articles} locale={locale} />
     </li>
   );
 }
@@ -175,6 +240,7 @@ export default async function WorldviewBundlePage({
   const theme = BUNDLES[bundle];
   const s = data.synthesis_fa;
   const evidence = data.evidence_fa;
+  const articles = data.evidence_articles;
 
   return (
     <div dir="rtl" className="mx-auto max-w-3xl px-4 py-8">
@@ -236,6 +302,7 @@ export default async function WorldviewBundlePage({
                     idx={i}
                     item={item}
                     evidence={evidence}
+                    articles={articles}
                     locale={locale}
                     accent={theme.accent}
                   />
@@ -257,6 +324,7 @@ export default async function WorldviewBundlePage({
                     idx={i}
                     item={item}
                     evidence={evidence}
+                    articles={articles}
                     locale={locale}
                     accent={theme.accent}
                   />
@@ -303,6 +371,7 @@ export default async function WorldviewBundlePage({
                     idx={i}
                     item={item}
                     evidence={evidence}
+                    articles={articles}
                     locale={locale}
                     accent={theme.accent}
                   />
