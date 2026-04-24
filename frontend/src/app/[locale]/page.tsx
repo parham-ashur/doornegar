@@ -26,7 +26,11 @@ const TELEGRAM_TTL = 300;        // 5 min
 async function fetchAPI<T>(path: string): Promise<T | null> {
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
+    // 20s: Railway cold-starts during ISR regen can easily hit 10s+ while
+    // also serving 15+ parallel telegram calls. The old 8s cap was
+    // aborting trending on those bursts and baking an empty homepage
+    // into the ISR cache for the full 300s revalidate window.
+    const timeout = setTimeout(() => controller.abort(), 20000);
     const res = await fetch(`${API}${path}`, { next: { revalidate: TRENDING_TTL }, signal: controller.signal });
     clearTimeout(timeout);
     if (!res.ok) return null;
@@ -275,11 +279,23 @@ export default async function HomePage({
   setRequestLocale(locale);
   // Stage 1: all independent fetches in parallel — trending,
   // blindspots, weekly digest. None depend on story IDs.
-  const [_stories, _blindspots, weeklyDigestData] = await Promise.all([
-    fetchAPI<StoryBrief[]>("/api/v1/stories/trending?limit=50").then(d => d || []),
+  //
+  // Trending is load-bearing: `_stories` gates everything below and an
+  // empty result triggers the "هنوز موضوعی ایجاد نشده" empty state,
+  // which then gets baked into the ISR cache for 5 min. If fetchAPI
+  // returns null (timeout / transient 5xx during ISR regen) we THROW
+  // instead of silently falling back to [] — that way Next.js fails
+  // the regen and keeps serving the previous successful prerender,
+  // rather than caching a broken empty homepage.
+  const [trendingResult, _blindspots, weeklyDigestData] = await Promise.all([
+    fetchAPI<StoryBrief[]>("/api/v1/stories/trending?limit=50"),
     fetchAPI<StoryBrief[]>("/api/v1/stories/blindspots?limit=10").then(d => d || []),
     fetchAPI<{ status: string; content?: string }>("/api/v1/stories/weekly-digest"),
   ]);
+  if (trendingResult === null) {
+    throw new Error("trending fetch failed during ISR regen — serving stale");
+  }
+  const _stories = trendingResult;
 
   // Skip stories that only have a source-logo fallback as their cover.
   // Per Parham's rule, a story without a real image should never surface

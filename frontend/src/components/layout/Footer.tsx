@@ -1,16 +1,6 @@
-"use client";
-
-import { useState, useEffect } from "react";
-import DoornegarAnimation, { getTodayIcon } from "@/components/common/DoornegarAnimation";
+import DoornegarAnimation from "@/components/common/DoornegarAnimation";
 
 export default function Footer() {
-  const [showIcon, setShowIcon] = useState(false);
-  const icon = getTodayIcon();
-
-  useEffect(() => {
-    const timer = setTimeout(() => setShowIcon(true), 16000);
-    return () => clearTimeout(timer);
-  }, []);
   return (
     <footer className="border-t border-slate-200 bg-white dark:border-slate-800 dark:bg-[#0a0e1a]" dir="rtl">
       <div className="mx-auto max-w-7xl px-4 py-8">
@@ -20,11 +10,6 @@ export default function Footer() {
             <DoornegarAnimation size="footer" />
             <p className="text-2xl md:text-3xl font-black text-slate-900 dark:text-white">
               دورنگر
-              {showIcon && (
-                <span className="inline-block text-xl mr-2 transition-opacity duration-1000">
-                  {icon}
-                </span>
-              )}
             </p>
           </div>
 

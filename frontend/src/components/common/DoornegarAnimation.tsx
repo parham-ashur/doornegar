@@ -348,14 +348,6 @@ const CONSTELLATIONS: Constellation[] = [
   },
 ];
 
-export function getTodayIcon(): string {
-  return CONSTELLATIONS[seedFromDate() % CONSTELLATIONS.length].icon;
-}
-
-export function getTodayName(): string {
-  return CONSTELLATIONS[seedFromDate() % CONSTELLATIONS.length].name_fa;
-}
-
 // ─── Helpers ───────────────────────────────────────────
 
 function hexWithAlpha(hex: string, alpha: number): string {
@@ -378,11 +370,14 @@ function sCurve(a: number, mid: number, b: number, t: number): number {
   }
 }
 
-interface StarPath {
-  x0: number; y0: number;
-  mx: number; my: number;
-  x: number; y: number;
-  delay: number;
+interface StarState {
+  // Constellation anchor (the "pattern" target)
+  patternX: number; patternY: number;
+  // Free-fly wander: center + amplitude + phase per axis
+  wanderCx: number; wanderCy: number;
+  wanderAx: number; wanderAy: number;
+  wanderFx: number; wanderFy: number;
+  wanderPx: number; wanderPy: number;
 }
 
 interface FieldStar {
@@ -394,17 +389,12 @@ interface FieldStar {
 export default function DoornegarAnimation({ size = "footer" }: { size?: Size }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animRef = useRef<number>(0);
-  const startRef = useRef<number>(0);
-  const formedAtRef = useRef<number>(0);
   const seedRef = useRef(seedFromDate());
   const triggeredRef = useRef(false);
 
-  const pathsRef = useRef<StarPath[]>([]);
+  const starsRef = useRef<StarState[]>([]);
   const fieldStarsRef = useRef<FieldStar[]>([]);
   const constellationRef = useRef<Constellation | null>(null);
-
-  // 10s to fully form: 5.5s stars drift in, 4.5s lines connect.
-  const duration = 10000;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -430,19 +420,23 @@ export default function DoornegarAnimation({ size = "footer" }: { size?: Size })
 
       const rng = seededRandom(seed);
 
-      pathsRef.current = constellation.stars.map((s, i) => {
-        const x = bx + s.x * boxSize;
-        const y = by + s.y * boxSize;
-        const angle = rng() * Math.PI * 2;
-        const dist = w * 0.55 + rng() * w * 0.35;
-        const mx = w * 0.5 + (rng() - 0.5) * w * 0.35;
-        const my = h * 0.5 + (rng() - 0.5) * h * 0.35;
-        // Stagger arrivals over the first 30% of the arrival phase
-        const delay = (i / constellation.stars.length) * 0.30;
+      // Each star wanders around a randomized center with its own amplitude
+      // and frequency per axis. When it snaps into the pattern, we
+      // interpolate from the current wander position to the constellation
+      // anchor, hold briefly, then release back to free-fly.
+      starsRef.current = constellation.stars.map((s) => {
+        const patternX = bx + s.x * boxSize;
+        const patternY = by + s.y * boxSize;
         return {
-          x0: w * 0.5 + Math.cos(angle) * dist,
-          y0: h * 0.5 + Math.sin(angle) * dist,
-          mx, my, x, y, delay,
+          patternX, patternY,
+          wanderCx: w * 0.5 + (rng() - 0.5) * w * 0.45,
+          wanderCy: h * 0.5 + (rng() - 0.5) * h * 0.45,
+          wanderAx: w * (0.12 + rng() * 0.18),
+          wanderAy: h * (0.12 + rng() * 0.18),
+          wanderFx: 0.18 + rng() * 0.24,
+          wanderFy: 0.15 + rng() * 0.22,
+          wanderPx: rng() * Math.PI * 2,
+          wanderPy: rng() * Math.PI * 2,
         };
       });
 
@@ -465,13 +459,33 @@ export default function DoornegarAnimation({ size = "footer" }: { size?: Size })
     };
     updateCachedSize();
 
+    // Smoothstep easing for the gather/release blend
+    const smoothstep = (x: number) => {
+      const t = Math.max(0, Math.min(1, x));
+      return t * t * (3 - 2 * t);
+    };
+
+    // 5-second pulse cycle:
+    //   0.00 → 0.55s : free-fly
+    //   0.55 → 0.75s : slow and gather into pattern
+    //   0.75 → 0.90s : hold at the pattern
+    //   0.90 → 1.00s : release back to free-fly
+    // Where 1.0 == full cycle == 5000ms.
+    const CYCLE_MS = 5000;
+    const patternAmount = (cycleT: number): number => {
+      if (cycleT < 0.55) return 0;
+      if (cycleT < 0.75) return smoothstep((cycleT - 0.55) / 0.20);
+      if (cycleT < 0.90) return 1;
+      return 1 - smoothstep((cycleT - 0.90) / 0.10);
+    };
+
     const draw = (timestamp: number) => {
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
 
-      if (!startRef.current) startRef.current = timestamp;
-      const progress = Math.min((timestamp - startRef.current) / duration, 1);
       const time = timestamp * 0.001;
+      const cycleT = (timestamp % CYCLE_MS) / CYCLE_MS;
+      const patternBlend = patternAmount(cycleT);
 
       const w = cachedW;
       const h = cachedH;
@@ -480,97 +494,34 @@ export default function DoornegarAnimation({ size = "footer" }: { size?: Size })
       ctx.fillStyle = isDark ? "#0a0e1a" : "#ffffff";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      if (progress >= 1 && formedAtRef.current === 0) {
-        formedAtRef.current = timestamp;
-      }
-
-      // ── Background field stars (fade in over first 2s) ──
-      const fieldFade = Math.min(progress / 0.2, 1);
+      // ── Background field stars ──
       const fieldColor = isDark ? "#ffffff" : "#334155";
       for (const fs of fieldStarsRef.current) {
         const twinkle = 0.75 + 0.25 * Math.sin(time * 1.4 + fs.twinkleOffset);
-        ctx.fillStyle = hexWithAlpha(fieldColor, fs.alpha * fieldFade * twinkle);
+        ctx.fillStyle = hexWithAlpha(fieldColor, fs.alpha * twinkle);
         ctx.beginPath();
         ctx.arc(fs.x, fs.y, fs.r, 0, Math.PI * 2);
         ctx.fill();
       }
 
       const constellation = constellationRef.current!;
-      const paths = pathsRef.current;
+      const stars = starsRef.current;
       const themeColors = getThemeColors(isDark);
 
-      // ── Phase split ──
-      //   0.00 → 0.55 : stars drift in (per-star delays up to 0.30)
-      //   0.55 → 1.00 : lines draw sequentially
-      const STAR_PHASE_END = 0.55;
-
-      // Current positions of each star
-      const starPositions: { x: number; y: number; arrived: boolean; fadeIn: number }[] = [];
-
-      for (let i = 0; i < constellation.stars.length; i++) {
-        const p = paths[i];
-        const starProgress = Math.max(
-          0,
-          Math.min((progress - p.delay) / Math.max(0.01, STAR_PHASE_END - p.delay), 1)
-        );
-
-        let px: number, py: number;
-        if (starProgress >= 1) {
-          px = p.x;
-          py = p.y;
-        } else {
-          px = sCurve(p.x0, p.mx, p.x, starProgress);
-          py = sCurve(p.y0, p.my, p.y, starProgress);
-        }
-
-        // Fade in over the first 20% of each star's individual arrival
-        const fadeIn = Math.min(starProgress / 0.2, 1);
-        starPositions.push({ x: px, y: py, arrived: starProgress >= 1, fadeIn });
-      }
-
-      // ── Draw connecting lines ──
-      const linePhase = Math.max(0, Math.min((progress - STAR_PHASE_END) / (1 - STAR_PHASE_END), 1));
-      const totalLines = constellation.lines.length;
-
-      for (let li = 0; li < totalLines; li++) {
-        const [a, b] = constellation.lines[li];
-        const posA = starPositions[a];
-        const posB = starPositions[b];
-        if (!posA.arrived || !posB.arrived) continue;
-
-        const slotStart = li / totalLines;
-        const slotEnd = (li + 1) / totalLines;
-        const lineProgress = Math.max(
-          0,
-          Math.min((linePhase - slotStart) / (slotEnd - slotStart), 1)
-        );
-        if (lineProgress <= 0) continue;
-
-        const ex = posA.x + (posB.x - posA.x) * lineProgress;
-        const ey = posA.y + (posB.y - posA.y) * lineProgress;
-
-        ctx.beginPath();
-        ctx.moveTo(posA.x, posA.y);
-        ctx.lineTo(ex, ey);
-        ctx.strokeStyle = hexWithAlpha(themeColors.line, 0.55);
-        ctx.lineWidth = 0.8;
-        ctx.lineCap = "round";
-        ctx.stroke();
-      }
-
-      // ── Draw stars (with glow + post-formation twinkle) ──
+      // ── Draw stars: free-wander blended toward the constellation every 5s ──
       for (let i = 0; i < constellation.stars.length; i++) {
         const starDef = constellation.stars[i];
-        const pos = starPositions[i];
+        const st = stars[i];
+
+        const freeX = st.wanderCx + Math.sin(time * st.wanderFx + st.wanderPx) * st.wanderAx;
+        const freeY = st.wanderCy + Math.cos(time * st.wanderFy + st.wanderPy) * st.wanderAy;
+        const px = freeX + (st.patternX - freeX) * patternBlend;
+        const py = freeY + (st.patternY - freeY) * patternBlend;
 
         const baseR = starDef.bright ? 2.4 : 1.7;
         const glowR = starDef.bright ? 6 : 4;
 
-        // Pick the star's subgroup color. Explicit `group` wins; else
-        // derive from `side`: inside stars alternate principlist/reformist
-        // by index, outside stars alternate moderate/radical. That
-        // yields a roughly balanced 4-color spread across each shape
-        // without having to hand-annotate every constellation.
+        // Subgroup color: explicit `group` wins; else derive from `side`.
         let group: Group;
         if (starDef.group != null) {
           group = starDef.group;
@@ -581,25 +532,24 @@ export default function DoornegarAnimation({ size = "footer" }: { size?: Size })
         }
         const starColor = themeColors[GROUP_KEYS[group]];
 
-        // Post-formation twinkle: gentle sinusoidal brightness shimmer
-        const twinkle = formedAtRef.current > 0
-          ? 0.82 + 0.18 * Math.sin(time * 1.8 + i * 1.37)
-          : 1.0;
-        const alpha = pos.fadeIn * twinkle;
+        // Always-on gentle shimmer + a subtle brightness boost while
+        // gathered in the pattern so the snap registers visually.
+        const twinkle = 0.80 + 0.20 * Math.sin(time * 1.8 + i * 1.37);
+        const alpha = twinkle * (0.75 + 0.25 * patternBlend);
 
         // Glow halo
-        const glow = ctx.createRadialGradient(pos.x, pos.y, 0, pos.x, pos.y, glowR);
+        const glow = ctx.createRadialGradient(px, py, 0, px, py, glowR);
         glow.addColorStop(0, hexWithAlpha(starColor, 0.42 * alpha));
         glow.addColorStop(1, hexWithAlpha(starColor, 0));
         ctx.fillStyle = glow;
         ctx.beginPath();
-        ctx.arc(pos.x, pos.y, glowR, 0, Math.PI * 2);
+        ctx.arc(px, py, glowR, 0, Math.PI * 2);
         ctx.fill();
 
         // Core
         ctx.fillStyle = hexWithAlpha(starColor, alpha);
         ctx.beginPath();
-        ctx.arc(pos.x, pos.y, baseR, 0, Math.PI * 2);
+        ctx.arc(px, py, baseR, 0, Math.PI * 2);
         ctx.fill();
       }
 
@@ -616,7 +566,6 @@ export default function DoornegarAnimation({ size = "footer" }: { size?: Size })
       (entries) => {
         if (entries[0].isIntersecting && !triggeredRef.current) {
           triggeredRef.current = true;
-          startRef.current = 0;
           animRef.current = requestAnimationFrame(draw);
         }
       },
@@ -630,37 +579,19 @@ export default function DoornegarAnimation({ size = "footer" }: { size?: Size })
       window.removeEventListener("resize", handleResize);
       cancelAnimationFrame(animRef.current);
     };
-  }, [size, duration]);
+  }, [size]);
 
   const sizeClasses: Record<Size, string> = {
     footer: "w-[110px] h-[110px]",
   };
 
-  const name = getTodayName();
-
   return (
-    <div className="relative group cursor-default doornegar-tooltip-wrapper">
-      <canvas
-        ref={canvasRef}
-        className={sizeClasses[size]}
-        style={{ display: "block" }}
-        role="img"
-        aria-label={`صورت فلکی امروز: ${name}`}
-      />
-      <span className="doornegar-tooltip absolute -bottom-6 left-1/2 -translate-x-1/2 px-2 py-0.5 text-[10px] font-medium text-slate-500 dark:text-slate-400 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 whitespace-nowrap pointer-events-none">
-        {name}
-      </span>
-      <style>{`
-        .doornegar-tooltip {
-          opacity: 0;
-          transition: opacity 0.3s;
-        }
-        @media (hover: hover) and (pointer: fine) {
-          .doornegar-tooltip-wrapper:hover .doornegar-tooltip {
-            opacity: 1;
-          }
-        }
-      `}</style>
-    </div>
+    <canvas
+      ref={canvasRef}
+      className={sizeClasses[size]}
+      style={{ display: "block" }}
+      role="img"
+      aria-label="دورنگر"
+    />
   );
 }
