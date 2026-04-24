@@ -292,10 +292,12 @@ export default async function HomePage({
     fetchAPI<StoryBrief[]>("/api/v1/stories/blindspots?limit=10").then(d => d || []),
     fetchAPI<{ status: string; content?: string }>("/api/v1/stories/weekly-digest"),
   ]);
-  const _stories: StoryBrief[] =
-    trendingFirst
-    ?? (await fetchAPI<StoryBrief[]>("/api/v1/stories/trending?limit=50"))
-    ?? [];
+  let _stories: StoryBrief[] | null = trendingFirst;
+  for (let attempt = 1; _stories === null && attempt <= 3; attempt++) {
+    await new Promise((r) => setTimeout(r, 1500 * attempt));
+    _stories = await fetchAPI<StoryBrief[]>("/api/v1/stories/trending?limit=50");
+  }
+  if (_stories === null) _stories = [];
 
   // Skip stories that only have a source-logo fallback as their cover.
   // Per Parham's rule, a story without a real image should never surface
