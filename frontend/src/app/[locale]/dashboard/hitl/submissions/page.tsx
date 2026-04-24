@@ -24,11 +24,11 @@ interface Submission {
 }
 
 const STATUS_LABELS: Record<string, string> = {
-  pending: "در انتظار",
-  accepted_article: "پذیرفته (مقاله)",
-  accepted_post: "پذیرفته (پست)",
-  rejected: "رد",
-  duplicate: "تکراری",
+  pending: "Pending",
+  accepted_article: "Accepted (article)",
+  accepted_post: "Accepted (post)",
+  rejected: "Rejected",
+  duplicate: "Duplicate",
 };
 
 export default function SubmissionsPage() {
@@ -65,7 +65,7 @@ export default function SubmissionsPage() {
   }, [load]);
 
   const act = async (id: string, status: string) => {
-    if (!confirm(`مطمئنید؟ وضعیت → ${STATUS_LABELS[status]}`)) return;
+    if (!confirm(`Confirm status → ${STATUS_LABELS[status]}?`)) return;
     const res = await fetch(`${API}/api/v1/submissions/${id}`, {
       method: "PATCH",
       headers: { ...adminHeaders(), "Content-Type": "application/json" },
@@ -75,15 +75,15 @@ export default function SubmissionsPage() {
       load();
     } else {
       const err = await res.json().catch(() => ({}));
-      alert(`خطا: ${err.detail || res.statusText}`);
+      alert(`Error: ${err.detail || res.statusText}`);
     }
   };
 
   if (!authed) {
     return (
       <div>
-        <h1 className="text-xl font-black mb-4">ارسال‌ها</h1>
-        <p className="text-[13px] mb-3">توکن ادمین را وارد کنید:</p>
+        <h1 className="text-xl font-black mb-4">User submissions</h1>
+        <p className="text-[13px] mb-3">Enter admin token:</p>
         <div className="flex gap-2">
           <input
             type="password"
@@ -100,7 +100,7 @@ export default function SubmissionsPage() {
             }}
             className="px-4 py-2 text-[13px] bg-blue-600 text-white"
           >
-            ذخیره
+            Save
           </button>
         </div>
       </div>
@@ -111,7 +111,7 @@ export default function SubmissionsPage() {
     <div>
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-black text-slate-900 dark:text-white">
-          ارسال‌های کاربران
+          User submissions
         </h1>
         <div className="flex gap-2">
           {Object.keys(STATUS_LABELS).map((s) => (
@@ -131,9 +131,9 @@ export default function SubmissionsPage() {
         </div>
       </div>
 
-      {loading && <p className="text-[13px] text-slate-500">در حال بارگذاری...</p>}
+      {loading && <p className="text-[13px] text-slate-500">Loading…</p>}
       {!loading && items.length === 0 && (
-        <p className="text-[13px] text-slate-500">موردی یافت نشد.</p>
+        <p className="text-[13px] text-slate-500">No items found.</p>
       )}
 
       <div className="space-y-4">
@@ -154,10 +154,10 @@ export default function SubmissionsPage() {
                     </span>
                   )}
                   {it.is_analyst === true && (
-                    <span className="text-[12px] text-emerald-600">تحلیلگر</span>
+                    <span className="text-[12px] text-emerald-600">Analyst</span>
                   )}
-                  <span className="text-[12px] text-slate-400">
-                    {new Date(it.created_at).toLocaleString("fa-IR")}
+                  <span className="text-[12px] text-slate-400" dir="ltr">
+                    {new Date(it.created_at).toLocaleString("en-US")}
                   </span>
                 </div>
                 {it.title && (
@@ -180,21 +180,21 @@ export default function SubmissionsPage() {
                     }
                     className="px-3 py-1 text-[12px] bg-emerald-600 text-white"
                   >
-                    پذیرش
+                    Accept
                   </button>
                   <button
                     type="button"
                     onClick={() => act(it.id, "rejected")}
                     className="px-3 py-1 text-[12px] bg-red-600 text-white"
                   >
-                    رد
+                    Reject
                   </button>
                   <button
                     type="button"
                     onClick={() => act(it.id, "duplicate")}
                     className="px-3 py-1 text-[12px] bg-slate-500 text-white"
                   >
-                    تکراری
+                    Duplicate
                   </button>
                 </div>
               )}
@@ -214,7 +214,7 @@ export default function SubmissionsPage() {
             )}
             {it.submitter_note && (
               <p className="text-[12px] text-slate-500 mt-2 italic">
-                یادداشت فرستنده: {it.submitter_note}
+                Submitter note: {it.submitter_note}
               </p>
             )}
             {it.suggested_story_id && (
@@ -224,7 +224,7 @@ export default function SubmissionsPage() {
                 rel="noreferrer"
                 className="text-[12px] text-blue-500 mt-1 block"
               >
-                ← پیشنهاد اتصال به خبر
+                → Suggested story link
               </a>
             )}
           </div>
