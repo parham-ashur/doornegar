@@ -398,38 +398,47 @@ def _build_prompt(agg: BundleAggregate) -> str:
     )
 
 
-async def _call_claude(prompt: str, system: str, bundle: str) -> tuple[str, dict]:
+SYNTHESIS_MODEL = "gpt-4o-mini"
+
+
+async def _call_llm(prompt: str, system: str, bundle: str) -> tuple[str, dict]:
     """Send one synthesis call; log usage under purpose='worldview_digest'.
 
-    Returns (text, usage_dict). Raises on transport / API failure — the
-    caller catches per-bundle so one failure doesn't take down the
-    whole weekly run.
+    Uses OpenAI gpt-4o-mini per Parham's 2026-04-24 decision. Chosen for
+    cost ($0.15/1M input, $0.60/1M output) and for the strict JSON
+    response_format which enforces parseable output without prompt-level
+    pleading. Returns (text, usage_dict). Raises on transport / API
+    failure — the caller catches per-bundle so one bundle blowing up
+    doesn't take down the rest of the weekly run.
     """
-    import anthropic
+    import openai
 
-    if not settings.anthropic_api_key:
-        raise RuntimeError("ANTHROPIC_API_KEY not configured for worldview synthesis")
+    if not settings.openai_api_key:
+        raise RuntimeError("OPENAI_API_KEY not configured for worldview synthesis")
 
-    model = "claude-haiku-4-5-20251001"
-    client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
-    msg = await client.messages.create(
-        model=model,
+    client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
+    response = await client.chat.completions.create(
+        model=SYNTHESIS_MODEL,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt},
+        ],
         max_tokens=2048,
-        system=system,
-        messages=[{"role": "user", "content": prompt}],
+        temperature=0.2,
+        response_format={"type": "json_object"},
     )
-    text = msg.content[0].text if msg.content else ""
-    usage = {
-        "input_tokens": getattr(msg.usage, "input_tokens", 0),
-        "output_tokens": getattr(msg.usage, "output_tokens", 0),
-    }
+    text = response.choices[0].message.content or ""
     # Cost tagged by purpose so /dashboard/cost can isolate worldview spend.
     await log_llm_usage(
-        model=model,
+        model=SYNTHESIS_MODEL,
         purpose="worldview_digest",
-        usage=usage,
+        usage=response.usage,
         meta={"bundle": bundle},
     )
+    usage = {
+        "input_tokens": getattr(response.usage, "prompt_tokens", 0) if response.usage else 0,
+        "output_tokens": getattr(response.usage, "completion_tokens", 0) if response.usage else 0,
+    }
     return text, usage
 
 
@@ -621,7 +630,7 @@ async def generate_worldview_digests(
         # Synthesis call. One bundle failing must not take down the rest.
         try:
             prompt = _build_prompt(agg)
-            text, usage = await _call_claude(
+            text, usage = await _call_llm(
                 prompt=prompt,
                 system=_WORLDVIEW_PROMPT_SYSTEM,
                 bundle=bundle,
@@ -631,17 +640,18 @@ async def generate_worldview_digests(
                 raise RuntimeError("LLM returned non-JSON output")
             synthesis, evidence = _validate_and_trim(parsed, agg)
             # Rough cost estimate mirrored on the row for UI convenience.
-            # Authoritative ledger is llm_usage_logs.
+            # Authoritative ledger is llm_usage_logs. Pricing matches
+            # gpt-4o-mini: $0.15 / 1M input, $0.60 / 1M output.
             in_tok = usage.get("input_tokens", 0)
             out_tok = usage.get("output_tokens", 0)
             total_in += in_tok
             total_out += out_tok
-            cost_usd = (in_tok * 0.80 + out_tok * 4.00) / 1_000_000
+            cost_usd = (in_tok * 0.15 + out_tok * 0.60) / 1_000_000
             await _upsert_digest(
                 db, bundle, window_start.date(), window_end.date(),
                 status="ok",
                 agg=agg, synthesis=synthesis, evidence=evidence,
-                model_used="claude-haiku-4-5-20251001",
+                model_used=SYNTHESIS_MODEL,
                 token_cost_usd=cost_usd,
             )
             stats["per_bundle"][bundle] = {
@@ -663,6 +673,6 @@ async def generate_worldview_digests(
     stats["total_input_tokens"] = total_in
     stats["total_output_tokens"] = total_out
     stats["total_cost_usd"] = round(
-        (total_in * 0.80 + total_out * 4.00) / 1_000_000, 5
+        (total_in * 0.15 + total_out * 0.60) / 1_000_000, 5
     )
     return stats
