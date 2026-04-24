@@ -41,14 +41,22 @@ export default function TelegramDiscussions({
   prefetchedData?: AnalysisItem[];
   locale?: string;
 }) {
+  // If the server handed us a populated prefetch, trust it and skip the
+  // client fetch. If prefetchedData is empty but storyIds are provided,
+  // fall through to the client-side fetch — this handles the SSR
+  // regression where 15 parallel Railway calls on ISR regen all fail
+  // under load and bake `[]` into the cached HTML. Without this
+  // fallback the sidebar stays blank for the full 300s revalidate
+  // window even though the backend has the data.
+  const hasPrefetch = !!prefetchedData?.length;
+  const canFallbackFetch = !hasPrefetch && !!storyIds?.length;
   const [items, setItems] = useState<AnalysisItem[]>(prefetchedData || []);
-  const [dataReady, setDataReady] = useState(!!prefetchedData?.length);
+  const [dataReady, setDataReady] = useState(hasPrefetch);
   const [animDone, setAnimDone] = useState(false);
-  const [noData, setNoData] = useState(prefetchedData !== undefined && prefetchedData.length === 0);
+  const [noData, setNoData] = useState(prefetchedData !== undefined && prefetchedData.length === 0 && !canFallbackFetch);
 
-  // Fetch client-side if no prefetched data
   useEffect(() => {
-    if (prefetchedData?.length) return;
+    if (hasPrefetch) return;
     if (!storyIds || storyIds.length === 0) {
       setNoData(true);
       setDataReady(true);
@@ -72,7 +80,7 @@ export default function TelegramDiscussions({
     });
 
     return () => { cancelled = true; };
-  }, [storyIds, prefetchedData]);
+  }, [storyIds, hasPrefetch]);
 
   const handleAnimComplete = useCallback(() => setAnimDone(true), []);
 

@@ -663,6 +663,7 @@ export default async function HomePage({
           allAnalyses={allAnalyses}
           heroTelegram={heroTelegram}
           prefetchedTelegram={prefetchedTelegram}
+          telegramAnalysisIds={telegramAnalysisIds}
           battleItems={battleItems}
           weeklyDigestContent={weeklyDigestData?.content || null}
         />
@@ -687,7 +688,7 @@ export default async function HomePage({
             تحلیل روایت‌های تلگرام
           </h3>
           <div className="flex-1 min-h-0 overflow-hidden">
-            <TelegramDiscussions prefetchedData={prefetchedTelegram} locale={locale} />
+            <TelegramDiscussions prefetchedData={prefetchedTelegram} storyIds={telegramAnalysisIds} locale={locale} />
           </div>
         </div>
 
@@ -1145,6 +1146,7 @@ function MobileHome({
   allAnalyses,
   heroTelegram,
   prefetchedTelegram,
+  telegramAnalysisIds,
   battleItems,
   weeklyDigestContent,
 }: {
@@ -1157,6 +1159,7 @@ function MobileHome({
   allAnalyses: Record<string, { bias_explanation_fa?: string; state_summary_fa?: string; diaspora_summary_fa?: string } | null>;
   heroTelegram: { discourse_summary?: string; predictions?: any[]; key_claims?: any[] } | null;
   prefetchedTelegram: { storyId: string; analysis: any }[];
+  telegramAnalysisIds: string[];
   battleItems: Array<{
     storyId: string;
     title: string;
@@ -1295,7 +1298,7 @@ function MobileHome({
         <h3 className="text-[15px] font-black text-slate-900 dark:text-white mb-3 pb-2 border-b border-slate-200 dark:border-slate-800">
           تحلیل روایت‌های تلگرام
         </h3>
-        <TelegramDiscussions prefetchedData={prefetchedTelegram} locale={locale} />
+        <TelegramDiscussions prefetchedData={prefetchedTelegram} storyIds={telegramAnalysisIds} locale={locale} />
       </div>
 
       {/* ── 3. Blind spots ── */}
