@@ -261,7 +261,7 @@ export default function HubPage() {
       setData(d);
       setCost(c);
     } catch (e: any) {
-      setErr(e?.message || "خطا");
+      setErr(e?.message || "Error");
     } finally {
       setLoading(false);
     }
@@ -314,7 +314,7 @@ export default function HubPage() {
   if (!authed) {
     return (
       <div className="p-8 max-w-md mx-auto">
-        <h1 className="text-xl font-bold mb-4">ورود ادمین</h1>
+        <h1 className="text-xl font-bold mb-4">Admin sign-in</h1>
         <input
           type="password"
           className="w-full border border-slate-300 dark:border-slate-700 px-3 py-2 bg-transparent"
@@ -329,7 +329,7 @@ export default function HubPage() {
             setAuthed(true);
           }}
         >
-          ورود
+          Sign in
         </button>
       </div>
     );
