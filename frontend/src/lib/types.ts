@@ -117,6 +117,10 @@ export interface StoryBrief {
   view_count: number;
   priority: number;
   image_url: string | null;
+  // True when image_url came from a real article image or a curator-pinned
+  // manual override. False when it's a logo fallback or missing. Homepage
+  // and related-stories lists filter on this to hide logo-only cards.
+  has_real_image?: boolean;
   // Legacy 3-bucket percentages (kept while the 4-group UI is rolled out).
   state_pct: number;
   diaspora_pct: number;

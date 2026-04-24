@@ -43,6 +43,13 @@ class StoryBrief(BaseModel):
     view_count: int = 0
     priority: int = 0
     image_url: str | None = None
+    # True when image_url was resolved from a real article image or a
+    # curator-pinned manual override; false when it came from a source
+    # logo fallback or is missing entirely. Frontend filters homepage
+    # and related-stories lists on this so cards don't show with just
+    # a logo as the cover. See /admin/hitl/stories-without-image for
+    # the priority-sorted HITL queue.
+    has_real_image: bool = False
     # Legacy 2-axis percentages (kept for backwards compat; remove after frontend migrates)
     state_pct: int = 0
     diaspora_pct: int = 0

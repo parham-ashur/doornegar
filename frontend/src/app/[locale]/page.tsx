@@ -275,11 +275,23 @@ export default async function HomePage({
   setRequestLocale(locale);
   // Stage 1: all independent fetches in parallel — trending,
   // blindspots, weekly digest. None depend on story IDs.
-  const [stories, blindspots, weeklyDigestData] = await Promise.all([
+  const [_stories, _blindspots, weeklyDigestData] = await Promise.all([
     fetchAPI<StoryBrief[]>("/api/v1/stories/trending?limit=50").then(d => d || []),
     fetchAPI<StoryBrief[]>("/api/v1/stories/blindspots?limit=10").then(d => d || []),
     fetchAPI<{ status: string; content?: string }>("/api/v1/stories/weekly-digest"),
   ]);
+
+  // Skip stories that only have a source-logo fallback as their cover.
+  // Per Parham's rule, a story without a real image should never surface
+  // on the homepage — it looks broken and dilutes the editorial feed.
+  // Those stories are still accessible via direct link and are queued for
+  // HITL image assignment at /admin/hitl/stories-without-image.
+  // `has_real_image` is undefined on older cached responses; treat
+  // undefined as "assume true" so a rollout of the backend flag doesn't
+  // blank the homepage on stale caches.
+  const hasImage = (s: StoryBrief) => s.has_real_image !== false;
+  const stories = _stories.filter(hasImage);
+  const blindspots = _blindspots.filter(hasImage);
 
   if (stories.length === 0) {
     return (

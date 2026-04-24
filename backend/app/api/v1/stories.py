@@ -642,9 +642,11 @@ async def get_related_stories(
             or u.endswith(".svg") or "1x1" in u or "placeholder" in u
         )
 
-    def _pick_image(s: Story) -> str | None:
-        # Prefer stable R2 images, then articles with real images, then
-        # source logo as a last resort.
+    def _pick_real_image(s: Story) -> str | None:
+        # Only real article images or R2-stable covers — NO logo fallback.
+        # Related-stories filters out logo-only cards to avoid showing
+        # placeholder-y tiles at the bottom of story pages. Stories without
+        # a real image flow to the /admin/hitl/stories-without-image queue.
         r2_prefix = settings.r2_public_url or ""
         for a in s.articles or []:
             if a.image_url and not _is_bad_img(a.image_url):
@@ -653,15 +655,15 @@ async def get_related_stories(
         for a in s.articles or []:
             if a.image_url and not _is_bad_img(a.image_url):
                 return a.image_url
-        for a in s.articles or []:
-            if a.source and a.source.logo_url and not _is_bad_img(a.source.logo_url):
-                return a.source.logo_url
         return None
 
     out = []
     for sid in picked_ids:
         s = by_id.get(sid)
         if not s:
+            continue
+        img = _pick_real_image(s)
+        if img is None:
             continue
         out.append({
             "id": str(s.id),
@@ -672,7 +674,7 @@ async def get_related_stories(
             "source_count": s.source_count,
             "first_published_at": s.first_published_at.isoformat() if s.first_published_at else None,
             "arc_id": str(s.arc_id) if s.arc_id else None,
-            "image_url": _pick_image(s),
+            "image_url": img,
         })
     return {"stories": out, "count": len(out)}
 
@@ -856,6 +858,7 @@ def _story_brief_with_extras(story: Story) -> StoryBrief:
 
     if manual_image:
         brief.image_url = manual_image
+        brief.has_real_image = True
         _skip_scorer = True
     else:
         _skip_scorer = False
@@ -886,9 +889,12 @@ def _story_brief_with_extras(story: Story) -> StoryBrief:
 
         best = max(candidates, key=_score)
         brief.image_url = best.image_url
+        brief.has_real_image = True
 
     # Last-resort fallback: if no article image AND no manual override,
     # use the primary active source's logo so the homepage card isn't blank.
+    # has_real_image stays False on this path so homepage/related filters
+    # can hide cards that would otherwise show with only a logo.
     # Skip bad logos (tiny favicons, geo-blocked Google Favicons) and prefer
     # active sources over deactivated ones.
     if not brief.image_url:
