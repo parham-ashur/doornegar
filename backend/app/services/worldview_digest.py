@@ -75,9 +75,9 @@ class BundleAggregate:
     bundle: NarrativeGroup
     window_start: datetime
     window_end: datetime
-    article_count: int
-    source_count: int
-    bias_coverage_pct: float
+    article_count: int = 0
+    source_count: int = 0
+    bias_coverage_pct: float = 0.0
     # article_id → source_id lookup (string UUIDs) so belief validation can
     # verify ≥2 distinct sources per cited set.
     article_to_source: dict[str, str] = field(default_factory=dict)
