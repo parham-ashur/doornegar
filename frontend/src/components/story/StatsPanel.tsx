@@ -109,12 +109,26 @@ export default function StatsPanel({
         </div>
       )}
 
-      {/* Silence detection */}
+      {/* Silence detection. Fires when ≥3 articles cover the story from
+          one side AND exactly 0 from the other — a one-sided-coverage
+          alert that's editorially load-bearing. */}
       {silenceAnalysis && (
         <div className="border-t border-slate-200 dark:border-slate-800 pt-4">
           <div className="flex items-center gap-2 mb-2">
             <VolumeX className="h-3.5 w-3.5 text-amber-500" />
-            <h4 className="text-[14px] font-bold text-slate-900 dark:text-white">سکوت رسانه‌ای</h4>
+            <h4 className="flex items-center gap-1 text-[14px] font-bold text-slate-900 dark:text-white">
+              سکوت رسانه‌ای
+              <span
+                className="inline-flex items-center cursor-help text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                title={
+                  "این نشانه زمانی فعال می‌شود که دست‌کم سه رسانه از یک سو خبر را پوشش داده‌اند و هیچ رسانه‌ای از سوی مقابل اشاره‌ای به آن نکرده است. " +
+                  "هدف این است که نبودن پوشش به اندازهٔ بودن آن اهمیت دارد؛ خواننده ببیند چه خبری از نظر یک سو اصلاً وجود نداشته است."
+                }
+                aria-label="توضیح سکوت رسانه‌ای"
+              >
+                <Info className="h-3 w-3" />
+              </span>
+            </h4>
           </div>
           <p className="text-[14px] leading-5 text-amber-600 dark:text-amber-400">
             {typeof silenceAnalysis === "string"
@@ -125,12 +139,27 @@ export default function StatsPanel({
         </div>
       )}
 
-      {/* Coordinated messaging */}
+      {/* Coordinated messaging. Fires when ≥3 sources in the same bundle
+          publish within 6 hours of each other with embedding cosine > 0.85
+          — i.e. near-identical phrasing clustered in time, a common
+          astroturf / talking-point signal. */}
       {coordination && (
         <div className="border-t border-slate-200 dark:border-slate-800 pt-4">
           <div className="flex items-center gap-2 mb-2">
             <Radio className="h-3.5 w-3.5 text-red-500" />
-            <h4 className="text-[14px] font-bold text-slate-900 dark:text-white">پیام هماهنگ</h4>
+            <h4 className="flex items-center gap-1 text-[14px] font-bold text-slate-900 dark:text-white">
+              پیام هماهنگ
+              <span
+                className="inline-flex items-center cursor-help text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                title={
+                  "این نشانه زمانی فعال می‌شود که دست‌کم سه رسانه از یک سو، در فاصلهٔ کمتر از شش ساعت، متن‌هایی با شباهت بسیار بالا منتشر کنند. " +
+                  "چنین الگویی معمولاً نشانهٔ پیام‌رسانی هماهنگ یا خط رسانه‌ای مشترک است و به خواننده کمک می‌کند محتوا را با احتیاط بیشتری بخواند."
+                }
+                aria-label="توضیح پیام هماهنگ"
+              >
+                <Info className="h-3 w-3" />
+              </span>
+            </h4>
           </div>
           <p className="text-[14px] text-slate-500 dark:text-slate-400">
             {coordination.sources?.length || 0} رسانه {coordination.side === "state" ? "درون‌مرزی" : "برون‌مرزی"} پیام مشابه منتشر کردند

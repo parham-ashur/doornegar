@@ -70,7 +70,16 @@ export default function StoryTimeline({ articles }: Props) {
     return groups;
   }, [articles]);
 
-  if (dayGroups.length < 2) return null;
+  // When all coverage falls on a single Tehran-local day, there is no
+  // meaningful "trend" yet — show the reader WHY the section looks
+  // empty rather than rendering nothing inside the collapsible card.
+  if (dayGroups.length < 2) {
+    return (
+      <p className="text-[13px] leading-6 text-slate-500 dark:text-slate-400" dir="rtl">
+        روند پوشش این خبر از روز دوم پوشش اضافه خواهد شد.
+      </p>
+    );
+  }
 
   const renderSide = (articles: TimelineArticle[], color: string) => {
     if (articles.length === 0) return <p className="text-[13px] text-slate-300 dark:text-slate-600">—</p>;
