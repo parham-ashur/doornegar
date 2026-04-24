@@ -280,22 +280,22 @@ export default async function HomePage({
   // Stage 1: all independent fetches in parallel — trending,
   // blindspots, weekly digest. None depend on story IDs.
   //
-  // Trending is load-bearing: `_stories` gates everything below and an
-  // empty result triggers the "هنوز موضوعی ایجاد نشده" empty state,
-  // which then gets baked into the ISR cache for 5 min. If fetchAPI
-  // returns null (timeout / transient 5xx during ISR regen) we THROW
-  // instead of silently falling back to [] — that way Next.js fails
-  // the regen and keeps serving the previous successful prerender,
-  // rather than caching a broken empty homepage.
-  const [trendingResult, _blindspots, weeklyDigestData] = await Promise.all([
+  // Trending is load-bearing (`_stories` gates the whole render). If
+  // fetchAPI returns null (20s timeout or 5xx) we retry once with a
+  // fresh controller before giving up. A single transient Railway
+  // hiccup was baking the "هنوز موضوعی ایجاد نشده" empty state into
+  // the ISR cache for 300s. Throwing would be cleaner but kills the
+  // initial `next build` prerender (no prior cached version exists
+  // then), so we retry instead and accept occasional empty caches.
+  const [trendingFirst, _blindspots, weeklyDigestData] = await Promise.all([
     fetchAPI<StoryBrief[]>("/api/v1/stories/trending?limit=50"),
     fetchAPI<StoryBrief[]>("/api/v1/stories/blindspots?limit=10").then(d => d || []),
     fetchAPI<{ status: string; content?: string }>("/api/v1/stories/weekly-digest"),
   ]);
-  if (trendingResult === null) {
-    throw new Error("trending fetch failed during ISR regen — serving stale");
-  }
-  const _stories = trendingResult;
+  const _stories: StoryBrief[] =
+    trendingFirst
+    ?? (await fetchAPI<StoryBrief[]>("/api/v1/stories/trending?limit=50"))
+    ?? [];
 
   // Skip stories that only have a source-logo fallback as their cover.
   // Per Parham's rule, a story without a real image should never surface
