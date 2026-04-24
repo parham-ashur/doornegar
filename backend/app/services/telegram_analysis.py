@@ -602,13 +602,9 @@ async def analyze_story_telegram(
         params = build_openai_params(
             model=model,
             prompt=prompt,
-            # Bumped 1200→1800 after the prompt was rewritten to ask
-            # for 4-6 predictions (up from 2) and distilled (no channel
-            # names, no quotes) claim text. 1200 capped the list at 2
-            # predictions in practice because the full JSON
-            # (worldviews + consensus + missing_voices + …) ate most of
-            # the budget before predictions filled out.
-            max_tokens=1800,
+            # Full JSON envelope (4-6 predictions + worldviews + claims
+            # + consensus + missing_voices) fits in ~1500 tokens.
+            max_tokens=1500,
             temperature=0.2,
         )
         response = await client.chat.completions.create(**params)

@@ -265,6 +265,38 @@ export interface StoryAnalysis {
   } | null;
 }
 
+// ─── Telegram analysis ──────────────────────────
+
+export type TelegramPrediction =
+  | string
+  | {
+      text: string;
+      supporters?: string[];
+      supporter_count?: number;
+      analysts_total?: number;
+      pct?: number;
+    };
+
+export type TelegramClaim = string | { text: string };
+
+export interface TelegramAnalysis {
+  discourse_summary?: string;
+  predictions?: TelegramPrediction[];
+  key_claims?: TelegramClaim[];
+  predictions_display?: TelegramPrediction[];
+  key_claims_display?: TelegramClaim[];
+  worldviews?: {
+    pro_regime?: string;
+    opposition?: string;
+    neutral?: string;
+  };
+  number_battle?: string;
+  coordinated_messaging?: string;
+  consensus?: string;
+  missing_voices?: string;
+  reliability_note?: string;
+}
+
 // ─── Lab / Topics ──────────────────────────────
 
 export interface TopicBrief {

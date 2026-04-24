@@ -3,21 +3,16 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import TelegramAnalyzingAnimation from "@/components/common/TelegramAnalyzingAnimation";
-import { toFa } from "@/lib/utils";
-import { cleanPrediction, cleanClaim } from "@/lib/telegram-text";
+import {
+  cleanClaim,
+  cleanPrediction,
+  displayClaims,
+  displayPredictions,
+  getCredLabel,
+} from "@/lib/telegram-text";
+import type { TelegramAnalysis } from "@/lib/types";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-
-interface TelegramAnalysis {
-  discourse_summary: string;
-  predictions?: any[];
-  key_claims?: any[];
-  // Niloofar-polished versions for homepage display. When present, these
-  // replace `predictions` / `key_claims` in UI. Raw fields stay intact for
-  // the full story page, which keeps the "موضوع: X |" grouping intact.
-  predictions_display?: any[];
-  key_claims_display?: any[];
-}
 
 interface AnalysisItem {
   storyId: string;
@@ -103,21 +98,15 @@ export default function TelegramDiscussions({
   const seenClaim = new Set<string>();
 
   for (const item of items) {
-    // Prefer Niloofar-polished versions when available. Raw fields still
-    // feed the story page where the "موضوع: X |" grouping stays useful.
-    const preds = item.analysis.predictions_display || item.analysis.predictions || [];
-    const kclaims = item.analysis.key_claims_display || item.analysis.key_claims || [];
+    const preds = displayPredictions(item.analysis);
+    const kclaims = displayClaims(item.analysis);
     for (const p of preds) {
-      const text = typeof p === "string" ? p : (p as any).text || "";
-      const pct = typeof p === "object" ? (p as any).pct : undefined;
-      const supporterCount = typeof p === "object" ? (p as any).supporter_count : undefined;
-      const analystsTotal = typeof p === "object" ? (p as any).analysts_total : undefined;
-      // Dedup by full text (was first-30-chars which collapsed every
-      // prediction starting with «احتمال ادامه …» into one, squashing
-      // 18 raw items down to 2). Full-text exact match still catches
-      // true dupes (same Niloofar-polished phrasing across merged
-      // stories) without eating near-duplicates that actually differ
-      // past the first clause.
+      const text = typeof p === "string" ? p : p.text || "";
+      const pct = typeof p === "object" ? p.pct : undefined;
+      const supporterCount = typeof p === "object" ? p.supporter_count : undefined;
+      const analystsTotal = typeof p === "object" ? p.analysts_total : undefined;
+      // Dedup by full text — first-30-chars was collapsing every prediction
+      // starting with «احتمال ادامه …» into one.
       const key = text.trim();
       if (text && !seenPred.has(key)) {
         seenPred.add(key);
@@ -125,7 +114,7 @@ export default function TelegramDiscussions({
       }
     }
     for (const c of kclaims) {
-      const text = typeof c === "string" ? c : (c as any).text || String(c);
+      const text = typeof c === "string" ? c : c.text || "";
       const key = text.trim();
       if (text && !seenClaim.has(key)) {
         seenClaim.add(key);
@@ -134,36 +123,10 @@ export default function TelegramDiscussions({
     }
   }
 
-  // Strip "در آینده،" (predictions) and "موضوع: X |" (claims) first — those
-  // are LLM label-boilerplate the Pass-2 prompt explicitly requests.
-  // Then strip numbering, bullets, and "با توجه به X،" hedges.
-  // Channel attribution («کانال X ادعا کرد/کردند/کرده است...») is already
-  // handled inside cleanClaim — earlier ad-hoc regexes that only matched
-  // singular «ادعا کرد» were leaving orphan «ند» / «کرده است» heads.
   const clean = (t: string) => cleanClaim(cleanPrediction(t))
     .replace(/^[\s۰-۹0-9]+[).\-–]\s*/, "")
     .replace(/^[•·]\s*/, "")
     .replace(/^با توجه به [^،]+،\s*/, "");
-
-  // Extract credibility label from claim text. Niloofar's polish step
-  // prefixes each claim with one of these exact labels followed by a
-  // colon («تأیید شده: …», «مشکوک: …», «تبلیغاتی: …», «تک‌منبع: …»,
-  // «نیازمند تأیید: …»). Leading-prefix matches are preferred; free-text
-  // keyword fallbacks stay below for un-polished claims that still
-  // carry an "(… — cred)" suffix from pass-2.
-  const getCredLabel = (t: string): { label: string; color: string } | null => {
-    if (/^تأیید شده\s*:|^تایید شده\s*:/.test(t)) return { label: "تأیید شده", color: "text-emerald-500" };
-    if (/^مشکوک\s*:/.test(t)) return { label: "مشکوک", color: "text-red-500" };
-    if (/^تبلیغاتی\s*:/.test(t)) return { label: "تبلیغاتی", color: "text-red-400" };
-    if (/^تک[‌\s]?منبع\s*:/.test(t)) return { label: "تک‌منبع", color: "text-amber-500" };
-    if (/^نیازمند تأیید\s*:|^نیازمند تایید\s*:/.test(t)) return { label: "نیازمند تأیید", color: "text-amber-500" };
-    // Free-text fallback for un-polished claims
-    if (/مشکوک|اغراق|بعید|غیرواقعی/.test(t)) return { label: "مشکوک", color: "text-red-500" };
-    if (/تبلیغاتی|جنبه تبلیغی|پروپاگاند/.test(t)) return { label: "تبلیغاتی", color: "text-red-400" };
-    if (/نیازمند.*تایید|نیازمند.*تأیید|نیاز به تایید|نیاز به تأیید|تأیید نشده|تایید نشده|قابل.تأیید نیست|نیازمند.*مستقل|صحت.*نیاز/.test(t)) return { label: "تأیید نشده", color: "text-amber-500" };
-    if (/قابل.اعتبار|تایید شده|تأیید شده|قابل.اعتماد|معتبر/.test(t)) return { label: "تأیید شده", color: "text-emerald-500" };
-    return null;
-  };
 
   // Sort predictions by pct (if available), then by length
   predictions.sort((a, b) => (b.pct || 0) - (a.pct || 0) || b.text.length - a.text.length);

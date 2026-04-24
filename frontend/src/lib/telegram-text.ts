@@ -1,3 +1,9 @@
+import type {
+  TelegramAnalysis,
+  TelegramClaim,
+  TelegramPrediction,
+} from "./types";
+
 // Shared normalizers for Telegram-analysis predictions and claims.
 //
 // Predictions: the UI already labels the section "پیش‌بینی" ("prediction"),
@@ -67,6 +73,35 @@ export function cleanClaim(text: string): string {
   );
   t = t.replace(/^به گفتهٔ\s+[^،]+،\s*/, "");
   return t.trim();
+}
+
+export function displayPredictions(a: TelegramAnalysis | null | undefined): TelegramPrediction[] {
+  return a?.predictions_display || a?.predictions || [];
+}
+
+export function displayClaims(a: TelegramAnalysis | null | undefined): TelegramClaim[] {
+  return a?.key_claims_display || a?.key_claims || [];
+}
+
+export interface CredLabel {
+  label: string;
+  color: string;
+}
+
+// Niloofar's polish step prefixes each claim with one of these exact
+// labels followed by a colon. Free-text fallbacks below cover pre-polish
+// claims that still carry an "(… — cred)" suffix from pass-2.
+export function getCredLabel(t: string): CredLabel | null {
+  if (/^تأیید شده\s*:|^تایید شده\s*:/.test(t)) return { label: "تأیید شده", color: "text-emerald-500" };
+  if (/^مشکوک\s*:/.test(t)) return { label: "مشکوک", color: "text-red-500" };
+  if (/^تبلیغاتی\s*:/.test(t)) return { label: "تبلیغاتی", color: "text-red-400" };
+  if (/^تک[‌\s]?منبع\s*:/.test(t)) return { label: "تک‌منبع", color: "text-amber-500" };
+  if (/^نیازمند تأیید\s*:|^نیازمند تایید\s*:/.test(t)) return { label: "نیازمند تأیید", color: "text-amber-500" };
+  if (/مشکوک|اغراق|بعید|غیرواقعی/.test(t)) return { label: "مشکوک", color: "text-red-500" };
+  if (/تبلیغاتی|جنبه تبلیغی|پروپاگاند/.test(t)) return { label: "تبلیغاتی", color: "text-red-400" };
+  if (/نیازمند.*تایید|نیازمند.*تأیید|نیاز به تایید|نیاز به تأیید|تأیید نشده|تایید نشده|قابل.تأیید نیست|نیازمند.*مستقل|صحت.*نیاز/.test(t)) return { label: "تأیید نشده", color: "text-amber-500" };
+  if (/قابل.اعتبار|تایید شده|تأیید شده|قابل.اعتماد|معتبر/.test(t)) return { label: "تأیید شده", color: "text-emerald-500" };
+  return null;
 }
 
 // Accepts either a string or the object shape { text, pct, supporters }.

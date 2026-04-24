@@ -1,11 +1,16 @@
 import { setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import SafeImage from "@/components/common/SafeImage";
-import type { StoryBrief } from "@/lib/types";
+import type { StoryBrief, TelegramAnalysis } from "@/lib/types";
 import TelegramDiscussions from "@/components/home/TelegramDiscussions";
 import WeeklyDigest from "@/components/home/WeeklyDigest";
 import { formatRelativeTime, toFa } from "@/lib/utils";
-import { predictionText, claimText } from "@/lib/telegram-text";
+import {
+  claimText,
+  displayClaims,
+  displayPredictions,
+  predictionText,
+} from "@/lib/telegram-text";
 import { normalizedSidePercentages, independentShare } from "@/lib/narrativeGroups";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -80,33 +85,23 @@ async function fetchAnalysesBatch(storyIds: string[]): Promise<Record<string, { 
   }
 }
 
-async function fetchTelegramAnalysis(storyId: string): Promise<{ discourse_summary?: string; predictions?: any[]; key_claims?: any[]; predictions_display?: any[]; key_claims_display?: any[]; worldviews?: { pro_regime?: string; opposition?: string } } | null> {
+async function fetchTelegramAnalysis(storyId: string): Promise<TelegramAnalysis | null> {
   try {
     const controller = new AbortController();
-    // 15s timeout: stories without cached analysis regenerate on-demand
-    // via a two-pass LLM call that can easily take 10s+. The old 8s cap
-    // was aborting those before they finished, dropping the entry from
-    // the sidebar pool even when the analysis was about to land.
+    // 15s timeout — two-pass LLM regen easily runs 10s+; 8s aborted mid-flight.
     const timeout = setTimeout(() => controller.abort(), 15000);
-    // 60-second Data Cache window. no-store was pounding Railway with
-    // 15 parallel fetches on every SSR (one per top-trending story) and
-    // pushing TTFB to 2-3s. A 60s window means worst case ~15 upstream
-    // calls per minute per region — light, and after maintenance writes
-    // fresh analysis the homepage reflects it inside a minute. Short
-    // enough to sidestep the original stuck-cache bug (which was at
-    // 300s+) while still batching normal request bursts.
+    // 60s Data Cache. no-store pounded Railway with 15 parallel SSR
+    // fetches; 300s+ hit a stuck-cache bug.
     const res = await fetch(`${API}/api/v1/social/stories/${storyId}/telegram-analysis`, { next: { revalidate: 60 }, signal: controller.signal });
     clearTimeout(timeout);
     if (!res.ok) return null;
     const data = await res.json();
     if (data.status !== "ok" || !data.analysis) return null;
-    // Homepage prefers Niloofar-polished versions. Raw fields stay for the
-    // story detail page where "موضوع: X |" grouping is still useful.
-    const a = data.analysis;
+    const a = data.analysis as TelegramAnalysis;
     return {
       ...a,
-      predictions: a.predictions_display || a.predictions,
-      key_claims: a.key_claims_display || a.key_claims,
+      predictions: displayPredictions(a),
+      key_claims: displayClaims(a),
     };
   } catch {
     return null;

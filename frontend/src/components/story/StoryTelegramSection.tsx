@@ -3,31 +3,16 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { ChevronDown } from "lucide-react";
 import TelegramAnalyzingAnimation from "@/components/common/TelegramAnalyzingAnimation";
-import { cleanClaim, cleanPrediction } from "@/lib/telegram-text";
+import {
+  cleanClaim,
+  cleanPrediction,
+  displayClaims,
+  displayPredictions,
+  getCredLabel,
+} from "@/lib/telegram-text";
+import type { TelegramAnalysis } from "@/lib/types";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-
-interface TelegramAnalysis {
-  discourse_summary: string;
-  predictions: any[];
-  key_claims: any[];
-  // Niloofar-polished versions — prefer these on the story page too so
-  // channel-name attribution and direct quotes are stripped. Fall back
-  // to raw `predictions`/`key_claims` for stories polished before the
-  // display arrays existed.
-  predictions_display?: any[];
-  key_claims_display?: any[];
-  worldviews: {
-    pro_regime?: string;
-    opposition?: string;
-    neutral?: string;
-  };
-  number_battle?: string;
-  coordinated_messaging?: string;
-  consensus: string;
-  missing_voices: string;
-  reliability_note?: string;
-}
 
 interface ChannelStat {
   name: string;
@@ -129,27 +114,13 @@ export default function StoryTelegramSection({ storyId, initialTab, highlightTex
     );
   }
 
-  // Route through the shared cleanClaim/cleanPrediction so the story
-  // page benefits from the same plural/perfect-tense attribution
-  // stripping as the homepage («ادعا کردند», «اعلام کرده است»).
   const clean = (t: string) => cleanClaim(cleanPrediction(t))
     .replace(/^[\s۰-۹0-9]+[).\-–]\s*/, "")
     .replace(/^[•·]\s*/, "")
     .replace(/^با توجه به [^،]+،\s*/, "");
 
-  const getCredLabel = (t: string): { label: string; color: string } | null => {
-    if (/مشکوک|اغراق|بعید|غیرواقعی/.test(t)) return { label: "مشکوک", color: "text-red-500" };
-    if (/تبلیغاتی|جنبه تبلیغی|پروپاگاند/.test(t)) return { label: "تبلیغاتی", color: "text-red-400" };
-    if (/نیازمند.*تایید|نیازمند.*تأیید|نیاز به تایید|نیاز به تأیید|تأیید نشده|تایید نشده|قابل.تأیید نیست|نیازمند.*مستقل|صحت.*نیاز/.test(t)) return { label: "تأیید نشده", color: "text-amber-500" };
-    if (/قابل.اعتبار|تایید شده|تأیید شده|قابل.اعتماد|معتبر/.test(t)) return { label: "تأیید شده", color: "text-emerald-500" };
-    return null;
-  };
-
-  // Prefer Niloofar-polished versions (channel names stripped, quotes
-  // distilled). Fall back to raw if display arrays haven't been
-  // generated yet for this story.
-  const predictions = analysis.predictions_display || analysis.predictions || [];
-  const claims = analysis.key_claims_display || analysis.key_claims || [];
+  const predictions = displayPredictions(analysis);
+  const claims = displayClaims(analysis);
 
   return (
     <div className="space-y-3 animate-[fadeIn_0.2s_ease-in]">
@@ -186,7 +157,7 @@ export default function StoryTelegramSection({ storyId, initialTab, highlightTex
 
           <div className="space-y-1.5">
             {activeTab === "predictions" && predictions.map((p, i) => {
-              const text = typeof p === "string" ? p : (p as any).text || "";
+              const text = typeof p === "string" ? p : p.text || "";
               const isHighlighted = !!(highlightText && clean(text).includes(highlightText));
               return (
                 <div key={i} ref={isHighlighted ? highlightRef : undefined} className={isHighlighted ? "bg-blue-50 dark:bg-blue-900/20 -mx-2 px-2 py-1 border-r-2 border-blue-500" : ""}>
@@ -195,11 +166,12 @@ export default function StoryTelegramSection({ storyId, initialTab, highlightTex
               );
             })}
             {activeTab === "claims" && claims.map((c, i) => {
-              const isHighlighted = !!(highlightText && clean(c).includes(highlightText));
-              const cred = getCredLabel(c);
+              const text = typeof c === "string" ? c : c.text || "";
+              const isHighlighted = !!(highlightText && clean(text).includes(highlightText));
+              const cred = getCredLabel(text);
               return (
                 <div key={i} ref={isHighlighted ? highlightRef : undefined} className={isHighlighted ? "bg-amber-50 dark:bg-amber-900/20 -mx-2 px-2 py-1 border-r-2 border-amber-500" : ""}>
-                  <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400">• {clean(c)}</p>
+                  <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400">• {clean(text)}</p>
                   {cred && (
                     <p className={`text-[13px] ${cred.color} mr-3`}>{cred.label}</p>
                   )}
