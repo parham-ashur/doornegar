@@ -2105,6 +2105,47 @@ async def trigger_recompute_centroids():
         return {"status": "error", "error": str(e)}
 
 
+@router.post("/neutrality/run", dependencies=[Depends(require_admin)], status_code=202)
+async def trigger_neutrality_audit(
+    top: int = 30,
+    include_scored: bool = False,
+):
+    """Kick off the Claude-scored neutrality audit in the background.
+
+    Picks the top-N trending stories missing neutrality scores (or every
+    top-N if include_scored=true), scores each one's articles with
+    Claude, and writes source_neutrality back so the PoliticalSpectrum
+    figure ("جایگاه رسانه‌ها") appears on those story pages. Returns 202
+    immediately to avoid Cloudflare's 100s edge timeout — watch Railway
+    logs for progress, or poll a scored story's /api/v1/stories/{id}
+    to see when source_neutrality lands.
+    """
+    import asyncio
+    from app.database import async_session
+    from app.services.neutrality_audit_service import run_neutrality_audit
+
+    async def _run() -> None:
+        try:
+            async with async_session() as db:
+                stats = await run_neutrality_audit(
+                    db, top_n=top, include_scored=include_scored,
+                )
+                logger.info(f"neutrality_audit complete: {stats}")
+        except Exception:
+            logger.exception("neutrality_audit background task failed")
+
+    asyncio.create_task(_run())
+    return {
+        "status": "accepted",
+        "message": (
+            "Neutrality audit running in background. Poll /api/v1/stories/{id} "
+            "to see source_neutrality land."
+        ),
+        "top": top,
+        "include_scored": include_scored,
+    }
+
+
 # === Social Media Posting ===
 
 @router.get("/social/preview")
