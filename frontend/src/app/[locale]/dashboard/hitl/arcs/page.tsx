@@ -88,11 +88,11 @@ export default function ArcsHitlPage() {
   const createArc = async (idx: number, s: ArcSuggestion) => {
     const draft = drafts[idx];
     if (!draft || !draft.title.trim()) {
-      setMsg("عنوان قوس را وارد کنید");
+      setMsg("Enter an arc title");
       return;
     }
     if (draft.chapterIds.length < 2) {
-      setMsg("حداقل دو چپتر لازم است");
+      setMsg("At least two chapters required");
       return;
     }
     setPending(`sug-${idx}`);
@@ -107,10 +107,10 @@ export default function ArcsHitlPage() {
         }),
       });
       if (!res.ok) throw new Error(`create ${res.status}`);
-      setMsg("قوس ساخته شد");
+      setMsg("Arc created");
       await load();
     } catch (e) {
-      setMsg(`خطا: ${e}`);
+      setMsg(`Error: ${e}`);
     } finally {
       setPending(null);
     }
@@ -133,7 +133,7 @@ export default function ArcsHitlPage() {
   };
 
   const deleteArc = async (arcId: string) => {
-    if (!confirm("حذف این قوس؟ مقاله‌ها دست‌نخورده می‌مانند، فقط برچسبِ قوس برداشته می‌شود.")) return;
+    if (!confirm("Delete this arc? Articles stay untouched — only the arc grouping is removed.")) return;
     setPending(`del-${arcId}`);
     try {
       const res = await fetch(`${API}/api/v1/admin/hitl/arcs/${arcId}`, {
@@ -141,10 +141,10 @@ export default function ArcsHitlPage() {
         headers: adminHeaders(),
       });
       if (!res.ok) throw new Error(`delete ${res.status}`);
-      setMsg("قوس حذف شد");
+      setMsg("Arc deleted");
       await load();
     } catch (e) {
-      setMsg(`خطا: ${e}`);
+      setMsg(`Error: ${e}`);
     } finally {
       setPending(null);
     }
@@ -152,28 +152,28 @@ export default function ArcsHitlPage() {
 
   if (!authed) {
     return (
-      <div dir="rtl" className="p-6">
+      <div className="p-6">
         <p className="text-sm text-slate-500">
-          برای دیدن این صفحه، از صفحهٔ{" "}
+          Sign in from the{" "}
           <Link href="/fa/dashboard" className="text-blue-600 hover:underline">
-            داشبورد
+            dashboard
           </Link>{" "}
-          وارد شوید.
+          first to access this page.
         </p>
       </div>
     );
   }
 
   return (
-    <div dir="rtl">
+    <div>
       <div className="mb-6">
         <h1 className="text-xl font-black text-slate-900 dark:text-white">
-          قوس‌های روایت — پیشنهادها و موجودی
+          Narrative arcs — suggestions and live
         </h1>
         <p className="text-[13px] text-slate-500 dark:text-slate-400 mt-1 leading-6">
-          گروه‌هایی از خبرهای مرتبط که به‌صورت زمان‌بندی‌شده روی یک قوس روایتی قرار می‌گیرند.
-          با فاصلهٔ شباهت مرکزِ خبر ≥ ۰.۵۵ پیشنهاد می‌شوند. کرایو خود انتخاب می‌کنید که کدام‌ها
-          یک قوس واقعی‌اند.
+          Groups of related stories that play out as one evolving narrative.
+          Auto-suggested when ≥3 stories share centroid cosine ≥0.55 — you
+          pick which groups are real arcs.
         </p>
       </div>
 
@@ -191,12 +191,12 @@ export default function ArcsHitlPage() {
       {/* Existing arcs */}
       <section className="mb-8">
         <h2 className="text-[14px] font-black text-slate-900 dark:text-white mb-3 pb-2 border-b border-slate-200 dark:border-slate-800">
-          قوس‌های موجود ({existing?.length ?? 0})
+          Existing arcs ({existing?.length ?? 0})
         </h2>
-        {loading && <p className="text-[13px] text-slate-400">بارگذاری…</p>}
+        {loading && <p className="text-[13px] text-slate-400">Loading…</p>}
         {existing && existing.length === 0 && (
           <p className="text-[13px] text-slate-400">
-            هنوز هیچ قوسی ساخته نشده. از بخش پیشنهادها یکی را بسازید.
+            No arcs yet. Build one from the suggestions below.
           </p>
         )}
         {existing && existing.length > 0 && (
@@ -220,7 +220,7 @@ export default function ArcsHitlPage() {
                     disabled={pending === `del-${arc.id}`}
                     className="text-[13px] text-rose-500 hover:text-rose-700 disabled:opacity-40"
                   >
-                    حذف
+                    Delete
                   </button>
                 </div>
                 <div className="flex gap-2 flex-wrap">
@@ -250,12 +250,12 @@ export default function ArcsHitlPage() {
       {/* Suggestions */}
       <section>
         <h2 className="text-[14px] font-black text-slate-900 dark:text-white mb-3 pb-2 border-b border-slate-200 dark:border-slate-800">
-          پیشنهاد قوس‌های جدید ({suggestions?.length ?? 0})
+          New arc suggestions ({suggestions?.length ?? 0})
         </h2>
-        {loading && <p className="text-[13px] text-slate-400">بارگذاری…</p>}
+        {loading && <p className="text-[13px] text-slate-400">Loading…</p>}
         {suggestions && suggestions.length === 0 && (
           <p className="text-[13px] text-slate-400">
-            هیچ گروهی از ≥ ۳ خبر با شباهت کافی یافت نشد.
+            No group of ≥3 stories with enough similarity found.
           </p>
         )}
         {suggestions && suggestions.map((s, i) => {
@@ -269,13 +269,13 @@ export default function ArcsHitlPage() {
               >
                 <div className="flex-1 min-w-0">
                   <h3 className="text-[13px] font-bold text-slate-900 dark:text-white line-clamp-1">
-                    {s.suggested_title_fa || `گروه ${i + 1}`}
+                    {s.suggested_title_fa || `Group ${i + 1}`}
                   </h3>
                   <p className="text-[12px] text-slate-400 mt-0.5">
-                    {s.chapters.length} چپتر
+                    {s.chapters.length} chapter{s.chapters.length === 1 ? "" : "s"}
                     {s.already_in_arc_ids.length > 0 && (
-                      <span className="mr-2 text-amber-500">
-                        · {s.already_in_arc_ids.length} در قوس دیگر
+                      <span className="ml-2 text-amber-500">
+                        · {s.already_in_arc_ids.length} already in another arc
                       </span>
                     )}
                   </p>
@@ -288,7 +288,7 @@ export default function ArcsHitlPage() {
                 <div className="p-3 border-t border-slate-200 dark:border-slate-800 space-y-3">
                   <div>
                     <label className="block text-[12px] font-bold text-slate-600 dark:text-slate-400 mb-1">
-                      عنوان قوس
+                      Arc title
                     </label>
                     <input
                       type="text"
@@ -300,13 +300,13 @@ export default function ArcsHitlPage() {
                         }))
                       }
                       className="w-full border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-[13px] px-2 py-1.5"
-                      placeholder="مثلاً: بحران تنگهٔ هرمز"
+                      placeholder="e.g. Strait of Hormuz crisis"
                     />
                   </div>
 
                   <div>
                     <label className="block text-[12px] font-bold text-slate-600 dark:text-slate-400 mb-1">
-                      چپترهای قوس (تیک بزنید تا شامل شود)
+                      Arc chapters (check to include)
                     </label>
                     <div className="space-y-1.5">
                       {s.chapters.map(c => {
@@ -330,7 +330,7 @@ export default function ArcsHitlPage() {
                                 </span>
                                 {inAnotherArc && (
                                   <span className="text-[10px] bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 px-1 py-0.5 border border-amber-200 dark:border-amber-800">
-                                    در قوس دیگر
+                                    in another arc
                                   </span>
                                 )}
                               </div>
@@ -338,7 +338,7 @@ export default function ArcsHitlPage() {
                                 {c.title_fa || c.story_id.slice(0, 8)}
                               </p>
                               <p className="text-[11px] text-slate-400 mt-0.5">
-                                {c.article_count} مقاله
+                                {c.article_count} article{c.article_count === 1 ? "" : "s"}
                               </p>
                             </div>
                             <Link
@@ -347,7 +347,7 @@ export default function ArcsHitlPage() {
                               className="text-[11px] text-blue-500 hover:underline shrink-0"
                               onClick={e => e.stopPropagation()}
                             >
-                              مشاهده
+                              View
                             </Link>
                           </label>
                         );
@@ -361,13 +361,13 @@ export default function ArcsHitlPage() {
                       disabled={pending === `sug-${i}` || !draft.title.trim() || draft.chapterIds.length < 2}
                       className="text-[13px] font-bold px-3 py-1.5 bg-slate-900 dark:bg-white text-white dark:text-slate-900 disabled:opacity-40"
                     >
-                      {pending === `sug-${i}` ? "در حال ساخت…" : "ساخت قوس"}
+                      {pending === `sug-${i}` ? "Building…" : "Build arc"}
                     </button>
                     <button
                       onClick={() => setExpanded(null)}
                       className="text-[13px] px-3 py-1.5 border border-slate-300 dark:border-slate-700"
                     >
-                      نادیده
+                      Dismiss
                     </button>
                   </div>
                 </div>

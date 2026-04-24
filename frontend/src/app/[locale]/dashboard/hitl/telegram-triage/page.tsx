@@ -71,11 +71,11 @@ function StorySearchPicker({
         type="text"
         value={q}
         onChange={(e) => setQ(e.target.value)}
-        placeholder="جستجوی خبر دیگر بر اساس عنوان…"
+        placeholder="Search another story by title…"
         disabled={disabled}
         className="w-full px-2 py-1 text-[12px] border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40"
       />
-      {loading && <p className="text-[11px] text-slate-400 mt-1">جستجو…</p>}
+      {loading && <p className="text-[11px] text-slate-400 mt-1">Searching…</p>}
       {hits.length > 0 && (
         <div className="mt-1 space-y-1 max-h-48 overflow-y-auto border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
           {hits.map((h) => (
@@ -156,7 +156,7 @@ export default function TelegramTriagePage() {
     if (res.ok) {
       setItems((prev) => prev.filter((p) => p.post_id !== post_id));
     } else {
-      alert("خطا در اتصال");
+      alert("Link failed");
     }
   };
 
@@ -169,15 +169,15 @@ export default function TelegramTriagePage() {
     if (res.ok) {
       setItems((prev) => prev.filter((p) => p.post_id !== post_id));
     } else {
-      alert("خطا");
+      alert("Error");
     }
   };
 
   if (!authed) {
     return (
       <div>
-        <h1 className="text-xl font-black mb-4">صف بررسی تلگرام</h1>
-        <p className="text-[13px] mb-3">توکن ادمین:</p>
+        <h1 className="text-xl font-black mb-4">Telegram triage</h1>
+        <p className="text-[13px] mb-3">Admin token:</p>
         <div className="flex gap-2">
           <input
             type="password"
@@ -194,7 +194,7 @@ export default function TelegramTriagePage() {
             }}
             className="px-4 py-2 text-[13px] bg-blue-600 text-white"
           >
-            ذخیره
+            Save
           </button>
         </div>
       </div>
@@ -205,7 +205,7 @@ export default function TelegramTriagePage() {
     <div>
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-black text-slate-900 dark:text-white">
-          صف بررسی تلگرام
+          Telegram triage
         </h1>
         <div className="flex gap-2">
           <button
@@ -214,19 +214,19 @@ export default function TelegramTriagePage() {
             disabled={loading}
             className="px-3 py-1.5 text-[13px] border border-slate-300 dark:border-slate-700"
           >
-            {loading ? "در حال بارگذاری..." : "تازه‌سازی"}
+            {loading ? "Loading…" : "Refresh"}
           </button>
         </div>
       </div>
       <p className="text-[13px] text-slate-500 mb-4 leading-6">
-        پست‌های با نمرهٔ «{minScore.toFixed(2)}» تا «{maxScore.toFixed(2)}» را می‌بینید.
-        دامنه را باز‌تر کنید تا پست‌های بیشتری برای بررسی ببینید.
+        Posts with a match score between {minScore.toFixed(2)} and{" "}
+        {maxScore.toFixed(2)}. Widen the range to see more borderline cases.
       </p>
 
       {/* Band controls */}
       <div className="flex flex-wrap items-center gap-3 mb-4 text-[13px] bg-slate-50 dark:bg-slate-900/50 p-3 border border-slate-200 dark:border-slate-800">
         <label className="flex items-center gap-2">
-          حداقل:
+          Min:
           <input
             type="number"
             step={0.05}
@@ -239,7 +239,7 @@ export default function TelegramTriagePage() {
           />
         </label>
         <label className="flex items-center gap-2">
-          حداکثر:
+          Max:
           <input
             type="number"
             step={0.05}
@@ -252,7 +252,7 @@ export default function TelegramTriagePage() {
           />
         </label>
         <label className="flex items-center gap-2">
-          روزهای اخیر:
+          Last N days:
           <input
             type="number"
             min={1}
@@ -264,7 +264,7 @@ export default function TelegramTriagePage() {
           />
         </label>
         <label className="flex items-center gap-2">
-          تعداد اسکن:
+          Scan size:
           <input
             type="number"
             min={10}
@@ -281,7 +281,7 @@ export default function TelegramTriagePage() {
           disabled={loading}
           className="px-4 py-1 bg-blue-600 text-white"
         >
-          اعمال
+          Apply
         </button>
       </div>
 
@@ -289,7 +289,7 @@ export default function TelegramTriagePage() {
       {Object.keys(bandCounts).length > 0 && (
         <div className="mb-5 p-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800">
           <p className="text-[12px] text-slate-500 mb-2">
-            توزیع نمرهٔ {totalScanned} پست اسکن‌شده:
+            Score distribution across {totalScanned} scanned posts:
           </p>
           <div className="flex flex-wrap gap-3 text-[12px]" dir="ltr">
             {Object.entries(bandCounts).map(([band, count]) => (
@@ -303,8 +303,9 @@ export default function TelegramTriagePage() {
 
       {!loading && items.length === 0 && (
         <p className="text-[13px] text-slate-500">
-          موردی در این دامنه نیست. لینک‌کنندهٔ خودکار دقیقاً کار کرده — اکثر پست‌ها نمرهٔ بالای ۰.۵۰ می‌گیرند.
-          برای بازبینی تصمیم‌های مرزی، «حداکثر» را به مثلاً ۰.۶۰ بالا ببرید تا اتصال‌های ضعیف‌تر نیز ظاهر شوند.
+          Nothing in this range. The auto-linker is doing its job — most posts
+          score above 0.50. To review borderline auto-links, raise Max to e.g.
+          0.60 so weaker matches also show up.
         </p>
       )}
 
@@ -323,7 +324,7 @@ export default function TelegramTriagePage() {
               {p.posted_at && (
                 <>
                   <span>·</span>
-                  <span>{new Date(p.posted_at).toLocaleString("fa-IR")}</span>
+                  <span>{new Date(p.posted_at).toLocaleString("en-US")}</span>
                 </>
               )}
               {p.current_story_id && (
@@ -335,7 +336,7 @@ export default function TelegramTriagePage() {
                     rel="noreferrer"
                     className="text-blue-500"
                   >
-                    الان متصل به یک خبر
+                    Currently linked to a story
                   </a>
                 </>
               )}
@@ -351,7 +352,7 @@ export default function TelegramTriagePage() {
                     onClick={() => link(p.post_id, c.story_id)}
                     className="px-2 py-1 text-[12px] bg-emerald-600 text-white hover:bg-emerald-700 shrink-0"
                   >
-                    اتصال
+                    Link
                   </button>
                   <span className="text-[12px] font-mono text-slate-400 shrink-0 w-12 text-left">
                     {c.score.toFixed(3)}
@@ -373,7 +374,7 @@ export default function TelegramTriagePage() {
                   onClick={() => unlink(p.post_id)}
                   className="px-2 py-1 text-[12px] bg-red-50 dark:bg-red-950/40 text-red-600 border border-red-200 dark:border-red-900/40 mt-2"
                 >
-                  قطع اتصال از خبر فعلی
+                  Unlink from current story
                 </button>
               )}
             </div>
