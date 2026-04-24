@@ -85,7 +85,7 @@ def generate_embedding(text: str) -> list[float] | None:
         logger.warning("OPENAI_API_KEY not set — skipping embedding")
         return None
 
-    text = text[:30000]
+    text = text[:20000]  # ~8k tokens for Persian — stays under the API's 8192 cap
     try:
         response = _call_with_retry(_openai_client(), text)
     except Exception:
