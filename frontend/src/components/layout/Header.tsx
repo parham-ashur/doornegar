@@ -81,7 +81,7 @@ export default function Header() {
             دورنگر
           </Link>
           <span className="text-[13px] text-slate-400 dark:text-slate-500 header-fade hidden sm:inline">
-            اخبار رسانه‌های ایرانی را گردآوری و تحلیل می‌کند
+            اخبار رسانه‌های فارسی‌زبان را گردآوری و تحلیل می‌کند
           </span>
         </div>
 
