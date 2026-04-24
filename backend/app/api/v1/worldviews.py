@@ -28,6 +28,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.admin import require_admin
 from app.database import get_db
 from app.models.worldview_digest import WorldviewDigest
 from app.services.narrative_groups import (
@@ -35,6 +36,7 @@ from app.services.narrative_groups import (
     GROUP_LABELS_FA,
     NarrativeGroup,
 )
+from app.services.worldview_digest import generate_worldview_digests
 
 logger = logging.getLogger(__name__)
 
@@ -160,3 +162,34 @@ async def get_bundle_detail(
             detail="No worldview digest found for that bundle/window yet.",
         )
     return _to_card(row, include_evidence=True)
+
+
+# ─── Admin trigger (on-demand run) ───────────────────────────────────
+
+
+@router.post(
+    "/admin/generate",
+    dependencies=[Depends(require_admin)],
+    summary="Run worldview synthesis now (bypasses the Monday gate).",
+)
+async def admin_generate(
+    anchor: date | None = Query(
+        None,
+        description=(
+            "Optional anchor date. Window is the ISO week ending on "
+            "anchor's Monday (i.e. the previous full week). If omitted, "
+            "uses today's week anchor."
+        ),
+    ),
+    db: AsyncSession = Depends(get_db),
+):
+    """Synthesize the 4 bundles on demand.
+
+    Intended for first-publish / preview / retry flows. Respects all
+    the same preconditions as the weekly cron — insufficient bundles
+    persist with status='insufficient' instead of being synthesized.
+    Cost is logged under purpose='worldview_digest' just like the
+    scheduled run.
+    """
+    stats = await generate_worldview_digests(db, anchor=anchor)
+    return {"status": "ok", "stats": stats}
