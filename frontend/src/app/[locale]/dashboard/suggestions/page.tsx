@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
+import FeedbackTabs from "@/components/dashboard/FeedbackTabs";
 import {
   RefreshCw, ArrowLeft, Check, X, Trash2, ExternalLink,
   Clock, CheckCircle2, XCircle, Copy, ChevronDown, ChevronUp,
@@ -166,17 +167,12 @@ export default function SuggestionsAdminPage() {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8">
+      <FeedbackTabs active="suggestions" />
       {/* Header */}
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <Link
-            href="/fa/dashboard"
-            className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-900 dark:hover:text-white mb-2"
-          >
-            <ArrowLeft className="h-3 w-3" /> Back to dashboard
-          </Link>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
-            Source Suggestions
+            New-outlet suggestions
           </h1>
           <p className="text-sm text-slate-500 mt-1">
             {total} total · {pending} pending review

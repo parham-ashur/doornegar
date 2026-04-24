@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
+import FeedbackTabs from "@/components/dashboard/FeedbackTabs";
 import {
   RefreshCw, ArrowLeft, Check, Trash2, ExternalLink, Clock,
   CheckCircle2, ChevronDown, ChevronUp, Copy, Play, XCircle,
@@ -206,17 +207,12 @@ export default function ImprovementsAdminPage() {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8">
+      <FeedbackTabs active="issues" />
       {/* Header */}
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <Link
-            href="/fa/dashboard"
-            className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-900 dark:hover:text-white mb-2"
-          >
-            <ArrowLeft className="h-3 w-3" /> Back to dashboard
-          </Link>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
-            Improvement Todo List
+            Issue reports
           </h1>
           <p className="text-sm text-slate-500 mt-1">
             {total} total · {openCount} open · {inProgress} in progress

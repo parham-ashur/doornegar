@@ -53,7 +53,7 @@ export default function EditStoriesPage() {
     try {
       const res = await fetch(`${API}/api/v1/stories/trending?limit=${fetchLimit}`);
       if (!res.ok) {
-        setStatusMap({ _global: `خطا در بارگذاری داستان‌ها (${res.status})` });
+        setStatusMap({ _global: `Failed to load stories (${res.status})` });
         return;
       }
       const data: StoryBrief[] = await res.json();
@@ -85,7 +85,7 @@ export default function EditStoriesPage() {
       setDrafts(seeded);
       setStatusMap({});
     } catch (e) {
-      setStatusMap({ _global: `خطا: ${String(e).slice(0, 120)}` });
+      setStatusMap({ _global: `Error: ${String(e).slice(0, 120)}` });
     } finally {
       setLoading(false);
     }
@@ -123,11 +123,11 @@ export default function EditStoriesPage() {
     const draft = drafts[id];
     if (!draft) return;
     if (!adminToken) {
-      setStatusMap((p) => ({ ...p, [id]: "نخست توکن مدیریت را وارد کنید" }));
+      setStatusMap((p) => ({ ...p, [id]: "Enter the admin token first" }));
       return;
     }
     setSavingId(id);
-    setStatusMap((p) => ({ ...p, [id]: "در حال ذخیره..." }));
+    setStatusMap((p) => ({ ...p, [id]: "Saving…" }));
     try {
       const res = await fetch(`${API}/api/v1/admin/stories/${id}`, {
         method: "PATCH",
@@ -145,10 +145,10 @@ export default function EditStoriesPage() {
       });
       if (!res.ok) {
         const err = await res.text();
-        setStatusMap((p) => ({ ...p, [id]: `خطا (${res.status}): ${err.slice(0, 200)}` }));
+        setStatusMap((p) => ({ ...p, [id]: `Error (${res.status}): ${err.slice(0, 200)}` }));
         return;
       }
-      setStatusMap((p) => ({ ...p, [id]: "ذخیره شد ✓" }));
+      setStatusMap((p) => ({ ...p, [id]: "Saved ✓" }));
       // Reflect the updated title in the list
       setStories((prev) =>
         prev.map((s) =>
@@ -158,7 +158,7 @@ export default function EditStoriesPage() {
         ),
       );
     } catch (e) {
-      setStatusMap((p) => ({ ...p, [id]: `خطا: ${String(e).slice(0, 120)}` }));
+      setStatusMap((p) => ({ ...p, [id]: `Error: ${String(e).slice(0, 120)}` }));
     } finally {
       setSavingId(null);
     }
@@ -167,36 +167,36 @@ export default function EditStoriesPage() {
   // Login gate — requires backend ADMIN_TOKEN
   if (!authed) {
     return (
-      <div dir="rtl" className="mx-auto max-w-md p-6">
+      <div className="mx-auto max-w-md p-6">
         <h1 className="mb-4 text-2xl font-bold text-slate-900 dark:text-white">
-          ویرایش داستان‌ها
+          Story editor
         </h1>
         <p className="mb-4 text-sm text-slate-500">
-          برای دسترسی به داشبورد ابتدا از صفحه{" "}
-          <a href="./" className="underline">اصلی داشبورد</a>{" "}
-          توکن مدیریت را وارد کنید.
+          Sign in from the{" "}
+          <a href="./" className="underline">main dashboard</a>{" "}
+          first to enter the admin token.
         </p>
       </div>
     );
   }
 
   return (
-    <div dir="rtl" className="mx-auto max-w-4xl p-6">
+    <div className="mx-auto max-w-4xl p-6">
       <div className="mb-6 flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
-            ویرایش داستان‌ها
+            Story editor
           </h1>
           <p className="mt-1 text-sm text-slate-500">
-            عنوان، روایت‌ها و توضیح سوگیری داستان‌ها. ویرایش دستی از بازتولید
-            خودکار در خط‌لوله شبانه مصون می‌ماند.
+            Edit titles, side narratives, and bias explanations. Manual edits
+            are protected from the nightly auto-regeneration pipeline.
           </p>
         </div>
         <button
           onClick={loadStories}
           className="shrink-0 rounded border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
         >
-          بارگذاری مجدد
+          Reload
         </button>
       </div>
 
@@ -206,20 +206,19 @@ export default function EditStoriesPage() {
           type="search"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="جستجو در عنوان فارسی یا انگلیسی..."
+          placeholder="Search by Farsi or English title…"
           className="flex-1 rounded border border-slate-300 bg-white p-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-          dir="rtl"
         />
         <select
           value={fetchLimit}
           onChange={(e) => setFetchLimit(Number(e.target.value))}
           className="shrink-0 rounded border border-slate-300 bg-white p-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
         >
-          <option value={15}>۱۵ داستان</option>
-          <option value={30}>۳۰ داستان</option>
-          <option value={50}>۵۰ داستان</option>
-          <option value={100}>۱۰۰ داستان</option>
-          <option value={200}>۲۰۰ داستان</option>
+          <option value={15}>15 stories</option>
+          <option value={30}>30 stories</option>
+          <option value={50}>50 stories</option>
+          <option value={100}>100 stories</option>
+          <option value={200}>200 stories</option>
         </select>
       </div>
 
@@ -227,15 +226,15 @@ export default function EditStoriesPage() {
       {!loading && (
         <p className="mb-3 text-xs text-slate-500">
           {query
-            ? `${filteredStories.length} از ${stories.length} داستان با «${search}» مطابقت دارد`
-            : `نمایش ${stories.length} داستان`}
+            ? `${filteredStories.length} of ${stories.length} stories match "${search}"`
+            : `Showing ${stories.length} stories`}
         </p>
       )}
 
       {/* Admin token input */}
       <div className="mb-6 rounded border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-900">
         <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">
-          توکن مدیریت (ADMIN_TOKEN)
+          Admin token (ADMIN_TOKEN)
         </label>
         <input
           type="password"
@@ -256,7 +255,7 @@ export default function EditStoriesPage() {
       )}
 
       {loading && (
-        <p className="text-sm text-slate-500">در حال بارگذاری داستان‌ها...</p>
+        <p className="text-sm text-slate-500">Loading stories…</p>
       )}
 
       <div className="space-y-3">
@@ -271,15 +270,15 @@ export default function EditStoriesPage() {
             >
               <button
                 type="button"
-                className="flex w-full items-start justify-between gap-3 p-4 text-right"
+                className="flex w-full items-start justify-between gap-3 p-4 text-left"
                 onClick={() => setExpandedId(isOpen ? null : s.id)}
               >
                 <div className="min-w-0 flex-1">
                   <div className="text-xs text-slate-400">
-                    #{idx + 1} · {s.article_count} مقاله · {s.source_count} منبع
+                    #{idx + 1} · {s.article_count} article{s.article_count === 1 ? "" : "s"} · {s.source_count} source{s.source_count === 1 ? "" : "s"}
                     {s._isEdited && (
-                      <span className="mr-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-900">
-                        ویرایش دستی
+                      <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-900">
+                        manual edit
                       </span>
                     )}
                   </div>
@@ -293,7 +292,7 @@ export default function EditStoriesPage() {
               {isOpen && (
                 <div className="border-t border-slate-200 p-4 space-y-4 dark:border-slate-800">
                   <Field
-                    label="عنوان فارسی"
+                    label="Title (Farsi)"
                     value={draft.title_fa}
                     onChange={(v) => updateDraft(s.id, "title_fa", v)}
                   />
@@ -304,19 +303,19 @@ export default function EditStoriesPage() {
                     ltr
                   />
                   <Field
-                    label="روایت درون‌مرزی"
+                    label="Inside-Iran narrative (Farsi)"
                     value={draft.state_summary_fa}
                     onChange={(v) => updateDraft(s.id, "state_summary_fa", v)}
                     multiline
                   />
                   <Field
-                    label="روایت برون‌مرزی"
+                    label="Diaspora narrative (Farsi)"
                     value={draft.diaspora_summary_fa}
                     onChange={(v) => updateDraft(s.id, "diaspora_summary_fa", v)}
                     multiline
                   />
                   <Field
-                    label="مقایسه سوگیری"
+                    label="Bias comparison (Farsi)"
                     value={draft.bias_explanation_fa}
                     onChange={(v) => updateDraft(s.id, "bias_explanation_fa", v)}
                     multiline
@@ -328,7 +327,7 @@ export default function EditStoriesPage() {
                         className={`text-sm ${
                           statusMsg.includes("✓")
                             ? "text-emerald-600"
-                            : statusMsg.includes("خطا")
+                            : statusMsg.toLowerCase().includes("error")
                               ? "text-rose-600"
                               : "text-slate-500"
                         }`}
@@ -344,7 +343,7 @@ export default function EditStoriesPage() {
                       onClick={() => saveStory(s.id)}
                       className="rounded bg-slate-900 px-5 py-2 text-sm font-bold text-white disabled:opacity-50 dark:bg-white dark:text-slate-900"
                     >
-                      {savingId === s.id ? "در حال ذخیره..." : "ذخیره"}
+                      {savingId === s.id ? "Saving…" : "Save"}
                     </button>
                   </div>
                 </div>
@@ -355,11 +354,11 @@ export default function EditStoriesPage() {
       </div>
 
       {!loading && stories.length === 0 && (
-        <p className="mt-6 text-center text-sm text-slate-500">داستانی یافت نشد.</p>
+        <p className="mt-6 text-center text-sm text-slate-500">No stories found.</p>
       )}
       {!loading && stories.length > 0 && filteredStories.length === 0 && (
         <p className="mt-6 text-center text-sm text-slate-500">
-          نتیجه‌ای برای «{search}» پیدا نشد.
+          No matches for "{search}".
         </p>
       )}
     </div>

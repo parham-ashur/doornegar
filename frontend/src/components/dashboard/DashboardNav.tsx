@@ -18,6 +18,7 @@ const NAV: { href: string; label: string; group?: "left" | "right" }[] = [
   { href: "/fa/dashboard/review-queue", label: "Review Queue" },
   { href: "/fa/dashboard/hitl", label: "HITL" },
   { href: "/fa/dashboard/edit-stories", label: "Story Editor" },
+  { href: "/fa/dashboard/improvements", label: "Feedback" },
   { href: "/fa/dashboard/cost", label: "Cost", group: "right" },
   { href: "/fa/dashboard/fetch-stats", label: "Ingest", group: "right" },
   { href: "/fa/dashboard/actions", label: "Actions", group: "right" },
@@ -29,8 +30,17 @@ export default function DashboardNav() {
   const isActive = (href: string) => {
     // Exact-match on /dashboard (now "Advanced") so it doesn't eat every
     // subpage. Prefix-match on everything else so deep pages keep their
-    // parent tab highlighted.
+    // parent tab highlighted. Feedback nav points at /improvements but
+    // we also want /suggestions to light it up — hand-handled below.
     if (href === "/fa/dashboard") return pathname === "/fa/dashboard";
+    if (href === "/fa/dashboard/improvements") {
+      return (
+        pathname === "/fa/dashboard/improvements" ||
+        pathname.startsWith("/fa/dashboard/improvements/") ||
+        pathname === "/fa/dashboard/suggestions" ||
+        pathname.startsWith("/fa/dashboard/suggestions/")
+      );
+    }
     return pathname === href || pathname.startsWith(href + "/");
   };
   const left = NAV.filter((n) => n.group !== "right");
