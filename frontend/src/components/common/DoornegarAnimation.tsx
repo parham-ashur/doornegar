@@ -20,33 +20,54 @@ function seededRandom(seed: number): () => number {
   };
 }
 
-// ─── Two-side palette ──────────────────────────────────
-// Echoes the bias UI elsewhere on the site:
-//   inside  (درون‌مرزی) — navy  (#1e3a5f light / #93c5fd dark)
-//   outside (برون‌مرزی) — orange (#ea580c light / #fb923c dark)
-// Each constellation's stars are split between the two sides so the
-// whole shape only emerges when you read both colors together.
-const COLOR_INSIDE_LIGHT = "#1e3a5f";
-const COLOR_INSIDE_DARK  = "#93c5fd";
-const COLOR_OUTSIDE_LIGHT = "#ea580c";
-const COLOR_OUTSIDE_DARK  = "#fb923c";
-const COLOR_LINE_LIGHT = "#94a3b8";
-const COLOR_LINE_DARK  = "#64748b";
+// ─── Four-subgroup palette ──────────────────────────────────
+// Echoes the 4-subgroup taxonomy shown on story pages:
+//   principlist       — dark navy   (#1e3a5f light / #93c5fd dark)
+//   reformist         — slate blue  (#4f7cac light / #7ba3cf dark)
+//   moderate_diaspora — warm amber  (#f97316 light / #fdba74 dark)
+//   radical_diaspora  — deep orange (#c2410c light / #fb923c dark)
+// Each constellation's stars are split across all four subgroups so
+// the whole shape only emerges when you read every color together.
+const COLOR_PRINCIPLIST_LIGHT = "#1e3a5f";
+const COLOR_PRINCIPLIST_DARK  = "#93c5fd";
+const COLOR_REFORMIST_LIGHT   = "#4f7cac";
+const COLOR_REFORMIST_DARK    = "#7ba3cf";
+const COLOR_MOD_LIGHT         = "#f97316";
+const COLOR_MOD_DARK          = "#fdba74";
+const COLOR_RAD_LIGHT         = "#c2410c";
+const COLOR_RAD_DARK          = "#fb923c";
+const COLOR_LINE_LIGHT        = "#94a3b8";
+const COLOR_LINE_DARK         = "#64748b";
 
 function getThemeColors(isDark: boolean) {
   return {
-    inside:  isDark ? COLOR_INSIDE_DARK  : COLOR_INSIDE_LIGHT,
-    outside: isDark ? COLOR_OUTSIDE_DARK : COLOR_OUTSIDE_LIGHT,
-    line:    isDark ? COLOR_LINE_DARK    : COLOR_LINE_LIGHT,
+    principlist:       isDark ? COLOR_PRINCIPLIST_DARK : COLOR_PRINCIPLIST_LIGHT,
+    reformist:         isDark ? COLOR_REFORMIST_DARK   : COLOR_REFORMIST_LIGHT,
+    moderate_diaspora: isDark ? COLOR_MOD_DARK         : COLOR_MOD_LIGHT,
+    radical_diaspora:  isDark ? COLOR_RAD_DARK         : COLOR_RAD_LIGHT,
+    line:              isDark ? COLOR_LINE_DARK        : COLOR_LINE_LIGHT,
   };
 }
+
+// Star group: 0=principlist, 1=reformist, 2=moderate_diaspora, 3=radical_diaspora.
+// Kept numeric so existing constellation data can use side:0|1 and we
+// auto-derive: side 0 → group {0 or 1 alternating by index}, side 1 →
+// group {2 or 3 alternating}. A constellation can override by setting
+// `group` explicitly on a star.
+type Group = 0 | 1 | 2 | 3;
+const GROUP_KEYS: Array<keyof ReturnType<typeof getThemeColors>> = [
+  "principlist",
+  "reformist",
+  "moderate_diaspora",
+  "radical_diaspora",
+];
 
 // ─── Constellations ────────────────────────────────────
 // Each shape is designed to read at 110×110 with 5–8 stars. Coordinates
 // are normalized 0-1 and scaled into an 82% centered box. `side: 1`
 // means the star is drawn in the outside (orange) color; omitted
 // means inside (navy).
-interface Star { x: number; y: number; bright?: boolean; side?: 0 | 1; }
+interface Star { x: number; y: number; bright?: boolean; side?: 0 | 1; group?: Group; }
 interface Constellation {
   name_fa: string;
   icon: string;
@@ -545,8 +566,20 @@ export default function DoornegarAnimation({ size = "footer" }: { size?: Size })
         const baseR = starDef.bright ? 2.4 : 1.7;
         const glowR = starDef.bright ? 6 : 4;
 
-        // Pick the star's side color
-        const starColor = starDef.side === 1 ? themeColors.outside : themeColors.inside;
+        // Pick the star's subgroup color. Explicit `group` wins; else
+        // derive from `side`: inside stars alternate principlist/reformist
+        // by index, outside stars alternate moderate/radical. That
+        // yields a roughly balanced 4-color spread across each shape
+        // without having to hand-annotate every constellation.
+        let group: Group;
+        if (starDef.group != null) {
+          group = starDef.group;
+        } else if (starDef.side === 1) {
+          group = (i % 2 === 0 ? 2 : 3) as Group;
+        } else {
+          group = (i % 2 === 0 ? 0 : 1) as Group;
+        }
+        const starColor = themeColors[GROUP_KEYS[group]];
 
         // Post-formation twinkle: gentle sinusoidal brightness shimmer
         const twinkle = formedAtRef.current > 0
