@@ -57,6 +57,23 @@ async def lifespan(app: FastAPI):
                 "ALTER TABLE stories ADD COLUMN IF NOT EXISTS review_tier SMALLINT NOT NULL DEFAULT 0",
                 "CREATE INDEX IF NOT EXISTS idx_stories_unfrozen ON stories(updated_at) WHERE frozen_at IS NULL",
                 "CREATE INDEX IF NOT EXISTS idx_stories_review_tier ON stories(review_tier) WHERE review_tier > 0 AND frozen_at IS NULL",
+                # Event log — HITL decisions + clustering decisions + field-level edits
+                """CREATE TABLE IF NOT EXISTS story_events (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    story_id UUID,
+                    article_id UUID,
+                    event_type VARCHAR(40) NOT NULL,
+                    actor VARCHAR(40) NOT NULL,
+                    field VARCHAR(60),
+                    old_value TEXT,
+                    new_value TEXT,
+                    confidence DOUBLE PRECISION,
+                    signals JSONB,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )""",
+                "CREATE INDEX IF NOT EXISTS idx_story_events_story ON story_events(story_id, created_at DESC) WHERE story_id IS NOT NULL",
+                "CREATE INDEX IF NOT EXISTS idx_story_events_type ON story_events(event_type, created_at DESC)",
+                "CREATE INDEX IF NOT EXISTS idx_story_events_article ON story_events(article_id) WHERE article_id IS NOT NULL",
                 """CREATE TABLE IF NOT EXISTS story_arcs (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                     title_fa TEXT NOT NULL,

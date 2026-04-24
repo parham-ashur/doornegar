@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.article import Article
 from app.models.story import Story
 from app.models.story_arc import StoryArc
+from app.services.events import log_event
 
 
 @dataclass
@@ -61,6 +62,7 @@ async def split_story_into_groups(
     arc_title_fa: str | None = None,
     arc_slug: str | None = None,
     freeze_source: bool = True,
+    actor: str = "admin",
 ) -> SplitResult:
     """Carve a source story into N child stories. Articles named in each
     group move to a new Story; leftovers stay in source. Optionally wrap
@@ -150,6 +152,26 @@ async def split_story_into_groups(
     src.article_count = remaining
     if freeze_source:
         src.frozen_at = datetime.now(timezone.utc)
+
+    await log_event(
+        db,
+        event_type="split",
+        actor=actor,
+        story_id=src.id,
+        signals={
+            "arc_id": str(arc_id) if arc_id else None,
+            "groups": [
+                {
+                    "story_id": str(g.story_id),
+                    "title_fa": g.title_fa,
+                    "article_count": g.article_count,
+                }
+                for g in created
+            ],
+            "remaining_in_source": remaining,
+            "freeze_source": freeze_source,
+        },
+    )
 
     await db.commit()
     return SplitResult(
@@ -248,6 +270,7 @@ async def scaffold_arc(
     chapters: list[ChapterInput],
     arc_slug: str | None = None,
     create_missing: bool = True,
+    actor: str = "admin",
 ) -> ScaffoldResult:
     """Build an arc from a chapter outline. Each chapter resolves to:
     - the story at `story_id` if provided
@@ -314,6 +337,25 @@ async def scaffold_arc(
                 match_score=score,
             )
         )
+
+    await log_event(
+        db,
+        event_type="arc_scaffold",
+        actor=actor,
+        signals={
+            "arc_id": str(arc.id),
+            "arc_title_fa": arc.title_fa,
+            "chapters": [
+                {
+                    "story_id": str(c.story_id),
+                    "title_fa": c.title_fa,
+                    "resolution": c.resolution,
+                    "match_score": c.match_score,
+                }
+                for c in resolved
+            ],
+        },
+    )
 
     await db.commit()
     return ScaffoldResult(

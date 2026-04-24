@@ -697,11 +697,23 @@ async def freeze_story(story_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     so no new articles will be attached. Idempotent: re-freezing leaves
     the original frozen_at untouched.
     """
+    from app.services.events import log_event
+
     story = await db.get(Story, story_id)
     if not story:
         raise HTTPException(status_code=404, detail="Story not found")
     if story.frozen_at is None:
         story.frozen_at = datetime.now(timezone.utc)
+        await log_event(
+            db,
+            event_type="freeze",
+            actor="admin",
+            story_id=story.id,
+            signals={
+                "article_count": story.article_count or 0,
+                "review_tier": story.review_tier or 0,
+            },
+        )
         await db.commit()
     return FreezeResponse(
         story_id=str(story.id),
@@ -719,11 +731,22 @@ class UnfreezeResponse(BaseModel):
 async def unfreeze_story(story_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     """Reverse a freeze. Clears review_tier too so the next pipeline run
     re-evaluates it from scratch."""
+    from app.services.events import log_event
+
     story = await db.get(Story, story_id)
     if not story:
         raise HTTPException(status_code=404, detail="Story not found")
+    was_frozen = story.frozen_at
     story.frozen_at = None
     story.review_tier = 0
+    if was_frozen is not None:
+        await log_event(
+            db,
+            event_type="unfreeze",
+            actor="admin",
+            story_id=story.id,
+            signals={"previously_frozen_at": was_frozen.isoformat()},
+        )
     await db.commit()
     return UnfreezeResponse(
         story_id=str(story.id),
@@ -949,3 +972,133 @@ async def scaffold_arc_preview(
             )
         )
     return ScaffoldPreviewResponse(chapters=out)
+
+
+# ─── 7. Decision queue (review_tier > 0) + event log read ────
+
+class ReviewQueueItem(BaseModel):
+    story_id: str
+    title_fa: str
+    article_count: int
+    source_count: int
+    review_tier: int
+    first_published_at: datetime | None
+    last_updated_at: datetime | None
+    age_days: float | None
+    arc_id: str | None
+
+
+class ReviewQueueResponse(BaseModel):
+    items: list[ReviewQueueItem]
+    tier_counts: dict[str, int]
+
+
+@router.get("/review-queue", response_model=ReviewQueueResponse)
+async def review_queue(
+    min_tier: int = Query(1, ge=1, le=3),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+):
+    """Stories flagged by the guardrail pass as size/age outliers but
+    not yet frozen. Tier 3 = propose freeze, tier 2 = strong warn,
+    tier 1 = soft warn. Ordered tier desc, then article_count desc.
+    """
+    from sqlalchemy import text as _sql_text
+
+    rows = await db.execute(
+        select(
+            Story.id, Story.title_fa, Story.article_count, Story.source_count,
+            Story.review_tier, Story.first_published_at, Story.last_updated_at,
+            Story.arc_id,
+        )
+        .where(Story.review_tier >= min_tier, Story.frozen_at.is_(None))
+        .order_by(Story.review_tier.desc(), Story.article_count.desc())
+        .limit(limit)
+    )
+    now = datetime.now(timezone.utc)
+    items: list[ReviewQueueItem] = []
+    for r in rows.all():
+        started = r[5] or r[6]
+        age = ((now - started).total_seconds() / 86400.0) if started else None
+        items.append(
+            ReviewQueueItem(
+                story_id=str(r[0]),
+                title_fa=r[1] or "",
+                article_count=r[2] or 0,
+                source_count=r[3] or 0,
+                review_tier=r[4] or 0,
+                first_published_at=r[5],
+                last_updated_at=r[6],
+                age_days=round(age, 2) if age is not None else None,
+                arc_id=str(r[7]) if r[7] else None,
+            )
+        )
+
+    counts_q = await db.execute(_sql_text(
+        "SELECT review_tier, COUNT(*) FROM stories "
+        "WHERE review_tier > 0 AND frozen_at IS NULL GROUP BY review_tier"
+    ))
+    tier_counts = {str(t): c for t, c in counts_q.all()}
+    return ReviewQueueResponse(items=items, tier_counts=tier_counts)
+
+
+class StoryEventItem(BaseModel):
+    id: str
+    story_id: str | None
+    article_id: str | None
+    event_type: str
+    actor: str
+    field: str | None
+    old_value: str | None
+    new_value: str | None
+    confidence: float | None
+    signals: dict | None
+    created_at: datetime
+
+
+class StoryEventsResponse(BaseModel):
+    items: list[StoryEventItem]
+
+
+@router.get("/stories/{story_id}/events", response_model=StoryEventsResponse)
+async def get_story_events(
+    story_id: uuid.UUID,
+    limit: int = Query(100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+):
+    """Timeline of every logged event touching this story — clustering
+    decisions, freezes, splits, field edits. Used by the UI to render
+    per-story audit history.
+    """
+    from sqlalchemy import text as _sql_text
+
+    rows = await db.execute(
+        _sql_text(
+            """
+            SELECT id, story_id, article_id, event_type, actor, field,
+                   old_value, new_value, confidence, signals, created_at
+            FROM story_events
+            WHERE story_id = :sid
+            ORDER BY created_at DESC
+            LIMIT :lim
+            """
+        ),
+        {"sid": story_id, "lim": limit},
+    )
+    items = [
+        StoryEventItem(
+            id=str(r[0]),
+            story_id=str(r[1]) if r[1] else None,
+            article_id=str(r[2]) if r[2] else None,
+            event_type=r[3],
+            actor=r[4],
+            field=r[5],
+            old_value=r[6],
+            new_value=r[7],
+            confidence=r[8],
+            signals=r[9],
+            created_at=r[10],
+        )
+        for r in rows.all()
+    ]
+    return StoryEventsResponse(items=items)

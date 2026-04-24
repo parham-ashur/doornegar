@@ -1727,6 +1727,44 @@ async def cluster_articles(db: AsyncSession) -> dict:
     )
     articles = list(result.scalars().all())
 
+    # Noise filter — titles matching these patterns are periodic format
+    # posts (radio broadcast announcements, daily price bulletins) that
+    # never cluster meaningfully with other outlets' coverage but keep
+    # paying the LLM tax on every run. Filtered out and retired to
+    # MAX_CLUSTER_ATTEMPTS so they won't be re-fetched.
+    noise_patterns = [
+        re.compile(r"📻"),
+        re.compile(r"^\s*بشنوید"),
+        re.compile(r"برنامه\s+رادیویی"),
+        re.compile(r"سرخط\s+خبرها"),
+        re.compile(r"قیمت\s+(سکه|طلا|دینار|درهم|نیم\s+سکه|ربع\s+سکه|سکه\s+گرمی).*امروز"),
+        re.compile(r"قیمت\s+طلا(ی\s+(جهانی|۱۸\s+عیار|دست\s+دوم))?\s+امروز"),
+    ]
+
+    def _is_noise(title: str | None) -> bool:
+        if not title:
+            return False
+        return any(p.search(title) for p in noise_patterns)
+
+    noise_ids: list = []
+    kept: list[Article] = []
+    for a in articles:
+        if _is_noise(a.title_fa) or _is_noise(a.title_original):
+            noise_ids.append(a.id)
+        else:
+            kept.append(a)
+    if noise_ids:
+        logger.info(
+            "Noise filter: retired %d periodic-format articles "
+            "(radio bulletins / daily prices)", len(noise_ids)
+        )
+        await db.execute(
+            update(Article)
+            .where(Article.id.in_(noise_ids))
+            .values(cluster_attempts=MAX_CLUSTER_ATTEMPTS)
+        )
+    articles = kept
+
     # Pre-extract source info while in session context (avoid lazy loading later)
     source_names: dict[str, str] = {}
     source_alignments_map: dict[str, str | None] = {}
