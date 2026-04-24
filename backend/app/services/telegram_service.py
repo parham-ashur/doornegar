@@ -487,6 +487,14 @@ async def convert_telegram_posts_to_articles(db: AsyncSession) -> dict:
         if source is None:
             stats["skipped_no_source"] += 1
             continue
+        # Respect the RSS source's is_active flag here too. Without this
+        # gate, Telegram mirror posts keep creating Article rows against
+        # an outlet that was deliberately disabled — which makes fetch-
+        # stats say "inactive" with 60+ articles today. Inactive means
+        # inactive across all ingest paths.
+        if not source.is_active:
+            stats["skipped_no_source"] += 1
+            continue
 
         # Build article fields
         cleaned = _clean_post_text(raw_text)
@@ -840,6 +848,11 @@ async def extract_articles_from_aggregators(db: AsyncSession) -> dict:
                 continue
 
             source = sources_by_slug[source_slug]
+            # Same is_active gate as the Telegram→Article mirror above.
+            # Don't backfill articles against outlets marked inactive.
+            if not source.is_active:
+                stats["links_no_source_match"] += 1
+                continue
 
             # Fetch the page metadata
             metadata = await _fetch_page_metadata(url)
