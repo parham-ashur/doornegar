@@ -102,52 +102,36 @@ export default function WeeklyDigest({ prefetchedContent }: { prefetchedContent?
     fetchDigest();
   }, [prefetchedContent]);
 
+  // Per Parham 2026-04-24: outer title ("خلاصه هفتگی دورنگر") removed.
+  // Two-column grid of the existing cards stays intact; the cards
+  // themselves carry their own headers. Outer wrapper is now just a
+  // plain container so the grid sits flush within the homepage flow.
   if (loading) {
     return (
-      <div dir="rtl" className="border border-slate-300 dark:border-slate-600">
-        <div className="flex items-center -mt-3 mx-4">
-          <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
-          <span className="text-[15px] font-black text-slate-900 dark:text-white px-3 bg-white dark:bg-[#0a0e1a]">خلاصه هفتگی دورنگر</span>
-          <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
-        </div>
-        <div className="px-4 pb-4 pt-3 animate-pulse">
-          <div className="h-3 bg-slate-200 dark:bg-slate-700 rounded w-3/4 mb-2" />
-          <div className="h-3 bg-slate-200 dark:bg-slate-700 rounded w-1/2" />
-        </div>
+      <div dir="rtl" className="animate-pulse grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="border border-slate-200 dark:border-slate-700 p-4 h-32" />
+        <div className="border border-slate-200 dark:border-slate-700 p-4 h-32" />
       </div>
     );
   }
 
   if (noData || (trends.length === 0 && outlook.length === 0)) {
     return (
-      <div dir="rtl" className="border border-slate-300 dark:border-slate-600">
-        <div className="flex items-center -mt-3 mx-4">
-          <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
-          <span className="text-[15px] font-black text-slate-900 dark:text-white px-3 bg-white dark:bg-[#0a0e1a]">خلاصه هفتگی دورنگر</span>
-          <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
-        </div>
-        <div className="px-4 pb-4 pt-3">
-          <p className="text-[14px] text-slate-400 dark:text-slate-500">خلاصه هفتگی پس از اولین اجرا در دسترس خواهد بود</p>
-        </div>
+      <div dir="rtl" className="border border-slate-200 dark:border-slate-700 px-4 py-6">
+        <p className="text-[14px] text-slate-400 dark:text-slate-500">خلاصه هفتگی پس از اولین اجرا در دسترس خواهد بود</p>
       </div>
     );
   }
 
   return (
-    <div dir="rtl" className="border border-slate-300 dark:border-slate-600">
-      <div className="flex items-center -mt-3 mx-4">
-        <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
-        <span className="text-[15px] font-black text-slate-900 dark:text-white px-3 bg-white dark:bg-[#0a0e1a]">خلاصه هفتگی دورنگر</span>
-        <div className="flex-1 h-px bg-white dark:bg-[#0a0e1a]" />
-      </div>
-
-      <div className="px-5 pb-5 pt-3 grid grid-cols-1 md:grid-cols-2 gap-4">
+    <div dir="rtl">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Trends */}
         {trends.length > 0 && (
           <div className="border border-slate-200 dark:border-slate-700 p-4">
             <div className="flex items-center gap-1.5 mb-3 pb-2 border-b border-slate-200 dark:border-slate-700">
               <TrendingUp className="h-3.5 w-3.5 text-blue-500" />
-              <h4 className="text-[14px] font-black text-slate-900 dark:text-white">روندهای کلیدی</h4>
+              <h4 className="text-[14px] font-black text-slate-900 dark:text-white">روندهای کلیدی هفتهٔ گذشته</h4>
             </div>
             <div className="space-y-3">
               {trends.map((item, i) => (

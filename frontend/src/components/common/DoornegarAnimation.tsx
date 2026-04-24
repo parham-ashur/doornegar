@@ -370,19 +370,31 @@ function sCurve(a: number, mid: number, b: number, t: number): number {
   }
 }
 
-interface StarState {
-  // Constellation anchor (the "pattern" target)
-  patternX: number; patternY: number;
-  // Free-fly wander: center + amplitude + phase per axis
-  wanderCx: number; wanderCy: number;
+interface StarDisplay {
+  // 4-subgroup color index, fixed for the star's lifetime so identity
+  // persists through pose morphs.
+  group: Group;
+  // Whether this is a "bright" anchor star (slightly larger). Fixed per
+  // star so size doesn't flicker across poses.
+  bright: boolean;
+  // Tiny always-on wander so settled stars still breathe. One orbit
+  // per axis with small amplitude.
   wanderAx: number; wanderAy: number;
   wanderFx: number; wanderFy: number;
   wanderPx: number; wanderPy: number;
+  // Target positions, one per pose. Same length as `poseOrder`.
+  posePositions: Array<{ x: number; y: number }>;
 }
 
 interface FieldStar {
   x: number; y: number; r: number; alpha: number; twinkleOffset: number;
 }
+
+// Fixed display-star count. Each pose maps its constellation's stars
+// onto these 8 slots (cycling if the constellation has fewer), so the
+// same 8 glowing dots morph between constellations instead of spawning
+// /despawning per pose.
+const DISPLAY_STARS = 8;
 
 // ─── Component ─────────────────────────────────────────
 
@@ -392,17 +404,26 @@ export default function DoornegarAnimation({ size = "footer" }: { size?: Size })
   const seedRef = useRef(seedFromDate());
   const triggeredRef = useRef(false);
 
-  const starsRef = useRef<StarState[]>([]);
+  const starsRef = useRef<StarDisplay[]>([]);
   const fieldStarsRef = useRef<FieldStar[]>([]);
-  const constellationRef = useRef<Constellation | null>(null);
+  const poseOrderRef = useRef<number[]>([]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const seed = seedRef.current;
-    const constellation = CONSTELLATIONS[seed % CONSTELLATIONS.length];
-    constellationRef.current = constellation;
+
+    // Deterministic pose sequence for the day: every constellation
+    // shuffled by the same seed so the whole footer tells one coherent
+    // story across a full visit.
+    const rngOrder = seededRandom(seed ^ 0x5a5a5a5a);
+    const poseOrder = CONSTELLATIONS.map((_, i) => i);
+    for (let i = poseOrder.length - 1; i > 0; i--) {
+      const j = Math.floor(rngOrder() * (i + 1));
+      [poseOrder[i], poseOrder[j]] = [poseOrder[j], poseOrder[i]];
+    }
+    poseOrderRef.current = poseOrder;
 
     const resize = () => {
       const rect = canvas.getBoundingClientRect();
@@ -420,25 +441,39 @@ export default function DoornegarAnimation({ size = "footer" }: { size?: Size })
 
       const rng = seededRandom(seed);
 
-      // Each star wanders around a randomized center with its own amplitude
-      // and frequency per axis. When it snaps into the pattern, we
-      // interpolate from the current wander position to the constellation
-      // anchor, hold briefly, then release back to free-fly.
-      starsRef.current = constellation.stars.map((s) => {
-        const patternX = bx + s.x * boxSize;
-        const patternY = by + s.y * boxSize;
-        return {
-          patternX, patternY,
-          wanderCx: w * 0.5 + (rng() - 0.5) * w * 0.45,
-          wanderCy: h * 0.5 + (rng() - 0.5) * h * 0.45,
-          wanderAx: w * (0.12 + rng() * 0.18),
-          wanderAy: h * (0.12 + rng() * 0.18),
-          wanderFx: 0.18 + rng() * 0.24,
-          wanderFy: 0.15 + rng() * 0.22,
+      // Precompute each display star's 4-subgroup color + tiny wander
+      // motion + the target position it takes in every pose. Cycling
+      // through constellation.stars when the constellation has fewer
+      // than DISPLAY_STARS keeps the mapping stable without introducing
+      // fades in/out.
+      const stars: StarDisplay[] = [];
+      for (let i = 0; i < DISPLAY_STARS; i++) {
+        // Two principlist + two reformist on the "right" half, two
+        // moderate + two radical on the "left" half — balanced 4-color
+        // spread that stays consistent across all poses.
+        const group: Group = (i % 4) as Group;
+        const bright = i === 0 || i === 4;
+        const posePositions = poseOrder.map((poseIdx) => {
+          const c = CONSTELLATIONS[poseIdx];
+          const starDef = c.stars[i % c.stars.length];
+          return {
+            x: bx + starDef.x * boxSize,
+            y: by + starDef.y * boxSize,
+          };
+        });
+        stars.push({
+          group,
+          bright,
+          wanderAx: w * (0.015 + rng() * 0.02),
+          wanderAy: h * (0.015 + rng() * 0.02),
+          wanderFx: 0.35 + rng() * 0.4,
+          wanderFy: 0.3 + rng() * 0.4,
           wanderPx: rng() * Math.PI * 2,
           wanderPy: rng() * Math.PI * 2,
-        };
-      });
+          posePositions,
+        });
+      }
+      starsRef.current = stars;
 
       // Background field stars — static decorative dust to suggest depth
       const fieldCount = 9;
@@ -459,36 +494,31 @@ export default function DoornegarAnimation({ size = "footer" }: { size?: Size })
     };
     updateCachedSize();
 
-    // Smoothstep easing for the gather/release blend
     const smoothstep = (x: number) => {
       const t = Math.max(0, Math.min(1, x));
       return t * t * (3 - 2 * t);
     };
 
-    // 5-second pulse cycle:
-    //   0.00 → 0.55s : free-fly
-    //   0.55 → 0.75s : slow and gather into pattern
-    //   0.75 → 0.90s : hold at the pattern
-    //   0.90 → 1.00s : release back to free-fly
-    // Where 1.0 == full cycle == 5000ms.
-    const CYCLE_MS = 5000;
-    const patternAmount = (cycleT: number): number => {
-      if (cycleT < 0.55) return 0;
-      if (cycleT < 0.75) return smoothstep((cycleT - 0.55) / 0.20);
-      if (cycleT < 0.90) return 1;
-      return 1 - smoothstep((cycleT - 0.90) / 0.10);
-    };
+    // ── Pose cycle: slow morph between constellations ───────────────
+    //
+    // Each pose lasts POSE_MS. Within a pose window we run a smoothstep
+    // from the previous constellation's positions to the current one,
+    // so stars always ease *in* to the shape and ease *out* before the
+    // next. No hold-in-place interval — the smoothstep flatness at
+    // both endpoints already reads as "settled" at arrival and
+    // "departing" just before the next morph. Result is the slow
+    // breathing feel Parham asked for, rather than a snap-and-release.
+    const POSE_MS = 7000;
 
     const draw = (timestamp: number) => {
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
 
       const time = timestamp * 0.001;
-      const cycleT = (timestamp % CYCLE_MS) / CYCLE_MS;
-      const patternBlend = patternAmount(cycleT);
-
-      const w = cachedW;
-      const h = cachedH;
+      const poseIdx = Math.floor(timestamp / POSE_MS) % poseOrderRef.current.length;
+      const prevIdx = (poseIdx - 1 + poseOrderRef.current.length) % poseOrderRef.current.length;
+      const rawT = (timestamp % POSE_MS) / POSE_MS;
+      const morphT = smoothstep(rawT);
 
       const isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
       ctx.fillStyle = isDark ? "#0a0e1a" : "#ffffff";
@@ -504,38 +534,30 @@ export default function DoornegarAnimation({ size = "footer" }: { size?: Size })
         ctx.fill();
       }
 
-      const constellation = constellationRef.current!;
       const stars = starsRef.current;
       const themeColors = getThemeColors(isDark);
 
-      // ── Draw stars: free-wander blended toward the constellation every 5s ──
-      for (let i = 0; i < constellation.stars.length; i++) {
-        const starDef = constellation.stars[i];
+      for (let i = 0; i < stars.length; i++) {
         const st = stars[i];
+        const prev = st.posePositions[prevIdx];
+        const cur = st.posePositions[poseIdx];
 
-        const freeX = st.wanderCx + Math.sin(time * st.wanderFx + st.wanderPx) * st.wanderAx;
-        const freeY = st.wanderCy + Math.cos(time * st.wanderFy + st.wanderPy) * st.wanderAy;
-        const px = freeX + (st.patternX - freeX) * patternBlend;
-        const py = freeY + (st.patternY - freeY) * patternBlend;
+        // Morph smoothly between the two anchors, add always-on micro-wander.
+        const anchorX = prev.x + (cur.x - prev.x) * morphT;
+        const anchorY = prev.y + (cur.y - prev.y) * morphT;
+        const px = anchorX + Math.sin(time * st.wanderFx + st.wanderPx) * st.wanderAx;
+        const py = anchorY + Math.cos(time * st.wanderFy + st.wanderPy) * st.wanderAy;
 
-        const baseR = starDef.bright ? 2.4 : 1.7;
-        const glowR = starDef.bright ? 6 : 4;
+        const baseR = st.bright ? 2.4 : 1.7;
+        const glowR = st.bright ? 6 : 4;
+        const starColor = themeColors[GROUP_KEYS[st.group]];
 
-        // Subgroup color: explicit `group` wins; else derive from `side`.
-        let group: Group;
-        if (starDef.group != null) {
-          group = starDef.group;
-        } else if (starDef.side === 1) {
-          group = (i % 2 === 0 ? 2 : 3) as Group;
-        } else {
-          group = (i % 2 === 0 ? 0 : 1) as Group;
-        }
-        const starColor = themeColors[GROUP_KEYS[group]];
-
-        // Always-on gentle shimmer + a subtle brightness boost while
-        // gathered in the pattern so the snap registers visually.
-        const twinkle = 0.80 + 0.20 * Math.sin(time * 1.8 + i * 1.37);
-        const alpha = twinkle * (0.75 + 0.25 * patternBlend);
+        // Brightness eases up when settled into a pose (near pose center,
+        // rawT ≈ 0.5), and dims slightly during the morph travel. Plus a
+        // gentle sinusoidal twinkle so no star ever looks frozen.
+        const settledness = 1 - Math.abs(rawT - 0.5) * 2; // 0 at edges, 1 at center
+        const twinkle = 0.82 + 0.18 * Math.sin(time * 1.6 + i * 1.37);
+        const alpha = twinkle * (0.75 + 0.25 * smoothstep(settledness));
 
         // Glow halo
         const glow = ctx.createRadialGradient(px, py, 0, px, py, glowR);
