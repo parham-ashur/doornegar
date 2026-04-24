@@ -1855,10 +1855,13 @@ async def cluster_articles(db: AsyncSession) -> dict:
         )
 
     # ── Guardrails: update review_tier on actively-growing stories ──
-    # Tiers flag oversized / too-long-running clusters for HITL review.
-    # Only touches stories updated in the last 24h so aging dormant
-    # stories aren't constantly re-flagged. Frozen stories keep their
-    # tier as-is (the freeze itself was the decision).
+    # Size-based tiers fire on article_count. Age-based tiers fire only
+    # when the story is BOTH (a) older than the threshold AND (b) still
+    # being updated past its DB-creation date (last_updated > created+3d).
+    # The second condition filters out one-off late backdated additions
+    # and stories that simply got 1 legit article on day 0 and then went
+    # silent for a week — those shouldn't drag into the review queue.
+    # Frozen stories keep their tier; 24h filter prevents constant re-flagging.
     await db.execute(text(
         """
         UPDATE stories SET review_tier = GREATEST(
@@ -1869,9 +1872,14 @@ async def cluster_articles(db: AsyncSession) -> dict:
             ELSE 0
           END,
           CASE
-            WHEN (COALESCE(last_updated_at, now()) - COALESCE(first_published_at, created_at)) >= interval '7 days' THEN 3
-            WHEN (COALESCE(last_updated_at, now()) - COALESCE(first_published_at, created_at)) >= interval '5 days' THEN 2
-            WHEN (COALESCE(last_updated_at, now()) - COALESCE(first_published_at, created_at)) >= interval '3 days' THEN 1
+            WHEN last_updated_at > created_at + interval '3 days' THEN (
+              CASE
+                WHEN (last_updated_at - created_at) >= interval '7 days' THEN 3
+                WHEN (last_updated_at - created_at) >= interval '5 days' THEN 2
+                WHEN (last_updated_at - created_at) >= interval '3 days' THEN 1
+                ELSE 0
+              END
+            )
             ELSE 0
           END
         )
