@@ -15,7 +15,7 @@ import EditableTitle from "@/components/feedback/EditableTitle";
 import PriorityControl from "@/components/feedback/PriorityControl";
 import StoryFeedbackOverlay from "@/components/improvement/StoryFeedbackOverlay";
 import PublicFeedbackButton from "@/components/common/PublicFeedbackButton";
-import { getStory, getSources, getStoryAnalysis, getRelatedStories } from "@/lib/api";
+import { getStory, getStoryAnalysis, getRelatedStories } from "@/lib/api";
 import RelatedStoriesSlider from "@/components/story/RelatedStoriesSlider";
 import { formatRelativeTime, toFa } from "@/lib/utils";
 
@@ -92,22 +92,22 @@ export default async function StoryDetailPage({
   const { locale, id } = await params;
   setRequestLocale(locale);
 
-  // Fetch story, analysis, sources, and related stories in parallel (no waterfall)
+  // Fetch story, analysis, and related stories in parallel. Sources for the
+  // political spectrum + JSON-LD citations are now embedded in the story
+  // response (covering_sources), so the separate /api/v1/sources fetch is
+  // gone — one fewer Railway round trip per page regen.
   let story;
   let analysis = null;
-  let allSources: any[] = [];
   let relatedStories: any[] = [];
 
   try {
-    const [storyResult, analysisResult, sourcesResult, relatedResult] = await Promise.all([
+    const [storyResult, analysisResult, relatedResult] = await Promise.all([
       getStory(id),
       getStoryAnalysis(id).catch(() => null),
-      getSources().then(d => d.sources).catch(() => []),
       getRelatedStories(id, 8).catch(() => ({ stories: [] })),
     ]);
     story = storyResult;
     analysis = analysisResult;
-    allSources = sourcesResult;
     relatedStories = relatedResult?.stories || [];
   } catch {
     return (
@@ -122,9 +122,10 @@ export default async function StoryDetailPage({
 
   const title = story.title_fa || story.title_en;
 
-  // Sources covering this story
-  const coveringSlugs = new Set(story.articles.map((a) => a.source_slug).filter(Boolean));
-  const coveringSources = allSources.filter((s) => coveringSlugs.has(s.slug));
+  // Sources covering this story — server now embeds these in the story
+  // response. Fall back to the slug-filter shape on legacy responses while
+  // the deploy rolls out so older Railway revisions still render.
+  const coveringSources = story.covering_sources ?? [];
 
   // Aggregate per-article evidence by source slug so the spectrum
   // tooltip can show WHY a source got its neutrality number.

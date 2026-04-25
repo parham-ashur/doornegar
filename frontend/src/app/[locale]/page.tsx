@@ -1,6 +1,7 @@
 import { setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import SafeImage from "@/components/common/SafeImage";
+import SafeImageStatic from "@/components/common/SafeImageStatic";
 import WelcomeModal from "@/components/common/WelcomeModal";
 import type { StoryBrief, TelegramAnalysis } from "@/lib/types";
 import TelegramDiscussions from "@/components/home/TelegramDiscussions";
@@ -86,26 +87,31 @@ async function fetchAnalysesBatch(storyIds: string[]): Promise<Record<string, { 
   }
 }
 
-async function fetchTelegramAnalysis(storyId: string): Promise<TelegramAnalysis | null> {
+async function fetchTelegramAnalysesBatch(storyIds: string[]): Promise<Record<string, TelegramAnalysis>> {
+  if (storyIds.length === 0) return {};
+  const ids = Array.from(new Set(storyIds)).sort();
   try {
     const controller = new AbortController();
-    // 15s timeout — two-pass LLM regen easily runs 10s+; 8s aborted mid-flight.
     const timeout = setTimeout(() => controller.abort(), 15000);
-    // 60s Data Cache. no-store pounded Railway with 15 parallel SSR
-    // fetches; 300s+ hit a stuck-cache bug.
-    const res = await fetch(`${API}/api/v1/social/stories/${storyId}/telegram-analysis`, { next: { revalidate: 60 }, signal: controller.signal });
+    const res = await fetch(
+      `${API}/api/v1/social/stories/telegram-analyses?ids=${ids.join(",")}`,
+      { next: { revalidate: TELEGRAM_TTL }, signal: controller.signal },
+    );
     clearTimeout(timeout);
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (data.status !== "ok" || !data.analysis) return null;
-    const a = data.analysis as TelegramAnalysis;
-    return {
-      ...a,
-      predictions: displayPredictions(a),
-      key_claims: displayClaims(a),
-    };
+    if (!res.ok) return {};
+    const raw = (await res.json()) as Record<string, TelegramAnalysis | null>;
+    const out: Record<string, TelegramAnalysis> = {};
+    for (const [id, a] of Object.entries(raw)) {
+      if (!a) continue;
+      out[id] = {
+        ...a,
+        predictions: displayPredictions(a),
+        key_claims: displayClaims(a),
+      };
+    }
+    return out;
   } catch {
-    return null;
+    return {};
   }
 }
 
@@ -405,9 +411,9 @@ export default async function HomePage({
   //    from the top-15 telegram map further down (no separate fetches).
   const sortedIds = sorted.map(s => s.id);
   const telegramAnalysisIds = sorted.slice(0, 15).map(s => s.id);
-  const [allAnalyses, telegramResults] = await Promise.all([
+  const [allAnalyses, telegramByStoryId] = await Promise.all([
     fetchAnalysesBatch(sortedIds),
-    Promise.all(telegramAnalysisIds.map(id => fetchTelegramAnalysis(id))),
+    fetchTelegramAnalysesBatch(telegramAnalysisIds),
   ]);
   const hasBiasNarrative = (s: StoryBrief): boolean => {
     const a = allAnalyses[s.id];
@@ -500,15 +506,11 @@ export default async function HomePage({
   }
 
   // ── Telegram lookup maps ──
-  // Top-15 telegram strips were fetched up top alongside analyses. Look
-  // up hero/leftText/mostViewed telegrams from that single source of
-  // truth instead of refetching them. Stories that fall outside top-15
-  // (rare for hero/leftText, occasionally for mostViewed) get null and
-  // the strip simply hides — acceptable below-fold UX.
-  const telegramByStoryId: Record<string, TelegramAnalysis> = {};
-  telegramAnalysisIds.forEach((id, i) => {
-    if (telegramResults[i]) telegramByStoryId[id] = telegramResults[i] as TelegramAnalysis;
-  });
+  // Top-15 telegram strips were fetched up top alongside analyses, in a
+  // single batched request. Look up hero/leftText/mostViewed telegrams
+  // from that map instead of refetching them. Stories that fall outside
+  // top-15 (rare for hero/leftText, occasionally for mostViewed) get
+  // null and the strip simply hides — acceptable below-fold UX.
   const heroTelegram: TelegramAnalysis | null = hero ? telegramByStoryId[hero.id] || null : null;
   const leftTextTelegramById: Record<string, TelegramAnalysis> = {};
   for (const s of leftTextStories) {
@@ -626,10 +628,11 @@ export default async function HomePage({
   }
   const battleIds = new Set(battleItems.map(b => b.storyId));
 
-  const prefetchedTelegram: { storyId: string; analysis: any }[] = [];
-  telegramAnalysisIds.forEach((id, i) => {
-    if (telegramResults[i]) prefetchedTelegram.push({ storyId: id, analysis: telegramResults[i] });
-  });
+  const prefetchedTelegram: { storyId: string; analysis: TelegramAnalysis }[] = [];
+  for (const id of telegramAnalysisIds) {
+    const a = telegramByStoryId[id];
+    if (a) prefetchedTelegram.push({ storyId: id, analysis: a });
+  }
 
   return (
     <div dir="rtl" className="mx-auto max-w-7xl px-0 md:px-6 lg:px-8">
@@ -811,7 +814,7 @@ export default async function HomePage({
           {conservativeBlind && (
             <Link href={`/${locale}/stories/${conservativeBlind.id}`} className="group block border-[3px] border-[#1e3a5f] shadow-[0_0_12px_rgba(30,58,95,0.4)] hover:shadow-[0_0_20px_rgba(30,58,95,0.6)] transition-shadow animate-pulse-glow-blue">
               <div className="relative aspect-[4/3] overflow-hidden bg-slate-100 dark:bg-slate-800">
-                <SafeImage src={conservativeBlind.image_url} className="h-full w-full object-cover" />
+                <SafeImageStatic src={conservativeBlind.image_url} className="h-full w-full object-cover" />
                 {conservativeBlind.update_signal?.has_update && (
                   <span className="absolute bottom-2 right-2 border border-orange-300 dark:border-orange-700 bg-orange-50/95 dark:bg-orange-900/80 px-1.5 py-0.5 text-[10px] font-bold text-orange-700 dark:text-orange-200 backdrop-blur-sm">
                     بروزرسانی{formatUpdateReason(conservativeBlind.update_signal) ? ` · ${formatUpdateReason(conservativeBlind.update_signal)}` : ""}
@@ -831,7 +834,7 @@ export default async function HomePage({
           {oppositionBlind && (
             <Link href={`/${locale}/stories/${oppositionBlind.id}`} className="group block border-[3px] border-[#ea580c] shadow-[0_0_12px_rgba(234,88,12,0.4)] hover:shadow-[0_0_20px_rgba(234,88,12,0.6)] transition-shadow animate-pulse-glow-orange">
               <div className="relative aspect-[4/3] overflow-hidden bg-slate-100 dark:bg-slate-800">
-                <SafeImage src={oppositionBlind.image_url} className="h-full w-full object-cover" />
+                <SafeImageStatic src={oppositionBlind.image_url} className="h-full w-full object-cover" />
                 {oppositionBlind.update_signal?.has_update && (
                   <span className="absolute bottom-2 right-2 border border-orange-300 dark:border-orange-700 bg-orange-50/95 dark:bg-orange-900/80 px-1.5 py-0.5 text-[10px] font-bold text-orange-700 dark:text-orange-200 backdrop-blur-sm">
                     بروزرسانی{formatUpdateReason(oppositionBlind.update_signal) ? ` · ${formatUpdateReason(oppositionBlind.update_signal)}` : ""}
@@ -1058,7 +1061,7 @@ export default async function HomePage({
                       right of the image (Parham's ask). */}
                   <span className="text-[64px] font-black text-slate-200 dark:text-slate-700 shrink-0 leading-none -mt-1 w-[72px] text-right self-start">{toFa(i + 1)}</span>
                   <div className="w-48 shrink-0 overflow-hidden bg-slate-100 dark:bg-slate-800 self-stretch">
-                    <SafeImage src={s.image_url} className="w-full h-full object-cover" />
+                    <SafeImageStatic src={s.image_url} className="w-full h-full object-cover" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <h3 className="text-[22px] font-black leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
@@ -1135,7 +1138,7 @@ function MobileHome({
   oppositionBlind: StoryBrief | undefined;
   allAnalyses: Record<string, { bias_explanation_fa?: string; state_summary_fa?: string; diaspora_summary_fa?: string } | null>;
   heroTelegram: { discourse_summary?: string; predictions?: any[]; key_claims?: any[] } | null;
-  prefetchedTelegram: { storyId: string; analysis: any }[];
+  prefetchedTelegram: { storyId: string; analysis: TelegramAnalysis }[];
   telegramAnalysisIds: string[];
   battleItems: Array<{
     storyId: string;
@@ -1291,7 +1294,7 @@ function MobileHome({
                 className="group block border-[3px] border-[#1e3a5f] shadow-[0_0_12px_rgba(30,58,95,0.4)] animate-pulse-glow-blue">
                 <div className="flex gap-3 p-3">
                   <div className="relative w-20 h-20 shrink-0 overflow-hidden bg-slate-100 dark:bg-slate-800">
-                    <SafeImage src={conservativeBlind.image_url} className="h-full w-full object-cover" />
+                    <SafeImageStatic src={conservativeBlind.image_url} className="h-full w-full object-cover" />
                     {conservativeBlind.update_signal?.has_update && (
                       <span className="absolute bottom-0 inset-x-0 bg-orange-500/95 text-white text-center text-[9px] font-bold py-0.5">
                         بروزرسانی
@@ -1314,7 +1317,7 @@ function MobileHome({
                 className="group block border-[3px] border-[#ea580c] shadow-[0_0_12px_rgba(234,88,12,0.4)] animate-pulse-glow-orange">
                 <div className="flex gap-3 p-3">
                   <div className="relative w-20 h-20 shrink-0 overflow-hidden bg-slate-100 dark:bg-slate-800">
-                    <SafeImage src={oppositionBlind.image_url} className="h-full w-full object-cover" />
+                    <SafeImageStatic src={oppositionBlind.image_url} className="h-full w-full object-cover" />
                     {oppositionBlind.update_signal?.has_update && (
                       <span className="absolute bottom-0 inset-x-0 bg-orange-500/95 text-white text-center text-[9px] font-bold py-0.5">
                         بروزرسانی

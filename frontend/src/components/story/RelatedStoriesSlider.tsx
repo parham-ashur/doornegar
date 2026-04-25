@@ -10,7 +10,7 @@
  */
 
 import Link from "next/link";
-import SafeImage from "@/components/common/SafeImage";
+import SafeImageStatic from "@/components/common/SafeImageStatic";
 import type { RelatedStory } from "@/lib/api";
 import { toFa } from "@/lib/utils";
 
@@ -61,7 +61,7 @@ export default function RelatedStoriesSlider({
               className="shrink-0 w-[72vw] sm:w-60 md:w-64 snap-start border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/40 hover:border-blue-400 dark:hover:border-blue-600 transition-colors group"
             >
               <div className="relative aspect-[16/10] bg-slate-100 dark:bg-slate-800 overflow-hidden">
-                <SafeImage
+                <SafeImageStatic
                   src={s.image_url}
                   sizes="(max-width: 640px) 72vw, 256px"
                 />

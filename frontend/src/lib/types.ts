@@ -164,6 +164,7 @@ export interface StoryDetail extends StoryBrief {
   editorial_context_fa: EditorialContext | null;
   articles: StoryArticleWithBias[];
   arc: StoryArcBrief | null;
+  covering_sources?: Source[];
 }
 
 export interface SocialSentiment {

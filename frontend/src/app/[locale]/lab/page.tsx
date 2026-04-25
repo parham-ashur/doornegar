@@ -1,6 +1,6 @@
 import { setRequestLocale } from "next-intl/server";
 import Link from "next/link";
-import SafeImage from "@/components/common/SafeImage";
+import SafeImageStatic from "@/components/common/SafeImageStatic";
 import type { TopicBrief } from "@/lib/types";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -70,7 +70,7 @@ function HeroCard({ topic, locale }: { topic: TopicBrief; locale: string }) {
         {topic.image_url && (
           <div className="lg:col-span-4">
             <div className="aspect-[16/10] overflow-hidden bg-slate-100 dark:bg-slate-800">
-              <SafeImage src={topic.image_url} className="h-full w-full object-cover" />
+              <SafeImageStatic src={topic.image_url} className="h-full w-full object-cover" />
             </div>
           </div>
         )}
@@ -94,7 +94,7 @@ function LargeThumbCard({ topic, locale }: { topic: TopicBrief; locale: string }
     <Link href={`/${locale}/lab/${topic.id}`} className="group block">
       {topic.image_url && (
         <div className="aspect-[4/3] overflow-hidden bg-slate-100 dark:bg-slate-800 mb-3">
-          <SafeImage src={topic.image_url} className="h-full w-full object-cover" />
+          <SafeImageStatic src={topic.image_url} className="h-full w-full object-cover" />
         </div>
       )}
       <ModeBadge mode={topic.mode} />
@@ -145,7 +145,7 @@ function BoxCard({ topic, locale }: { topic: TopicBrief; locale: string }) {
       </div>
       {topic.image_url && (
         <div className="sm:col-span-2 aspect-[4/3] overflow-hidden bg-slate-100 dark:bg-slate-800">
-          <SafeImage src={topic.image_url} className="h-full w-full object-cover" />
+          <SafeImageStatic src={topic.image_url} className="h-full w-full object-cover" />
         </div>
       )}
     </Link>
