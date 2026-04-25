@@ -40,6 +40,17 @@ export function cleanClaim(text: string): string {
   // "موضوع: X | rest" → "rest" — short Persian label + "|" separator
   // from Pass-2's categorizer prefix.
   t = t.replace(/^[\u0600-\u06FF\s]{1,25}:\s*[^|]+\|\s*/, "");
+  // "ادعا: «inner»" / "ادعا: inner" → "inner". Pass-2 sometimes wraps the
+  // whole claim in this scaffold; the section header «ادعاهای کلیدی» already
+  // tells the reader what they're looking at.
+  t = t.replace(/^ادعا\s*:\s*/, "");
+  t = t.replace(/^[«"]([^»"]+)[»"]\s*/, "$1");
+  // Trailing « — کانال X [descriptor]» or « — ارزیابی: ...» tails. These
+  // attribute the claim or grade its credibility — the credibility goes to
+  // the label below the card; the channel name is gone by policy.
+  t = t.replace(/\s*[—–-]\s*کانال\s+[^—–\-]+(?=\s*[—–\-]|\s*$)/g, "");
+  t = t.replace(/\s*[—–-]\s*(?:کانال‌های|رسانه‌های)\s+[^—–\-]+(?=\s*[—–\-]|\s*$)/g, "");
+  t = t.replace(/\s*[—–-]\s*ارزیابی\s*:\s*.+$/, "");
   // Verbose attribution verbs that Parham flagged as non-essential:
   //   «کانال [X] اعلام کرد/کرده است/کرده‌اند/ادعا کردند که …»
   //   «کانال‌های حکومتی نزدیک به دولت ادعا کردند …»
@@ -100,7 +111,7 @@ export function getCredLabel(t: string): CredLabel | null {
   if (/مشکوک|اغراق|بعید|غیرواقعی/.test(t)) return { label: "مشکوک", color: "text-red-500" };
   if (/تبلیغاتی|جنبه تبلیغی|پروپاگاند/.test(t)) return { label: "تبلیغاتی", color: "text-red-400" };
   if (/نیازمند.*تایید|نیازمند.*تأیید|نیاز به تایید|نیاز به تأیید|تأیید نشده|تایید نشده|قابل.تأیید نیست|نیازمند.*مستقل|صحت.*نیاز/.test(t)) return { label: "تأیید نشده", color: "text-amber-500" };
-  if (/قابل.اعتبار|تایید شده|تأیید شده|قابل.اعتماد|معتبر/.test(t)) return { label: "تأیید شده", color: "text-emerald-500" };
+  if (/قابل.اعتبار|تایید شده|تأیید شده|قابل.اعتماد|قابل.استناد|معتبر|موثق/.test(t)) return { label: "تأیید شده", color: "text-emerald-500" };
   return null;
 }
 
