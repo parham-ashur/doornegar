@@ -117,14 +117,21 @@ async def pipeline():
             print(f"  → Skipped: {e}")
 
         print()
-        print("Step 7/8: Downloading/fixing story images...")
+        print("Step 7/9: Downloading/fixing story images...")
         try:
             await fill_images()
         except Exception as e:
             print(f"  → Image fill failed: {e}")
 
         print()
-        print("Step 8/8: Checking for stories without images...")
+        print("Step 8/9: Re-hosting article images on R2 (recompress to WebP, max 1600px)...")
+        try:
+            await download_images()
+        except Exception as e:
+            print(f"  → Re-host failed: {e}")
+
+        print()
+        print("Step 9/9: Checking for stories without images...")
         try:
             await check_images()
         except Exception as e:
