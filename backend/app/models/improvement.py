@@ -68,6 +68,13 @@ class ImprovementFeedback(Base):
     # toward consensus.
     submitter_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
+    # Story the article was orphaned from when this row's flag triggered
+    # the auto-orphan path. Used by the clusterer's negative-pair check
+    # to refuse re-attaching the same article to the same story.
+    orphaned_from_story_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+
     # Admin tracking
     status: Mapped[str] = mapped_column(
         String(20),

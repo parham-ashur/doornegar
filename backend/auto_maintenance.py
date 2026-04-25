@@ -1574,6 +1574,7 @@ async def step_rater_feedback_apply():
     from app.models.article import Article
     from app.models.story import Story
     from app.nlp.embeddings import cosine_similarity as _cs
+    from app.services.events import log_event as _log_event
 
     stats = {
         "rater_orphaned": 0,
@@ -1583,6 +1584,9 @@ async def step_rater_feedback_apply():
     }
     rejections: set[tuple[str, str]] = set()
     orphan_ids: set[uuid.UUID] = set()
+    # Track orphan→from-story mapping so we can log a follow-up rehome
+    # event linking the two stories.
+    orphan_from: dict[uuid.UUID, uuid.UUID] = {}
 
     async with async_session() as db:
         # ── Rater path: ≥1 trusted vote ─────────────────────────
@@ -1612,6 +1616,15 @@ async def step_rater_feedback_apply():
             if res.rowcount:
                 stats["rater_orphaned"] += 1
                 orphan_ids.add(art_id)
+                orphan_from[art_id] = sid
+                await _log_event(
+                    db,
+                    event_type="feedback_orphan_rater",
+                    actor="rater_feedback",
+                    story_id=sid,
+                    article_id=art_id,
+                    signals={"votes": int(votes)},
+                )
                 logger.info(
                     f"  Rater feedback: orphaned article {art_id} "
                     f"from story {sid} ({votes} vote{'s' if votes != 1 else ''})"
@@ -1654,8 +1667,10 @@ async def step_rater_feedback_apply():
             if res.rowcount:
                 stats["anon_orphaned"] += 1
                 orphan_ids.add(article_uuid)
-                # Mark all open submissions for this article as in_progress
-                # so we don't re-trigger on the next tick before rehoming.
+                orphan_from[article_uuid] = current_sid
+                # Persist the from-story for the negative-pair check and
+                # mark submissions in_progress so we don't re-trigger on
+                # the next tick before rehoming completes.
                 await db.execute(
                     update(ImprovementFeedback)
                     .where(
@@ -1665,9 +1680,18 @@ async def step_rater_feedback_apply():
                     )
                     .values(
                         status="in_progress",
+                        orphaned_from_story_id=current_sid,
                         admin_notes=f"Auto-orphaned at {voters} fingerprints",
                         resolved_at=datetime.now(timezone.utc),
                     )
+                )
+                await _log_event(
+                    db,
+                    event_type="feedback_orphan_anon",
+                    actor="improvement_feedback",
+                    story_id=current_sid,
+                    article_id=article_uuid,
+                    signals={"voters": int(voters)},
                 )
                 logger.info(
                     f"  Anon feedback: orphaned article {article_uuid} "
@@ -1713,6 +1737,18 @@ async def step_rater_feedback_apply():
                         update(Article).where(Article.id == art_id).values(story_id=best_story)
                     )
                     stats["rehomed"] += 1
+                    await _log_event(
+                        db,
+                        event_type="feedback_rehome",
+                        actor="rater_feedback",
+                        story_id=best_story,
+                        article_id=art_id,
+                        confidence=float(best_sim),
+                        signals={
+                            "from_story_id": str(orphan_from.get(art_id) or ""),
+                            "cosine": round(best_sim, 3),
+                        },
+                    )
                     logger.info(
                         f"  Rehomed article {art_id} → story {best_story} "
                         f"(cosine {best_sim:.2f})"
@@ -1769,6 +1805,7 @@ async def step_apply_summary_corrections():
         import openai
         from app.services.llm_helper import build_openai_params
         from app.services.llm_usage import log_llm_usage
+        from app.services.events import log_event as _log_event
 
         client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
 
@@ -1821,6 +1858,16 @@ async def step_apply_summary_corrections():
                         update(RaterFeedback)
                         .where(RaterFeedback.id == fb.id)
                         .values(applied_at=datetime.now(timezone.utc))
+                    )
+                    await _log_event(
+                        db,
+                        event_type="feedback_summary_regen",
+                        actor="rater_feedback",
+                        story_id=story.id,
+                        signals={
+                            "rating": int(fb.summary_rating or 0),
+                            "correction_chars": len(fb.summary_correction or ""),
+                        },
                     )
                     stats["regenerated"] += 1
                     logger.info(f"  Regenerated summary for story {story.id} from rater correction")
@@ -1880,6 +1927,7 @@ async def step_niloofar_feedback_audit():
         import openai
         from app.services.llm_helper import build_openai_params
         from app.services.llm_usage import log_llm_usage
+        from app.services.events import log_event as _log_event
 
         client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
 
@@ -1963,9 +2011,18 @@ async def step_niloofar_feedback_audit():
                         .where(ImprovementFeedback.id == fb.id)
                         .values(
                             status="in_progress",
+                            orphaned_from_story_id=story.id,
                             admin_notes=f"Niloofar agreed: {explanation}",
                             resolved_at=datetime.now(timezone.utc),
                         )
+                    )
+                    await _log_event(
+                        db,
+                        event_type="feedback_niloofar_orphan",
+                        actor="niloofar",
+                        story_id=story.id,
+                        article_id=article_uuid,
+                        signals={"explanation": explanation[:200]},
                     )
                     stats["agreed"] += 1
                 elif first_line.startswith("disagree"):
@@ -1978,6 +2035,14 @@ async def step_niloofar_feedback_audit():
                             resolved_at=datetime.now(timezone.utc),
                         )
                     )
+                    await _log_event(
+                        db,
+                        event_type="feedback_niloofar_dismiss",
+                        actor="niloofar",
+                        story_id=story.id,
+                        article_id=article_uuid,
+                        signals={"explanation": explanation[:200]},
+                    )
                     stats["disagreed"] += 1
                 else:
                     stats["ambiguous"] += 1
@@ -1989,6 +2054,152 @@ async def step_niloofar_feedback_audit():
 
     if any(v for k, v in stats.items() if k != "ambiguous"):
         logger.info(f"Niloofar feedback audit: {stats}")
+    return stats
+
+
+async def step_source_trust_recompute():
+    """Auto-tune Source.cluster_quality_score from feedback signals.
+
+    For each source, compute the 30d *flag rate*:
+      flagged = articles with any negative is_relevant rater_feedback OR
+                wrong_clustering ImprovementFeedback (status≠open)
+      total   = articles ingested in the last 30 days
+      rate    = flagged / total
+
+    Sources with rate > 3 × the global median (across sources with
+    ≥10 articles in window) get penalized:
+
+      score = max(0.5, 1.0 - 2 × (rate - median))
+
+    Sources at or below the median recover toward 1.0 by +0.05/day so
+    a one-bad-week dip auto-heals. Score is then used by the matcher:
+    effective_threshold = base_threshold / score, so a 0.5-trust source
+    needs cosine ≥ 0.90 instead of 0.45 to attach.
+
+    Logs source_trust_change story_event whenever a score moves > 0.05.
+    """
+    from sqlalchemy import select, update, func
+    from app.database import async_session
+    from app.models.article import Article
+    from app.models.feedback import RaterFeedback
+    from app.models.improvement import ImprovementFeedback
+    from app.models.source import Source
+    from app.services.events import log_event as _log_event
+
+    stats = {"sources_checked": 0, "penalized": 0, "recovered": 0, "median_rate": 0.0}
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+
+    async with async_session() as db:
+        # Total articles per source in window
+        totals_q = await db.execute(
+            select(Article.source_id, func.count(Article.id))
+            .where(Article.ingested_at >= cutoff)
+            .group_by(Article.source_id)
+        )
+        totals = {sid: cnt for sid, cnt in totals_q.all()}
+
+        # Flagged articles per source: rater rejections
+        rater_flagged_q = await db.execute(
+            select(Article.source_id, func.count(func.distinct(Article.id)))
+            .join(RaterFeedback, RaterFeedback.article_id == Article.id)
+            .where(
+                Article.ingested_at >= cutoff,
+                RaterFeedback.feedback_type == "article_relevance",
+                RaterFeedback.is_relevant.is_(False),
+            )
+            .group_by(Article.source_id)
+        )
+        rater_flagged = {sid: cnt for sid, cnt in rater_flagged_q.all()}
+
+        # Flagged via anonymous orphans (acted-on rows have status≠open)
+        anon_flagged_q = await db.execute(
+            select(Article.source_id, func.count(func.distinct(Article.id)))
+            .join(
+                ImprovementFeedback,
+                ImprovementFeedback.target_id == func.cast(Article.id, type_=ImprovementFeedback.target_id.type),
+            )
+            .where(
+                Article.ingested_at >= cutoff,
+                ImprovementFeedback.target_type == "article",
+                ImprovementFeedback.issue_type == "wrong_clustering",
+                ImprovementFeedback.status != "open",
+            )
+            .group_by(Article.source_id)
+        )
+        anon_flagged = {sid: cnt for sid, cnt in anon_flagged_q.all()}
+
+        # Compute rates
+        rates: dict[uuid.UUID, float] = {}
+        eligible_for_median: list[float] = []
+        for sid, total in totals.items():
+            if total < 10:
+                continue
+            flagged = rater_flagged.get(sid, 0) + anon_flagged.get(sid, 0)
+            rate = flagged / total
+            rates[sid] = rate
+            eligible_for_median.append(rate)
+
+        if not eligible_for_median:
+            logger.info("Source trust: no eligible sources with ≥10 articles in 30d")
+            return stats
+
+        eligible_for_median.sort()
+        median_rate = eligible_for_median[len(eligible_for_median) // 2]
+        stats["median_rate"] = round(median_rate, 4)
+
+        # Apply scores
+        sources_q = await db.execute(select(Source))
+        sources = list(sources_q.scalars().all())
+
+        for source in sources:
+            stats["sources_checked"] += 1
+            old_score = source.cluster_quality_score or 1.0
+            rate = rates.get(source.id)
+
+            if rate is None:
+                # Insufficient data — drift back toward 1.0
+                new_score = min(1.0, old_score + 0.05)
+            elif rate > 3 * max(median_rate, 0.01):
+                # Penalize proportional to excess
+                new_score = max(0.5, 1.0 - 2 * (rate - median_rate))
+                stats["penalized"] += 1
+            else:
+                # At or below the bar — recover
+                new_score = min(1.0, old_score + 0.05)
+                if new_score > old_score:
+                    stats["recovered"] += 1
+
+            new_score = round(new_score, 3)
+            if abs(new_score - old_score) > 0.005:
+                await db.execute(
+                    update(Source)
+                    .where(Source.id == source.id)
+                    .values(cluster_quality_score=new_score)
+                )
+                # Log significant moves only (≥0.05) to avoid event spam
+                if abs(new_score - old_score) >= 0.05:
+                    await _log_event(
+                        db,
+                        event_type="source_trust_change",
+                        actor="maintenance",
+                        signals={
+                            "source_id": str(source.id),
+                            "source_slug": source.slug,
+                            "old_score": old_score,
+                            "new_score": new_score,
+                            "flag_rate_30d": round(rate or 0.0, 4),
+                            "median_rate_30d": round(median_rate, 4),
+                        },
+                    )
+                    logger.info(
+                        f"  Source trust: {source.slug} {old_score:.3f} → {new_score:.3f} "
+                        f"(rate={rate or 0:.3f}, median={median_rate:.3f})"
+                    )
+
+        await db.commit()
+
+    logger.info(f"Source trust recompute: {stats}")
     return stats
 
 
@@ -5108,6 +5319,7 @@ FULL_PIPELINE = [
     ("rater_feedback", "Apply rater feedback", "step_rater_feedback_apply"),
     ("summary_corrections", "Regenerate story summaries from rater corrections", "step_apply_summary_corrections"),
     ("niloofar_feedback_audit", "Niloofar audits open «نامرتبط» queue", "step_niloofar_feedback_audit"),
+    ("source_trust", "Recompute Source.cluster_quality_score from feedback", "step_source_trust_recompute"),
     ("feedback_health", "Feedback system health", "step_feedback_health"),
     ("telegram_analysis", "Deep Telegram discourse analysis (two-pass)", "step_telegram_deep_analysis"),
     ("backfill_analyst_counts", "Resolve prediction supporters → analyst counts (no LLM)", "step_backfill_analyst_counts"),
