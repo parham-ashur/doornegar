@@ -1,5 +1,3 @@
-"use client";
-
 import { useLocale, useTranslations } from "next-intl";
 import { ExternalLink } from "lucide-react";
 import BiasSpectrum from "@/components/common/BiasSpectrum";

@@ -10,7 +10,7 @@
  */
 
 import Link from "next/link";
-import Image from "next/image";
+import SafeImage from "@/components/common/SafeImage";
 import type { RelatedStory } from "@/lib/api";
 import { toFa } from "@/lib/utils";
 
@@ -61,20 +61,10 @@ export default function RelatedStoriesSlider({
               className="shrink-0 w-[72vw] sm:w-60 md:w-64 snap-start border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/40 hover:border-blue-400 dark:hover:border-blue-600 transition-colors group"
             >
               <div className="relative aspect-[16/10] bg-slate-100 dark:bg-slate-800 overflow-hidden">
-                {s.image_url ? (
-                  <Image
-                    src={s.image_url}
-                    alt=""
-                    fill
-                    sizes="(max-width: 640px) 72vw, 256px"
-                    className="object-cover"
-                    unoptimized
-                  />
-                ) : (
-                  <div className="absolute inset-0 flex items-center justify-center text-slate-400 text-xs">
-                    بدون تصویر
-                  </div>
-                )}
+                <SafeImage
+                  src={s.image_url}
+                  sizes="(max-width: 640px) 72vw, 256px"
+                />
                 {isArcSibling && (
                   <span className="absolute top-2 right-2 text-[10px] font-bold px-2 py-0.5 bg-blue-600 text-white">
                     روایت نزدیک

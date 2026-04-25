@@ -8,6 +8,9 @@ const nextConfig = {
       { protocol: "https", hostname: "**" },
     ],
   },
+  experimental: {
+    optimizePackageImports: ["lucide-react", "date-fns", "date-fns-jalali"],
+  },
 };
 
 module.exports = withNextIntl(nextConfig);

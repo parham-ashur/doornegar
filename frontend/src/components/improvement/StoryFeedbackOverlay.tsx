@@ -2,11 +2,16 @@
 
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import dynamic from "next/dynamic";
 import {
   Type, Image as ImageIcon, FileText, LayoutGrid,
   MessageSquare, Globe, BarChart3, Sparkles,
 } from "lucide-react";
-import ImprovementModal from "@/components/improvement/ImprovementModal";
+
+const ImprovementModal = dynamic(
+  () => import("@/components/improvement/ImprovementModal"),
+  { ssr: false },
+);
 
 type TargetType =
   | "story" | "story_title" | "story_image" | "story_summary"

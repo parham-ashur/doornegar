@@ -72,13 +72,15 @@ function extractSection(content: string, sectionName: string): DigestItem[] {
 }
 
 export default function WeeklyDigest({ prefetchedContent }: { prefetchedContent?: string | null }) {
-  const initTrends = prefetchedContent ? extractSection(prefetchedContent, "روندهای کلیدی") : [];
-  const initOutlook = prefetchedContent ? extractSection(prefetchedContent, "چشم‌انداز هفته آینده") : [];
-  const initRefs = prefetchedContent ? extractStoryRefs(prefetchedContent) : [];
-
-  const [trends, setTrends] = useState<DigestItem[]>(initTrends);
-  const [outlook, setOutlook] = useState<DigestItem[]>(initOutlook);
-  const [storyRefs, setStoryRefs] = useState<StoryRef[]>(initRefs);
+  const [trends, setTrends] = useState<DigestItem[]>(() =>
+    prefetchedContent ? extractSection(prefetchedContent, "روندهای کلیدی") : []
+  );
+  const [outlook, setOutlook] = useState<DigestItem[]>(() =>
+    prefetchedContent ? extractSection(prefetchedContent, "چشم‌انداز هفته آینده") : []
+  );
+  const [storyRefs, setStoryRefs] = useState<StoryRef[]>(() =>
+    prefetchedContent ? extractStoryRefs(prefetchedContent) : []
+  );
   const [loading, setLoading] = useState(!prefetchedContent);
   const [noData, setNoData] = useState(prefetchedContent === null && !prefetchedContent);
 

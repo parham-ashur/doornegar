@@ -7,8 +7,6 @@ import { useEffect } from "react";
   1. Staggered scroll entrance (elements fade+slide up as you scroll)
   2. Parallax depth (images move slower than text on scroll)
   3. Smooth scroll momentum (CSS smooth scroll)
-  4. Time-of-day atmosphere (faint tint based on hour)
-  5. Section dividers that breathe (border opacity pulses)
 */
 
 export default function PageAtmosphere() {
@@ -83,23 +81,6 @@ export default function PageAtmosphere() {
     window.addEventListener("scroll", handleScroll, { passive: true });
 
     const root = document.documentElement;
-    const isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-
-    // ─── 5. Section dividers that breathe ─────────────────
-    const dividers = document.querySelectorAll("[dir='rtl'] .border-b");
-    let breatheFrame: number;
-
-    const breathe = (timestamp: number) => {
-      const v = (Math.sin(timestamp * 0.0006) + 1) / 2; // very slow
-      const opacity = 0.3 + v * 0.7; // oscillate between 0.3 and 1.0
-      dividers.forEach((el) => {
-        (el as HTMLElement).style.borderBottomColor = isDark
-          ? `rgba(30, 41, 59, ${opacity})`
-          : `rgba(226, 232, 240, ${opacity})`;
-      });
-      breatheFrame = requestAnimationFrame(breathe);
-    };
-    breatheFrame = requestAnimationFrame(breathe);
 
     // ─── 3. Smooth scroll momentum ────────────────────────
     root.style.scrollBehavior = "smooth";
@@ -108,11 +89,7 @@ export default function PageAtmosphere() {
     return () => {
       observerEntrance.disconnect();
       window.removeEventListener("scroll", handleScroll);
-      cancelAnimationFrame(breatheFrame);
       root.style.scrollBehavior = "";
-      dividers.forEach((el) => {
-        (el as HTMLElement).style.borderBottomColor = "";
-      });
     };
   }, []);
 

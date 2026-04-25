@@ -1,16 +1,9 @@
-"use client";
-
-import { useState } from "react";
+import { useId } from "react";
 import { GROUP_COLORS, GROUP_LABELS_FA } from "@/lib/narrativeGroups";
 import type { NarrativeGroup, StoryAnalysis } from "@/lib/types";
 
-type TabKey = "bias" | "inside" | "outside";
-
-const TABS: { key: TabKey; label: string }[] = [
-  { key: "bias", label: "مقایسه روایت‌ها" },
-  { key: "inside", label: "روایت درون‌مرزی" },
-  { key: "outside", label: "روایت برون‌مرزی" },
-];
+const LABEL_BASE =
+  "cursor-pointer px-5 py-3 text-[13px] font-bold transition-colors text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/50";
 
 function FramingTags({ framing }: { framing: string | string[] | null }) {
   if (!framing) return null;
@@ -73,7 +66,14 @@ function SubgroupBullets({
 // No content repeats across tabs. Previously all three rendered
 // the same 4-subgroup bullets and readers saw each one up to 3×.
 export default function StoryAnalysisPanel({ analysis }: { analysis: StoryAnalysis | null }) {
-  const [activeTab, setActiveTab] = useState<TabKey>("bias");
+  // CSS-driven tabs: three hidden radio inputs at the top, three peer-checked
+  // panels below. Active label restyles via peer-checked/<name> utilities.
+  // No JS — keeps this component server-renderable.
+  const reactId = useId();
+  const tabName = `story-tabs-${reactId.replace(/:/g, "")}`;
+  const biasId = `${tabName}-bias`;
+  const insideId = `${tabName}-inside`;
+  const outsideId = `${tabName}-outside`;
 
   const hasBias =
     analysis?.bias_explanation_fa ||
@@ -101,27 +101,21 @@ export default function StoryAnalysisPanel({ analysis }: { analysis: StoryAnalys
 
   return (
     <div dir="rtl">
+      {/* Hidden radios drive the active tab; must precede labels + panels in DOM order. */}
+      <input id={biasId} type="radio" name={tabName} defaultChecked className="peer/bias hidden" aria-hidden="true" tabIndex={-1} />
+      <input id={insideId} type="radio" name={tabName} className="peer/inside hidden" aria-hidden="true" tabIndex={-1} />
+      <input id={outsideId} type="radio" name={tabName} className="peer/outside hidden" aria-hidden="true" tabIndex={-1} />
+
       {/* Tab bar */}
       <div className="flex gap-0 border-b border-slate-200 dark:border-slate-800">
-        {TABS.map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            className={`px-5 py-3 text-[13px] font-bold transition-colors ${
-              activeTab === tab.key
-                ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900"
-                : "text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/50"
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
+        <label htmlFor={biasId} className={`${LABEL_BASE} peer-checked/bias:bg-slate-900 dark:peer-checked/bias:bg-white peer-checked/bias:text-white dark:peer-checked/bias:text-slate-900`}>مقایسه روایت‌ها</label>
+        <label htmlFor={insideId} className={`${LABEL_BASE} peer-checked/inside:bg-slate-900 dark:peer-checked/inside:bg-white peer-checked/inside:text-white dark:peer-checked/inside:text-slate-900`}>روایت درون‌مرزی</label>
+        <label htmlFor={outsideId} className={`${LABEL_BASE} peer-checked/outside:bg-slate-900 dark:peer-checked/outside:bg-white peer-checked/outside:text-white dark:peer-checked/outside:text-slate-900`}>روایت برون‌مرزی</label>
       </div>
 
-      {/* Tab content */}
+      {/* Tab content — all three panels render; CSS hides the inactive two. */}
       <div className="py-5 border-b border-slate-200 dark:border-slate-800">
-        {activeTab === "bias" && (
-          <div>
+        <div className="hidden peer-checked/bias:block">
             {/* Per-subgroup BIAS framing (how each subgroup slants the
                 story — word choices, emphasis, framing) — distinct from
                 the narrative bullets in the inside/outside tabs (which
@@ -224,11 +218,9 @@ export default function StoryAnalysisPanel({ analysis }: { analysis: StoryAnalys
                 </div>
               );
             })()}
-          </div>
-        )}
+        </div>
 
-        {activeTab === "inside" && (
-          <div>
+        <div className="hidden peer-checked/inside:block">
             {analysis.narrative?.inside &&
              ((analysis.narrative.inside.principlist?.length || 0) +
               (analysis.narrative.inside.reformist?.length || 0) > 0) ? (
@@ -251,11 +243,9 @@ export default function StoryAnalysisPanel({ analysis }: { analysis: StoryAnalys
             ) : (
               <p className="text-[13px] text-slate-400">روایتی از سوی رسانه‌های درون‌مرزی یافت نشد</p>
             )}
-          </div>
-        )}
+        </div>
 
-        {activeTab === "outside" && (
-          <div>
+        <div className="hidden peer-checked/outside:block">
             {analysis.narrative?.outside &&
              ((analysis.narrative.outside.moderate?.length || 0) +
               (analysis.narrative.outside.radical?.length || 0) > 0) ? (
@@ -278,8 +268,7 @@ export default function StoryAnalysisPanel({ analysis }: { analysis: StoryAnalys
             ) : (
               <p className="text-[13px] text-slate-400">روایتی از سوی رسانه‌های برون‌مرزی یافت نشد</p>
             )}
-          </div>
-        )}
+        </div>
       </div>
     </div>
   );

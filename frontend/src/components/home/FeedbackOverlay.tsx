@@ -1,10 +1,19 @@
 "use client";
 
 import { useState, useCallback, createContext, useContext } from "react";
+import dynamic from "next/dynamic";
 import { Type, ArrowUp, ArrowDown, GitMerge } from "lucide-react";
-import ImprovementModal from "@/components/improvement/ImprovementModal";
-import RaterOnboarding from "@/components/improvement/RaterOnboarding";
 import ImageSuggestionButton from "@/components/story/ImageSuggestionButton";
+
+// Heavy modal modules; only load when feedback mode is actually opened.
+const ImprovementModal = dynamic(
+  () => import("@/components/improvement/ImprovementModal"),
+  { ssr: false },
+);
+const RaterOnboarding = dynamic(
+  () => import("@/components/improvement/RaterOnboarding"),
+  { ssr: false },
+);
 
 type TargetType =
   | "story" | "story_title" | "story_image" | "story_summary"

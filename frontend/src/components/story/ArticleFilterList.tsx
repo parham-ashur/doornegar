@@ -1,9 +1,17 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Clock } from "lucide-react";
 import ArticleRelevanceButton from "@/components/feedback/ArticleRelevanceButton";
 import type { StoryArticleWithBias } from "@/lib/types";
+
+const TEHRAN_DAY_FMT = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tehran" });
+const TEHRAN_LABEL_FMT = new Intl.DateTimeFormat("fa-IR", {
+  timeZone: "Asia/Tehran",
+  year: "numeric",
+  month: "long",
+  day: "numeric",
+});
 
 interface ArticleFilterListProps {
   articles: StoryArticleWithBias[];
@@ -51,18 +59,6 @@ export default function ArticleFilterList({ articles, storyId, sidebarSync }: Ar
     return () => ro.disconnect();
   }, [sidebarSync]);
 
-  const filtered = activeFilter === "all"
-    ? articles
-    : articles.filter((a) => {
-        const alignment = a.source_state_alignment;
-        if (activeFilter === "state") return alignment === "state" || alignment === "semi_state" || alignment === "independent";
-        if (activeFilter === "diaspora") return alignment === "diaspora";
-        return true;
-      });
-
-  // Group by (Tehran-day × source) so multiple articles from the same
-  // outlet on the same day collapse into one row. Saves vertical space
-  // on umbrella stories where one source publishes 5+ pieces in a day.
   type Group = {
     dayKey: string;
     dayLabel: string;
@@ -71,58 +67,72 @@ export default function ArticleFilterList({ articles, storyId, sidebarSync }: Ar
     alignment: string | null;
     items: StoryArticleWithBias[];
   };
-  const groupsMap = new Map<string, Group>();
-  for (const a of filtered) {
-    const pub = a.published_at ? new Date(a.published_at) : null;
-    const dayKey = pub ? pub.toLocaleDateString("en-CA", { timeZone: "Asia/Tehran" }) : "unknown";
-    const srcKey = a.source_slug || a.source_name_fa || a.source_name_en || "?";
-    const key = `${dayKey}::${srcKey}`;
-    let g = groupsMap.get(key);
-    if (!g) {
-      g = {
-        dayKey,
-        dayLabel: pub
-          ? pub.toLocaleDateString("fa-IR", {
-              timeZone: "Asia/Tehran",
-              year: "numeric",
-              month: "long",
-              day: "numeric",
-            })
-          : "",
-        sourceName: a.source_name_fa || a.source_name_en || "",
-        sourceSlug: a.source_slug,
-        alignment: a.source_state_alignment,
-        items: [],
-      };
-      groupsMap.set(key, g);
+
+  const filterCounts = useMemo(() => {
+    let stateLike = 0;
+    let diaspora = 0;
+    for (const a of articles) {
+      const al = a.source_state_alignment;
+      if (al === "state" || al === "semi_state" || al === "independent") stateLike++;
+      else if (al === "diaspora") diaspora++;
     }
-    g.items.push(a);
-  }
-  const groups = Array.from(groupsMap.values());
-  // Newest day first; within a day order by source name for stability.
-  groups.sort((a, b) => {
-    if (a.dayKey !== b.dayKey) return b.dayKey.localeCompare(a.dayKey);
-    return a.sourceName.localeCompare(b.sourceName);
-  });
-  for (const g of groups) {
-    g.items.sort((x, y) => {
-      const tx = x.published_at ? new Date(x.published_at).getTime() : 0;
-      const ty = y.published_at ? new Date(y.published_at).getTime() : 0;
-      return ty - tx;
+    return { all: articles.length, state: stateLike, diaspora };
+  }, [articles]);
+
+  // Group by (Tehran-day × source) so multiple articles from the same
+  // outlet on the same day collapse into one row. Saves vertical space
+  // on umbrella stories where one source publishes 5+ pieces in a day.
+  const groups = useMemo(() => {
+    const filtered = activeFilter === "all"
+      ? articles
+      : articles.filter((a) => {
+          const al = a.source_state_alignment;
+          if (activeFilter === "state") return al === "state" || al === "semi_state" || al === "independent";
+          if (activeFilter === "diaspora") return al === "diaspora";
+          return true;
+        });
+
+    const groupsMap = new Map<string, Group>();
+    for (const a of filtered) {
+      const pub = a.published_at ? new Date(a.published_at) : null;
+      const dayKey = pub ? TEHRAN_DAY_FMT.format(pub) : "unknown";
+      const srcKey = a.source_slug || a.source_name_fa || a.source_name_en || "?";
+      const key = `${dayKey}::${srcKey}`;
+      let g = groupsMap.get(key);
+      if (!g) {
+        g = {
+          dayKey,
+          dayLabel: pub ? TEHRAN_LABEL_FMT.format(pub) : "",
+          sourceName: a.source_name_fa || a.source_name_en || "",
+          sourceSlug: a.source_slug,
+          alignment: a.source_state_alignment,
+          items: [],
+        };
+        groupsMap.set(key, g);
+      }
+      g.items.push(a);
+    }
+    const list = Array.from(groupsMap.values());
+    list.sort((a, b) => {
+      if (a.dayKey !== b.dayKey) return b.dayKey.localeCompare(a.dayKey);
+      return a.sourceName.localeCompare(b.sourceName);
     });
-  }
+    for (const g of list) {
+      g.items.sort((x, y) => {
+        const tx = x.published_at ? new Date(x.published_at).getTime() : 0;
+        const ty = y.published_at ? new Date(y.published_at).getTime() : 0;
+        return ty - tx;
+      });
+    }
+    return list;
+  }, [articles, activeFilter]);
 
   return (
     <div dir="rtl">
       {/* Filter buttons */}
       <div className="flex flex-wrap gap-2 mb-6">
         {filters.map((f) => {
-          const count = f.key === "all" ? articles.length : articles.filter((a) => {
-            const al = a.source_state_alignment;
-            if (f.key === "state") return al === "state" || al === "semi_state" || al === "independent";
-            if (f.key === "diaspora") return al === "diaspora";
-            return false;
-          }).length;
+          const count = filterCounts[f.key];
 
           return (
             <button

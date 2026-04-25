@@ -1,10 +1,11 @@
 import { setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import SafeImage from "@/components/common/SafeImage";
+import WelcomeModal from "@/components/common/WelcomeModal";
 import type { StoryBrief, TelegramAnalysis } from "@/lib/types";
 import TelegramDiscussions from "@/components/home/TelegramDiscussions";
 import WeeklyDigest from "@/components/home/WeeklyDigest";
-import { formatRelativeTime, toFa } from "@/lib/utils";
+import { formatRelativeTime, splitBiasPoints, toFa } from "@/lib/utils";
 import {
   claimText,
   displayClaims,
@@ -395,16 +396,21 @@ export default async function HomePage({
 
   const sorted = [...stories];
 
-  // Pre-fetch analyses for the top-15 trending so the hero picker can
-  // require a populated bias comparison. Without this check the hero
-  // sometimes landed on a story whose state_summary_fa / diaspora_
-  // summary_fa hadn't been generated yet — the card would render with
-  // just a title and no two-side narrative, defeating the point of the
-  // site. Reusing these analyses below as the primary batch.
-  const prefetchIds = sorted.slice(0, 15).map(s => s.id);
-  const prefetchedAnalyses = await fetchAnalysesBatch(prefetchIds);
+  // ── Stage 2 (collapsed): one round trip for ALL analyses + top-15
+  //    telegram strips, fired in parallel. Previously this was split
+  //    across two awaits — a 15-id "prefetch" to gate the hero picker,
+  //    then another batch with extraAnalyses + 4 telegram batches.
+  //    Merging into a single Promise.all saves ~300-600ms on every ISR
+  //    regen on Railway. Hero/leftText/mostViewed strips are looked up
+  //    from the top-15 telegram map further down (no separate fetches).
+  const sortedIds = sorted.map(s => s.id);
+  const telegramAnalysisIds = sorted.slice(0, 15).map(s => s.id);
+  const [allAnalyses, telegramResults] = await Promise.all([
+    fetchAnalysesBatch(sortedIds),
+    Promise.all(telegramAnalysisIds.map(id => fetchTelegramAnalysis(id))),
+  ]);
   const hasBiasNarrative = (s: StoryBrief): boolean => {
-    const a = prefetchedAnalyses[s.id];
+    const a = allAnalyses[s.id];
     return !!(a && (a.state_summary_fa || a.diaspora_summary_fa) && a.bias_explanation_fa);
   };
 
@@ -493,57 +499,28 @@ export default async function HomePage({
     cursor += chunk.length;
   }
 
-  // ── Batch-fetch all analyses the homepage needs in ONE backend call ──
-  // Was: N parallel GET /stories/{id}/analysis (up to ~30+ round trips).
-  // Now: single GET /stories/analyses?ids=... — one RTT, shared cache key.
-  const allIds = new Set<string>();
-  if (hero) allIds.add(hero.id);
-  for (const s of [...leftTextStories, ...mostViewed, ...overflow, ...disputedCandidates]) {
-    allIds.add(s.id);
-  }
-  for (const sec of sections) {
-    for (const s of sec.stories) allIds.add(s.id);
-  }
-  // ── Parallel stage 2: analyses + telegram + hero telegram ──
-  // All of these need story IDs from stage 1 but are independent of
-  // each other. Running them in a single Promise.all cuts the critical
-  // path from 4 sequential stages (~5s) to 2 (~3s).
-  //
-  // Telegram source pool: top-15 trending, regardless of freshness. The
-  // earlier "prefer fresh (<24h)" gate emptied the sidebar on days where
-  // the newest cluster of stories hadn't cycled through the maintenance
-  // deep-analysis loop yet — all 7 fresh stories returned no_data while
-  // the slightly-older top-trending stories had rich analysis. Trending
-  // rank already skews recent enough; deep-analyses are expensive so we
-  // accept showing a story from 26h ago if that's where the data lives.
-  const telegramAnalysisIds = sorted.slice(0, 15).map(s => s.id);
-  // leftTextStories AND mostViewed both get telegram strips now, so
-  // fetch their analyses in parallel with everything else. Each group
-  // goes into its own lookup map indexed by story id.
-  // Only fetch analyses we don't already have from the hero-picker prefetch.
-  const missingIds = Array.from(allIds).filter(id => !(id in prefetchedAnalyses));
-  // Always call fetchAnalysesBatch (it short-circuits on empty input) so the
-  // Promise.all union type stays concrete. Earlier I used Promise.resolve({})
-  // as the shortcut which widened the type to {} and broke build-time TS.
-  const [extraAnalyses, heroTelegram, telegramResults, leftTextTelegramResults, mostViewedTelegramResults] = await Promise.all([
-    fetchAnalysesBatch(missingIds),
-    hero ? fetchTelegramAnalysis(hero.id) : Promise.resolve(null),
-    Promise.all(telegramAnalysisIds.map(id => fetchTelegramAnalysis(id))),
-    Promise.all(leftTextStories.map(s => fetchTelegramAnalysis(s.id))),
-    Promise.all(mostViewed.map(s => fetchTelegramAnalysis(s.id))),
-  ]);
-  const allAnalyses = { ...prefetchedAnalyses, ...extraAnalyses };
-  const leftTextTelegramById: Record<string, any> = {};
-  leftTextStories.forEach((s, i) => {
-    if (leftTextTelegramResults[i]) leftTextTelegramById[s.id] = leftTextTelegramResults[i];
+  // ── Telegram lookup maps ──
+  // Top-15 telegram strips were fetched up top alongside analyses. Look
+  // up hero/leftText/mostViewed telegrams from that single source of
+  // truth instead of refetching them. Stories that fall outside top-15
+  // (rare for hero/leftText, occasionally for mostViewed) get null and
+  // the strip simply hides — acceptable below-fold UX.
+  const telegramByStoryId: Record<string, TelegramAnalysis> = {};
+  telegramAnalysisIds.forEach((id, i) => {
+    if (telegramResults[i]) telegramByStoryId[id] = telegramResults[i] as TelegramAnalysis;
   });
-  const mostViewedTelegramById: Record<string, any> = {};
-  mostViewed.forEach((s, i) => {
-    if (mostViewedTelegramResults[i]) mostViewedTelegramById[s.id] = mostViewedTelegramResults[i];
-  });
+  const heroTelegram: TelegramAnalysis | null = hero ? telegramByStoryId[hero.id] || null : null;
+  const leftTextTelegramById: Record<string, TelegramAnalysis> = {};
+  for (const s of leftTextStories) {
+    if (telegramByStoryId[s.id]) leftTextTelegramById[s.id] = telegramByStoryId[s.id];
+  }
+  const mostViewedTelegramById: Record<string, TelegramAnalysis> = {};
+  for (const s of mostViewed) {
+    if (telegramByStoryId[s.id]) mostViewedTelegramById[s.id] = telegramByStoryId[s.id];
+  }
 
   const allSummaries: Record<string, string | null> = {};
-  for (const id of Array.from(allIds)) {
+  for (const id of sortedIds) {
     allSummaries[id] = allAnalyses[id]?.summary_fa || null;
   }
 
@@ -656,6 +633,7 @@ export default async function HomePage({
 
   return (
     <div dir="rtl" className="mx-auto max-w-7xl px-0 md:px-6 lg:px-8">
+      <WelcomeModal />
 
       {/* ════════════════════════════════════════════ */}
       {/* MOBILE LAYOUT — original scrolling list (phones only) */}
@@ -760,7 +738,7 @@ export default async function HomePage({
               const diasporaSummary = analysis?.diaspora_summary_fa;
               const bias = analysis?.bias_explanation_fa;
               if (!stateSummary && !diasporaSummary) {
-                const points = bias?.split(/[.؛]/).map((p: string) => p.trim()).filter((p: string) => p.length > 10).slice(0, 2) || [];
+                const points = splitBiasPoints(bias).slice(0, 2);
                 if (!points.length) return null;
                 return (
                   <div className="mt-3 space-y-1">
@@ -771,11 +749,7 @@ export default async function HomePage({
                   </div>
                 );
               }
-              const biasPoints = bias
-                ?.split(/[.؛]/)
-                .map((p: string) => p.trim())
-                .filter((p: string) => p.length > 10)
-                .slice(0, 2) || [];
+              const biasPoints = splitBiasPoints(bias).slice(0, 2);
               return (
                 <div className="mt-3">
                   <UpdateDeltaCallout story={hero} field="bias" />
@@ -923,7 +897,7 @@ export default async function HomePage({
                     ) : (() => {
                       const bias = analysis?.bias_explanation_fa;
                       if (!bias) return null;
-                      const firstPoint = bias.split(/[.؛]/).map((p: string) => p.trim()).find((p: string) => p.length > 10);
+                      const firstPoint = splitBiasPoints(bias)[0];
                       if (!firstPoint) return null;
                       return <p className="mt-1.5 text-[13px] leading-5 text-slate-400 dark:text-slate-500 line-clamp-1">• {firstPoint}</p>;
                     })()}
@@ -1067,9 +1041,7 @@ export default async function HomePage({
             let fallbackBullets: string[] = [];
             if (!stateS && !diasporaS) {
               const bias = analysis?.bias_explanation_fa;
-              fallbackBullets = bias
-                ? bias.split(/[.؛]/).map((p: string) => p.trim()).filter((p: string) => p.length > 10).slice(0, 2)
-                : [];
+              fallbackBullets = splitBiasPoints(bias).slice(0, 2);
             }
             return (
               <div key={s.id}>
@@ -1182,8 +1154,7 @@ function MobileHome({
   const heroStateSummary = heroAnalysis?.state_summary_fa;
   const heroDiasporaSummary = heroAnalysis?.diaspora_summary_fa;
   const heroBias = heroAnalysis?.bias_explanation_fa;
-  const heroBiasPoints = heroBias
-    ?.split(/[.؛]/).map((p: string) => p.trim()).filter((p: string) => p.length > 10).slice(0, 2) || [];
+  const heroBiasPoints = splitBiasPoints(heroBias).slice(0, 2);
 
   // Weekly briefing stories ("در روزهای گذشته"): stories 1–3
   const briefingStories = stories.slice(1, 4);
@@ -1454,7 +1425,7 @@ function MobileHome({
           <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
             {briefingStories.map((s) => {
               const bias = allAnalyses[s.id]?.bias_explanation_fa;
-              const firstPoint = bias?.split(/[.؛]/).map((p: string) => p.trim()).find((p: string) => p.length > 10);
+              const firstPoint = splitBiasPoints(bias)[0];
               return (
                 <Link key={s.id} href={`/${locale}/stories/${s.id}`} className="group block py-4">
                   <h3 className="text-[22px] font-black leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">

@@ -32,6 +32,19 @@ export function toFa(n: number | string): string {
   return String(n).replace(/[0-9]/g, (d) => "۰۱۲۳۴۵۶۷۸۹"[parseInt(d)]);
 }
 
+/** Split a Farsi bias_explanation into its sentence-level points.
+ *  Splits on the Persian semicolon (؛) and English period; trims, drops
+ *  fragments shorter than 11 chars (avoid stray "..." tails).
+ *  Hoisted out of the homepage component so the regex isn't recompiled
+ *  per-card on every render. */
+export function splitBiasPoints(bias: string | null | undefined): string[] {
+  if (!bias) return [];
+  return bias
+    .split(/[.؛]/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 10);
+}
+
 export function formatRelativeTime(dateStr: string, locale: string): string {
   const date = new Date(dateStr);
   const now = new Date();

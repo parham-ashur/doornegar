@@ -1,5 +1,3 @@
-"use client";
-
 import { useLocale, useTranslations } from "next-intl";
 import { MessageCircle, Eye, Share2, ThumbsUp, ThumbsDown, Minus } from "lucide-react";
 import type { SocialSentiment } from "@/lib/types";

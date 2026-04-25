@@ -8,7 +8,6 @@ import Header from "@/components/layout/Header";
 import Footer from "@/components/layout/Footer";
 import ChromeGate from "@/components/layout/ChromeGate";
 import PageAtmosphere from "@/components/common/PageAtmosphere";
-import WelcomeModal from "@/components/common/WelcomeModal";
 import UmamiTracker from "@/components/common/UmamiTracker";
 import "@/styles/globals.css";
 
@@ -137,9 +136,6 @@ export default async function LocaleLayout({
             </ChromeGate>
             <ChromeGate>
               <PageAtmosphere />
-            </ChromeGate>
-            <ChromeGate>
-              <WelcomeModal />
             </ChromeGate>
           </div>
         </NextIntlClientProvider>

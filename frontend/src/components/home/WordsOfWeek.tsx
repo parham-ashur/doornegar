@@ -21,10 +21,10 @@ const FALLBACK_OPPOSITION = [
 ];
 
 export default function WordsOfWeek({ prefetchedData }: { prefetchedData?: { conservative?: any[]; opposition?: any[] } | null }) {
-  const [conservativeWords, setConservativeWords] = useState(
+  const [conservativeWords, setConservativeWords] = useState(() =>
     prefetchedData?.conservative?.length ? prefetchedData.conservative : FALLBACK_CONSERVATIVE
   );
-  const [oppositionWords, setOppositionWords] = useState(
+  const [oppositionWords, setOppositionWords] = useState(() =>
     prefetchedData?.opposition?.length ? prefetchedData.opposition : FALLBACK_OPPOSITION
   );
   const [loading, setLoading] = useState(!prefetchedData);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import type { StoryBrief } from "@/lib/types";
 import { toFa } from "@/lib/utils";
 
@@ -115,6 +115,47 @@ export default function NarrativeMap({ stories, prefetchedPositions }: { stories
     ? (cache.current[selected] || generateFallbackDots(stories.find(s => s.id === selected)!))
     : [];
 
+  // Group dots by source so multi-article sources draw connecting lines.
+  // Independent of hover/click state — memo keyed on dots only.
+  const bySource = useMemo(() => {
+    const out: Record<string, DotData[]> = {};
+    for (const d of dots) {
+      if (!d.source_slug) continue;
+      if (!out[d.source_slug]) out[d.source_slug] = [];
+      out[d.source_slug].push(d);
+    }
+    return Object.values(out).filter(g => g.length >= 2);
+  }, [dots]);
+
+  // O(n²) collision-nudge for overlapping logos. Independent of hover/click —
+  // recomputing on every state change burns ~5×n² ops per hover.
+  const nudgedDots = useMemo(() => {
+    const SIZE_PCT = 6;
+    const out = dots.map(d => ({ ...d }));
+    for (let pass = 0; pass < 5; pass++) {
+      let moved = false;
+      for (let i = 0; i < out.length; i++) {
+        for (let j = i + 1; j < out.length; j++) {
+          const dx = out[i].x - out[j].x;
+          const dy = out[i].y - out[j].y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < SIZE_PCT) {
+            const push = (SIZE_PCT - dist) / 2 + 1;
+            out[i].y = Math.max(5, out[i].y - push);
+            out[j].y = Math.min(95, out[j].y + push);
+            if (Math.abs(dx) < 2) {
+              out[i].x = Math.max(5, out[i].x - 1.5);
+              out[j].x = Math.min(95, out[j].x + 1.5);
+            }
+            moved = true;
+          }
+        }
+      }
+      if (!moved) break;
+    }
+    return out;
+  }, [dots]);
+
   const loading = false;
 
   const dotColorClasses: Record<DotData["color"], string> = {
@@ -180,63 +221,30 @@ export default function NarrativeMap({ stories, prefetchedPositions }: { stories
         )}
 
         {/* Connecting lines between same-source articles */}
-        {!loading && (() => {
-          const bySource: Record<string, DotData[]> = {};
-          dots.filter(d => d.source_slug).forEach(d => {
-            if (!bySource[d.source_slug]) bySource[d.source_slug] = [];
-            bySource[d.source_slug].push(d);
-          });
-          return Object.values(bySource).filter(g => g.length >= 2).map((group, gi) => (
-            <svg key={`line-${gi}`} className="absolute inset-0 w-full h-full pointer-events-none z-0" style={{ overflow: "visible" }}>
-              {group.slice(0, -1).map((d, i) => {
-                const next = group[i + 1];
-                const colorMap = { conservative: "#1e3a5f", opposition: "#ea580c", independent: "#94a3b8" };
-                return (
-                  <line
-                    key={`${d.article_id}-${next.article_id}`}
-                    x1={`${d.x}%`} y1={`${d.y}%`}
-                    x2={`${next.x}%`} y2={`${next.y}%`}
-                    stroke={colorMap[d.color] || "#94a3b8"}
-                    strokeWidth="1.5"
-                    opacity="0.45"
-                    strokeDasharray="4,3"
-                  />
-                );
-              })}
-            </svg>
-          ));
-        })()}
+        {!loading && bySource.map((group, gi) => (
+          <svg key={`line-${gi}`} className="absolute inset-0 w-full h-full pointer-events-none z-0" style={{ overflow: "visible" }}>
+            {group.slice(0, -1).map((d, i) => {
+              const next = group[i + 1];
+              const colorMap = { conservative: "#1e3a5f", opposition: "#ea580c", independent: "#94a3b8" };
+              return (
+                <line
+                  key={`${d.article_id}-${next.article_id}`}
+                  x1={`${d.x}%`} y1={`${d.y}%`}
+                  x2={`${next.x}%`} y2={`${next.y}%`}
+                  stroke={colorMap[d.color] || "#94a3b8"}
+                  strokeWidth="1.5"
+                  opacity="0.45"
+                  strokeDasharray="4,3"
+                />
+              );
+            })}
+          </svg>
+        ))}
 
         {/* Article logos — nudge overlapping positions */}
         {!loading && (() => {
-          // Nudge dots that overlap — run multiple passes for chain collisions
-          const SIZE_PCT = 6; // minimum distance between logos in %
-          const nudged = dots.map(d => ({ ...d }));
-          for (let pass = 0; pass < 5; pass++) {
-            let moved = false;
-            for (let i = 0; i < nudged.length; i++) {
-              for (let j = i + 1; j < nudged.length; j++) {
-                const dx = nudged[i].x - nudged[j].x;
-                const dy = nudged[i].y - nudged[j].y;
-                const dist = Math.sqrt(dx * dx + dy * dy);
-                if (dist < SIZE_PCT) {
-                  const push = (SIZE_PCT - dist) / 2 + 1;
-                  // Push apart on Y, and slightly on X if same column
-                  nudged[i].y = Math.max(5, nudged[i].y - push);
-                  nudged[j].y = Math.min(95, nudged[j].y + push);
-                  if (Math.abs(dx) < 2) {
-                    nudged[i].x = Math.max(5, nudged[i].x - 1.5);
-                    nudged[j].x = Math.min(95, nudged[j].x + 1.5);
-                  }
-                  moved = true;
-                }
-              }
-            }
-            if (!moved) break;
-          }
-
           const borderColor: Record<string, string> = { conservative: "border-[#1e3a5f]", opposition: "border-[#ea580c]", independent: "border-slate-400" };
-          return nudged.map((d) => (
+          return nudgedDots.map((d) => (
             <div
               key={d.article_id}
               className="absolute transition-all duration-500 z-10"
