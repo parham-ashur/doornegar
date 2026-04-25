@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from app.schemas.article import ArticleBrief
 from app.schemas.bias import BiasScoreResponse
+from app.schemas.source import SourceResponse
 
 
 class NarrativeGroupPercentages(BaseModel):
@@ -94,6 +95,10 @@ class StoryDetail(StoryBrief):
     editorial_context_fa: dict | None = None
     articles: list[StoryArticleWithBias] = []
     arc: StoryArcBrief | None = None
+    # Sources whose articles appear in this story. Embedded so the
+    # frontend can render the political-spectrum + JSON-LD citations
+    # without a second round trip to /api/v1/sources.
+    covering_sources: list[SourceResponse] = []
 
 
 class StoryListResponse(BaseModel):

@@ -18,6 +18,7 @@ from app.models.bias_score import BiasScore
 from app.models.source import Source
 from app.models.story import Story
 from app.schemas.bias import BiasScoreResponse
+from app.schemas.source import SourceResponse
 from app.schemas.story import (
     StoryAnalysisResponse,
     StoryArticleWithBias,
@@ -749,6 +750,19 @@ async def get_story(
                 chapters=chapters,
             )
 
+    # Collect unique sources whose articles cite into this story. Reading
+    # article.source from already-eager-loaded relations is in-memory only —
+    # no additional round trip. Embeds the small subset here so the frontend
+    # doesn't need a second fetch to /api/v1/sources for the political
+    # spectrum + JSON-LD citations.
+    covering_sources_map: dict[uuid.UUID, Source] = {}
+    for article in story.articles:
+        if article.source and article.source.id not in covering_sources_map:
+            covering_sources_map[article.source.id] = article.source
+    covering_sources = [
+        SourceResponse.model_validate(s) for s in covering_sources_map.values()
+    ]
+
     response = StoryDetail(
         **brief.model_dump(),
         summary_en=story.summary_en,
@@ -756,6 +770,7 @@ async def get_story(
         editorial_context_fa=story.editorial_context_fa,
         articles=articles_with_bias,
         arc=arc_brief,
+        covering_sources=covering_sources,
     )
 
     # Bump view_count AFTER the response is built, in a background task so

@@ -181,6 +181,50 @@ def _cache_is_fresh(cached: dict | None) -> bool:
     return datetime.now(timezone.utc) - dt < timedelta(hours=TELEGRAM_ANALYSIS_TTL_HOURS)
 
 
+@router.get("/stories/telegram-analyses")
+async def get_telegram_analyses_batch(
+    ids: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Batch-fetch Telegram analyses in a single round trip.
+
+    Mirrors /api/v1/stories/analyses for the social side. The homepage
+    needs Telegram analyses for the top-15 trending — doing that as 15
+    parallel /telegram-analysis calls hammered Railway and made one slow
+    cell drag the whole homepage. This endpoint cuts those 15 round
+    trips to one.
+
+    Read-only: the user-facing path never regenerates. Cache fills via
+    auto_maintenance.step_telegram_deep_analysis. Stories without a
+    cached analysis are simply absent from the response (same shape as
+    /api/v1/stories/analyses).
+    """
+    from app.models.story import Story
+
+    id_list: list[uuid.UUID] = []
+    for raw in ids.split(","):
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            id_list.append(uuid.UUID(raw))
+        except (ValueError, AttributeError):
+            continue
+    if not id_list:
+        return {}
+    # Cap so a crafted URL can't DoS the endpoint.
+    id_list = id_list[:60]
+
+    result = await db.execute(
+        select(Story.id, Story.telegram_analysis).where(Story.id.in_(id_list))
+    )
+    out: dict[str, dict] = {}
+    for story_id, analysis in result.all():
+        if analysis:
+            out[str(story_id)] = analysis
+    return out
+
+
 @router.get("/stories/{story_id}/telegram-analysis")
 async def get_telegram_analysis(
     story_id: uuid.UUID,
