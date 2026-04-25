@@ -2190,14 +2190,33 @@ async def step_archive_stale():
 
 async def step_recalculate_trending():
     """Recalculate trending scores for all visible stories."""
-    from sqlalchemy import select
+    from sqlalchemy import select, text
 
     from app.database import async_session
     from app.models.story import Story
 
-    stats = {"updated": 0}
+    stats = {"updated": 0, "first_published_backfilled": 0}
 
     async with async_session() as db:
+        # Heal any story whose first_published_at is stale or null. The
+        # per-merge path in _refresh_story_metadata fixes this going
+        # forward; this UPDATE backfills history and protects against
+        # any future code path that forgets.
+        backfill = await db.execute(text("""
+            UPDATE stories s
+            SET first_published_at = sub.min_pub
+            FROM (
+                SELECT story_id, MIN(published_at) AS min_pub
+                FROM articles
+                WHERE published_at IS NOT NULL AND story_id IS NOT NULL
+                GROUP BY story_id
+            ) sub
+            WHERE s.id = sub.story_id
+              AND s.first_published_at IS DISTINCT FROM sub.min_pub
+        """))
+        stats["first_published_backfilled"] = backfill.rowcount or 0
+        await db.commit()
+
         result = await db.execute(select(Story).where(Story.article_count >= 5))
         for story in result.scalars().all():
             old_score = story.trending_score

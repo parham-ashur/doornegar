@@ -998,6 +998,18 @@ async def _refresh_story_metadata(db: AsyncSession, story_id: uuid.UUID) -> None
     # coverage_diversity_score is now (subgroups observed) / 4 total subgroups
     story.coverage_diversity_score = len(groups_present) / 4.0
     story.last_updated_at = datetime.now(timezone.utc)
+
+    # Recompute first_published_at from current articles. Without this,
+    # stories that absorb articles via merge/HITL/cosine-pre-merge keep
+    # whatever value the keeper had at creation — often null when the
+    # keeper started empty (HITL scaffold) or with no published-dated
+    # articles. Trending decay depends on this field.
+    min_pub_result = await db.execute(
+        select(func.min(Article.published_at))
+        .where(Article.story_id == story_id, Article.published_at.isnot(None))
+    )
+    story.first_published_at = min_pub_result.scalar()
+
     story.trending_score = _compute_trending_score(
         story.article_count, story.first_published_at, story.source_count
     )

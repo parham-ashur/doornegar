@@ -203,11 +203,19 @@ export default function ArticleFilterList({ articles, storyId, sidebarSync }: Ar
                     </h3>
                   </a>
 
+                  {storyId && (
+                    <div className="mt-1">
+                      <ArticleRelevanceButton storyId={storyId} articleId={head.id} />
+                    </div>
+                  )}
+
                   {/* Additional same-day titles from this source, stacked
                       compact so they read as a cluster rather than their
-                      own cards. Each is its own link. */}
+                      own cards. Each is its own link with its own
+                      «نامرتبط» button so feedback maps to the article
+                      the reader actually clicked, not the head. */}
                   {g.items.length > 1 && (
-                    <ul className="mt-1.5 space-y-1 border-r-2 border-slate-200 dark:border-slate-800 pr-2.5">
+                    <ul className="mt-2 space-y-2 border-r-2 border-slate-200 dark:border-slate-800 pr-2.5">
                       {g.items.slice(1).map((a) => (
                         <li key={a.id}>
                           <a
@@ -218,15 +226,12 @@ export default function ArticleFilterList({ articles, storyId, sidebarSync }: Ar
                           >
                             {a.title_fa || a.title_original}
                           </a>
+                          {storyId && (
+                            <ArticleRelevanceButton storyId={storyId} articleId={a.id} />
+                          )}
                         </li>
                       ))}
                     </ul>
-                  )}
-
-                  {storyId && (
-                    <div className="mt-1">
-                      <ArticleRelevanceButton storyId={storyId} articleId={head.id} />
-                    </div>
                   )}
                 </div>
               );
