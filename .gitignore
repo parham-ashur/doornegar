@@ -63,3 +63,14 @@ maintenance_error.log
 backend/.Rhistory
 backend/model_comparison_results.md
 screenshots/
+
+# Build caches
+*.tsbuildinfo
+
+# Operational artifacts (logs, persona run outputs, weekly digests)
+project-management/COST_LOG.md
+project-management/MAINTENANCE_LOG.md
+project-management/digests/
+backend/data/weekly_reports/
+backend/scripts/*_report.json
+backend/scripts/niloofar_notepad.md
