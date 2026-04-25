@@ -1,6 +1,5 @@
 """Improvement feedback API — rater submissions + admin todo list."""
 
-import hashlib
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -54,20 +53,6 @@ async def submit_feedback(
         )
         similar_count = result.scalar() or 0
 
-    # Soft fingerprint of the submitter — IP + UA + accept-language hashed
-    # together. Lets step_rater_feedback_apply count *distinct* anonymous
-    # voters per article instead of raw row count, so one person can't
-    # vote 3 times to trip auto-orphan. Not strong identity (VPN/private
-    # browsing dodges) — just a brigading deterrent at the small-audience
-    # scale Doornegar is at.
-    client_host = request.client.host if request.client else ""
-    fp_input = (
-        f"{client_host}|"
-        f"{request.headers.get('user-agent', '')[:200]}|"
-        f"{request.headers.get('accept-language', '')[:32]}"
-    )
-    fingerprint = hashlib.sha256(fp_input.encode("utf-8", "replace")).hexdigest()[:40]
-
     item = ImprovementFeedback(
         target_type=body.target_type,
         target_id=body.target_id,
@@ -80,7 +65,6 @@ async def submit_feedback(
         rater_contact=body.rater_contact,
         priority=body.priority,
         device_info=body.device_info,
-        submitter_fingerprint=fingerprint,
         status="open",
     )
     db.add(item)

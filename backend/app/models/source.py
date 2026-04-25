@@ -43,14 +43,6 @@ class Source(Base):
     language: Mapped[str] = mapped_column(String(5), default="fa")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     credibility_score: Mapped[float | None] = mapped_column(Float, nullable=True)
-    # Auto-tuned trust signal driven by reader feedback. 1.0 = baseline;
-    # < 1 = articles get rejected as off-topic above the median rate, so
-    # the clusterer demands a stricter cosine to attach. Updated daily by
-    # step_source_trust_recompute. Floored at 0.5 so a bad week doesn't
-    # permanently sink a source.
-    cluster_quality_score: Mapped[float] = mapped_column(
-        Float, nullable=False, server_default="1.0", default=1.0
-    )
     description_en: Mapped[str | None] = mapped_column(Text, nullable=True)
     description_fa: Mapped[str | None] = mapped_column(Text, nullable=True)
 

@@ -653,46 +653,6 @@ async def _match_to_existing_stories(
             if len(story_recent_titles[sid]) < 3:
                 story_recent_titles[sid].append(t_fa)
 
-    # Negative-pair memory: (article_id, story_id) pairs that readers
-    # have explicitly flagged as wrong over the last 90 days. Used below
-    # to refuse re-attaching the same article to the same wrong story —
-    # otherwise «نامرتبط» votes are toothless against the matcher.
-    from app.models.feedback import RaterFeedback as _RF
-    from app.models.improvement import ImprovementFeedback as _IF
-    rejection_cutoff = datetime.now(timezone.utc) - timedelta(days=90)
-    rater_rej_q = await db.execute(
-        select(_RF.article_id, _RF.story_id).where(
-            _RF.feedback_type == "article_relevance",
-            _RF.is_relevant.is_(False),
-            _RF.created_at >= rejection_cutoff,
-        )
-    )
-    anon_rej_q = await db.execute(
-        select(_IF.target_id, _IF.orphaned_from_story_id).where(
-            _IF.target_type == "article",
-            _IF.issue_type == "wrong_clustering",
-            _IF.orphaned_from_story_id.isnot(None),
-            _IF.created_at >= rejection_cutoff,
-        )
-    )
-    rejected_pairs: set[tuple[str, str]] = set()
-    for art_id, sid in rater_rej_q.all():
-        if art_id and sid:
-            rejected_pairs.add((str(art_id), str(sid)))
-    for art_id_str, sid in anon_rej_q.all():
-        if art_id_str and sid:
-            rejected_pairs.add((str(art_id_str), str(sid)))
-    if rejected_pairs:
-        logger.info(f"Negative-pair memory: {len(rejected_pairs)} (article, story) rejections in window")
-
-    # Source trust scores — higher-error sources need stronger cosine
-    # evidence to attach to existing stories. Score 1.0 = baseline; 0.5
-    # = effective threshold doubles. Updated by step_source_trust_recompute.
-    source_trust_q = await db.execute(
-        select(Source.id, Source.cluster_quality_score)
-    )
-    source_trust: dict[uuid.UUID, float] = {sid: float(score or 1.0) for sid, score in source_trust_q.all()}
-
     # Per-story token/quote/number sets (story title + top-3 titles + summary).
     # Also track article_count — small stories have thin centroids that drift
     # easily when an off-topic article matches on generic vocabulary alone,
@@ -729,10 +689,6 @@ async def _match_to_existing_stories(
 
     auto_match_count = 0
     auto_reject_count = 0
-    negative_block_count = 0
-    low_trust_block_count = 0
-    negative_blocks: list[tuple[uuid.UUID, uuid.UUID]] = []  # (article_id, story_id)
-    low_trust_blocks: list[tuple[uuid.UUID, uuid.UUID, float, float]] = []  # (article_id, story_id, sim, threshold)
 
     now_utc = datetime.now(timezone.utc)
 
@@ -750,23 +706,8 @@ async def _match_to_existing_stories(
         a_quotes = _quoted_phrases(a_title)
         a_numbers = _number_tokens(a_title)
 
-        # Source-specific cosine multiplier — high-error sources have
-        # cluster_quality_score < 1.0, which raises the effective
-        # threshold this article needs to clear before being a match
-        # candidate. trust_factor = 1/score, so 0.5-trust source needs
-        # 2× the threshold (e.g. 0.45 → 0.90).
-        source_score = source_trust.get(article.source_id, 1.0) if article.source_id else 1.0
-        trust_factor = 1.0 / max(source_score, 0.5)
-
         candidates = set()
         for story_id, centroid in stories_with_centroids.items():
-            # Negative-pair memory: refuse to even consider re-attaching
-            # an article to a story it was explicitly flagged out of.
-            if (str(article.id), str(story_id)) in rejected_pairs:
-                negative_block_count += 1
-                negative_blocks.append((article.id, story_id))
-                continue
-
             sim = _cosine_sim(article.embedding, centroid)
             sig = story_sig.get(story_id, {})
             last_upd = sig.get("last_updated_at")
@@ -781,11 +722,8 @@ async def _match_to_existing_stories(
 
             # AUTO-MATCH: very high cosine AND a concrete shared signal
             # (token overlap, shared quote, or shared number) AND fresh.
-            # Trust factor still applies — a low-trust source needs to
-            # clear (AUTO_MATCH_COSINE × trust_factor).
-            auto_match_threshold = min(AUTO_MATCH_COSINE * trust_factor, 0.99)
             if (
-                sim >= auto_match_threshold
+                sim >= AUTO_MATCH_COSINE
                 and age_days <= AUTO_MATCH_MAX_AGE_DAYS
                 and (
                     _jaccard(a_tokens, sig.get("tokens") or set()) >= AUTO_MATCH_JACCARD
@@ -806,8 +744,7 @@ async def _match_to_existing_stories(
             # on generic vocabulary and the LLM rubber-stamped.
             target_ac = sig.get("article_count") or 0
             target_small = target_ac and target_ac < 10
-            base_threshold = 0.45 if target_small else EMBEDDING_SIM_THRESHOLD
-            effective_threshold = min(base_threshold * trust_factor, 0.95)
+            effective_threshold = 0.45 if target_small else EMBEDDING_SIM_THRESHOLD
             if sim >= effective_threshold:
                 if target_small:
                     has_signal = (
@@ -818,12 +755,6 @@ async def _match_to_existing_stories(
                     if not has_signal:
                         continue
                 candidates.add(story_id)
-            elif sim >= base_threshold and trust_factor > 1.0:
-                # Would have qualified at baseline but source's penalty
-                # made the threshold too high — record so the dashboard
-                # shows feedback actually moved the needle.
-                low_trust_block_count += 1
-                low_trust_blocks.append((article.id, story_id, sim, effective_threshold))
 
         # Record LLM candidates only for articles NOT auto-matched
         if candidates and not any(a is article for a, _ in auto_match_pairs):
@@ -834,7 +765,6 @@ async def _match_to_existing_stories(
     total_candidate_pairs = sum(len(c) for c in article_candidates.values())
     logger.info(
         f"Match gating — auto-match: {auto_match_count}, auto-reject: {auto_reject_count}, "
-        f"negative-blocked: {negative_block_count}, low-trust-blocked: {low_trust_block_count}, "
         f"to LLM: {len(article_candidates)} articles × {total_candidate_pairs} pairs "
         f"(+{len(articles_without_embedding)} without embedding), "
         f"{len(articles) - pre_filtered_articles - auto_match_count} articles → new cluster"
@@ -842,33 +772,6 @@ async def _match_to_existing_stories(
 
     # Apply deterministic auto-matches first.
     from app.services.events import log_event as _log_event
-
-    # Log negative-pair + low-trust blocks so the dashboard can show
-    # which feedback signals actually changed clustering decisions.
-    # Cap event count per run to avoid story_events bloat — these are
-    # diagnostic, not actionable. One row per (article, story) pair.
-    for art_id, sid in negative_blocks[:50]:
-        await _log_event(
-            db,
-            event_type="cluster_block_negative",
-            actor="clustering",
-            story_id=sid,
-            article_id=art_id,
-            signals={"reason": "rejected_pair_within_90d"},
-        )
-    for art_id, sid, sim, thr in low_trust_blocks[:50]:
-        await _log_event(
-            db,
-            event_type="cluster_block_low_trust",
-            actor="clustering",
-            story_id=sid,
-            article_id=art_id,
-            confidence=float(sim),
-            signals={
-                "cosine": round(sim, 3),
-                "effective_threshold": round(thr, 3),
-            },
-        )
 
     matched_article_ids: set[uuid.UUID] = set()
     for article, story_id in auto_match_pairs:

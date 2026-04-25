@@ -47,12 +47,6 @@ class RaterFeedback(Base):
     categorization_note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    # Set when step_apply_summary_corrections has consumed this row's
-    # correction text and regenerated the story summary, so the same
-    # correction doesn't re-trigger on every maintenance tick.
-    applied_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
 
     # Relationships
     user: Mapped["User"] = relationship()  # noqa: F821
