@@ -614,7 +614,7 @@ async def get_related_stories(
                 sim = cosine_similarity(src_vec, c)
             except (TypeError, ValueError):
                 continue
-            if sim >= 0.45:
+            if sim >= 0.62:
                 scored.append((sim, s))
         scored.sort(key=lambda t: -t[0])
         for _, s in scored[:need]:

@@ -2270,7 +2270,7 @@ async def step_niloofar_image_rescue():
     from app.models.story import Story
     from app.api.v1.stories import _is_bad_image
 
-    stats = {"checked": 0, "rescued": 0, "no_candidate": 0, "already_ok": 0}
+    stats = {"checked": 0, "rescued": 0, "no_candidate": 0, "already_ok": 0, "tier_promoted": 0}
 
     async with async_session() as db:
         result = await db.execute(
@@ -2304,6 +2304,24 @@ async def step_niloofar_image_rescue():
         ]
         if not candidates:
             stats["no_candidate"] += 1
+            # Promote to HITL review queue so a curator can pin a manual
+            # image or hide the story. Idempotent — only writes when the
+            # tier is still 0.
+            from app.services.events import log_event
+            async with async_session() as db:
+                s = await db.get(Story, story.id)
+                if s and (getattr(s, "review_tier", 0) or 0) < 1:
+                    s.review_tier = 1
+                    await log_event(
+                        db,
+                        event_type="needs_image",
+                        actor="niloofar",
+                        story_id=s.id,
+                        new_value="review_tier=1",
+                        signals={"reason": "no_real_article_image", "article_count": s.article_count},
+                    )
+                    await db.commit()
+                    stats["tier_promoted"] += 1
             continue
 
         # If the automatic scorer would already pick a valid image we
