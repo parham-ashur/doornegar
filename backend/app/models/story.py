@@ -55,6 +55,11 @@ class Story(Base):
     )
     # Reliability flag: set when summary generation fails; story is skipped for 24h before retry
     llm_failed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Set by step_archive_old_stories when last_updated_at falls outside
+    # the 30d relevance window. Archived stories stay reachable by
+    # direct URL (SEO + permalinks) but are excluded from trending /
+    # blindspots / analyses APIs and the homepage picks.
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     # Set to True when an admin has hand-edited any of: title_fa, title_en,
     # state_summary_fa, diaspora_summary_fa, bias_explanation_fa. When set,
     # the maintenance pipeline skips regeneration for this story so manual

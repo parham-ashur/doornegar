@@ -598,7 +598,18 @@ async def _match_to_existing_stories(
     AUTO_MATCH_MAX_AGE_DAYS = 2
     AUTO_REJECT_MAX_AGE_DAYS = 7
 
-    time_cutoff = datetime.now(timezone.utc) - _timedelta(days=settings.clustering_time_window_days)
+    # F4 — never attach a new article to a story that hasn't been
+    # touched in 10 days. The site's editorial intent: anything older
+    # is dead context. Resurrecting a 2-week-old thread with one
+    # straggler creates "thread-zombie" stories that look fresh but
+    # carry stale narratives. The new article seeds its own story
+    # instead. Tighter than `settings.clustering_time_window_days`
+    # (which existed for legacy reasons); we pick the stricter of
+    # the two.
+    AGE_CAP_DAYS = 10
+    legacy_cutoff = datetime.now(timezone.utc) - _timedelta(days=settings.clustering_time_window_days)
+    fresh_cutoff = datetime.now(timezone.utc) - _timedelta(days=AGE_CAP_DAYS)
+    time_cutoff = max(legacy_cutoff, fresh_cutoff)
 
     # Get existing visible stories with their centroid embeddings +
     # last_updated_at (for time-delta gating) and summary_fa (for the
@@ -613,6 +624,8 @@ async def _match_to_existing_stories(
             Story.article_count < settings.max_cluster_size,
             Story.last_updated_at >= time_cutoff,
             Story.frozen_at.is_(None),
+            # F3 — archived stories are never resurrected.
+            Story.archived_at.is_(None),
         )
         .order_by(Story.last_updated_at.desc().nullslast())
     )
@@ -688,10 +701,30 @@ async def _match_to_existing_stories(
     # Source trust scores — higher-error sources need stronger cosine
     # evidence to attach to existing stories. Score 1.0 = baseline; 0.5
     # = effective threshold doubles. Updated by step_source_trust_recompute.
+    #
+    # #3 — cold-start probation. New sources have created_at < 14d ago
+    # and zero history; the median-based recompute can't catch a bad
+    # one until weeks of clustering damage are done. We treat their
+    # score as min(score, 0.85) for the first 14 days regardless of
+    # what the recompute produced. This raises their cosine bar from
+    # 0.45 to ~0.53 — enough to cool the worst false-positive matches
+    # without blocking legitimate ones.
     source_trust_q = await db.execute(
-        select(Source.id, Source.cluster_quality_score)
+        select(Source.id, Source.cluster_quality_score, Source.created_at)
     )
-    source_trust: dict[uuid.UUID, float] = {sid: float(score or 1.0) for sid, score in source_trust_q.all()}
+    PROBATION_DAYS = 14
+    PROBATION_CEILING = 0.85
+    probation_cutoff = datetime.now(timezone.utc) - timedelta(days=PROBATION_DAYS)
+    source_trust: dict[uuid.UUID, float] = {}
+    probation_count = 0
+    for sid, score, created_at in source_trust_q.all():
+        s = float(score or 1.0)
+        if created_at and created_at >= probation_cutoff and s > PROBATION_CEILING:
+            s = PROBATION_CEILING
+            probation_count += 1
+        source_trust[sid] = s
+    if probation_count:
+        logger.info(f"Cold-start probation applied to {probation_count} source(s) (<14d old, capped trust at {PROBATION_CEILING})")
 
     # Per-story token/quote/number sets (story title + top-3 titles + summary).
     # Also track article_count — small stories have thin centroids that drift

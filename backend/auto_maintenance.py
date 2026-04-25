@@ -1630,20 +1630,31 @@ async def step_rater_feedback_apply():
                     f"from story {sid} ({votes} vote{'s' if votes != 1 else ''})"
                 )
 
-        # ── Anonymous path: ≥3 distinct fingerprints ────────────
+        # ── Anonymous path: ≥3 distinct *identities* ────────────
+        # An identity is the strongest available signal for each row:
+        # COALESCE(submitter_cookie, submitter_fingerprint). Cookie is
+        # the harder-to-spoof one (long-lived UUID per browser), but
+        # older rows from before the cookie column existed only have
+        # the IP+UA fingerprint, so we fall through. Counting distinct
+        # COALESCEs catches the "private-mode reload" gaming pattern
+        # the IP+UA-only check used to allow.
+        identity_expr = func.coalesce(
+            ImprovementFeedback.submitter_cookie,
+            ImprovementFeedback.submitter_fingerprint,
+        )
         anon_groups = (await db.execute(
             select(
                 ImprovementFeedback.target_id,
-                func.count(distinct(ImprovementFeedback.submitter_fingerprint)).label("voters"),
+                func.count(distinct(identity_expr)).label("voters"),
             )
             .where(
                 ImprovementFeedback.target_type == "article",
                 ImprovementFeedback.issue_type == "wrong_clustering",
                 ImprovementFeedback.status == "open",
-                ImprovementFeedback.submitter_fingerprint.isnot(None),
+                identity_expr.isnot(None),
             )
             .group_by(ImprovementFeedback.target_id)
-            .having(func.count(distinct(ImprovementFeedback.submitter_fingerprint)) >= 3)
+            .having(func.count(distinct(identity_expr)) >= 3)
         )).all()
 
         for art_id_str, voters in anon_groups:
@@ -2129,6 +2140,14 @@ async def step_source_trust_recompute():
         )
         anon_flagged = {sid: cnt for sid, cnt in anon_flagged_q.all()}
 
+        # #3 — pull source created_at so probation-aged sources are
+        # excluded from the median calc. They'd otherwise spike or
+        # depress the median based on a tiny denominator and 0-1 weeks
+        # of behavior, which is noise.
+        source_age_q = await db.execute(select(Source.id, Source.created_at))
+        source_created: dict[uuid.UUID, datetime | None] = dict(source_age_q.all())
+        probation_floor = datetime.now(timezone.utc) - timedelta(days=30)
+
         # Compute rates
         rates: dict[uuid.UUID, float] = {}
         eligible_for_median: list[float] = []
@@ -2138,6 +2157,12 @@ async def step_source_trust_recompute():
             flagged = rater_flagged.get(sid, 0) + anon_flagged.get(sid, 0)
             rate = flagged / total
             rates[sid] = rate
+            created = source_created.get(sid)
+            # Exclude sources <30d old from the median calculation. Their
+            # rates are still computed and applied to themselves; only the
+            # population statistic uses stable sources.
+            if created and created >= probation_floor:
+                continue
             eligible_for_median.append(rate)
 
         if not eligible_for_median:
@@ -2200,6 +2225,218 @@ async def step_source_trust_recompute():
         await db.commit()
 
     logger.info(f"Source trust recompute: {stats}")
+    return stats
+
+
+async def step_age_out_stale_feedback():
+    """#9 — age out anonymous feedback that never reached consensus.
+
+    Anonymous wrong_clustering improvements that sit in "open" status
+    for >14 days without hitting the 3-identity threshold are
+    effectively rejected by collective inaction. Mark them
+    `wont_do` with reason "stale_unconverged" and emit
+    feedback_rejected_threshold so /dashboard/learning can show them
+    as a separate failure mode (vs Niloofar dismissals).
+
+    Cheap pure SQL — runs every full cron at 04:00 UTC.
+    """
+    from sqlalchemy import select, update, func, distinct
+    from app.database import async_session
+    from app.models.improvement import ImprovementFeedback
+    from app.services.events import log_event as _log_event
+
+    stats = {"aged": 0}
+    cutoff = datetime.now(timezone.utc) - timedelta(days=14)
+
+    async with async_session() as db:
+        identity_expr = func.coalesce(
+            ImprovementFeedback.submitter_cookie,
+            ImprovementFeedback.submitter_fingerprint,
+        )
+        # Per (target_id) voter counts, restricted to wrong_clustering opens.
+        groups = (await db.execute(
+            select(
+                ImprovementFeedback.target_id,
+                func.count(distinct(identity_expr)).label("voters"),
+            )
+            .where(
+                ImprovementFeedback.target_type == "article",
+                ImprovementFeedback.issue_type == "wrong_clustering",
+                ImprovementFeedback.status == "open",
+                ImprovementFeedback.created_at < cutoff,
+            )
+            .group_by(ImprovementFeedback.target_id)
+            .having(func.count(distinct(identity_expr)) < 3)
+        )).all()
+
+        for target_id, voters in groups:
+            if not target_id:
+                continue
+            # Mark every row of this target as wont_do.
+            res = await db.execute(
+                update(ImprovementFeedback)
+                .where(
+                    ImprovementFeedback.target_type == "article",
+                    ImprovementFeedback.target_id == target_id,
+                    ImprovementFeedback.issue_type == "wrong_clustering",
+                    ImprovementFeedback.status == "open",
+                )
+                .values(
+                    status="wont_do",
+                    admin_notes="Aged out: did not reach 3-identity threshold within 14 days.",
+                    resolved_at=datetime.now(timezone.utc),
+                )
+            )
+            stats["aged"] += int(res.rowcount or 0)
+            try:
+                article_uuid = uuid.UUID(target_id)
+            except ValueError:
+                continue
+            await _log_event(
+                db,
+                event_type="feedback_rejected_threshold",
+                actor="maintenance",
+                article_id=article_uuid,
+                signals={"voters": int(voters), "window_days": 14},
+            )
+        await db.commit()
+
+    if stats["aged"]:
+        logger.info(f"Aged-out unconverged feedback: {stats}")
+    return stats
+
+
+async def step_source_trust_fast():
+    """F8 — fast hourly path for source trust.
+
+    Cheaper than step_source_trust_recompute (no global median calc,
+    no full source scan). Only acts on sources that received a new
+    negative flag within the last 60 minutes. For each such source,
+    if the recent 24h flag rate exceeds 3× the source's own 30d
+    historical rate, apply a one-step penalty cap of 0.85 immediately
+    instead of waiting for the 04:00 UTC daily pass.
+
+    Recovery is intentionally NOT done here — only the daily pass
+    rebuilds. This keeps the loop biased toward catching new bad
+    behavior fast, not erasing it.
+
+    Pure SQL, no LLM. Runs in ~50ms even with 100+ sources.
+    """
+    from sqlalchemy import select, func, update
+    from app.database import async_session
+    from app.models.article import Article
+    from app.models.feedback import RaterFeedback
+    from app.models.improvement import ImprovementFeedback
+    from app.models.source import Source
+    from app.services.events import log_event as _log_event
+
+    stats = {"sources_touched": 0, "fast_penalized": 0}
+    now = datetime.now(timezone.utc)
+    last_hour = now - timedelta(hours=1)
+    last_day = now - timedelta(hours=24)
+    historical = now - timedelta(days=30)
+
+    async with async_session() as db:
+        # Sources with a new flag in the last hour. Two paths: rater
+        # rejections + anonymous wrong_clustering improvements.
+        recent_rater = await db.execute(
+            select(func.distinct(Article.source_id))
+            .join(RaterFeedback, RaterFeedback.article_id == Article.id)
+            .where(
+                RaterFeedback.created_at >= last_hour,
+                RaterFeedback.feedback_type == "article_relevance",
+                RaterFeedback.is_relevant.is_(False),
+            )
+        )
+        recent_anon = await db.execute(
+            select(func.distinct(Article.source_id))
+            .join(
+                ImprovementFeedback,
+                ImprovementFeedback.target_id == func.cast(Article.id, type_=ImprovementFeedback.target_id.type),
+            )
+            .where(
+                ImprovementFeedback.created_at >= last_hour,
+                ImprovementFeedback.target_type == "article",
+                ImprovementFeedback.issue_type == "wrong_clustering",
+            )
+        )
+        touched_ids = {sid for sid, in recent_rater.all() if sid} | {sid for sid, in recent_anon.all() if sid}
+
+        if not touched_ids:
+            return stats
+        stats["sources_touched"] = len(touched_ids)
+
+        for source_id in touched_ids:
+            # 24h vs 30d rate, on this source's own articles.
+            denom_24h = (await db.execute(
+                select(func.count(Article.id)).where(
+                    Article.source_id == source_id,
+                    Article.ingested_at >= last_day,
+                )
+            )).scalar() or 0
+            if denom_24h < 5:
+                continue  # need a meaningful denominator
+            num_24h = (await db.execute(
+                select(func.count(func.distinct(Article.id)))
+                .join(RaterFeedback, RaterFeedback.article_id == Article.id, isouter=True)
+                .where(
+                    Article.source_id == source_id,
+                    Article.ingested_at >= last_day,
+                    RaterFeedback.feedback_type == "article_relevance",
+                    RaterFeedback.is_relevant.is_(False),
+                )
+            )).scalar() or 0
+            rate_24h = num_24h / denom_24h
+
+            denom_30d = (await db.execute(
+                select(func.count(Article.id)).where(
+                    Article.source_id == source_id,
+                    Article.ingested_at >= historical,
+                )
+            )).scalar() or 0
+            num_30d = (await db.execute(
+                select(func.count(func.distinct(Article.id)))
+                .join(RaterFeedback, RaterFeedback.article_id == Article.id, isouter=True)
+                .where(
+                    Article.source_id == source_id,
+                    Article.ingested_at >= historical,
+                    RaterFeedback.feedback_type == "article_relevance",
+                    RaterFeedback.is_relevant.is_(False),
+                )
+            )).scalar() or 0
+            rate_30d = (num_30d / denom_30d) if denom_30d else 0.0
+
+            # Fire when 24h rate is ≥3× historical and exceeds 0.10 absolute
+            # (otherwise tiny denominators trigger nuisance penalties).
+            if rate_24h >= max(0.10, 3 * rate_30d):
+                src = (await db.execute(select(Source).where(Source.id == source_id))).scalar_one_or_none()
+                if not src:
+                    continue
+                old_score = src.cluster_quality_score or 1.0
+                new_score = round(min(old_score, 0.85), 3)
+                if new_score < old_score - 0.005:
+                    await db.execute(
+                        update(Source).where(Source.id == source_id).values(cluster_quality_score=new_score)
+                    )
+                    await _log_event(
+                        db,
+                        event_type="source_trust_fast_penalty",
+                        actor="hourly_cron",
+                        signals={
+                            "source_id": str(source_id),
+                            "source_slug": src.slug,
+                            "old_score": old_score,
+                            "new_score": new_score,
+                            "rate_24h": round(rate_24h, 4),
+                            "rate_30d": round(rate_30d, 4),
+                        },
+                    )
+                    stats["fast_penalized"] += 1
+
+        await db.commit()
+
+    if stats["fast_penalized"]:
+        logger.info(f"Source trust fast: {stats}")
     return stats
 
 
@@ -2751,31 +2988,61 @@ async def step_prune_stagnant():
 
 
 async def step_archive_stale():
-    """Archive stories older than 30 days with no new articles."""
+    """Two-tier story aging.
+
+    1) **Soft-archive at 30d** — any story whose last_updated_at is
+       outside the 30-day relevance window gets `archived_at` set.
+       Archived stories are filtered out of /api/v1/stories/trending,
+       /blindspots, the homepage picks, and clustering candidate
+       lists. Direct URLs continue to render (SEO / permalinks).
+
+    2) **Hard-delete tiny stories at 60d** — long-tail rows with
+       <3 articles and no updates in 60 days get removed entirely.
+       Their articles are unlinked back into the orphan pool so a
+       fresh cluster pass can give them a real home if newer
+       siblings have arrived.
+
+    Also recounts article_count / source_count for non-archived
+    stories so the homepage reflects reality after merges/splits.
+    """
     from sqlalchemy import select, update, func, delete
 
     from app.database import async_session
     from app.models.story import Story
     from app.models.article import Article
 
-    stats = {"archived": 0, "recounted": 0}
-    cutoff = datetime.now(timezone.utc) - timedelta(days=60)
+    stats = {"soft_archived": 0, "hard_deleted": 0, "recounted": 0}
+    now = datetime.now(timezone.utc)
+    soft_cutoff = now - timedelta(days=30)
+    hard_cutoff = now - timedelta(days=60)
 
     async with async_session() as db:
-        # Find stories not updated in 60 days with low article count AND no linked articles
+        # Tier 1 — soft-archive everything older than 30d that isn't
+        # already archived. last_updated_at is the anchor (matches the
+        # F2 trending decay), with a fall-through to first_published_at
+        # for stories that somehow lack last_updated_at.
+        soft_result = await db.execute(
+            select(Story).where(
+                Story.archived_at.is_(None),
+                Story.last_updated_at < soft_cutoff,
+            )
+        )
+        for story in soft_result.scalars().all():
+            story.archived_at = now
+            stats["soft_archived"] += 1
+
+        # Tier 2 — delete tiny stale stories (existing behavior).
         result = await db.execute(
             select(Story).where(
-                Story.last_updated_at < cutoff,
+                Story.last_updated_at < hard_cutoff,
                 Story.article_count < 3,
             )
         )
         stale = list(result.scalars().all())
-
         for story in stale:
-            # Unlink articles and delete stale hidden story
             await db.execute(update(Article).where(Article.story_id == story.id).values(story_id=None))
             await db.execute(delete(Story).where(Story.id == story.id))
-            stats["archived"] += 1
+            stats["hard_deleted"] += 1
 
         # Recount article_count for ALL stories (in case articles were added/removed)
         result = await db.execute(select(Story).where(Story.article_count >= 1))
@@ -2793,7 +3060,7 @@ async def step_archive_stale():
 
         await db.commit()
 
-    if stats["archived"] > 0 or stats["recounted"] > 0:
+    if stats["soft_archived"] > 0 or stats["hard_deleted"] > 0 or stats["recounted"] > 0:
         logger.info(f"Archive/recount: {stats}")
     return stats
 
@@ -2827,15 +3094,38 @@ async def step_recalculate_trending():
         stats["first_published_backfilled"] = backfill.rowcount or 0
         await db.commit()
 
-        result = await db.execute(select(Story).where(Story.article_count >= 5))
+        # F2 — continuous decay anchored on last_updated_at.
+        # The site's editorial intent: stories matter most for ~7 days,
+        # are dated after ~14, and dead by 30. The previous formula
+        # decayed linearly from first_published_at over 30d, so a story
+        # that gained a fresh article on day 25 still scored low. Anchor
+        # on last_updated_at instead so a refreshed story behaves like
+        # a young one.
+        #
+        # Score = article_count * 0.85^days_since_last_update.
+        # Day 0: full score. Day 7: 32% of articles. Day 14: 10%.
+        # Day 30: ~1%. Combined with archive_at gating elsewhere, this
+        # naturally pushes old content off the homepage without explicit
+        # cutoffs in every consumer.
+        result = await db.execute(
+            select(Story).where(
+                Story.article_count >= 5,
+                Story.archived_at.is_(None),
+            )
+        )
+        now_utc = datetime.now(timezone.utc)
         for story in result.scalars().all():
             old_score = story.trending_score
-            # Score = article_count * recency_factor (decays over 30 days)
-            if story.first_published_at:
-                hours_ago = (datetime.now(timezone.utc) - story.first_published_at).total_seconds() / 3600
-                recency = max(0.1, 1.0 - (hours_ago / (30 * 24)) * 0.9)
+            anchor = story.last_updated_at or story.first_published_at
+            if anchor:
+                days_ago = (now_utc - anchor).total_seconds() / 86400.0
+                recency = 0.85 ** max(0.0, days_ago)
+                # Floor so a 30+ day story without an anchor doesn't
+                # math.expDown to zero and drop entirely from
+                # admin-facing /api/v1/stories listings.
+                recency = max(recency, 0.005)
             else:
-                recency = 0.5
+                recency = 0.05
             story.trending_score = story.article_count * recency
             if abs(story.trending_score - old_score) > 0.1:
                 stats["updated"] += 1
@@ -5319,6 +5609,7 @@ FULL_PIPELINE = [
     ("rater_feedback", "Apply rater feedback", "step_rater_feedback_apply"),
     ("summary_corrections", "Regenerate story summaries from rater corrections", "step_apply_summary_corrections"),
     ("niloofar_feedback_audit", "Niloofar audits open «نامرتبط» queue", "step_niloofar_feedback_audit"),
+    ("age_out_stale_feedback", "Mark unconverged anonymous flags wont_do (#9)", "step_age_out_stale_feedback"),
     ("source_trust", "Recompute Source.cluster_quality_score from feedback", "step_source_trust_recompute"),
     ("feedback_health", "Feedback system health", "step_feedback_health"),
     ("telegram_analysis", "Deep Telegram discourse analysis (two-pass)", "step_telegram_deep_analysis"),
@@ -5373,6 +5664,9 @@ HOURLY_PIPELINE = [
     ("cluster", "Cluster new articles into stories", "step_cluster"),
     ("centroids", "Recompute story centroid embeddings", "step_recompute_centroids"),
     ("detect_hourly_updates", "Flag significant intra-day story updates", "step_detect_hourly_updates"),
+    # F8 — fast source-trust pass. No-ops when no flags landed in the
+    # last hour, so this adds < 100ms to most runs.
+    ("source_trust_fast", "Fast source-trust check on hourly flags", "step_source_trust_fast"),
 ]
 
 

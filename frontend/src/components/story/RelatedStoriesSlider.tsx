@@ -5,11 +5,18 @@
  * grouping) and fills the rest with centroid-cosine neighbors.
  *
  * Snap-scroll on mobile, edge-to-edge via `-mx-4` so cards peek off
- * the right edge on small screens. Server Component — no client JS;
- * data is fetched at the page level and passed in via props.
+ * the right edge on small screens.
+ *
+ * Client component (lightweight) so it can read `?feedback=1` from
+ * the URL and (a) propagate it onto related-story hrefs to keep the
+ * rater in feedback mode while they navigate, and (b) surface a
+ * small «بازخورد» chip on each card that opens the related story
+ * directly into feedback mode.
  */
+"use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import SafeImageStatic from "@/components/common/SafeImageStatic";
 import type { RelatedStory } from "@/lib/api";
 import { toFa } from "@/lib/utils";
@@ -30,11 +37,21 @@ export default function RelatedStoriesSlider({
   stories,
   currentArcId,
   locale = "fa",
+  storyId,
 }: {
   stories: RelatedStory[];
   currentArcId?: string | null;
   locale?: string;
+  /** Parent story id — used to label «نامرتبط» feedback so an admin
+   *  knows the related-pair was rejected from this story, not from
+   *  the related card itself. */
+  storyId?: string;
 }) {
+  const sp = useSearchParams();
+  const feedbackMode = sp.get("feedback") === "1";
+  const href = (id: string) =>
+    `/${locale}/stories/${id}${feedbackMode ? "?feedback=1" : ""}`;
+
   if (!stories || stories.length === 0) return null;
 
   return (
@@ -55,42 +72,105 @@ export default function RelatedStoriesSlider({
         {stories.map((s) => {
           const isArcSibling = currentArcId && s.arc_id === currentArcId;
           return (
-            <Link
+            <div
               key={s.id}
-              href={`/${locale}/stories/${s.id}`}
-              className="shrink-0 w-[72vw] sm:w-60 md:w-64 snap-start border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/40 hover:border-blue-400 dark:hover:border-blue-600 transition-colors group"
+              className="relative shrink-0 w-[72vw] sm:w-60 md:w-64 snap-start group"
             >
-              <div className="relative aspect-[16/10] bg-slate-100 dark:bg-slate-800 overflow-hidden">
-                <SafeImageStatic
-                  src={s.image_url}
-                  sizes="(max-width: 640px) 72vw, 256px"
-                />
-                {isArcSibling && (
-                  <span className="absolute top-2 right-2 text-[10px] font-bold px-2 py-0.5 bg-blue-600 text-white">
-                    روایت نزدیک
-                  </span>
-                )}
-              </div>
-              <div className="p-3">
-                <h3 className="text-[13px] leading-6 font-bold text-slate-900 dark:text-slate-100 group-hover:text-blue-700 dark:group-hover:text-blue-300 line-clamp-3">
-                  {s.title_fa || s.title_en}
-                </h3>
-                <div className="mt-2 flex items-center gap-3 text-[11px] text-slate-500">
-                  <span>{toFa(s.source_count)} رسانه</span>
-                  <span>·</span>
-                  <span>{toFa(s.article_count)} مقاله</span>
-                  {s.first_published_at && (
-                    <>
-                      <span>·</span>
-                      <span>{fmtRelative(s.first_published_at)}</span>
-                    </>
+              <Link
+                href={href(s.id)}
+                className="block border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/40 hover:border-blue-400 dark:hover:border-blue-600 transition-colors"
+              >
+                <div className="relative aspect-[16/10] bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                  <SafeImageStatic
+                    src={s.image_url}
+                    sizes="(max-width: 640px) 72vw, 256px"
+                  />
+                  {isArcSibling && (
+                    <span className="absolute top-2 right-2 text-[10px] font-bold px-2 py-0.5 bg-blue-600 text-white">
+                      روایت نزدیک
+                    </span>
                   )}
                 </div>
-              </div>
-            </Link>
+                <div className="p-3">
+                  <h3 className="text-[13px] leading-6 font-bold text-slate-900 dark:text-slate-100 group-hover:text-blue-700 dark:group-hover:text-blue-300 line-clamp-3">
+                    {s.title_fa || s.title_en}
+                  </h3>
+                  <div className="mt-2 flex items-center gap-3 text-[11px] text-slate-500">
+                    <span>{toFa(s.source_count)} رسانه</span>
+                    <span>·</span>
+                    <span>{toFa(s.article_count)} مقاله</span>
+                    {s.first_published_at && (
+                      <>
+                        <span>·</span>
+                        <span>{fmtRelative(s.first_published_at)}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </Link>
+              {feedbackMode && (
+                <RelatedFeedback
+                  parentStoryId={storyId}
+                  relatedStoryId={s.id}
+                  relatedTitle={s.title_fa || s.title_en || ""}
+                />
+              )}
+            </div>
           );
         })}
       </div>
     </section>
+  );
+}
+
+const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+function RelatedFeedback({
+  parentStoryId,
+  relatedStoryId,
+  relatedTitle,
+}: {
+  parentStoryId?: string;
+  relatedStoryId: string;
+  relatedTitle: string;
+}) {
+  const submit = async (kind: "unrelated" | "merge") => {
+    try {
+      const { antiSpamHeaders } = await import("@/lib/antiSpamToken");
+      await fetch(`${API}/api/v1/improvements`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...antiSpamHeaders() },
+        body: JSON.stringify({
+          target_type: "story",
+          target_id: relatedStoryId,
+          issue_type: kind === "unrelated" ? "wrong_clustering" : "merge_stories",
+          reason:
+            kind === "unrelated"
+              ? `از منظر خبرِ والد (${parentStoryId || "؟"}) این خبر مرتبط نیست`
+              : `پیشنهاد ادغام با خبرِ والد ${parentStoryId || "؟"}`,
+          context: { parent_story_id: parentStoryId, related_title: relatedTitle },
+        }),
+      });
+    } catch {}
+  };
+  return (
+    <div className="absolute top-2 left-2 z-10 flex flex-col gap-1 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
+      <button
+        type="button"
+        title="نامرتبط با این خبر"
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); submit("unrelated"); }}
+        className="text-[10px] font-bold px-1.5 py-0.5 bg-slate-900/85 text-white border border-slate-700 hover:bg-red-600"
+      >
+        نامرتبط
+      </button>
+      <button
+        type="button"
+        title="ادغام با این خبر"
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); submit("merge"); }}
+        className="text-[10px] font-bold px-1.5 py-0.5 bg-slate-900/85 text-white border border-slate-700 hover:bg-blue-600"
+      >
+        ادغام
+      </button>
+    </div>
   );
 }

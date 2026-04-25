@@ -68,6 +68,13 @@ class ImprovementFeedback(Base):
     # toward consensus.
     submitter_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
+    # Long-lived cookie hash (set by /api/v1/improvements when the
+    # browser presents the dn_fp cookie). Layered on top of the IP-based
+    # fingerprint above so a private-mode reload or VPN hop doesn't
+    # silently re-enable a single user to satisfy the 3-fingerprint
+    # threshold. Either column counts toward dedupe.
+    submitter_cookie: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
     # Story the article was orphaned from when this row's flag triggered
     # the auto-orphan path. Used by the clusterer's negative-pair check
     # to refuse re-attaching the same article to the same story.

@@ -28,9 +28,10 @@ export default function ImageSuggestionButton({
     setSubmitting(true);
     setResult(null);
     try {
+      const { antiSpamHeaders } = await import("@/lib/antiSpamToken");
       const res = await fetch(`${API}/api/v1/improvements`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...antiSpamHeaders() },
         body: JSON.stringify({
           target_type: "story_image",
           target_id: storyId,

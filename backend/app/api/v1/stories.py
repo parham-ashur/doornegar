@@ -55,6 +55,11 @@ async def list_stories(
         query = query.where(Story.is_blindspot.is_(True))
         count_query = count_query.where(Story.is_blindspot.is_(True))
 
+    # Hide soft-archived stories from the paginated index. Direct
+    # /stories/{id} access still resolves them — only listings filter.
+    query = query.where(Story.archived_at.is_(None))
+    count_query = count_query.where(Story.archived_at.is_(None))
+
     total = (await db.execute(count_query)).scalar() or 0
 
     query = query.order_by(Story.trending_score.desc(), Story.first_published_at.desc().nullslast())
@@ -91,14 +96,17 @@ async def trending_stories(
         .options(selectinload(Story.articles).selectinload(Article.source))
         .where(
             Story.article_count >= min_articles,
-            # Exclude stale tiny stories — 2-day half-life decay means
-            # 7-day-old 4-article stories score ~0.36. Threshold 0.5
-            # keeps large clusters visible while cutting old noise.
+            # Exclude stale tiny stories — F2 trending decay (0.85^days)
+            # means a 7-day story with no fresh articles scores ~0.32.
+            # Threshold 0.5 keeps large recent clusters visible while
+            # cutting old noise.
             Story.trending_score > 0.5,
             # Blindspots have their own dedicated section on the homepage.
             # Keeping them out of trending prevents small one-sided stories
             # from diluting the multi-sided feed.
             Story.is_blindspot.is_(False),
+            # F3 — archived stories are dead content; never show in trending.
+            Story.archived_at.is_(None),
         )
         .order_by(Story.priority.desc(), Story.trending_score.desc())
         .limit(fetch_limit)
@@ -139,14 +147,31 @@ async def blindspot_stories(
     min_articles: int = Query(4, ge=1),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
+    # F7 — a blindspot from >7d ago isn't a blindspot anymore, it's just
+    # an old one-sided story. The whole point of the feature is "look,
+    # one side missed THIS WEEK's news." We try the strict 7d window
+    # first; if that's empty we fall through to a 14d softer window so
+    # the homepage block doesn't go bare on quiet days. Anything older
+    # is dropped, plus archived rows are always excluded.
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    cutoff_strict = _dt.now(_tz.utc) - _td(days=7)
+    cutoff_soft = _dt.now(_tz.utc) - _td(days=14)
+    base = (
         select(Story)
         .options(selectinload(Story.articles).selectinload(Article.source))
-        .where(Story.is_blindspot.is_(True), Story.article_count >= min_articles)
+        .where(
+            Story.is_blindspot.is_(True),
+            Story.article_count >= min_articles,
+            Story.archived_at.is_(None),
+        )
         .order_by(Story.first_published_at.desc().nullslast())
         .limit(limit)
     )
-    stories = result.scalars().all()
+    result = await db.execute(base.where(Story.last_updated_at >= cutoff_strict))
+    stories = list(result.scalars().all())
+    if not stories:
+        result = await db.execute(base.where(Story.last_updated_at >= cutoff_soft))
+        stories = list(result.scalars().all())
     return [_story_brief_with_extras(s) for s in stories]
 
 

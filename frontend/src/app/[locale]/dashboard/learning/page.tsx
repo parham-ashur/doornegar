@@ -47,9 +47,11 @@ const EVENT_LABELS: Record<string, string> = {
   feedback_summary_regen: "Summary regenerated",
   feedback_niloofar_orphan: "Niloofar orphaned",
   feedback_niloofar_dismiss: "Niloofar dismissed",
+  feedback_rejected_threshold: "Aged out (no consensus)",
   cluster_block_negative: "Blocked (negative pair)",
   cluster_block_low_trust: "Blocked (low source trust)",
   source_trust_change: "Source trust changed",
+  source_trust_fast_penalty: "Source trust (fast penalty)",
 };
 
 const EVENT_COLORS: Record<string, string> = {
@@ -59,9 +61,11 @@ const EVENT_COLORS: Record<string, string> = {
   feedback_summary_regen: "bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300",
   feedback_niloofar_orphan: "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300",
   feedback_niloofar_dismiss: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400",
+  feedback_rejected_threshold: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400",
   cluster_block_negative: "bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300",
   cluster_block_low_trust: "bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300",
   source_trust_change: "bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300",
+  source_trust_fast_penalty: "bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300",
 };
 
 const EVENT_TYPE_FILTERS: { key: string; label: string }[] = [
@@ -72,9 +76,11 @@ const EVENT_TYPE_FILTERS: { key: string; label: string }[] = [
   { key: "feedback_summary_regen", label: "Summary regen" },
   { key: "feedback_niloofar_orphan", label: "Niloofar agreed" },
   { key: "feedback_niloofar_dismiss", label: "Niloofar dismissed" },
+  { key: "feedback_rejected_threshold", label: "Aged out" },
   { key: "cluster_block_negative", label: "Negative-pair block" },
   { key: "cluster_block_low_trust", label: "Low-trust block" },
   { key: "source_trust_change", label: "Trust change" },
+  { key: "source_trust_fast_penalty", label: "Fast penalty" },
 ];
 
 function timeAgo(iso: string | null): string {

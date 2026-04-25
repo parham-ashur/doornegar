@@ -332,9 +332,10 @@ export default function ImprovementModal({
     }
     setSubmitting(true);
     try {
+      const { antiSpamHeaders } = await import("@/lib/antiSpamToken");
       const res = await fetch(`${API}/api/v1/improvements`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...antiSpamHeaders() },
         body: JSON.stringify({
           target_type: targetType === "merge_stories" ? "story" : targetType,
           target_id: targetId || null,

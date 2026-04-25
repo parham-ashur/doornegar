@@ -98,6 +98,14 @@ async def lifespan(app: FastAPI):
                 "ALTER TABLE improvement_feedback ADD COLUMN IF NOT EXISTS orphaned_from_story_id UUID",
                 "CREATE INDEX IF NOT EXISTS idx_improvement_orphan_pair ON improvement_feedback(target_id, orphaned_from_story_id) WHERE orphaned_from_story_id IS NOT NULL",
                 "ALTER TABLE sources ADD COLUMN IF NOT EXISTS cluster_quality_score DOUBLE PRECISION NOT NULL DEFAULT 1.0",
+                # Freshness/archival + cookie fingerprint (migration s4n5o6p7q8r9).
+                # Self-heal applies these so a fresh deploy doesn't have
+                # to wait on `alembic upgrade head` to render correctly.
+                "ALTER TABLE stories ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ",
+                "CREATE INDEX IF NOT EXISTS idx_stories_archived_at ON stories(archived_at) WHERE archived_at IS NOT NULL",
+                "ALTER TABLE improvement_feedback ADD COLUMN IF NOT EXISTS submitter_cookie VARCHAR(64)",
+                "CREATE INDEX IF NOT EXISTS idx_improvement_cookie_target ON improvement_feedback(target_id, submitter_cookie) WHERE submitter_cookie IS NOT NULL",
+                "CREATE INDEX IF NOT EXISTS idx_story_events_type_created ON story_events(event_type, created_at DESC)",
                 # Orphan-retirement counter — filters out articles that
                 # repeatedly fail to cluster, so they don't keep paying
                 # the LLM tax on every pipeline run.

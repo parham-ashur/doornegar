@@ -39,9 +39,10 @@ export default function ArticleRelevanceButton({ storyId, articleId }: ArticleRe
         });
         if (res.ok) setDone(true);
       } else {
+        const { antiSpamHeaders } = await import("@/lib/antiSpamToken");
         const res = await fetch(`${API}/api/v1/improvements`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...antiSpamHeaders() },
           body: JSON.stringify({
             target_type: "article",
             target_id: articleId,

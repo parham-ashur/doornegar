@@ -121,8 +121,9 @@ function PriorityBtn({ storyId, direction }: { storyId: string; direction: "high
   const submit = async (e: React.MouseEvent) => {
     e.preventDefault(); e.stopPropagation();
     try {
+      const { antiSpamHeaders } = await import("@/lib/antiSpamToken");
       await fetch(`${API}/api/v1/improvements`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json", ...antiSpamHeaders() },
         body: JSON.stringify({ target_type: "story", target_id: storyId, issue_type: `priority_${direction}`, reason: label }),
       });
     } catch {}

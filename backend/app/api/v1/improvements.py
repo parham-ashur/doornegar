@@ -5,7 +5,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,6 +25,13 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# Anonymous flooding cap. An IP that submits more than this many
+# anonymous improvements in 24h is almost certainly brigading or
+# exploring the form. Authenticated raters bypass this (their
+# submissions go through a different code path that tags
+# rater_feedback rows with user_id).
+_ANON_DAILY_CAP = 5
+
 
 # ─── Rater submission ─────────────────────────────────────────
 # Public for now, rate-limited. Can add auth later when rater accounts
@@ -36,8 +43,39 @@ async def submit_feedback(
     request: Request,
     body: ImprovementSubmit,
     db: AsyncSession = Depends(get_db),
+    x_dn_anti_spam: str | None = Header(default=None, alias="X-DN-Anti-Spam"),
 ):
-    """Submit improvement feedback. Rate-limited to 60/hour/IP."""
+    """Submit improvement feedback. Rate-limited to 60/hour/IP, plus a
+    stricter 5/24h cap on anonymous submissions per IP."""
+    # IP-level anonymous cap. Catches a single visitor who keeps
+    # changing browsers / clearing storage to dodge cookie+fingerprint
+    # dedupe. Stricter than the global 60/hour rate limit because that
+    # is meant for traffic shaping, this is meant for spam.
+    client_host = request.client.host if request.client else ""
+    if client_host:
+        cap_cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+        # We don't store IP directly — we can't, GDPR — so we hash it
+        # into a column we DO store (the IP-based fingerprint) and
+        # count rows that share at least the IP component. The current
+        # fingerprint includes IP + UA + accept-lang, so any two rows
+        # from the same IP across different browsers will share the
+        # IP-only prefix. To get a clean per-IP count, we hash IP-only
+        # into a tiny separate string and compare against the column.
+        ip_only_hash = hashlib.sha256(client_host.encode("utf-8", "replace")).hexdigest()[:16]
+        recent_anon = (await db.execute(
+            select(func.count(ImprovementFeedback.id))
+            .where(
+                ImprovementFeedback.created_at >= cap_cutoff,
+                ImprovementFeedback.rater_name.is_(None),
+                ImprovementFeedback.submitter_fingerprint.like(f"{ip_only_hash}%"),
+            )
+        )).scalar() or 0
+        if recent_anon >= _ANON_DAILY_CAP:
+            raise HTTPException(
+                status_code=429,
+                detail=f"حداکثر {_ANON_DAILY_CAP} پیشنهاد ناشناس در ۲۴ ساعت اخیر ثبت شده است.",
+            )
+
     # Count similar open/in_progress items flagged by others with the same
     # target and issue type. Used for the "X others flagged this" hint.
     similar_count = 0
@@ -54,19 +92,43 @@ async def submit_feedback(
         )
         similar_count = result.scalar() or 0
 
-    # Soft fingerprint of the submitter — IP + UA + accept-language hashed
-    # together. Lets step_rater_feedback_apply count *distinct* anonymous
-    # voters per article instead of raw row count, so one person can't
-    # vote 3 times to trip auto-orphan. Not strong identity (VPN/private
-    # browsing dodges) — just a brigading deterrent at the small-audience
-    # scale Doornegar is at.
-    client_host = request.client.host if request.client else ""
+    # Layered fingerprint:
+    #   ip_only_hash[:16] = IP component (used for the per-IP cap above
+    #     via LIKE prefix match — cheaper than re-hashing on read)
+    #   submitter_fingerprint = full IP + UA + accept-lang hash
+    #     (stored from day one, used by 3-fingerprint dedupe)
+    #   submitter_cookie = a long-lived per-browser UUID cookie hash,
+    #     resilient to private-mode reload, IP rotation, UA spoofing.
+    #     Either column counts toward the 3-fingerprint threshold so
+    #     dodging requires defeating BOTH (different browser AND
+    #     different IP).
+    ip_only_hash = hashlib.sha256(client_host.encode("utf-8", "replace")).hexdigest()[:16] if client_host else ""
     fp_input = (
-        f"{client_host}|"
+        f"{ip_only_hash}|"
         f"{request.headers.get('user-agent', '')[:200]}|"
         f"{request.headers.get('accept-language', '')[:32]}"
     )
-    fingerprint = hashlib.sha256(fp_input.encode("utf-8", "replace")).hexdigest()[:40]
+    # Prefix the IP-only hash so LIKE-based per-IP queries are O(index seek)
+    # instead of O(table scan). 16 + ":" + 24 = 41 chars, fits in VARCHAR(64).
+    fingerprint = f"{ip_only_hash}:" + hashlib.sha256(fp_input.encode("utf-8", "replace")).hexdigest()[:23]
+
+    # Anti-spam token path. The frontend mints a UUID once on first
+    # interaction and keeps it in localStorage; it sends the token on
+    # /api/v1/improvements POSTs ONLY (not on every page load), via
+    # the X-DN-Anti-Spam header. We hash it and store the digest so
+    # the raw token never lives on the server. Difference vs a cookie:
+    #   - Not auto-attached by the browser to every request
+    #   - Never appears on the network outside the explicit feedback POST
+    #   - User-clearable via "Clear Site Data" / DevTools localStorage
+    #   - No cross-site tracking surface
+    # Footnote claim "بدون کوکی ردیابی" continues to hold: this is
+    # neither a cookie nor a tracker.
+    cookie_hash: str | None = None
+    if x_dn_anti_spam:
+        # Trim to a reasonable length so an oversized header can't grow
+        # the hash input arbitrarily.
+        token = x_dn_anti_spam[:128]
+        cookie_hash = hashlib.sha256(token.encode("utf-8", "replace")).hexdigest()[:48]
 
     item = ImprovementFeedback(
         target_type=body.target_type,
@@ -81,6 +143,7 @@ async def submit_feedback(
         priority=body.priority,
         device_info=body.device_info,
         submitter_fingerprint=fingerprint,
+        submitter_cookie=cookie_hash,
         status="open",
     )
     db.add(item)

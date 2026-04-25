@@ -29,9 +29,10 @@ export default function PublicFeedbackButton({ pagePath, storyId }: Props) {
     if (!text.trim() || status === "sending") return;
     setStatus("sending");
     try {
+      const { antiSpamHeaders } = await import("@/lib/antiSpamToken");
       const res = await fetch(`${API}/api/v1/improvements`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...antiSpamHeaders() },
         body: JSON.stringify({
           target_type: storyId ? "story" : "other",
           target_id: storyId || null,

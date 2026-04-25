@@ -13,6 +13,7 @@ import FeedbackProvider from "@/components/feedback/FeedbackProvider";
 import SummaryRating from "@/components/feedback/SummaryRating";
 import EditableTitle from "@/components/feedback/EditableTitle";
 import PriorityControl from "@/components/feedback/PriorityControl";
+import RatingModeBanner from "@/components/feedback/RatingModeBanner";
 import StoryFeedbackOverlay from "@/components/improvement/StoryFeedbackOverlay";
 import PublicFeedbackButton from "@/components/common/PublicFeedbackButton";
 import { getStory, getStoryAnalysis, getRelatedStories } from "@/lib/api";
@@ -195,6 +196,7 @@ export default async function StoryDetailPage({
       type="application/ld+json"
       dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
     />
+    <RatingModeBanner locale={locale} />
     <StoryFeedbackOverlay storyId={id} storyTitle={title} />
     <PublicFeedbackButton storyId={id} />
     <div dir="rtl" className="mx-auto max-w-7xl px-4 py-8">
@@ -336,6 +338,7 @@ export default async function StoryDetailPage({
         stories={relatedStories}
         currentArcId={story.arc?.id ?? null}
         locale={locale}
+        storyId={id}
       />
     </div>
     </FeedbackProvider>
