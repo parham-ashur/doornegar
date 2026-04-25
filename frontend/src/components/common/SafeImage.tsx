@@ -16,6 +16,7 @@ export default function SafeImage({
   placeholderClass,
   sizes = "(max-width: 768px) 100vw, 50vw",
   priority = false,
+  quality = 70,
 }: {
   src: string | null;
   alt?: string;
@@ -25,6 +26,8 @@ export default function SafeImage({
   sizes?: string;
   /** Set true for above-the-fold hero images (disables lazy-loading + preloads). */
   priority?: boolean;
+  /** WebP quality. 70 default for hero/visible-on-load cases. Cards use SafeImageStatic at 65. */
+  quality?: number;
 }) {
   const [failed, setFailed] = useState(false);
 
@@ -49,6 +52,7 @@ export default function SafeImage({
         fill
         sizes={sizes}
         priority={priority}
+        quality={quality}
         className={className || "object-cover"}
         onError={() => setFailed(true)}
         unoptimized={skipOptimization}

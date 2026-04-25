@@ -20,6 +20,7 @@ export default function SafeImageStatic({
   placeholderClass,
   sizes = "(max-width: 768px) 100vw, 50vw",
   priority = false,
+  quality = 65,
 }: {
   src: string | null;
   alt?: string;
@@ -27,6 +28,11 @@ export default function SafeImageStatic({
   placeholderClass?: string;
   sizes?: string;
   priority?: boolean;
+  /** WebP quality. 65 is the sweet spot for cards on small displays — Lighthouse's
+   *  "Improve image delivery" pass flagged the homepage cards as oversized; this
+   *  trims ~10-15% per file vs the next/image default of 75 with no visible diff
+   *  on phone screens. Hero stays at SafeImage's default (70). */
+  quality?: number;
 }) {
   if (isUnusableUrl(src)) {
     return (
@@ -47,6 +53,7 @@ export default function SafeImageStatic({
         fill
         sizes={sizes}
         priority={priority}
+        quality={quality}
         className={className || "object-cover"}
         unoptimized={skipOptimization}
       />

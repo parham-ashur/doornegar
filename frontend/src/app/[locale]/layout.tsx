@@ -21,15 +21,19 @@ import "@/styles/globals.css";
 // disappear entirely. display:swap keeps fallback text visible during
 // the few ms it still takes to load. CSS variables so globals.css
 // references stay unchanged.
+// Weight subset audit (2026-04-25): grep across src/ found 0 uses of
+// font-thin / font-extralight / font-light. Dropped the 300 weight from
+// both fonts — saves 2 Vazirmatn files (arabic + latin subset) and 1
+// IBM Plex Sans file on first paint without changing rendered output.
 const fontPersian = Vazirmatn({
   subsets: ["arabic", "latin"],
-  weight: ["300", "400", "500", "600", "700", "800", "900"],
+  weight: ["400", "500", "600", "700", "800", "900"],
   display: "swap",
   variable: "--font-persian",
 });
 const fontLatin = IBM_Plex_Sans({
   subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700"],
+  weight: ["400", "500", "600", "700"],
   display: "swap",
   variable: "--font-latin",
 });
