@@ -84,6 +84,12 @@ async def lifespan(app: FastAPI):
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )""",
                 "CREATE INDEX IF NOT EXISTS idx_stories_arc_id ON stories(arc_id)",
+                # Feedback-loop columns: anonymous-vote dedup fingerprint
+                # on improvement_feedback, applied-at flag on rater_feedback
+                # so summary-correction regeneration is idempotent.
+                "ALTER TABLE improvement_feedback ADD COLUMN IF NOT EXISTS submitter_fingerprint VARCHAR(64)",
+                "CREATE INDEX IF NOT EXISTS idx_improvement_fp_target ON improvement_feedback(target_id, submitter_fingerprint) WHERE submitter_fingerprint IS NOT NULL",
+                "ALTER TABLE rater_feedback ADD COLUMN IF NOT EXISTS applied_at TIMESTAMPTZ",
                 # Orphan-retirement counter — filters out articles that
                 # repeatedly fail to cluster, so they don't keep paying
                 # the LLM tax on every pipeline run.

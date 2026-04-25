@@ -61,6 +61,13 @@ class ImprovementFeedback(Base):
     # Auto-captured device context: "mobile 375×812" or "desktop 1440×900" + user agent
     device_info: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
+    # Soft fingerprint of submitter (sha256 of IP + UA + accept-language,
+    # truncated). Anonymous «نامرتبط» votes are deduped by this so one
+    # person can't trip the 3-fingerprint auto-orphan threshold alone.
+    # NULL on rows from before the column existed — those won't count
+    # toward consensus.
+    submitter_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
     # Admin tracking
     status: Mapped[str] = mapped_column(
         String(20),
