@@ -74,3 +74,8 @@ project-management/digests/
 backend/data/weekly_reports/
 backend/scripts/*_report.json
 backend/scripts/niloofar_notepad.md
+
+# Project-management docs (mirrored in Notion) and dev log
+DEVLOG.md
+docs/
+project-management/
