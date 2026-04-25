@@ -50,7 +50,7 @@ INITIAL_SOURCES = [
         "factional_alignment": None,
         "language": "both",
         "description_en": "Independent news platform combining diaspora journalists and citizen reporters inside Iran.",
-        "description_fa": "پلتفرم خبری مستقل با همکاری روزنامه‌نگاران مهاجر و خبرنگاران شهروندی داخل ایران.",
+        "description_fa": "سکوی خبری مستقل با همکاری روزنامه‌نگاران مهاجر و خبرنگاران شهروندی داخل ایران.",
     },
     {
         "name_en": "Radio Zamaneh",

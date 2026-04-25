@@ -279,7 +279,7 @@ ANALYSTS = [
         "affiliation": "Tavaana",
         "focus_areas": ["civil_society", "democracy", "education"],
         "bio_en": "Co-founder of Tavaana civic education platform. Advocates for democratic transition in Iran.",
-        "bio_fa": "هم‌بنیانگذار پلتفرم آموزش مدنی توانا. مدافع گذار دموکراتیک در ایران.",
+        "bio_fa": "هم‌بنیانگذار سکوی آموزش مدنی توانا. مدافع گذار دموکراتیک در ایران.",
     },
     {
         "name_en": "Amirabbas Fakhravar",

@@ -16,7 +16,7 @@ export default function Footer() {
           {/* Left (RTL): description + tags */}
           <div className="flex flex-col gap-2 text-center md:text-start">
             <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-500">
-              پلتفرم شفافیت رسانه‌ای ایران — مقایسه پوشش خبری رسانه‌های داخل و خارج ایران.
+              سکوی شفافیت رسانه‌ای ایران — مقایسه پوشش خبری رسانه‌های داخل و خارج ایران.
               ببینید کدام رسانه چه خبری را پوشش داده و چه خبری را پنهان کرده.
             </p>
             <p className="text-[10px] leading-4 text-slate-400/60 dark:text-slate-600/60 mt-2">

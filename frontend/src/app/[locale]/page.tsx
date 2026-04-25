@@ -109,14 +109,16 @@ async function fetchTelegramAnalysis(storyId: string): Promise<TelegramAnalysis 
 }
 
 function Meta({ story }: { story: StoryBrief }) {
-  const published = story.first_published_at
-    ? formatRelativeTime(story.first_published_at, "fa")
-    : null;
-  const updated = story.updated_at
-    ? formatRelativeTime(story.updated_at, "fa")
-    : null;
-  const showUpdated = updated && story.updated_at && story.first_published_at
-    && Math.abs(new Date(story.updated_at).getTime() - new Date(story.first_published_at).getTime()) > 3600000;
+  // Fall back through the date chain so a story always shows at least
+  // one timestamp. Some stories arrive with a null first_published_at
+  // (RSS feeds without pubDate); without the fallback the meta line
+  // hides the date entirely.
+  const publishedSrc = story.first_published_at || story.last_updated_at || story.updated_at;
+  const published = publishedSrc ? formatRelativeTime(publishedSrc, "fa") : null;
+  const updatedSrc = story.last_updated_at || story.updated_at;
+  const updated = updatedSrc ? formatRelativeTime(updatedSrc, "fa") : null;
+  const showUpdated = updated && updatedSrc && publishedSrc
+    && Math.abs(new Date(updatedSrc).getTime() - new Date(publishedSrc).getTime()) > 3600000;
   // Normalized side percentages always sum to 100 so the reader doesn't
   // see 76% + 22% = 98 and wonder where the other 2 went. Raw state_pct
   // / diaspora_pct leave implicit room for independent outlets (not in

@@ -210,16 +210,20 @@ export default async function StoryDetailPage({
             <Newspaper className="h-4 w-4" />
             {toFa(story.source_count)} رسانه · {toFa(story.article_count)} مقاله
           </span>
-          {story.first_published_at && (
-            <span>
-              نشر {formatRelativeTime(story.first_published_at, "fa")}
-            </span>
-          )}
-          {story.updated_at && (
-            <span className="text-sm text-slate-500">
-              به‌روز {formatRelativeTime(story.updated_at, "fa")}
-            </span>
-          )}
+          {(() => {
+            const pubSrc = story.first_published_at || story.last_updated_at || story.updated_at;
+            const updSrc = story.last_updated_at || story.updated_at;
+            const showUpdated = pubSrc && updSrc
+              && Math.abs(new Date(updSrc).getTime() - new Date(pubSrc).getTime()) > 3600000;
+            return (
+              <>
+                {pubSrc && <span>نشر {formatRelativeTime(pubSrc, "fa")}</span>}
+                {showUpdated && (
+                  <span className="text-sm text-slate-500">به‌روز {formatRelativeTime(updSrc!, "fa")}</span>
+                )}
+              </>
+            );
+          })()}
         </div>
 
         {/* Coverage bar — 4 narrative subgroups grouped into 2 sides */}
