@@ -1,9 +1,17 @@
-import { useId } from "react";
+"use client";
+
+import { useState } from "react";
 import { GROUP_COLORS, GROUP_LABELS_FA } from "@/lib/narrativeGroups";
 import type { NarrativeGroup, StoryAnalysis } from "@/lib/types";
 
-const LABEL_BASE =
-  "cursor-pointer px-5 py-3 text-[13px] font-bold transition-colors text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/50";
+const TAB_BASE =
+  "cursor-pointer px-5 py-3 text-[13px] font-bold transition-colors";
+const TAB_INACTIVE =
+  "text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/50";
+const TAB_ACTIVE =
+  "bg-slate-900 dark:bg-white text-white dark:text-slate-900";
+
+type TabKey = "bias" | "inside" | "outside";
 
 function FramingTags({ framing }: { framing: string | string[] | null }) {
   if (!framing) return null;
@@ -66,14 +74,7 @@ function SubgroupBullets({
 // No content repeats across tabs. Previously all three rendered
 // the same 4-subgroup bullets and readers saw each one up to 3×.
 export default function StoryAnalysisPanel({ analysis }: { analysis: StoryAnalysis | null }) {
-  // CSS-driven tabs: three hidden radio inputs at the top, three peer-checked
-  // panels below. Active label restyles via peer-checked/<name> utilities.
-  // No JS — keeps this component server-renderable.
-  const reactId = useId();
-  const tabName = `story-tabs-${reactId.replace(/:/g, "")}`;
-  const biasId = `${tabName}-bias`;
-  const insideId = `${tabName}-inside`;
-  const outsideId = `${tabName}-outside`;
+  const [active, setActive] = useState<TabKey>("bias");
 
   const hasBias =
     analysis?.bias_explanation_fa ||
@@ -101,21 +102,16 @@ export default function StoryAnalysisPanel({ analysis }: { analysis: StoryAnalys
 
   return (
     <div dir="rtl">
-      {/* Hidden radios drive the active tab; must precede labels + panels in DOM order. */}
-      <input id={biasId} type="radio" name={tabName} defaultChecked className="peer/bias hidden" aria-hidden="true" tabIndex={-1} />
-      <input id={insideId} type="radio" name={tabName} className="peer/inside hidden" aria-hidden="true" tabIndex={-1} />
-      <input id={outsideId} type="radio" name={tabName} className="peer/outside hidden" aria-hidden="true" tabIndex={-1} />
-
       {/* Tab bar */}
       <div className="flex gap-0 border-b border-slate-200 dark:border-slate-800">
-        <label htmlFor={biasId} className={`${LABEL_BASE} peer-checked/bias:bg-slate-900 dark:peer-checked/bias:bg-white peer-checked/bias:text-white dark:peer-checked/bias:text-slate-900`}>مقایسه روایت‌ها</label>
-        <label htmlFor={insideId} className={`${LABEL_BASE} peer-checked/inside:bg-slate-900 dark:peer-checked/inside:bg-white peer-checked/inside:text-white dark:peer-checked/inside:text-slate-900`}>روایت درون‌مرزی</label>
-        <label htmlFor={outsideId} className={`${LABEL_BASE} peer-checked/outside:bg-slate-900 dark:peer-checked/outside:bg-white peer-checked/outside:text-white dark:peer-checked/outside:text-slate-900`}>روایت برون‌مرزی</label>
+        <button type="button" onClick={() => setActive("bias")} className={`${TAB_BASE} ${active === "bias" ? TAB_ACTIVE : TAB_INACTIVE}`}>مقایسه روایت‌ها</button>
+        <button type="button" onClick={() => setActive("inside")} className={`${TAB_BASE} ${active === "inside" ? TAB_ACTIVE : TAB_INACTIVE}`}>روایت درون‌مرزی</button>
+        <button type="button" onClick={() => setActive("outside")} className={`${TAB_BASE} ${active === "outside" ? TAB_ACTIVE : TAB_INACTIVE}`}>روایت برون‌مرزی</button>
       </div>
 
-      {/* Tab content — all three panels render; CSS hides the inactive two. */}
+      {/* Tab content */}
       <div className="py-5 border-b border-slate-200 dark:border-slate-800">
-        <div className="hidden peer-checked/bias:block">
+        <div className={active === "bias" ? "block" : "hidden"}>
             {/* Per-subgroup BIAS framing (how each subgroup slants the
                 story — word choices, emphasis, framing) — distinct from
                 the narrative bullets in the inside/outside tabs (which
@@ -220,7 +216,7 @@ export default function StoryAnalysisPanel({ analysis }: { analysis: StoryAnalys
             })()}
         </div>
 
-        <div className="hidden peer-checked/inside:block">
+        <div className={active === "inside" ? "block" : "hidden"}>
             {analysis.narrative?.inside &&
              ((analysis.narrative.inside.principlist?.length || 0) +
               (analysis.narrative.inside.reformist?.length || 0) > 0) ? (
@@ -245,7 +241,7 @@ export default function StoryAnalysisPanel({ analysis }: { analysis: StoryAnalys
             )}
         </div>
 
-        <div className="hidden peer-checked/outside:block">
+        <div className={active === "outside" ? "block" : "hidden"}>
             {analysis.narrative?.outside &&
              ((analysis.narrative.outside.moderate?.length || 0) +
               (analysis.narrative.outside.radical?.length || 0) > 0) ? (
