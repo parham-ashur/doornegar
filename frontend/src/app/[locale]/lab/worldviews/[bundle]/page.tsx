@@ -194,14 +194,10 @@ function BeliefBlock({
     item.example_article_ids ||
     [];
   return (
-    <li className="border-b border-slate-100 dark:border-slate-800 py-3 last:border-0">
-      <p className="text-[15px] leading-6 text-slate-800 dark:text-slate-200">{text}</p>
-      <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">
-        {item.article_count ? `${toFa(item.article_count)} مقاله` : ""}
-        {item.source_count ? ` · از ${toFa(item.source_count)} رسانه` : ""}
-      </p>
+    <li className="border-b border-slate-100 dark:border-slate-800 py-4 last:border-0">
+      <p className="text-[15px] leading-7 text-slate-800 dark:text-slate-200">{text}</p>
       {item.note && (
-        <p className="text-[12px] leading-5 text-slate-500 dark:text-slate-400 mt-1">{item.note}</p>
+        <p className="text-[13px] leading-6 text-slate-500 dark:text-slate-400 mt-2">{item.note}</p>
       )}
       <EvidenceList ids={ids} articles={articles} locale={locale} />
     </li>

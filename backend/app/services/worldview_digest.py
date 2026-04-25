@@ -59,7 +59,13 @@ logger = logging.getLogger(__name__)
 # derived from a single outlet.
 MIN_SOURCES = 2
 MIN_ARTICLES = 20
-MIN_ANALYZED_ARTICLES = 50
+# Lowered from 50 → 25 (2026-04-25). The original 50 was too strict for
+# bundles like radical_diaspora that have only 2 tracked outlets — at 6%
+# bias-coverage that bucket needed ~830 articles to clear the gate, far
+# above its actual 551. 25 is still enough to sample 10 diverse narratives
+# (SAMPLE_BIAS_NARRATIVES) for the LLM. Per-belief grounding floor stays
+# at ≥3 articles / ≥2 sources, so individual claims are still well-evidenced.
+MIN_ANALYZED_ARTICLES = 25
 
 # Grounding floor: every published belief must be backed by ≥3 articles
 # from ≥2 distinct sources. Enforced after the LLM returns.
@@ -332,9 +338,27 @@ people.
 Output strict JSON only. No markdown fences, no prose before or after.
 
 Write every string field in natural Persian (Farsi). Use neutral, \
-analytical phrasing. Never use pejoratives for either side. Prefer \
-قلب passive/descriptive voice ("این رسانه‌ها … را برجسته کردند") over \
-active ascription ("این گروه باور دارد").
+analytical phrasing. Never use pejoratives for either side.
+
+VOICE & PHRASING (read carefully — this is what makes the card useful):
+
+1. State the CLAIM directly. Do NOT prefix with "این رسانه‌ها …" or \
+"این گروه …" or "رسانه‌های این بخش …". The page header already tells the \
+reader these are media claims; repeating it on every entry is noisy. \
+Bad: «این رسانه‌ها بر این باورند که تنش‌ها در حال افزایش است.» \
+Good: «تنش‌ها در منطقه به‌صورت پیوسته در حال افزایش است و سیاست خارجی \
+آمریکا نقش محرک این تنش‌ها را دارد.»
+
+2. Each `text` field should be 2–4 SENTENCES of substantive analytical \
+prose, not a single short bullet. Connect the claim to its supporting \
+context, the scope it covers, and the reasoning the outlets advanced. \
+Treat it like a paragraph in a media-criticism column, not a tweet.
+
+3. Each `note` field on `emphasized` and `absent` should be 1–2 sentences \
+explaining the framing or salience pattern — not just a topic label.
+
+4. Do NOT name specific outlets, channel handles, or article URLs in any \
+visible string. The `example_article_ids` array carries that evidence.
 
 Every entry in `core_beliefs`, `emphasized`, and `predictions_primed` \
 MUST include:
@@ -363,8 +387,7 @@ Return ONLY this JSON shape:
   ]
 }
 
-Lists may have up to 5 items. Prefer depth over breadth — 3 strong \
-entries beat 5 weak ones.
+Aim for 3 substantive entries per list rather than 5 thin ones.
 """
 
 
@@ -423,7 +446,10 @@ async def _call_llm(prompt: str, system: str, bundle: str) -> tuple[str, dict]:
             {"role": "system", "content": system},
             {"role": "user", "content": prompt},
         ],
-        max_tokens=2048,
+        # Bumped 2048 → 3072 because the prompt now asks for 2-4 sentences
+        # per belief instead of one-liners. 3 entries × ~120 tokens each ×
+        # 3 lists ~= 1100 tokens of beliefs + JSON scaffolding.
+        max_tokens=3072,
         temperature=0.2,
         response_format={"type": "json_object"},
     )

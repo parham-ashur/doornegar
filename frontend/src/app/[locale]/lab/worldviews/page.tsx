@@ -153,27 +153,20 @@ function InsufficientCard({ card, locale }: { card: WorldviewCard; locale: strin
   );
 }
 
-function BeliefBullet({ item, accent }: { item: BeliefWithEvidence; accent: string }) {
+function BeliefParagraph({ item, accent }: { item: BeliefWithEvidence; accent: string }) {
   const text = item.text || item.topic || "";
-  const count = item.article_count ?? 0;
   if (!text) return null;
   return (
-    <li className="flex items-start gap-2">
-      <span className={`mt-1.5 w-1 h-1 rounded-full shrink-0 ${accent.replace("text-", "bg-")}`} />
-      <span className="flex-1">
-        <span className="text-[14px] leading-6 text-slate-700 dark:text-slate-300">{text}</span>
-        {count > 0 && (
-          <span className="inline-block mx-2 text-[11px] text-slate-400 align-middle">
-            · {toFaDigits(count)} مقاله
-          </span>
-        )}
-        {item.note && (
-          <span className="block text-[12px] leading-5 text-slate-400 dark:text-slate-500 mt-0.5">
-            {item.note}
-          </span>
-        )}
-      </span>
-    </li>
+    <div className="border-r-2 pr-3 py-1" style={{ borderColor: "currentColor" }}>
+      <p className={`text-[14px] leading-7 text-slate-700 dark:text-slate-300 ${accent.replace("text-", "marker:")}`}>
+        {text}
+      </p>
+      {item.note && (
+        <p className="mt-1 text-[12px] leading-6 text-slate-500 dark:text-slate-500">
+          {item.note}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -201,65 +194,59 @@ function WorldviewCardBox({ card, locale }: { card: WorldviewCard; locale: strin
         </span>
       </div>
 
-      {/* Measurement strip — signal strength behind the synthesis */}
-      <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-2">
-        {toFaDigits(card.article_count)} مقاله · {toFaDigits(card.source_count)} رسانه ·
-        پوشش تحلیل {toFaDigits(Math.round(card.coverage_pct))}٪
-      </p>
-
       {/* Core beliefs */}
       {beliefs.length > 0 && (
-        <div className="mt-4">
-          <p className="text-[12px] font-bold text-slate-500 dark:text-slate-400 mb-1.5">
+        <div className={`mt-4 ${theme.accent}`}>
+          <p className="text-[12px] font-bold text-slate-500 dark:text-slate-400 mb-2">
             چه چیزی گفته شد
           </p>
-          <ul className="space-y-1.5">
+          <div className="space-y-3">
             {beliefs.map((b, i) => (
-              <BeliefBullet key={`b${i}`} item={b} accent={theme.accent} />
+              <BeliefParagraph key={`b${i}`} item={b} accent={theme.accent} />
             ))}
-          </ul>
+          </div>
         </div>
       )}
 
       {/* Emphasized */}
       {emphasized.length > 0 && (
-        <div className="mt-3">
-          <p className="text-[12px] font-bold text-slate-500 dark:text-slate-400 mb-1.5">
+        <div className={`mt-4 ${theme.accent}`}>
+          <p className="text-[12px] font-bold text-slate-500 dark:text-slate-400 mb-2">
             چه چیزی برجسته شد
           </p>
-          <ul className="space-y-1.5">
+          <div className="space-y-3">
             {emphasized.map((b, i) => (
-              <BeliefBullet key={`e${i}`} item={b} accent={theme.accent} />
+              <BeliefParagraph key={`e${i}`} item={b} accent={theme.accent} />
             ))}
-          </ul>
+          </div>
         </div>
       )}
 
       {/* Absences */}
       {absent.length > 0 && (
-        <div className="mt-3">
-          <p className="text-[12px] font-bold text-slate-500 dark:text-slate-400 mb-1.5">
+        <div className="mt-4 text-slate-400 dark:text-slate-500">
+          <p className="text-[12px] font-bold text-slate-500 dark:text-slate-400 mb-2">
             چه چیزی گفته نشد
           </p>
-          <ul className="space-y-1.5">
+          <div className="space-y-3">
             {absent.map((b, i) => (
-              <BeliefBullet key={`a${i}`} item={b} accent="text-slate-400" />
+              <BeliefParagraph key={`a${i}`} item={b} accent="text-slate-400" />
             ))}
-          </ul>
+          </div>
         </div>
       )}
 
       {/* Predictions */}
       {predictions.length > 0 && (
-        <div className="mt-3">
-          <p className="text-[12px] font-bold text-slate-500 dark:text-slate-400 mb-1.5">
+        <div className={`mt-4 ${theme.accent}`}>
+          <p className="text-[12px] font-bold text-slate-500 dark:text-slate-400 mb-2">
             چه انتظاری ساخته شد
           </p>
-          <ul className="space-y-1.5">
+          <div className="space-y-3">
             {predictions.map((b, i) => (
-              <BeliefBullet key={`p${i}`} item={b} accent={theme.accent} />
+              <BeliefParagraph key={`p${i}`} item={b} accent={theme.accent} />
             ))}
-          </ul>
+          </div>
         </div>
       )}
 
