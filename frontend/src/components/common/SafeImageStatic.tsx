@@ -18,7 +18,12 @@ export default function SafeImageStatic({
   alt = "تصویر خبر",
   className,
   placeholderClass,
-  sizes = "(max-width: 768px) 100vw, 50vw",
+  // Default sized for typical homepage / story-card slots (~200-256px on
+  // desktop, half-viewport on mobile). The previous "100vw, 50vw" default
+  // was making Vercel's optimizer fetch the 640w-or-wider variant for
+  // 200px cards (3-5x oversized per Lighthouse). Callers that render at
+  // hero size should pass `sizes="100vw"` explicitly.
+  sizes = "(max-width: 640px) 50vw, 256px",
   priority = false,
   quality = 65,
 }: {

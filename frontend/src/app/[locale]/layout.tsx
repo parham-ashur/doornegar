@@ -120,13 +120,11 @@ export default async function LocaleLayout({
         <link rel="icon" href="/favicon.ico" />
         <link rel="manifest" href="/manifest.json" />
         <meta name="theme-color" content="#0a0e1a" />
-        {/* Pre-open the TCP+TLS handshake to the image CDNs while the HTML
-            is still parsing. On the homepage we resolve ~20 images from
-            R2 as soon as the hero renders; the preconnect shaves 100-
-            200ms off the first image LCP by hiding the handshake cost
-            behind the SSR response. */}
-        <link rel="preconnect" href="https://pub-65f981ecf095486aaea3482ec613d9b1.r2.dev" crossOrigin="anonymous" />
-        <link rel="preconnect" href="https://www.google.com" crossOrigin="anonymous" />
+        {/* Preconnect intentionally omitted — homepage images go through
+            /_next/image (Vercel optimizer), not directly to R2, so a R2
+            preconnect was sitting unused (Lighthouse flagged it). When/if
+            the hero starts loading directly from R2 (skip-optimizer for
+            already-WebP-encoded source), add the preconnect back here. */}
       </head>
       <body className={`min-h-screen bg-white text-slate-900 dark:bg-[#0a0e1a] dark:text-slate-100 ${isRtl ? "font-persian" : "font-latin"}`}>
         <NextIntlClientProvider locale={locale} messages={messages}>
