@@ -195,17 +195,28 @@ export default function StoryTelegramSection({ storyId, initialTab, highlightTex
         </CollapsibleSection>
       )}
 
-      {/* Channel stats — compact one line.
-          Labeled «پست مستقیم» to make clear these are posts directly
-          linked to THIS story. The prediction/claim analysis may also
-          draw on posts from closely-related sibling stories (neighbor
-          pooling — enabled when the direct pool is thin), which don't
-          appear in this count but do inform the narrative above. */}
+      {/* Telegram references — every channel that contributed posts to
+          this story, shown as chips with their post counts. «پست مستقیم»
+          flags that these are posts directly linked to THIS story; the
+          prediction/claim analysis above may also draw on neighbor-story
+          posts via the neighbor-pooling fallback. */}
       {channels.length > 0 && (
-        <div className="pt-1 border-t border-slate-100 dark:border-slate-800">
-          <p className="text-[13px] text-slate-400">
-            {postCount} پست مستقیم از {channels.length} کانال — {channels.map(ch => `${ch.name} (${ch.posts})`).join("، ")}
-          </p>
+        <div className="pt-3 mt-2 border-t border-slate-200 dark:border-slate-800">
+          <h4 className="text-[12px] font-bold text-slate-600 dark:text-slate-400 mb-2">
+            منابع تلگرامی — {channels.length} کانال، {postCount} پست مستقیم
+          </h4>
+          <div className="flex flex-wrap gap-1.5">
+            {channels.map((ch, i) => (
+              <span
+                key={i}
+                className="inline-flex items-center gap-1.5 px-2 py-0.5 text-[12px] border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300"
+              >
+                <span className="font-medium">{ch.name}</span>
+                <span className="text-slate-400 text-[11px]">·</span>
+                <span className="text-slate-500 dark:text-slate-400 text-[11px]">{ch.posts}</span>
+              </span>
+            ))}
+          </div>
         </div>
       )}
     </div>
