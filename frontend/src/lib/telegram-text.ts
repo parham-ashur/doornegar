@@ -44,6 +44,11 @@ export function cleanClaim(text: string): string {
   // whole claim in this scaffold; the section header «ادعاهای کلیدی» already
   // tells the reader what they're looking at.
   t = t.replace(/^ادعا\s*:\s*/, "");
+  // Credibility-label prefix that Niloofar polish writes («تأیید شده:»,
+  // «مشکوک:», «تبلیغاتی:», «تک‌منبع:», «نیازمند تأیید:») — getCredLabel
+  // pulls the label off the raw text, so we strip it here to avoid showing
+  // it twice (once in the bullet, once as the colored label below).
+  t = t.replace(/^(?:تأیید شده|تایید شده|مشکوک|تبلیغاتی|تک[‌\s]?منبع|نیازمند تأیید|نیازمند تایید|تأیید نشده|تایید نشده)\s*:\s*/, "");
   t = t.replace(/^[«"]([^»"]+)[»"]\s*/, "$1");
   // Trailing « — کانال X [descriptor]» or « — ارزیابی: ...» tails. These
   // attribute the claim or grade its credibility — the credibility goes to
