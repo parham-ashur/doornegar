@@ -19,6 +19,7 @@ const NAV: { href: string; label: string; group?: "left" | "right" }[] = [
   { href: "/fa/dashboard/hitl", label: "HITL" },
   { href: "/fa/dashboard/edit-stories", label: "Story Editor" },
   { href: "/fa/dashboard/improvements", label: "Feedback" },
+  { href: "/fa/dashboard/learning", label: "Learning" },
   { href: "/fa/dashboard/cost", label: "Cost", group: "right" },
   { href: "/fa/dashboard/fetch-stats", label: "Ingest", group: "right" },
   { href: "/fa/dashboard/actions", label: "Actions", group: "right" },

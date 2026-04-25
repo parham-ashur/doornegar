@@ -61,6 +61,20 @@ class ImprovementFeedback(Base):
     # Auto-captured device context: "mobile 375×812" or "desktop 1440×900" + user agent
     device_info: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
+    # Soft fingerprint of submitter (sha256 of IP + UA + accept-language,
+    # truncated). Anonymous «نامرتبط» votes are deduped by this so one
+    # person can't trip the 3-fingerprint auto-orphan threshold alone.
+    # NULL on rows from before the column existed — those won't count
+    # toward consensus.
+    submitter_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    # Story the article was orphaned from when this row's flag triggered
+    # the auto-orphan path. Used by the clusterer's negative-pair check
+    # to refuse re-attaching the same article to the same story.
+    orphaned_from_story_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+
     # Admin tracking
     status: Mapped[str] = mapped_column(
         String(20),

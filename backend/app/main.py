@@ -84,6 +84,20 @@ async def lifespan(app: FastAPI):
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )""",
                 "CREATE INDEX IF NOT EXISTS idx_stories_arc_id ON stories(arc_id)",
+                # Feedback-loop columns: anonymous-vote dedup fingerprint
+                # on improvement_feedback, applied-at flag on rater_feedback
+                # so summary-correction regeneration is idempotent.
+                "ALTER TABLE improvement_feedback ADD COLUMN IF NOT EXISTS submitter_fingerprint VARCHAR(64)",
+                "CREATE INDEX IF NOT EXISTS idx_improvement_fp_target ON improvement_feedback(target_id, submitter_fingerprint) WHERE submitter_fingerprint IS NOT NULL",
+                "ALTER TABLE rater_feedback ADD COLUMN IF NOT EXISTS applied_at TIMESTAMPTZ",
+                # Negative-pair memory: which story an article was orphaned
+                # from after a wrong_clustering vote, so the clusterer can
+                # refuse to re-attach it. Source trust score scales the
+                # cosine threshold per source — high-error sources need
+                # stronger cosine evidence to attach.
+                "ALTER TABLE improvement_feedback ADD COLUMN IF NOT EXISTS orphaned_from_story_id UUID",
+                "CREATE INDEX IF NOT EXISTS idx_improvement_orphan_pair ON improvement_feedback(target_id, orphaned_from_story_id) WHERE orphaned_from_story_id IS NOT NULL",
+                "ALTER TABLE sources ADD COLUMN IF NOT EXISTS cluster_quality_score DOUBLE PRECISION NOT NULL DEFAULT 1.0",
                 # Orphan-retirement counter — filters out articles that
                 # repeatedly fail to cluster, so they don't keep paying
                 # the LLM tax on every pipeline run.

@@ -2191,3 +2191,143 @@ async def social_platform_status():
     """Check which social platforms are configured."""
     from app.services.social_posting import get_platform_status
     return await get_platform_status()
+
+
+# ─── Feedback-impact telemetry ────────────────────────────────────
+# Drives /dashboard/learning. Two slices:
+#   1. /feedback-impact/events — recent story_events from feedback +
+#      clustering decisions, joined to story / article titles.
+#   2. /feedback-impact/source-trust — current Source.cluster_quality_score
+#      with the 30d flag rate that drove it.
+
+# Event types this endpoint surfaces. Anything else is hidden so the
+# feed stays focused on feedback-driven learning, not the full event log.
+_LEARNING_EVENT_TYPES = (
+    "feedback_orphan_rater",
+    "feedback_orphan_anon",
+    "feedback_rehome",
+    "feedback_summary_regen",
+    "feedback_niloofar_orphan",
+    "feedback_niloofar_dismiss",
+    "cluster_block_negative",
+    "cluster_block_low_trust",
+    "source_trust_change",
+)
+
+
+@router.get("/feedback-impact/events")
+async def feedback_impact_events(
+    limit: int = Query(100, ge=1, le=500),
+    event_type: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Recent feedback-impact events. Joined to story title + article
+    title where applicable so the dashboard can render human-readable
+    rows without per-row round-trips."""
+    from sqlalchemy import text as _text
+
+    types_filter = list(_LEARNING_EVENT_TYPES)
+    if event_type and event_type in _LEARNING_EVENT_TYPES:
+        types_filter = [event_type]
+
+    rows = await db.execute(
+        _text("""
+            SELECT
+                e.id, e.event_type, e.actor, e.story_id, e.article_id,
+                e.signals, e.confidence, e.created_at,
+                s.title_fa AS story_title,
+                a.title_fa AS article_title,
+                a.title_original AS article_title_original
+            FROM story_events e
+            LEFT JOIN stories s ON s.id = e.story_id
+            LEFT JOIN articles a ON a.id = e.article_id
+            WHERE e.event_type = ANY(:types)
+            ORDER BY e.created_at DESC
+            LIMIT :lim
+        """),
+        {"types": types_filter, "lim": limit},
+    )
+    items = []
+    for r in rows.mappings():
+        items.append({
+            "id": str(r["id"]),
+            "event_type": r["event_type"],
+            "actor": r["actor"],
+            "story_id": str(r["story_id"]) if r["story_id"] else None,
+            "article_id": str(r["article_id"]) if r["article_id"] else None,
+            "story_title": r["story_title"],
+            "article_title": r["article_title"] or r["article_title_original"],
+            "signals": r["signals"] or {},
+            "confidence": r["confidence"],
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+        })
+    return {"items": items, "count": len(items)}
+
+
+@router.get("/feedback-impact/source-trust")
+async def feedback_impact_source_trust(db: AsyncSession = Depends(get_db)):
+    """Per-source trust score + 30-day flag rate.
+
+    Same arithmetic as step_source_trust_recompute but read-only — the
+    dashboard table needs to show the current score *and* what's driving
+    it without waiting for the next maintenance tick.
+    """
+    from sqlalchemy import text as _text
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+
+    totals_q = await db.execute(
+        select(Article.source_id, func.count(Article.id))
+        .where(Article.ingested_at >= cutoff)
+        .group_by(Article.source_id)
+    )
+    totals = {sid: cnt for sid, cnt in totals_q.all()}
+
+    flag_q = await db.execute(
+        _text("""
+            SELECT a.source_id, COUNT(DISTINCT a.id) AS flagged
+            FROM articles a
+            WHERE a.ingested_at >= :cutoff
+              AND (
+                EXISTS (
+                  SELECT 1 FROM rater_feedback rf
+                  WHERE rf.article_id = a.id
+                    AND rf.feedback_type = 'article_relevance'
+                    AND rf.is_relevant = false
+                )
+                OR EXISTS (
+                  SELECT 1 FROM improvement_feedback ifb
+                  WHERE ifb.target_id = a.id::text
+                    AND ifb.target_type = 'article'
+                    AND ifb.issue_type = 'wrong_clustering'
+                    AND ifb.status <> 'open'
+                )
+              )
+            GROUP BY a.source_id
+        """),
+        {"cutoff": cutoff},
+    )
+    flagged = {row[0]: row[1] for row in flag_q.all()}
+
+    sources_q = await db.execute(
+        select(Source).order_by(Source.cluster_quality_score.asc(), Source.slug.asc())
+    )
+    sources = list(sources_q.scalars().all())
+
+    items = []
+    for s in sources:
+        total = totals.get(s.id, 0)
+        flag_count = flagged.get(s.id, 0)
+        rate = (flag_count / total) if total else 0.0
+        items.append({
+            "source_id": str(s.id),
+            "slug": s.slug,
+            "name_fa": s.name_fa,
+            "name_en": s.name_en,
+            "state_alignment": s.state_alignment,
+            "cluster_quality_score": round(float(s.cluster_quality_score or 1.0), 3),
+            "articles_30d": total,
+            "flagged_30d": flag_count,
+            "flag_rate_30d": round(rate, 4),
+        })
+    return {"items": items, "count": len(items)}
