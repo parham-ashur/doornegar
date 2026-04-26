@@ -164,7 +164,11 @@ const OPS_PRIORITIES: Priority[] = [
 type DashboardData = {
   data?: {
     articles?: { total?: number; last_24h?: number; without_farsi_title?: number };
-    stories?: { total?: number; visible?: number; hidden?: number; with_summary?: number };
+    stories?: {
+      total?: number; visible?: number; hidden?: number; with_summary?: number;
+      new_24h?: number; frozen?: number; frozen_24h?: number;
+      archived?: number; archived_24h?: number;
+    };
     telegram?: { channels?: number; active?: number; posts_24h?: number; total_posts?: number };
   };
   issues?: Array<{ severity: string; message: string }>;
@@ -398,9 +402,9 @@ export default function HubPage() {
             tone={freshStale ? "amber" : "ok"}
           />
           <MetricTile
-            label="Visible stories"
-            value={fmtNum(dd?.stories?.visible ?? null)}
-            sub={dd?.stories?.hidden != null ? `${fmtNum(dd.stories.hidden)} hidden` : undefined}
+            label="New stories — 24h"
+            value={fmtNum(dd?.stories?.new_24h ?? null)}
+            sub={dd?.stories?.visible != null ? `${fmtNum(dd.stories.visible)} visible total` : undefined}
           />
         </div>
         {urgentIssues.length > 0 && (
@@ -481,10 +485,32 @@ export default function HubPage() {
       {/* PIPELINE */}
       <Section icon={<Activity className="w-4 h-4 text-slate-500" />} title="Pipeline" dir="ltr">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <MetricTile label="Articles — 24h" value={fmtNum(dd?.articles?.last_24h ?? null)} sub={`total ${fmtNum(dd?.articles?.total ?? null)}`} />
-          <MetricTile label="Without FA title" value={fmtNum(dd?.articles?.without_farsi_title ?? null)} tone={(dd?.articles?.without_farsi_title ?? 0) > 50 ? "amber" : "ok"} />
+          <MetricTile label="Articles — 24h" value={fmtNum(dd?.articles?.last_24h ?? null)} sub={`${fmtNum(dd?.articles?.total ?? null)} total`} />
+          <MetricTile label="Posts — 24h" value={fmtNum(dd?.telegram?.posts_24h ?? null)} sub={`${fmtNum(dd?.telegram?.total_posts ?? null)} total`} />
           <MetricTile label="Channels" value={`${fmtNum(dd?.telegram?.active ?? null)} / ${fmtNum(dd?.telegram?.channels ?? null)}`} sub="active / total" />
-          <MetricTile label="Posts — 24h" value={fmtNum(dd?.telegram?.posts_24h ?? null)} />
+          <MetricTile label="Without FA title" value={fmtNum(dd?.articles?.without_farsi_title ?? null)} tone={(dd?.articles?.without_farsi_title ?? 0) > 50 ? "amber" : "ok"} />
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+          <MetricTile
+            label="Frozen — 24h"
+            value={fmtNum(dd?.stories?.frozen_24h ?? null)}
+            sub={`${fmtNum(dd?.stories?.frozen ?? null)} total`}
+          />
+          <MetricTile
+            label="Archived — 24h"
+            value={fmtNum(dd?.stories?.archived_24h ?? null)}
+            sub={`${fmtNum(dd?.stories?.archived ?? null)} total`}
+          />
+          <MetricTile
+            label="Hidden stories"
+            value={fmtNum(dd?.stories?.hidden ?? null)}
+            sub="article_count < 5"
+          />
+          <MetricTile
+            label="With summary"
+            value={fmtNum(dd?.stories?.with_summary ?? null)}
+            sub={`of ${fmtNum(dd?.stories?.visible ?? null)} visible`}
+          />
         </div>
         {data?.maintenance?.status && (
           <div className="mt-4 text-xs text-slate-500">

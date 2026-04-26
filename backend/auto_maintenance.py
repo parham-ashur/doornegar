@@ -3279,7 +3279,13 @@ async def step_demote_umbrella_stories():
 
 
 async def step_archive_stale():
-    """Two-tier story aging.
+    """Three-tier story aging.
+
+    0) **Auto-freeze at 7d** — any story whose last_updated_at is
+       older than 7 days gets `frozen_at` set. Frozen stories no
+       longer accept new articles via clustering and are skipped by
+       guardrail/edit flows that respect frozen_at. Story stays
+       visible; archive (tier 1) handles homepage filtering.
 
     1) **Soft-archive at 30d** — any story whose last_updated_at is
        outside the 30-day relevance window gets `archived_at` set.
@@ -3302,12 +3308,38 @@ async def step_archive_stale():
     from app.models.story import Story
     from app.models.article import Article
 
-    stats = {"soft_archived": 0, "hard_deleted": 0, "recounted": 0}
+    stats = {"auto_frozen": 0, "soft_archived": 0, "hard_deleted": 0, "recounted": 0}
     now = datetime.now(timezone.utc)
+    freeze_cutoff = now - timedelta(days=7)
     soft_cutoff = now - timedelta(days=30)
     hard_cutoff = now - timedelta(days=60)
 
     async with async_session() as db:
+        # Tier 0 — auto-freeze stories idle for >7 days. Stops further
+        # article accretion and HITL guardrail churn on stories that
+        # are effectively over.
+        freeze_result = await db.execute(
+            select(Story).where(
+                Story.frozen_at.is_(None),
+                Story.last_updated_at < freeze_cutoff,
+            )
+        )
+        for story in freeze_result.scalars().all():
+            story.frozen_at = now
+            await _log_event(
+                db,
+                event_type="story_auto_frozen",
+                actor="maintenance",
+                story_id=story.id,
+                signals={
+                    "last_updated_at": story.last_updated_at.isoformat() if story.last_updated_at else None,
+                    "article_count": int(story.article_count or 0),
+                    "title_fa": (story.title_fa or "")[:120],
+                    "reason": "idle_7d",
+                },
+            )
+            stats["auto_frozen"] += 1
+
         # Tier 1 — soft-archive everything older than 30d that isn't
         # already archived. last_updated_at is the anchor (matches the
         # F2 trending decay), with a fall-through to first_published_at
@@ -3351,7 +3383,7 @@ async def step_archive_stale():
 
         await db.commit()
 
-    if stats["soft_archived"] > 0 or stats["hard_deleted"] > 0 or stats["recounted"] > 0:
+    if stats["auto_frozen"] > 0 or stats["soft_archived"] > 0 or stats["hard_deleted"] > 0 or stats["recounted"] > 0:
         logger.info(f"Archive/recount: {stats}")
     return stats
 

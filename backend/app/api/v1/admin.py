@@ -158,6 +158,21 @@ async def get_dashboard(db: AsyncSession = Depends(get_db)):
         select(func.count(Story.id)).where(Story.summary_fa.isnot(None))
     )).scalar() or 0
     hidden_stories = total_stories - visible_stories
+    new_stories_24h = (await db.execute(
+        select(func.count(Story.id)).where(Story.created_at >= day_ago)
+    )).scalar() or 0
+    frozen_total = (await db.execute(
+        select(func.count(Story.id)).where(Story.frozen_at.isnot(None))
+    )).scalar() or 0
+    frozen_24h = (await db.execute(
+        select(func.count(Story.id)).where(Story.frozen_at >= day_ago)
+    )).scalar() or 0
+    archived_total = (await db.execute(
+        select(func.count(Story.id)).where(Story.archived_at.isnot(None))
+    )).scalar() or 0
+    archived_24h = (await db.execute(
+        select(func.count(Story.id)).where(Story.archived_at >= day_ago)
+    )).scalar() or 0
 
     total_channels = (await db.execute(select(func.count(TelegramChannel.id)))).scalar() or 0
     active_channels = (await db.execute(
@@ -257,6 +272,11 @@ async def get_dashboard(db: AsyncSession = Depends(get_db)):
                 "visible": visible_stories,
                 "with_summary": stories_with_summary,
                 "hidden": hidden_stories,
+                "new_24h": new_stories_24h,
+                "frozen": frozen_total,
+                "frozen_24h": frozen_24h,
+                "archived": archived_total,
+                "archived_24h": archived_24h,
             },
             "telegram": {
                 "channels": total_channels,
