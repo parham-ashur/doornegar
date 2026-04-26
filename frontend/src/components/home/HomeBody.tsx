@@ -790,7 +790,7 @@ export default async function HomeBody({
             everything aligned. */}
         <div className="col-span-3 py-6 pl-6 border-l border-slate-200 dark:border-slate-800 flex flex-col overflow-hidden" style={{ maxHeight: 780 }}>
           <h3 className="text-[18px] font-black text-slate-900 dark:text-white mb-3 pb-2 border-b border-slate-200 dark:border-slate-800 shrink-0">
-            تحلیل روایت‌های تلگرام
+            پیش‌بینی روایت‌های تلگرام
           </h3>
           <div className="flex-1 min-h-0 overflow-hidden">
             <TelegramDiscussions prefetchedData={prefetchedTelegram} storyIds={telegramAnalysisIds} locale={locale} />
@@ -899,7 +899,7 @@ export default async function HomeBody({
             {heroTelegram?.discourse_summary && (
               <div className="mt-3 px-1">
                 <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-2">
-                  <span className="font-bold text-slate-600 dark:text-slate-300">تحلیل روایت‌های تلگرام.</span>
+                  <span className="font-bold text-slate-600 dark:text-slate-300">پیش‌بینی روایت‌های تلگرام.</span>
                   {" "}{heroTelegram.discourse_summary}
                 </p>
                 {heroTelegram.predictions && heroTelegram.predictions.length > 0 && (
@@ -1023,7 +1023,7 @@ export default async function HomeBody({
                     {tg?.discourse_summary && (
                       <div className="mt-3 px-1">
                         <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-2">
-                          <span className="font-bold text-slate-600 dark:text-slate-300">تحلیل روایت‌های تلگرام.</span>
+                          <span className="font-bold text-slate-600 dark:text-slate-300">پیش‌بینی روایت‌های تلگرام.</span>
                           {" "}{tg.discourse_summary}
                         </p>
                         {tg.predictions && tg.predictions.length > 0 && (
@@ -1400,7 +1400,7 @@ function MobileHome({
         {heroTelegram?.discourse_summary && (
           <div className="px-4 pt-3 pb-4">
             <p className="text-[15px] leading-6 text-slate-600 dark:text-slate-400 line-clamp-3">
-              <span className="font-bold text-slate-700 dark:text-slate-200">تحلیل روایت‌های تلگرام.</span>
+              <span className="font-bold text-slate-700 dark:text-slate-200">پیش‌بینی روایت‌های تلگرام.</span>
               {" "}{heroTelegram.discourse_summary}
             </p>
             {firstPredictionText && (
@@ -1421,7 +1421,7 @@ function MobileHome({
       {/* ── 2. Telegram section (cross-story discussions) ── */}
       <div className="px-4 py-5 border-b border-slate-200 dark:border-slate-800">
         <h3 className="text-[18px] font-black text-slate-900 dark:text-white mb-3 pb-2 border-b border-slate-200 dark:border-slate-800">
-          تحلیل روایت‌های تلگرام
+          پیش‌بینی روایت‌های تلگرام
         </h3>
         <TelegramDiscussions prefetchedData={prefetchedTelegram} storyIds={telegramAnalysisIds} locale={locale} />
       </div>

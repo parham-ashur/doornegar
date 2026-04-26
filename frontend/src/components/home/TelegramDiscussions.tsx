@@ -196,7 +196,6 @@ export default function TelegramDiscussions({
     <div className="animate-[fadeIn_0.2s_ease-in]">
       {dedupedPreds.length > 0 && (
         <div>
-          <h4 className="text-[13px] font-black text-blue-600 dark:text-blue-400 mb-2">پیش‌بینی‌ها</h4>
           <div className="space-y-2">
             {dedupedPreds.slice(0, 7).map((item, i) => (
               <Link
