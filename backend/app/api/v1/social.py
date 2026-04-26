@@ -74,28 +74,54 @@ async def get_story_social_data(
     Posts from channels mapped to Source records (via CHANNEL_SOURCE_MAP) are
     excluded — those posts are already shown as articles in the main article
     list. Only true "social reaction" posts from unmapped channels are returned.
+
+    The post bodies are run through `clean_post_for_display` (strips emojis,
+    markdown bold, leading bullets, channel-attribution tails) and gated by
+    `is_discussion_post` so the frontend renders only analytical commentary,
+    not one-line headline reposts.
     """
-    from app.services.telegram_service import CHANNEL_SOURCE_MAP
+    from app.services.telegram_service import (
+        CHANNEL_SOURCE_MAP,
+        clean_post_for_display,
+        is_discussion_post,
+    )
 
     mapped_usernames = set(CHANNEL_SOURCE_MAP.keys())
 
-    # Get posts, excluding those from mapped channels (to avoid duplication)
+    # Over-fetch a bit so the discussion-only filter still has enough to fill
+    # the requested limit. Cap at 200 (matches the existing query bound).
+    raw_limit = min(limit * 3, 200)
+
     query = (
         select(TelegramPost)
         .options(selectinload(TelegramPost.channel))
         .join(TelegramPost.channel)
         .where(TelegramPost.story_id == story_id)
         .order_by(TelegramPost.date.desc())
-        .limit(limit)
+        .limit(raw_limit)
     )
     if mapped_usernames:
         from app.models.social import TelegramChannel
         query = query.where(~TelegramChannel.username.in_(mapped_usernames))
 
     result = await db.execute(query)
-    posts = result.scalars().all()
+    raw_posts = result.scalars().all()
 
-    # Get total count (also excluding mapped channels)
+    # Apply text cleanup + discussion-only gate. Detach from session first
+    # so attribute writes don't risk an UPDATE if a downstream commit fires.
+    db.expunge_all()
+    posts: list[TelegramPost] = []
+    for p in raw_posts:
+        if not is_discussion_post(p.text, p.urls):
+            continue
+        p.text = clean_post_for_display(p.text)
+        posts.append(p)
+        if len(posts) >= limit:
+            break
+
+    # Get total count (also excluding mapped channels). This is the unfiltered
+    # post count — the frontend uses it to surface "X total raw posts" while
+    # rendering only the discussion-gated subset.
     from app.models.social import TelegramChannel as _TC
     count_query = (
         select(func.count(TelegramPost.id))

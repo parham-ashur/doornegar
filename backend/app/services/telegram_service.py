@@ -175,8 +175,13 @@ async def ingest_channel(channel: TelegramChannel, db: AsyncSession) -> dict:
     for post_data in posts:
         max_message_id = max(max_message_id, post_data["message_id"])
 
-        # Normalize and extract keywords
-        text = normalize(post_data["text"]) if post_data["text"] else ""
+        # Run the display cleaner once at ingest so the stored body is
+        # already free of decorative emojis, **bold** markers, leading
+        # bullets, channel-attribution tails. The Telegram analysis LLM
+        # and homepage rendering then see a uniform plain-text payload.
+        clean_text = clean_post_for_display(post_data["text"]) if post_data["text"] else ""
+        # Keyword extraction runs on normalized cleaned text.
+        text = normalize(clean_text) if clean_text else ""
         keywords = extract_keywords(text) if text else []
 
         # Check if any URL in the post matches a known article
@@ -196,7 +201,7 @@ async def ingest_channel(channel: TelegramChannel, db: AsyncSession) -> dict:
             .values(
                 channel_id=channel.id,
                 message_id=post_data["message_id"],
-                text=post_data["text"],
+                text=clean_text,
                 date=post_data["date"],
                 views=post_data["views"],
                 forwards=post_data["forwards"],
@@ -205,7 +210,10 @@ async def ingest_channel(channel: TelegramChannel, db: AsyncSession) -> dict:
                 keywords=keywords,
                 story_id=story_id,
                 shares_news_link=shares_news_link,
-                is_commentary=not shares_news_link and bool(text),
+                is_commentary=(
+                    not shares_news_link
+                    and is_discussion_post(clean_text, post_data["urls"])
+                ),
             )
             .on_conflict_do_nothing(constraint="uq_channel_message")
             .returning(TelegramPost.id)
@@ -429,6 +437,95 @@ def _clean_post_text(text: str) -> str:
     cleaned = re.sub(r"[ \t]+", " ", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned.strip()
+
+
+# Decorative leading markers that telegram channels prepend for visual flair —
+# arrows, megaphones, bullets, video-icons. These always appear at line start
+# in Iranian-news channels; stripping them keeps the rendered text uniform.
+_TG_DECORATIVE_LEADS = (
+    "\U0001F53B",  # 🔻 down arrow (negative)
+    "\U0001F53A",  # 🔺 up arrow (positive)
+    "\U0001F538",  # 🔸 small orange diamond
+    "\U0001F539",  # 🔹 small blue diamond
+    "\U0001F4E2",  # 📢 loudspeaker
+    "\U0001F4FB",  # 📻 radio
+    "\U0001F3A5",  # 🎥 movie camera
+    "\u25B6",      # ▶ play
+    "\u26A0",      # ⚠ warning
+    "\U0001F525",  # 🔥 fire
+    "\u2B50",      # ⭐ star
+    "\U0001F4CC",  # 📌 pin
+    "\U0001F517",  # 🔗 link
+    "\U0001F551",  # 🕑 clock
+)
+
+
+_TG_BOLD_RE = re.compile(r"\*\*([^*]+)\*\*")
+_TG_BULLET_RE = re.compile(r"^[\s\u202B\u202C]*[•·▪◾◼·]\s*", re.MULTILINE)
+_TG_LEAD_DECOR_RE = re.compile(
+    r"^[\s\u202B\u202C]*[" + "".join(re.escape(c) for c in _TG_DECORATIVE_LEADS) + r"]+[\s\u202B\u202C]*",
+    re.MULTILINE,
+)
+# Trailing channel attribution like "│ کانال آخرین خبر" / "@channelname".
+_TG_CHANNEL_TAIL_RE = re.compile(r"[│|]\s*(کانال|@)\s*[^\n│|]+\s*$", re.MULTILINE)
+
+
+def clean_post_for_display(text: str | None) -> str:
+    """Aggressive cleaner used at API response time and ingest persistence.
+
+    Goal: render a uniform, plain-text post body — drop emoji decorations,
+    markdown bold, leading bullets, channel-attribution tails. The frontend
+    then doesn't have to reason about per-channel formatting flavors.
+
+    Composes on top of `_clean_post_text` (URL/@-mention/markdown-link strip)
+    for reuse.
+    """
+    if not text:
+        return ""
+    out = _clean_post_text(text)
+    # Strip **bold** wrappers (keep inner)
+    out = _TG_BOLD_RE.sub(r"\1", out)
+    # Strip leading decorative emoji per line
+    out = _TG_LEAD_DECOR_RE.sub("", out)
+    # Strip leading bullets per line
+    out = _TG_BULLET_RE.sub("", out)
+    # Trailing channel attribution
+    out = _TG_CHANNEL_TAIL_RE.sub("", out)
+    # Re-collapse whitespace after the strips
+    out = re.sub(r"[ \t]+", " ", out)
+    out = re.sub(r"\n{3,}", "\n\n", out)
+    return out.strip()
+
+
+def is_discussion_post(text: str | None, urls: list[str] | None = None) -> bool:
+    """Heuristic gate for "this post is analysis/discussion, not a headline."
+
+    Drops:
+      * Empty/null text
+      * Posts whose cleaned body is shorter than 120 chars (likely a one-line
+        news headline or quote)
+      * Posts that are >70% URL by character count (link-spam reposts)
+      * Posts that are a single line under 100 chars (headlines)
+
+    Conservative — keeps anything that looks like analytical commentary even
+    if short. Used by the story page to filter the post list before rendering.
+    """
+    if not text or not text.strip():
+        return False
+    cleaned = clean_post_for_display(text)
+    if len(cleaned) < 120:
+        return False
+    # Single-line short posts are typically headlines.
+    lines = [ln for ln in cleaned.split("\n") if ln.strip()]
+    if len(lines) == 1 and len(cleaned) < 200:
+        return False
+    if urls:
+        url_chars = sum(len(u) for u in urls)
+        # If after cleaning the URLs are gone but the original was URL-heavy,
+        # it was a link-card post.
+        if url_chars > 0 and len(text) > 0 and url_chars / len(text) > 0.4:
+            return False
+    return True
 
 
 def _extract_title(cleaned_text: str, max_length: int = 100) -> str:

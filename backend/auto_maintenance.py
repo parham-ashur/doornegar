@@ -62,7 +62,7 @@ STEP_TIMEOUTS_SEC = {
     "telegram_reassign": 1200,     # re-embed 3K posts, pure math, no LLM
     "niloofar_image_rescue": 300,  # no LLM — scans article images, picks fallback
     "backfill_analyst_counts": 300,  # no LLM — just resolves supporter names
-    "niloofar_editorial": 1200,
+    "editorial": 1200,
     "niloofar_polish_telegram": 900,
     "quality_postprocess": 1800,
     "weekly_digest": 900,
@@ -5116,7 +5116,7 @@ async def step_snapshot_analyses():
     stats = {"snapshotted": 0, "skipped": 0, "failed": 0}
 
     async with async_session() as db:
-        # Self-creating column — matches the step_niloofar_editorial pattern.
+        # Self-creating column — matches the step_editorial pattern.
         await db.execute(text(
             "ALTER TABLE stories ADD COLUMN IF NOT EXISTS analysis_snapshot_24h JSONB"
         ))
@@ -5202,16 +5202,18 @@ async def step_audit_cluster_coherence():
     return stats
 
 
-async def step_niloofar_editorial():
+async def step_editorial():
     """Generate editorial context for top 30 trending stories.
 
-    Niloofar writes 2-3 sentences of background context ('what you need to know')
-    for each top story and stores it in story.editorial_context_fa.
-    Uses the nano model for cost efficiency.
+    Writes 2-3 sentences of background context ('what you need to know')
+    per story into story.editorial_context_fa using the nano model.
+
+    A Claude-driven Niloofar audit can override these blurbs via the
+    update_editorial fix type — this step is the cheap default that keeps
+    coverage broad until an audit improves a specific story.
 
     Previously ran on top 15. Expanded to 30 so the "what you need to know"
-    blurb appears on a larger slice of the homepage — context coverage was
-    only ~6% of all stories at the old limit.
+    blurb appears on a larger slice of the homepage.
     """
     from sqlalchemy import select, text, update
     from sqlalchemy.orm import selectinload
@@ -5242,7 +5244,7 @@ async def step_niloofar_editorial():
         stories = list(result.scalars().all())
 
     if not stories:
-        logger.info("Niloofar editorial: no stories found")
+        logger.info("Editorial: no stories found")
         return stats
 
     import openai
@@ -5250,7 +5252,7 @@ async def step_niloofar_editorial():
 
     client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
 
-    editorial_prompt = """تو نیلوفر هستی، سردبیر ارشد با ۲۰ سال تجربه در ژئوپلیتیک خاورمیانه.
+    editorial_prompt = """تو سردبیر ارشد با ۲۰ سال تجربه در ژئوپلیتیک خاورمیانه هستی.
 
 وظیفه تو نوشتن «زمینه خبر» (آنچه باید بدانید) برای یک موضوع خبری است.
 این متن به خواننده کمک می‌کند بفهمد چرا این خبر مهم است و پیشینه آن چیست.
@@ -5309,7 +5311,7 @@ async def step_niloofar_editorial():
             from app.services.llm_usage import log_llm_usage
             await log_llm_usage(
                 model=settings.translation_model,
-                purpose="niloofar.editorial",
+                purpose="editorial",
                 usage=response.usage,
                 story_id=story.id,
             )
@@ -5933,7 +5935,7 @@ FULL_PIPELINE = [
     ("cost_tracking", "LLM cost tracking", "step_cost_tracking"),
     ("backup", "Database backup", "step_database_backup"),
     ("quality_postprocess", "Quality post-processing (LLM review)", "step_quality_postprocess"),
-    ("niloofar_editorial", "Niloofar editorial context for top stories", "step_niloofar_editorial"),
+    ("editorial", "Editorial context blurb for top stories", "step_editorial"),
     ("niloofar_polish_telegram", "Niloofar polishes Telegram predictions/claims for homepage", "step_niloofar_polish_telegram"),
     ("snapshot_analyses", "Snapshot analysis axes for daily-change detection", "step_snapshot_analyses"),
     ("audit_clusters", "Cluster coherence audit (flag drift for Niloofar review)", "step_audit_cluster_coherence"),

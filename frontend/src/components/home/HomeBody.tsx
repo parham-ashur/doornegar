@@ -763,7 +763,7 @@ export default async function HomeBody({
             down; restoring a slightly-larger-than-700 ceiling keeps
             everything aligned. */}
         <div className="col-span-3 py-6 pl-6 border-l border-slate-200 dark:border-slate-800 flex flex-col overflow-hidden" style={{ maxHeight: 780 }}>
-          <h3 className="text-[15px] font-black text-slate-900 dark:text-white mb-3 pb-2 border-b border-slate-200 dark:border-slate-800 shrink-0">
+          <h3 className="text-[18px] font-black text-slate-900 dark:text-white mb-3 pb-2 border-b border-slate-200 dark:border-slate-800 shrink-0">
             تحلیل روایت‌های تلگرام
           </h3>
           <div className="flex-1 min-h-0 overflow-hidden">
@@ -1390,7 +1390,7 @@ function MobileHome({
 
       {/* ── 2. Telegram section (cross-story discussions) ── */}
       <div className="px-4 py-5 border-b border-slate-200 dark:border-slate-800">
-        <h3 className="text-[15px] font-black text-slate-900 dark:text-white mb-3 pb-2 border-b border-slate-200 dark:border-slate-800">
+        <h3 className="text-[18px] font-black text-slate-900 dark:text-white mb-3 pb-2 border-b border-slate-200 dark:border-slate-800">
           تحلیل روایت‌های تلگرام
         </h3>
         <TelegramDiscussions prefetchedData={prefetchedTelegram} storyIds={telegramAnalysisIds} locale={locale} />

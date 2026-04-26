@@ -34,7 +34,7 @@ const STEP_PHASE: Record<string, "Data" | "Cluster" | "Analysis" | "Ops"> = {
   story_quality: "Analysis",
   image_relevance: "Analysis",
   quality_postprocess: "Analysis",
-  niloofar_editorial: "Analysis",
+  editorial: "Analysis",
   telegram_analysis: "Analysis",
   analyst_takes: "Analysis",
   verify_predictions: "Analysis",
@@ -101,7 +101,7 @@ function summaryMetrics(result: Record<string, unknown> | null): Array<{
   const orphans = getNum(["cluster", "aged_orphans"]) ?? 0;
   const biasScored = getNum(["bias_score", "scored"]) ?? 0;
   const biasFailed = getNum(["bias_score", "failed"]) ?? 0;
-  const niloofar = getNum(["niloofar_editorial", "generated"]) ?? 0;
+  const editorial = getNum(["editorial", "generated"]) ?? 0;
   const telegramAnalyzed = getNum(["telegram_analysis", "analyzed"]) ?? 0;
 
   const out: Array<{ label: string; value: number; sub?: string }> = [];
@@ -118,8 +118,8 @@ function summaryMetrics(result: Record<string, unknown> | null): Array<{
       sub: biasFailed > 0 ? `${biasFailed} failed` : undefined,
     });
   }
-  if (niloofar > 0) {
-    out.push({ label: "Niloofar context", value: niloofar, sub: "editorial summaries" });
+  if (editorial > 0) {
+    out.push({ label: "Editorial context", value: editorial, sub: "homepage blurbs" });
   }
   if (telegramAnalyzed > 0) {
     out.push({ label: "Telegram analyses", value: telegramAnalyzed });

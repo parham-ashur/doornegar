@@ -859,6 +859,36 @@ async def apply_fix(finding: dict) -> str:
             await db.commit()
             return f"✓ بی‌طرفی ثبت شد ({len(article_scores)} مقاله → {len(source_neutrality)} رسانه)"
 
+        elif fix_type == "update_editorial":
+            # Payload: {"new_context_fa": "2-3 sentence Farsi blurb"}
+            # Writes story.editorial_context_fa with model="claude-opus-4-7"
+            # so the cron's nano-written blurb can tell it's been overridden.
+            from datetime import datetime, timezone
+            from sqlalchemy import text as _text, update as _update
+            story = await db.get(Story, story_id)
+            if not story:
+                return "✗ موضوع یافت نشد"
+            new_ctx = (fix_data.get("new_context_fa") or "").strip()
+            if not new_ctx:
+                return "✗ new_context_fa الزامی است"
+            # Self-create the column on first use, mirroring step_editorial.
+            await db.execute(_text(
+                "ALTER TABLE stories ADD COLUMN IF NOT EXISTS editorial_context_fa JSONB"
+            ))
+            payload = {
+                "context": new_ctx,
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "model": "claude-opus-4-7",
+                "source": "niloofar_audit",
+            }
+            await db.execute(
+                _update(Story).where(Story.id == story_id).values(editorial_context_fa=payload)
+            )
+            if hasattr(story, "is_edited"):
+                story.is_edited = True
+            await db.commit()
+            return f"✓ زمینه خبری به‌روز شد ({len(new_ctx)} نویسه)"
+
         elif fix_type == "pipeline_change":
             return f"📝 پیشنهاد ثبت شد: {fix_data.get('pipeline_description', '?')[:100]}"
 
@@ -884,6 +914,7 @@ async def gather_stories_json(limit: int = 25) -> dict:
     from app.models.story import Story
 
     async with async_session() as db:
+        # Top trending pool.
         result = await db.execute(
             select(Story)
             .options(selectinload(Story.articles).selectinload(Article.source))
@@ -891,7 +922,20 @@ async def gather_stories_json(limit: int = 25) -> dict:
             .order_by(Story.trending_score.desc())
             .limit(limit)
         )
-        stories = list(result.scalars().all())
+        trending_stories = list(result.scalars().all())
+
+        # Blindspot pool — homepage's «پوشش یک‌سویه» strip pulls from these.
+        # Niloofar audit covers both pools so blindspot rows aren't left out.
+        seen_ids = {s.id for s in trending_stories}
+        bs_result = await db.execute(
+            select(Story)
+            .options(selectinload(Story.articles).selectinload(Article.source))
+            .where(Story.is_blindspot.is_(True), Story.article_count >= 2)
+            .order_by(Story.trending_score.desc())
+            .limit(15)
+        )
+        blindspot_extra = [s for s in bs_result.scalars().all() if s.id not in seen_ids]
+        stories = trending_stories + blindspot_extra
 
     now = datetime.now(timezone.utc)
     output: dict = {
@@ -923,6 +967,7 @@ async def gather_stories_json(limit: int = 25) -> dict:
         }
         alignment_counts: dict[str, int] = {}
         articles_out: list[dict] = []
+        cover_candidates: list[str] = []
         for a in story.articles:
             if a.source:
                 align = a.source.state_alignment or "unknown"
@@ -931,6 +976,8 @@ async def gather_stories_json(limit: int = 25) -> dict:
             art_dict = {"title": a.title_original or a.title_fa or a.title_en or "", "content": content}
             evidence = _compute_article_evidence(art_dict) if a.source else None
             group = _ng(a.source) if a.source else None
+            if a.image_url and len(cover_candidates) < 5:
+                cover_candidates.append(a.image_url)
             articles_out.append({
                 "id": str(a.id),
                 "title_fa": (a.title_fa or a.title_original or "بدون عنوان")[:200],
@@ -942,6 +989,7 @@ async def gather_stories_json(limit: int = 25) -> dict:
                 "subgroup_fa": SUBGROUP_FA_LOCAL.get(group or "", "نامشخص"),
                 "content": content,
                 "evidence": evidence,
+                "image_url": a.image_url,
             })
 
         # Telegram claims (can be strings or dicts depending on pipeline version)
@@ -959,6 +1007,20 @@ async def gather_stories_json(limit: int = 25) -> dict:
         if story.last_updated_at:
             age_days = round((now - story.last_updated_at).total_seconds() / 86400, 2)
 
+        # 4-subgroup narrative arrays (None if the analysis pipeline hasn't
+        # populated them — auditor can detect coverage gaps from this).
+        narrative_blob = blob.get("narrative") if isinstance(blob.get("narrative"), dict) else {}
+        inside = narrative_blob.get("inside") if isinstance(narrative_blob.get("inside"), dict) else {}
+        outside = narrative_blob.get("outside") if isinstance(narrative_blob.get("outside"), dict) else {}
+
+        # Editorial context blurb (cron writes nano output here; Niloofar
+        # audit overrides via update_editorial → model="claude-opus-4-7").
+        ed_ctx = story.editorial_context_fa if hasattr(story, "editorial_context_fa") else None
+
+        # Side counts for subgroup-coverage-gap detection.
+        inside_n = sum(1 for a in story.articles if a.source and (a.source.state_alignment or "") in ("state", "semi_state", "independent"))
+        outside_n = sum(1 for a in story.articles if a.source and (a.source.state_alignment or "") == "diaspora")
+
         output["stories"].append({
             "id": str(story.id),
             "title_fa": story.title_fa,
@@ -967,6 +1029,16 @@ async def gather_stories_json(limit: int = 25) -> dict:
             "bias_explanation_fa": blob.get("bias_explanation_fa"),
             "state_summary_fa": blob.get("state_summary_fa"),
             "diaspora_summary_fa": blob.get("diaspora_summary_fa"),
+            "narrative_inside_principlist": inside.get("principlist"),
+            "narrative_inside_reformist": inside.get("reformist"),
+            "narrative_outside_moderate": outside.get("moderate"),
+            "narrative_outside_radical": outside.get("radical"),
+            "subgroup_arrays_present": bool(inside or outside),
+            "subgroup_coverage_gap": (inside_n > 0 and outside_n > 0 and not (inside or outside)),
+            "editorial_context_fa": ed_ctx,
+            "manual_image_url": blob.get("manual_image_url"),
+            "cover_candidates": cover_candidates,
+            "is_blindspot": bool(getattr(story, "is_blindspot", False)),
             "article_count": story.article_count,
             "source_count": story.source_count,
             "trending_score": round(float(story.trending_score or 0), 2),
@@ -1037,6 +1109,7 @@ async def apply_from_file(path: str) -> dict:
         "update_claim",
         "update_neutrality",
         "write_preliminary_summary",
+        "update_editorial",
     }
 
     for i, finding in enumerate(findings, 1):

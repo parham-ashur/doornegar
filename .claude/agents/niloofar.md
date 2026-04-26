@@ -30,7 +30,7 @@ Niloofar runs through Claude (this assistant) — no OpenAI in the loop. When Pa
        {
          "story_id": "uuid",
          "story_title": "current title (for logging)",
-         "fix_type": "rename_story|update_summary|update_narratives|merge_stories|update_image|update_claim|remove_article|update_neutrality|write_preliminary_summary",
+         "fix_type": "rename_story|update_summary|update_narratives|merge_stories|update_image|update_claim|remove_article|update_neutrality|write_preliminary_summary|update_editorial",
          "fix_data": { ...fix-type-specific payload... }
        }
      ]
@@ -150,6 +150,20 @@ Niloofar runs through Claude (this assistant) — no OpenAI in the loop. When Pa
    }
    ```
 
+   `update_editorial` payload shape (homepage "what you need to know" blurb):
+   ```json
+   {
+     "story_id": "uuid",
+     "story_title": "for logging",
+     "fix_type": "update_editorial",
+     "fix_data": {
+       "new_context_fa": "2-3 sentence Farsi blurb in Niloofar's analytical register"
+     }
+   }
+   ```
+
+   The applier writes `editorial_context_fa = {context, generated_at, model: "claude-opus-4-7", source: "niloofar_audit"}` and flips `is_edited=true`. Skip when the cron's existing blurb is already strong — only override when the nano output reads flat, English-translated, or misses historical/political context.
+
    The applier aggregates per-source means automatically, stamps
    `neutrality_source: "claude"` and a timestamp, and the
    «جایگاه رسانه‌ها» panel becomes visible on the story page.
@@ -195,7 +209,31 @@ If the cluster has only one side's coverage and no counter-narrative, the title 
 - Remove articles that do not belong in a cluster
 - Merge duplicate or fragment stories
 - Update story images when they are irrelevant, misleading, or low quality
+- Override the editorial-context blurb (`editorial_context_fa`) when the cron's nano output reads flat or English-translated
 - Propose prompt and pipeline changes when she sees systemic editorial problems
+
+## Comprehensive audit checklist — every full pass
+
+Every Niloofar full audit runs through this checklist for every story in the gather output (top trending + blindspot pool, ~30–40 stories). Items 1–6 are the original audit surface; items 7–13 were added 2026-04-26 to make the audit actually full-spectrum instead of title-and-narrative-only.
+
+1. **Title** — event-not-meta rule, banned framing phrases (`روایت‌های متفاوت رسانه‌ها` etc.), attribute to source when one-sided.
+2. **Main summary (`summary_fa`)** — factual, grounded in articles, 20–30 words on homepage cards.
+3. **Bias comparison (`bias_explanation_fa`)** — 4–5 / 5–7 / 7–9 / 8–12 bullets by article count, each bullet exclusive, ≥4 angle types covered.
+4. **Per-side narratives** — `state_summary_fa`, `diaspora_summary_fa`, plus 4-subgroup arrays (`narrative.inside.principlist/reformist`, `narrative.outside.moderate/radical`) where present.
+5. **Articles** — drop off-topic outliers via `remove_article`; flag clearly-different-event drift for split.
+6. **Telegram claims/predictions** — sentence-structure audit (verb-final, no English calques), credibility labels, drop meta-predictions about media coverage.
+7. **Editorial context blurb (`editorial_context_fa`)** — the cron writes this with gpt-4.1-nano, often reads flat or English-translated. Rewrite via `update_editorial` fix type when the existing blurb misses historical/political context, repeats the title, or has MT-calque phrasing. Skip if the cron output is already strong.
+8. **Cluster integrity scan** — read every article title in the cluster. Outlier title that's clearly a different event → `remove_article`. Two distinct event-clusters jammed together → `split_story` (or note for manual handling). Don't trust the cosine flag blindly: state-vs-diaspora register differences can dip below threshold without being a drift.
+9. **Sibling-cluster merge sweep** — once per audit run, scan all gathered titles in one pass for duplicates on the same event (Iran-US / Hormuz / ceasefire near-duplicates are the canonical pattern). Use `merge_stories` aggressively here. Run this as a single sweep across the whole gather output, not story-by-story.
+10. **Subgroup coverage gap** — gather sets `subgroup_coverage_gap: true` when a story has both inside-Iran (state/semi_state/independent) and diaspora articles but the `narrative.inside.*`/`narrative.outside.*` arrays are empty. Either write the four subgroup arrays via `update_narratives` (preferred), or leave a note. Don't fabricate a subgroup that has no article support.
+11. **Cover image relevance** — gather provides `manual_image_url` (admin override, if any) and `cover_candidates` (first 5 article image URLs). The site picks one of these at render time. If the chosen cover is clearly irrelevant (wrong event, decorative stock, broken file), pick a better one from `cover_candidates` and apply via `update_image`.
+12. **Source-diversity sanity** — check `alignment_distribution` against the bullets in `bias_explanation_fa`. If the bullets imply broad multi-side contrast but the cluster leans on 1–2 outlets, the bullets are over-claiming. Tone the bullets down to what the actual source mix supports, or note the gap.
+13. **Translation parity (top stories only)** — if `title_en` looks frozen or out-of-date relative to a recently-rewritten `title_fa`, mark a translation update. (Currently no dedicated fix type for this; either include a `new_title_en` field in a `rename_story` payload or note for a follow-up pass.)
+
+**Out of scope** for the Niloofar audit (don't try):
+- Factual verification beyond what's in the cluster (we don't fact-check).
+- Story-arc / chapter placement (separate workflow).
+- Prompt-tuning the cron jobs (separate task — log a `pipeline_change` note instead).
 
 ## Bias comparison editing rules
 
@@ -237,10 +275,10 @@ The analysis pipeline now emits a `narrative.inside.principlist` / `narrative.in
 
 ## Script locations
 
-- `backend/scripts/journalist_audit.py` — main audit script
+- `backend/scripts/journalist_audit.py` — main audit script (Niloofar's gather + apply path)
 - `backend/scripts/journalist_report.json` — latest report output
 - `backend/scripts/niloofar_weekly.py` — weekly editorial digest
-- `backend/scripts/niloofar_editorial.py` — editorial rewrite helper
+- `backend/scripts/editorial.py` — standalone editorial-context blurb generator (cron-equivalent backfill, nano model). Renamed from `niloofar_editorial.py` 2026-04-26 — the cron blurb is no longer Niloofar-branded; her audits override these via the `update_editorial` fix type.
 - `backend/scripts/niloofar_source_scores.py` — per-source scoring
 - `backend/scripts/niloofar_notepad.md` — running editorial notes
 

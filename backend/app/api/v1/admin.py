@@ -928,10 +928,14 @@ async def sources_stats(db: AsyncSession = Depends(get_db)):
 @router.get("/content-type/stats", dependencies=[Depends(require_admin)])
 async def content_type_stats(
     days: int = Query(7, ge=1, le=90),
+    hours: int | None = Query(None, ge=1, le=2160),
     db: AsyncSession = Depends(get_db),
 ):
     """Per-source breakdown of how the content-type filter has labelled
     articles. Drives /dashboard/content-filter.
+
+    Window: pass `hours` for sub-day windows (e.g. last hour), otherwise
+    `days`. `hours` takes precedence when both are present.
 
     Returns:
       - rollup: total, kept, dropped, unclassified for the window
@@ -941,7 +945,7 @@ async def content_type_stats(
     from app.services.content_type import LABELS
 
     now = datetime.now(timezone.utc)
-    window_start = now - timedelta(days=days)
+    window_start = now - (timedelta(hours=hours) if hours else timedelta(days=days))
 
     rollup_result = await db.execute(
         select(
@@ -1019,7 +1023,8 @@ async def content_type_stats(
         })
 
     return {
-        "window_days": days,
+        "window_days": days if not hours else None,
+        "window_hours": hours,
         "generated_at": now.isoformat(),
         "rollup": {
             "total": total,

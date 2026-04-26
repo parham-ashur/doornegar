@@ -35,13 +35,17 @@ type SourceRow = {
 };
 
 type StatsResponse = {
-  window_days: number;
+  window_days: number | null;
+  window_hours: number | null;
   generated_at: string;
   rollup: { total: number; kept: number; dropped: number; unclassified: number };
   by_label: ByLabel;
   labels: string[];
   sources: SourceRow[];
 };
+
+// Window selector value: "Nh" for hours, "Nd" for days.
+type WindowValue = "1h" | "1d" | "7d" | "30d";
 
 const LABEL_COLORS: Record<string, string> = {
   news: "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300",
@@ -59,7 +63,7 @@ function pct(n: number, d: number): string {
 export default function ContentFilterDashboardPage() {
   const [authed, setAuthed] = useState(false);
   const [tokenInput, setTokenInput] = useState("");
-  const [days, setDays] = useState<number>(7);
+  const [windowValue, setWindowValue] = useState<WindowValue>("7d");
   const [data, setData] = useState<StatsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -72,8 +76,11 @@ export default function ContentFilterDashboardPage() {
     setLoading(true);
     setErr(null);
     try {
+      const qs = windowValue.endsWith("h")
+        ? `hours=${parseInt(windowValue, 10)}`
+        : `days=${parseInt(windowValue, 10)}`;
       const res = await fetch(
-        `${API}/api/v1/admin/content-type/stats?days=${days}`,
+        `${API}/api/v1/admin/content-type/stats?${qs}`,
         { headers: adminHeaders(), cache: "no-store" },
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -84,7 +91,7 @@ export default function ContentFilterDashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, [days]);
+  }, [windowValue]);
 
   useEffect(() => {
     if (authed) fetchStats();
@@ -129,13 +136,14 @@ export default function ContentFilterDashboardPage() {
         </div>
         <div className="flex items-center gap-2">
           <select
-            value={days}
-            onChange={(e) => setDays(Number(e.target.value))}
+            value={windowValue}
+            onChange={(e) => setWindowValue(e.target.value as WindowValue)}
             className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 text-sm bg-transparent"
           >
-            <option value={1}>Last 24h</option>
-            <option value={7}>Last 7 days</option>
-            <option value={30}>Last 30 days</option>
+            <option value="1h">Last hour</option>
+            <option value="1d">Last 24h</option>
+            <option value="7d">Last 7 days</option>
+            <option value="30d">Last 30 days</option>
           </select>
           <button
             onClick={fetchStats}
@@ -263,7 +271,8 @@ export default function ContentFilterDashboardPage() {
 
       {data?.generated_at && (
         <p className="text-xs text-slate-500 mt-4">
-          Generated {new Date(data.generated_at).toLocaleString()} · window {data.window_days}d
+          Generated {new Date(data.generated_at).toLocaleString()} · window{" "}
+          {data.window_hours ? `${data.window_hours}h` : `${data.window_days}d`}
         </p>
       )}
     </div>

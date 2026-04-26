@@ -7,7 +7,7 @@ Create Date: 2026-04-17 18:00:00.000000
 Why:
 - Both columns were introduced by "self-creating via ALTER TABLE IF NOT EXISTS"
   inside nightly maintenance steps (editorial_context_fa via
-  step_niloofar_editorial, analysis_snapshot_24h via step_snapshot_analyses).
+  step_editorial, analysis_snapshot_24h via step_snapshot_analyses).
   On a fresh deploy that hasn't had a nightly run yet, the column exists on
   the SQLAlchemy model (app/models/story.py) but not in Postgres, so every
   SELECT on `stories` fails with a 500. We hit this today — the homepage

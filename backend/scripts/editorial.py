@@ -1,13 +1,18 @@
 """
-نیلوفر — تولید زمینه خبری (Editorial Context)
+Editorial context generator — تولید زمینه خبری
 
-برای ۱۵ موضوع برتر، زمینه خبر ("آنچه باید بدانید") تولید می‌کند
-و در فیلد editorial_context_fa ذخیره می‌کند.
+For the top trending stories, write a 2-3 sentence "what you need to
+know" blurb and persist it to stories.editorial_context_fa.
+
+Used by step_editorial in auto_maintenance.py and runnable standalone
+for ad-hoc backfills. The Claude-driven Niloofar audit can also write
+into this column via the update_editorial fix type — at which point
+this script's output gets superseded for that story.
 
 Usage:
-  python scripts/niloofar_editorial.py
-  python scripts/niloofar_editorial.py --limit 5
-  python scripts/niloofar_editorial.py --force   # Overwrite existing context
+  python scripts/editorial.py
+  python scripts/editorial.py --limit 5
+  python scripts/editorial.py --force   # Overwrite existing context
 """
 
 import asyncio
@@ -20,7 +25,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
-EDITORIAL_PROMPT = """تو نیلوفر هستی، سردبیر ارشد با ۲۰ سال تجربه در ژئوپلیتیک خاورمیانه.
+EDITORIAL_PROMPT = """تو سردبیر ارشد با ۲۰ سال تجربه در ژئوپلیتیک خاورمیانه هستی.
 
 وظیفه تو نوشتن «زمینه خبر» (آنچه باید بدانید) برای یک موضوع خبری است.
 این متن به خواننده کمک می‌کند بفهمد چرا این خبر مهم است و پیشینه آن چیست.
@@ -106,7 +111,7 @@ async def generate_editorial(story, articles) -> dict | None:
 
 
 async def main():
-    parser = argparse.ArgumentParser(description="نیلوفر — تولید زمینه خبری")
+    parser = argparse.ArgumentParser(description="تولید زمینه خبری برای موضوعات برتر")
     parser.add_argument("--limit", type=int, default=15, help="Number of top stories (default: 15)")
     parser.add_argument("--force", action="store_true", help="Overwrite existing editorial context")
     args = parser.parse_args()
@@ -135,7 +140,7 @@ async def main():
         print("هیچ موضوعی یافت نشد")
         return
 
-    print(f"نیلوفر: تولید زمینه خبری برای {len(stories)} موضوع...")
+    print(f"تولید زمینه خبری برای {len(stories)} موضوع...")
     stats = {"generated": 0, "skipped": 0, "failed": 0}
 
     for i, story in enumerate(stories, 1):

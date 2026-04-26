@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { ChevronDown, ExternalLink } from "lucide-react";
 import TelegramAnalyzingAnimation from "@/components/common/TelegramAnalyzingAnimation";
 import {
   cleanClaim,
+  cleanPostBody,
   cleanPrediction,
   displayClaims,
   displayPredictions,
@@ -15,7 +16,7 @@ import type { TelegramAnalysis } from "@/lib/types";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const POST_PREVIEW_CHARS = 280;
-const MAX_POSTS_RENDERED = 8;
+const MAX_POSTS_RENDERED = 12;
 
 interface ChannelStat {
   name: string;
@@ -226,68 +227,71 @@ export default function StoryTelegramSection({ storyId, initialTab, highlightTex
         </CollapsibleSection>
       )}
 
-      {/* Telegram references — actual analyst commentary posts attached
-          to this story. Each row has the channel label, the timestamp,
-          a text preview, and a deep link back to the original post on
-          Telegram. Posts from RSS-mirror channels are excluded server-
-          side (they already appear in the article list). When the post
-          list is empty, fall back to the channel chip summary so the
-          old behaviour still renders for stories whose analysis ran
-          before the schema extension. */}
+      {/* Telegram references — analyst commentary grouped by channel,
+          collapsed under a single toggle so the homepage stays tight.
+          Posts from RSS-mirror channels are excluded server-side. */}
       {(posts.length > 0 || channels.length > 0) && (
-        <div className="pt-3 mt-2 border-t border-slate-200 dark:border-slate-800">
-          <h4 className="text-[12px] font-bold text-slate-600 dark:text-slate-400 mb-2">
-            منابع تلگرامی — {channels.length} کانال، {postCount} پست مستقیم
-          </h4>
-          {posts.length > 0 ? (
-            <ul className="space-y-2.5">
-              {posts.map((p) => {
-                if (!p.channel || !p.text) return null;
-                const href = `https://t.me/${p.channel.username}/${p.message_id}`;
-                const truncated = p.text.length > POST_PREVIEW_CHARS;
-                const preview = truncated
-                  ? p.text.slice(0, POST_PREVIEW_CHARS).trimEnd() + "…"
-                  : p.text;
-                const typeLabel = CHANNEL_TYPE_LABEL[p.channel.channel_type] || null;
-                return (
-                  <li key={p.id} className="border-r-2 border-slate-200 dark:border-slate-700 pr-3">
-                    <div className="flex items-center gap-2 mb-1 text-[12px]">
-                      <a
-                        href={href}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="font-bold text-slate-700 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400"
-                      >
-                        {p.channel.title}
-                      </a>
-                      {typeLabel && (
-                        <span className="text-slate-400 text-[12px]">{typeLabel}</span>
-                      )}
-                      <span className="text-slate-300 dark:text-slate-600">·</span>
-                      <time className="text-slate-400 text-[12px]">
-                        {formatRelativeTime(p.date, "fa")}
-                      </time>
-                    </div>
-                    <p className="text-[15px] leading-6 text-slate-600 dark:text-slate-300 whitespace-pre-line break-words">
-                      {preview}
-                    </p>
-                    {truncated && (
-                      <a
-                        href={href}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 mt-1 text-[12px] text-blue-600 dark:text-blue-400 hover:underline"
-                      >
-                        ادامه در تلگرام
-                        <ExternalLink className="h-3 w-3" />
-                      </a>
-                    )}
-                  </li>
-                );
-              })}
+        <TelegramReferences posts={posts} channels={channels} totalPosts={postCount} />
+      )}
+    </div>
+  );
+}
+
+interface TelegramReferencesProps {
+  posts: SocialPost[];
+  channels: ChannelStat[];
+  totalPosts: number;
+}
+
+function TelegramReferences({ posts, channels, totalPosts }: TelegramReferencesProps) {
+  const [open, setOpen] = useState(false);
+
+  // Group posts by channel username so multiple posts from the same
+  // channel collapse into one entry. Channel order is by latest post date
+  // — newest channel chatter floats to the top.
+  const grouped = useMemo(() => {
+    const map = new Map<string, { title: string; type: string; username: string; posts: SocialPost[] }>();
+    for (const p of posts) {
+      if (!p.channel || !p.text) continue;
+      const key = p.channel.username;
+      const entry = map.get(key);
+      if (entry) {
+        entry.posts.push(p);
+      } else {
+        map.set(key, {
+          username: p.channel.username,
+          title: p.channel.title,
+          type: p.channel.channel_type,
+          posts: [p],
+        });
+      }
+    }
+    const arr = Array.from(map.values());
+    arr.sort((a, b) => new Date(b.posts[0].date).getTime() - new Date(a.posts[0].date).getTime());
+    return arr;
+  }, [posts]);
+
+  const totalChannels = channels.length || grouped.length;
+
+  return (
+    <div className="border-t border-slate-200 dark:border-slate-800 mt-2">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center justify-between w-full py-2 text-[13px] font-bold text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
+      >
+        <span>منابع تلگرامی — {totalChannels} کانال، {totalPosts} پست</span>
+        <ChevronDown className={`h-3 w-3 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div className="pb-2">
+          {grouped.length > 0 ? (
+            <ul className="space-y-3 mt-1">
+              {grouped.map((g) => (
+                <ChannelGroup key={g.username} group={g} />
+              ))}
             </ul>
           ) : (
-            <div className="flex flex-wrap gap-1.5">
+            <div className="flex flex-wrap gap-1.5 mt-1">
               {channels.map((ch, i) => (
                 <span
                   key={i}
@@ -303,5 +307,59 @@ export default function StoryTelegramSection({ storyId, initialTab, highlightTex
         </div>
       )}
     </div>
+  );
+}
+
+function ChannelGroup({ group }: { group: { username: string; title: string; type: string; posts: SocialPost[] } }) {
+  const [expanded, setExpanded] = useState(false);
+  const typeLabel = CHANNEL_TYPE_LABEL[group.type] || null;
+  const visible = expanded ? group.posts : group.posts.slice(0, 1);
+  const hidden = group.posts.length - visible.length;
+
+  return (
+    <li className="border-r-2 border-slate-200 dark:border-slate-700 pr-3">
+      <div className="flex items-center gap-2 mb-1 text-[12px]">
+        <span className="font-bold text-slate-700 dark:text-slate-200">{group.title}</span>
+        {typeLabel && <span className="text-slate-400">{typeLabel}</span>}
+        <span className="text-slate-300 dark:text-slate-600">·</span>
+        <span className="text-slate-400">{group.posts.length} پست</span>
+      </div>
+      <ul className="space-y-2">
+        {visible.map((p) => {
+          const href = `https://t.me/${group.username}/${p.message_id}`;
+          const body = cleanPostBody(p.text);
+          const truncated = body.length > POST_PREVIEW_CHARS;
+          const preview = truncated ? body.slice(0, POST_PREVIEW_CHARS).trimEnd() + "…" : body;
+          return (
+            <li key={p.id}>
+              <p className="text-[15px] leading-6 text-slate-600 dark:text-slate-300 whitespace-pre-line break-words">
+                {preview}
+              </p>
+              <div className="flex items-center gap-2 mt-1 text-[12px] text-slate-400">
+                <time>{formatRelativeTime(p.date, "fa")}</time>
+                <span className="text-slate-300 dark:text-slate-600">·</span>
+                <a
+                  href={href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline"
+                >
+                  {truncated ? "ادامه در تلگرام" : "مشاهده در تلگرام"}
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      {hidden > 0 && (
+        <button
+          onClick={() => setExpanded(true)}
+          className="mt-1 text-[12px] text-blue-600 dark:text-blue-400 hover:underline"
+        >
+          نمایش {hidden} پست بیشتر از این کانال
+        </button>
+      )}
+    </li>
   );
 }

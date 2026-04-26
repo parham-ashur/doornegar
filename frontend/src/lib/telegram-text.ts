@@ -120,6 +120,42 @@ export function getCredLabel(t: string): CredLabel | null {
   return null;
 }
 
+// Aggressive plain-text cleaner for raw Telegram post bodies (the
+// `text` field on /social/stories/{id}/social posts). Strips the same
+// decorative noise the backend's `clean_post_for_display` removes —
+// kept on the client too so legacy posts that pre-date the backend
+// cleaner still render uniformly.
+// Decorative emoji leads at line start. Matched without the /u flag (target=es5)
+// so we spell out astral chars as surrogate pairs:
+//   🔻U+1F53B \uD83D\uDD3B   🔺U+1F53A \uD83D\uDD3A   🔸U+1F538 \uD83D\uDD38
+//   🔹U+1F539 \uD83D\uDD39   📢U+1F4E2 \uD83D\uDCE2   📻U+1F4FB \uD83D\uDCFB
+//   🎥U+1F3A5 \uD83C\uDFA5   🔥U+1F525 \uD83D\uDD25   📌U+1F4CC \uD83D\uDCCC
+//   🔗U+1F517 \uD83D\uDD17   🕑U+1F551 \uD83D\uDD51   ▶ U+25B6   ⚠ U+26A0   ⭐ U+2B50
+const TG_DECORATIVE_LEADS_RE = /^[\s\u202B\u202C]*(?:\uD83D[\uDD3A\uDD3B\uDD38\uDD39\uDCE2\uDCFB\uDD25\uDCCC\uDD17\uDD51]|\uD83C\uDFA5|[\u25B6\u26A0\u2B50])+[\s\u202B\u202C]*/gm;
+
+export function cleanPostBody(text: string | null | undefined): string {
+  if (!text) return "";
+  let out = text;
+  // Markdown links → label only
+  out = out.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+  // Bare URLs
+  out = out.replace(/https?:\/\/\S+/g, "");
+  // @mentions
+  out = out.replace(/@\w+/g, "");
+  // **bold** wrappers (keep inner)
+  out = out.replace(/\*\*([^*]+)\*\*/g, "$1");
+  // Leading decorative emoji per line
+  out = out.replace(TG_DECORATIVE_LEADS_RE, "");
+  // Leading bullet markers per line
+  out = out.replace(/^[\s\u202B\u202C]*[•·▪◾◼·]\s*/gm, "");
+  // Trailing channel attribution like "│ کانال X" or "@channel"
+  out = out.replace(/[│|]\s*(کانال|@)\s*[^\n│|]+\s*$/gm, "");
+  // Collapse whitespace
+  out = out.replace(/[ \t]+/g, " ");
+  out = out.replace(/\n{3,}/g, "\n\n");
+  return out.trim();
+}
+
 // Accepts either a string or the object shape { text, pct, supporters }.
 export function predictionText(p: unknown): string {
   if (!p) return "";
