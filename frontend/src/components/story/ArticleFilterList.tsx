@@ -1,9 +1,26 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { Clock } from "lucide-react";
+import { Clock, Send } from "lucide-react";
 import ArticleRelevanceButton from "@/components/feedback/ArticleRelevanceButton";
 import type { StoryArticleWithBias } from "@/lib/types";
+
+// Telegram detection + de-deep-linking. Articles sourced from a
+// Telegram channel land here with `url = https://t.me/{channel}/{id}`.
+// Tapping that URL on a phone Safari triggers the Telegram-app handoff
+// even with target=_blank — there's no `rel` we can set to suppress it.
+// Appending `?embed=1` (or `&embed=1`) flips Telegram's t.me page to
+// the standalone embed view, which renders the post inline in the
+// browser and never offers the app deep-link.
+const TELEGRAM_URL_RE = /^https?:\/\/(t\.me|telegram\.me)\//i;
+function isTelegramArticle(url: string | null | undefined): boolean {
+  return !!url && TELEGRAM_URL_RE.test(url);
+}
+function articleHref(url: string): string {
+  if (!isTelegramArticle(url)) return url;
+  if (/[?&]embed=/.test(url)) return url;
+  return url + (url.includes("?") ? "&embed=1" : "?embed=1");
+}
 
 const TEHRAN_DAY_FMT = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tehran" });
 const TEHRAN_LABEL_FMT = new Intl.DateTimeFormat("fa-IR", {
@@ -171,10 +188,20 @@ export default function ArticleFilterList({ articles, storyId, sidebarSync }: Ar
             {groups.map((g) => {
               const badge = getAlignmentBadge(g.alignment);
               const head = g.items[0];
+              const isTelegramGroup = isTelegramArticle(head.url);
               return (
                 <div key={`${g.dayKey}::${g.sourceSlug || g.sourceName}`} className="py-4">
                   <div className="flex items-center gap-2 mb-1.5 flex-wrap">
                     <span className="text-xs font-semibold text-slate-500">{g.sourceName}</span>
+                    {isTelegramGroup && (
+                      <span
+                        className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 border border-sky-300 dark:border-sky-700 text-sky-700 dark:text-sky-300 bg-sky-50 dark:bg-sky-950/40"
+                        title="منبع: کانال تلگرام"
+                      >
+                        <Send className="h-3 w-3" />
+                        تلگرام
+                      </span>
+                    )}
                     {badge && (
                       <span className={`text-[11px] font-bold ${badge.color}`}>
                         {badge.label}
@@ -193,7 +220,7 @@ export default function ArticleFilterList({ articles, storyId, sidebarSync }: Ar
 
                   {/* Primary title = most recent article in the group. */}
                   <a
-                    href={head.url}
+                    href={articleHref(head.url)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="block group"
@@ -219,7 +246,7 @@ export default function ArticleFilterList({ articles, storyId, sidebarSync }: Ar
                       {g.items.slice(1).map((a) => (
                         <li key={a.id}>
                           <a
-                            href={a.url}
+                            href={articleHref(a.url)}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-[13px] leading-5 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:underline line-clamp-2"
