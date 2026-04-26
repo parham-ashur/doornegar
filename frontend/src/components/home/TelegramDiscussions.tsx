@@ -150,7 +150,7 @@ export default function TelegramDiscussions({
         <div>
           <h4 className="text-[13px] font-black text-blue-600 dark:text-blue-400 mb-2">پیش‌بینی‌ها</h4>
           <div className="space-y-2">
-            {dedupedPreds.slice(0, 4).map((item, i) => (
+            {dedupedPreds.slice(0, 7).map((item, i) => (
               <Link
                 key={i}
                 href={`/${locale}/stories/${item.storyId}?tg=predictions&hl=${encodeURIComponent(clean(item.text).slice(0, 40))}#telegram`}
