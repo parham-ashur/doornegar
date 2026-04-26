@@ -3199,6 +3199,68 @@ async def step_prune_stagnant():
     return stats
 
 
+async def step_demote_umbrella_stories():
+    """Auto-demote stories that grew into umbrellas.
+
+    Pattern: first_published_at >21d ago, article_count >100, and
+    last_updated_at recent (the cluster keeps absorbing adjacent
+    topics every day so it never appears stale by F2/F3 metrics).
+    These stories dominate the homepage with month-old context
+    re-stamped as fresh — exactly what F1/F2/F3/F4 were meant to
+    prevent but couldn't catch because the wall-clock signals all
+    say "current."
+
+    Action: set priority = -50 so trending pushes them off the
+    homepage; clustering's umbrella-cap (clustering.py
+    UMBRELLA_FIRST_PUB_CAP_DAYS) prevents further growth. Emits
+    `story_umbrella_demoted` event.
+
+    Conservative thresholds:
+      - first_published_at < now - 21 days
+      - article_count > 100
+      - priority > -10  (skip already-demoted)
+    """
+    from sqlalchemy import select, update
+    from app.database import async_session
+    from app.models.story import Story
+    from app.services.events import log_event as _log_event
+
+    stats = {"checked": 0, "demoted": 0}
+    cutoff = datetime.now(timezone.utc) - timedelta(days=21)
+
+    async with async_session() as db:
+        rows = (await db.execute(
+            select(Story).where(
+                Story.first_published_at < cutoff,
+                Story.article_count > 100,
+                Story.priority > -10,
+                Story.archived_at.is_(None),
+            )
+        )).scalars().all()
+        stats["checked"] = len(rows)
+        for s in rows:
+            await db.execute(
+                update(Story).where(Story.id == s.id).values(priority=-50)
+            )
+            await _log_event(
+                db,
+                event_type="story_umbrella_demoted",
+                actor="maintenance",
+                story_id=s.id,
+                signals={
+                    "article_count": int(s.article_count or 0),
+                    "first_published_at": s.first_published_at.isoformat() if s.first_published_at else None,
+                    "title_fa": (s.title_fa or "")[:120],
+                },
+            )
+            stats["demoted"] += 1
+            logger.info(f"  Umbrella demote: {s.title_fa[:60] if s.title_fa else s.id} ({s.article_count} articles)")
+        await db.commit()
+    if stats["demoted"]:
+        logger.info(f"Umbrella demote: {stats}")
+    return stats
+
+
 async def step_archive_stale():
     """Two-tier story aging.
 
@@ -5829,6 +5891,7 @@ FULL_PIPELINE = [
     ("detect_coordination", "Detect coordinated messaging", "step_detect_coordination"),
     ("source_health", "Source health", "step_source_health"),
     ("prune_stagnant", "Prune 1-article (>48h) and 2-4-article (>14d) stagnant stories", "step_prune_stagnant"),
+    ("demote_umbrellas", "Demote umbrella stories (>21d old + >100 articles)", "step_demote_umbrella_stories"),
     ("archive_stale", "Archive stale stories", "step_archive_stale"),
     ("recalc_trending", "Recalculate trending", "step_recalculate_trending"),
     ("dedup_articles", "Dedup articles", "step_deduplicate_articles"),

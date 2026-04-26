@@ -611,6 +611,16 @@ async def _match_to_existing_stories(
     fresh_cutoff = datetime.now(timezone.utc) - _timedelta(days=AGE_CAP_DAYS)
     time_cutoff = max(legacy_cutoff, fresh_cutoff)
 
+    # Umbrella-story cap: even when last_updated_at is fresh (because
+    # someone keeps adding articles every day), refuse to keep
+    # extending a story whose first_published_at is older than 14d.
+    # The pattern this kills: a single "Iran-US negotiations" cluster
+    # that started 30 days ago and has absorbed 200+ articles by
+    # being the obvious cosine match for every adjacent topic. New
+    # articles should seed a fresh sub-story instead.
+    UMBRELLA_FIRST_PUB_CAP_DAYS = 14
+    umbrella_cutoff = datetime.now(timezone.utc) - _timedelta(days=UMBRELLA_FIRST_PUB_CAP_DAYS)
+
     # Get existing visible stories with their centroid embeddings +
     # last_updated_at (for time-delta gating) and summary_fa (for the
     # Phase-2 richer story block).
@@ -626,6 +636,12 @@ async def _match_to_existing_stories(
             Story.frozen_at.is_(None),
             # F3 — archived stories are never resurrected.
             Story.archived_at.is_(None),
+            # Umbrella cap: drop stories whose first article is >14d
+            # old. Their continued growth signals editorial sprawl,
+            # not a coherent thread. Treats NULL first_published_at
+            # as eligible (legacy data) so we don't accidentally
+            # close every old-but-untimestamped story.
+            (Story.first_published_at.is_(None)) | (Story.first_published_at >= umbrella_cutoff),
         )
         .order_by(Story.last_updated_at.desc().nullslast())
     )
