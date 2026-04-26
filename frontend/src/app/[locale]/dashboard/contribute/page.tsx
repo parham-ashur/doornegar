@@ -52,15 +52,6 @@ const ENTRIES: { group: string; items: Entry[] }[] = [
           "Records a hard-negative (article, story) pair. Clustering refuses to re-attach that article to that story for 90 days.",
       },
       {
-        label: "Rate the summary",
-        description:
-          "1–5 stars + an optional correction box rendered under the bias panel on every story page.",
-        audience: "anyone",
-        surface: "/fa/stories/{id} — SummaryRating",
-        effect:
-          "Score ≤ 2 with a correction queues an OpenAI summary regen on the next maintenance-cron tick (04:00 UTC daily).",
-      },
-      {
         label: "Submit a story we missed",
         href: "/fa/submit",
         description:

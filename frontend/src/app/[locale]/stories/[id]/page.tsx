@@ -10,7 +10,6 @@ import StoryTimeline from "@/components/story/StoryTimeline";
 import ArticleFilterList from "@/components/story/ArticleFilterList";
 
 import FeedbackProvider from "@/components/feedback/FeedbackProvider";
-import SummaryRating from "@/components/feedback/SummaryRating";
 import EditableTitle from "@/components/feedback/EditableTitle";
 import PriorityControl from "@/components/feedback/PriorityControl";
 import RatingModeBanner from "@/components/feedback/RatingModeBanner";
@@ -263,7 +262,6 @@ export default async function StoryDetailPage({
           )}
           {/* Bias comparison */}
           <StoryAnalysisPanel analysis={analysis} />
-          <SummaryRating storyId={id} />
 
           {/* Mobile-only: Telegram + narrative development + stats, placed
               between narratives and articles per Parham's 2026-04-15 spec. */}
