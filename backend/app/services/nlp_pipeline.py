@@ -18,6 +18,7 @@ import httpx
 from langdetect import detect
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from trafilatura import extract
 
 from app.config import settings
@@ -42,6 +43,7 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
     result = await db.execute(
         select(Article)
         .join(Source, Source.id == Article.source_id)
+        .options(selectinload(Article.source))
         .where(
             Article.processed_at.is_(None),
             Article.content_type.isnot(None),
@@ -123,9 +125,16 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
         texts_for_embedding = []
         embeddable_articles = []
         for article in articles:
+            # Pass the source slug so source-specific boilerplate
+            # (scrape placeholders, recurring image captions, comments-
+            # section chrome) gets stripped before the body feeds the
+            # embedder. Cheap; avoids the cosine-poisoning we observed
+            # in the 2026-04-26 embedder comparison.
+            source_slug = article.source.slug if article.source else None
             text = extract_text_for_embedding(
                 article.title_original,
                 article.content_text or article.summary,
+                source_slug=source_slug,
             )
             if text.strip():
                 texts_for_embedding.append(text)

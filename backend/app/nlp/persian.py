@@ -126,14 +126,88 @@ def extract_keywords(text: str, max_keywords: int = 15) -> list[str]:
     return [word for word, _ in sorted_words[:max_keywords]]
 
 
-def extract_text_for_embedding(title: str, body: str | None, max_tokens: int = 512) -> str:
+# ─── Boilerplate stripping ────────────────────────────────────────────
+# Article bodies often carry text that has nothing to do with the
+# article topic: scrape-failure placeholders ("Transferring to the
+# website..."), comments-section chrome, recurring image captions on
+# unrelated articles. Without stripping, this content poisons the
+# embedding and pulls unrelated pieces toward common boilerplate-
+# driven cosines. Observed in the 2026-04-26 embedder comparison: three
+# Iran International articles about wholly different topics matched
+# the same wrong story because they shared a recurring image caption.
+
+# Universal patterns. Order matters: greedy comments-section trailers
+# match before line-anchored meta strips would have swallowed them.
+_UNIVERSAL_BOILERPLATE_PATTERNS = [
+    # Scrape-failure placeholder (Tasnim, khabaronline, etc.). Match
+    # the literal English phrase, the Persian variant, and the Persian
+    # form using Arabic presentation glyphs (ﺣ instead of ح) since
+    # some HTML scrapes return the rendered ligatures.
+    re.compile(r"Transferring to the website\.\.\.", re.IGNORECASE),
+    re.compile(r"در\s*[\u062Dﺡﺢﺣﺤ]ال\s*انتقال\s*به\s*سایت[\s\S]*$"),
+    # Tabnak-family comments-section trailing block. Anchored on the
+    # «گزارش خطا» link that always precedes the comments scaffold.
+    re.compile(r"گزارش\s+خطا[\s\S]*"),
+    # Article-meta lines that show up mid-body in some sources.
+    re.compile(r"^\s*کد\s+خبر:?\s*[\d۰-۹]+\s*$", re.MULTILINE),
+    re.compile(r"^\s*\|\s*\|\s*[\d۰-۹]+\s+بازدید\s*$", re.MULTILINE),
+    re.compile(r"^\s*تعداد\s+بازدید:?.*$", re.MULTILINE),
+]
+
+# Per-source patterns. Add as you observe specific outlets bleeding
+# templated content into article bodies.
+_SOURCE_BOILERPLATE_PATTERNS: dict[str, list] = {
+    # Iran International ships an image caption that gets concatenated
+    # into many article bodies regardless of topic. Match the templated
+    # prefix and stop at the first sentence terminator so we swallow the
+    # caption without clipping the legit text that follows.
+    "iran-international": [
+        re.compile(r"تصاویر\s+رسیده\s+به\s+ایران\s+اینترنشنال[^.؛\n]*[.؛]"),
+    ],
+}
+
+
+def strip_boilerplate(text: str | None, source_slug: str | None = None) -> str:
+    """Remove scrape placeholders, comments-section chrome, and
+    per-source recurring captions from an article body before it
+    feeds the embedder.
+
+    Empty input returns empty. Universal patterns apply to every
+    article; per-source patterns are layered on when ``source_slug``
+    matches an entry in ``_SOURCE_BOILERPLATE_PATTERNS``.
+
+    Callers should treat a very short return value (< ~80 chars) as a
+    signal that the article had no real content — better to embed
+    title only than to embed a one-sentence remnant.
+    """
+    if not text:
+        return ""
+    out = text
+    for pat in _UNIVERSAL_BOILERPLATE_PATTERNS:
+        out = pat.sub("", out)
+    if source_slug:
+        for pat in _SOURCE_BOILERPLATE_PATTERNS.get(source_slug, []):
+            out = pat.sub("", out)
+    return re.sub(r"\s+", " ", out).strip()
+
+
+def extract_text_for_embedding(
+    title: str,
+    body: str | None,
+    max_tokens: int = 512,
+    source_slug: str | None = None,
+) -> str:
     """Prepare text for embedding generation.
 
-    Combines title and body text, truncated to approximately max_tokens words.
+    Combines title and body text, truncated to approximately
+    max_tokens words. When ``source_slug`` is provided, runs the body
+    through ``strip_boilerplate`` first so source-specific noise
+    doesn't pollute the resulting vector.
     """
     parts = [normalize(title)]
     if body:
-        normalized_body = normalize(body)
+        cleaned = strip_boilerplate(body, source_slug=source_slug) if source_slug else body
+        normalized_body = normalize(cleaned)
         words = tokenize_words(normalized_body)
         # Title gets priority, body fills remaining space
         remaining = max_tokens - len(tokenize_words(parts[0]))

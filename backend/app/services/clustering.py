@@ -591,7 +591,16 @@ async def _match_to_existing_stories(
     from datetime import timedelta as _timedelta
     from app.nlp.embeddings import cosine_similarity as _cosine_sim
 
-    EMBEDDING_SIM_THRESHOLD = 0.30  # loose — let the LLM reject false positives
+    # Pre-filter to LLM. Was 0.30 — too loose: articles with cosine
+    # 0.30-0.40 to a candidate were sending the LLM to read pairs that
+    # almost never matched, polluting cost and occasionally producing
+    # wrong matches when the LLM rubber-stamped a borderline pair. The
+    # 2026-04-26 embedder comparison showed almost no LLM-confirmed
+    # matches below cosine 0.40; raising the floor saves clustering
+    # tokens and cuts the false-positive rate without losing real
+    # signal. Articles below this threshold to ALL candidates fall
+    # through to _cluster_new_articles to seed a fresh story.
+    EMBEDDING_SIM_THRESHOLD = 0.40
     AUTO_MATCH_COSINE = 0.85
     AUTO_REJECT_COSINE = 0.60
     AUTO_MATCH_JACCARD = 0.35
@@ -1687,42 +1696,77 @@ async def _merge_hidden_stories(db: AsyncSession) -> int:
 
 
 async def merge_similar_visible_stories(db: AsyncSession) -> int:
-    """Find and merge visible stories with high title overlap.
+    """Find and merge visible stories that look like duplicates.
 
     Unlike _merge_hidden_stories (which only looks at small stories),
-    this checks ALL visible stories (article_count >= 5) for duplicates.
+    this checks ALL visible stories (article_count >= 5) for sibling
+    clusters that should consolidate.
 
-    1. Pre-filter: find pairs with >50% title word overlap
-    2. If any candidates found, ask LLM to confirm which should merge
-    3. Merge confirmed pairs (articles move to the story with more articles)
+    Two candidate signals — either triggers a pair:
+    1. Title word overlap >= 0.4 (lexical signal — was 0.5; loosened
+       2026-04-26 after observing 4-5 sibling clusters about the same
+       Iran-US event that all had similar but not 50%-overlapping
+       titles).
+    2. Centroid cosine >= 0.78 (semantic signal — catches sibling
+       clusters that use different vocabulary for the same event,
+       which the title-overlap rule alone missed).
+
+    LLM then confirms which should actually merge. Candidate pool
+    expanded 50 → 80 stories so longer-tail dupes also get a chance.
+    LLM input is still capped at 30 stories to keep the prompt bounded.
     """
+    from app.nlp.embeddings import cosine_similarity as _cosine_sim
+
+    OVERLAP_THRESHOLD = 0.4
+    CENTROID_COSINE_THRESHOLD = 0.78
+    MAX_CANDIDATES_TO_LLM = 30
+
     result = await db.execute(
         select(Story)
         .where(Story.article_count >= 5, Story.frozen_at.is_(None))
         .order_by(Story.trending_score.desc())
-        .limit(50)
+        .limit(80)
     )
     stories = list(result.scalars().all())
 
     if len(stories) < 2:
         return 0
 
-    # Pre-filter: find stories with high title word overlap
     def _words(s: str | None) -> set[str]:
         return {w for w in (s or "").split() if len(w) >= 3}
 
     candidates: list[Story] = []
     candidate_ids: set = set()
+    title_pairs = 0
+    centroid_pairs = 0
+
     for i, a in enumerate(stories):
         a_words = _words(a.title_fa)
-        if not a_words:
-            continue
+        a_centroid = a.centroid_embedding if isinstance(a.centroid_embedding, list) else None
         for b in stories[i + 1:]:
             b_words = _words(b.title_fa)
-            if not b_words:
-                continue
-            overlap = len(a_words & b_words) / min(len(a_words), len(b_words))
-            if overlap >= 0.5:
+            triggered = False
+
+            # Signal 1: title-word overlap
+            if a_words and b_words:
+                overlap = len(a_words & b_words) / min(len(a_words), len(b_words))
+                if overlap >= OVERLAP_THRESHOLD:
+                    triggered = True
+                    title_pairs += 1
+
+            # Signal 2: centroid cosine. Skip if either centroid is
+            # missing — those stories haven't been through the
+            # recompute step yet and we'd need to round-trip the LLM
+            # without a real semantic signal anyway.
+            if not triggered:
+                b_centroid = b.centroid_embedding if isinstance(b.centroid_embedding, list) else None
+                if a_centroid and b_centroid:
+                    sim = _cosine_sim(a_centroid, b_centroid)
+                    if sim >= CENTROID_COSINE_THRESHOLD:
+                        triggered = True
+                        centroid_pairs += 1
+
+            if triggered:
                 if a.id not in candidate_ids:
                     candidates.append(a)
                     candidate_ids.add(a.id)
@@ -1731,10 +1775,28 @@ async def merge_similar_visible_stories(db: AsyncSession) -> int:
                     candidate_ids.add(b.id)
 
     if len(candidates) < 2:
-        logger.info("No visible story pairs with >50%% title overlap")
+        logger.info(
+            "No visible story pairs flagged "
+            "(title_overlap >= %.2f or centroid_cosine >= %.2f)",
+            OVERLAP_THRESHOLD,
+            CENTROID_COSINE_THRESHOLD,
+        )
         return 0
 
-    logger.info(f"Found {len(candidates)} visible stories with title overlap — asking LLM to confirm merges")
+    if len(candidates) > MAX_CANDIDATES_TO_LLM:
+        # Sort by trending_score and take the top to keep the LLM
+        # prompt bounded. Hot stories matter more than long-tail dupes
+        # for any single run; the latter will still surface on later
+        # ticks as their centroids drift into range.
+        candidates.sort(key=lambda s: s.trending_score or 0, reverse=True)
+        candidates = candidates[:MAX_CANDIDATES_TO_LLM]
+
+    logger.info(
+        "Found %d visible stories to evaluate for merges (title=%d, centroid=%d) — calling LLM",
+        len(candidates),
+        title_pairs,
+        centroid_pairs,
+    )
 
     # Build stories block for LLM
     stories_lines = []
