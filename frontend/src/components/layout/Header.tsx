@@ -88,50 +88,15 @@ export default function Header() {
         {/* Worker animation — saved in HeaderAnimation.saved.tsx, re-enable later */}
         {/* <HeaderAnimation /> */}
 
-        {/* Desktop nav */}
-        <nav className="hidden items-center gap-1 md:flex header-fade">
-          {navLinks.map((link) => (
-            <Link
-              key={link.href}
-              href={link.href}
-              className="px-3 py-1.5 text-[13px] font-medium text-slate-500 transition-colors hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
-            >
-              {link.label}
-            </Link>
-          ))}
-        </nav>
+        {/* Desktop nav — kept disabled per Parham 2026-04-26.
+            navLinks defined above so re-enabling is a paste-back of
+            the <nav> + mobile hamburger + mobile <nav> blocks. */}
 
-        {/* Tehran date/time — left side, desktop only */}
-        <div className="header-fade hidden md:block">
+        {/* Tehran date/time — left side */}
+        <div className="header-fade">
           <WorldClocks />
         </div>
-
-        {/* Mobile hamburger */}
-        <button
-          onClick={() => setMobileOpen(!mobileOpen)}
-          aria-label={mobileOpen ? "بستن منو" : "باز کردن منو"}
-          aria-expanded={mobileOpen}
-          className="p-3 text-slate-500 dark:text-slate-400 md:hidden header-fade"
-        >
-          {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-        </button>
       </div>
-
-      {/* Mobile nav */}
-      {mobileOpen && (
-        <nav className="border-t border-slate-200 bg-white px-4 py-2 md:hidden dark:border-slate-800 dark:bg-[#0a0e1a]" dir="rtl">
-          {navLinks.map((link) => (
-            <Link
-              key={link.href}
-              href={link.href}
-              onClick={() => setMobileOpen(false)}
-              className="block px-3 py-2.5 text-sm font-medium text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
-            >
-              {link.label}
-            </Link>
-          ))}
-        </nav>
-      )}
     </header>
     </>
   );
