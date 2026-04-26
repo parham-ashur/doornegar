@@ -315,13 +315,11 @@ export default async function StoryDetailPage({
             sourceCount={story.source_count}
           />
 
-          {/* Political spectrum — desktop only. Always rendered when
-              the story has covering sources; the component itself
-              falls back to "horizontal axis only" layout (no Y-axis
-              labels, no neutrality explanation) when scores aren't
-              populated yet. The vertical axis fills in after the
-              Claude-scored neutrality audit runs for this story. */}
-          {coveringSources.length > 0 && (
+          {/* Political spectrum — temporarily hidden per Parham
+              2026-04-26. Component still renders elsewhere; bringing
+              it back here is a single-flag flip when neutrality
+              scoring is producing data we trust. */}
+          {false && coveringSources.length > 0 && (
             <div className="border-t border-slate-200 dark:border-slate-800 pt-4">
               <h3 className="text-sm font-black text-slate-900 dark:text-white mb-4 pb-2 border-b border-slate-200 dark:border-slate-800">
                 جایگاه رسانه‌ها
