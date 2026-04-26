@@ -1109,12 +1109,12 @@ export default async function HomeBody({
                           <div className="mt-3 space-y-1">
                             {item.stateSummary && (
                               <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-2">
-                                <span className="text-[#1e3a5f] dark:text-blue-300 font-bold">• </span>{item.stateSummary}
+                                <span className="text-[#1e3a5f] dark:text-blue-300 font-bold">(درون‌مرزی) </span>{item.stateSummary}
                               </p>
                             )}
                             {item.diasporaSummary && (
                               <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-2">
-                                <span className="text-[#ea580c] dark:text-orange-400 font-bold">در مقابل </span>{item.diasporaSummary}
+                                <span className="text-[#ea580c] dark:text-orange-400 font-bold">(برون‌مرزی) </span>{item.diasporaSummary}
                               </p>
                             )}
                           </div>
@@ -1551,12 +1551,12 @@ function MobileHome({
                     <div className="mt-2.5 space-y-1">
                       {item.stateSummary && (
                         <p className="text-[12px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-2">
-                          <span className="text-[#1e3a5f] dark:text-blue-300 font-bold">• </span>{item.stateSummary}
+                          <span className="text-[#1e3a5f] dark:text-blue-300 font-bold">(درون‌مرزی) </span>{item.stateSummary}
                         </p>
                       )}
                       {item.diasporaSummary && (
                         <p className="text-[12px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-2">
-                          <span className="text-[#ea580c] dark:text-orange-400 font-bold">در مقابل </span>{item.diasporaSummary}
+                          <span className="text-[#ea580c] dark:text-orange-400 font-bold">(برون‌مرزی) </span>{item.diasporaSummary}
                         </p>
                       )}
                     </div>
