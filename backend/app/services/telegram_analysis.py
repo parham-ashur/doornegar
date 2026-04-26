@@ -666,6 +666,7 @@ async def link_posts_by_embedding(db: AsyncSession, threshold: float = 0.35) -> 
          rescue finds posts that match one specific article sharply.
     """
     import re
+    from datetime import datetime, timezone
     from urllib.parse import urlparse
 
     from app.models.article import Article
@@ -736,10 +737,16 @@ async def link_posts_by_embedding(db: AsyncSession, threshold: float = 0.35) -> 
         return v
 
     story_centroids: dict[str, list[float]] = {}
+    # last_updated_at per story so we can raise the link threshold for
+    # candidates older than 2 days — same friction model as the article
+    # clustering's aged-candidate bump in app/services/clustering.py.
+    story_last_updated: dict[str, datetime] = {}
     for s in stories:
         c = _clean_vec(s.centroid_embedding)
         if c is not None:
             story_centroids[str(s.id)] = c
+            if s.last_updated_at is not None:
+                story_last_updated[str(s.id)] = s.last_updated_at
 
     if not story_centroids:
         return {"linked": 0, "reason": "no stories with centroids"}
@@ -842,7 +849,24 @@ async def link_posts_by_embedding(db: AsyncSession, threshold: float = 0.35) -> 
                 best_story_id = sid
                 best_via_article = used_article
 
-        if best_score >= threshold and best_story_id:
+        # Aged-candidate bump: stories whose last_updated_at is more
+        # than 2 days old need stronger evidence (0.45 vs the 0.35
+        # baseline) before a Telegram post gets attached. Mirrors the
+        # 2d/0.40→0.55 friction in the article clustering path so the
+        # two surfaces don't glue stale stories together at different
+        # rates.
+        AGED_TG_THRESHOLD_BUMP = 0.10
+        AGED_TG_DAYS = 2
+        effective_threshold = threshold
+        if best_story_id:
+            last_upd = story_last_updated.get(best_story_id)
+            if last_upd:
+                age_days = abs(
+                    (datetime.now(timezone.utc) - last_upd).total_seconds()
+                ) / 86400.0
+                if age_days > AGED_TG_DAYS:
+                    effective_threshold = threshold + AGED_TG_THRESHOLD_BUMP
+        if best_score >= effective_threshold and best_story_id:
             await db.execute(
                 update(TelegramPost)
                 .where(TelegramPost.id == post.id)

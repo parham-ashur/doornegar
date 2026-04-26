@@ -601,6 +601,14 @@ async def _match_to_existing_stories(
     # signal. Articles below this threshold to ALL candidates fall
     # through to _cluster_new_articles to seed a fresh story.
     EMBEDDING_SIM_THRESHOLD = 0.40
+    # Past 2 days, raise the embedding floor — fresh stories deserve
+    # easier accretion; older candidates need stronger evidence to keep
+    # absorbing borderline articles. Sits between the existing 0.40
+    # baseline and the 0.60 AUTO_REJECT cliff. Borderline articles in
+    # the 2-7d band now seed their own story instead of getting glued
+    # onto a 4-day-old cluster on weak cosine alone.
+    EMBEDDING_SIM_THRESHOLD_AGED = 0.55
+    AGED_CANDIDATE_DAYS = 2
     AUTO_MATCH_COSINE = 0.85
     AUTO_REJECT_COSINE = 0.60
     AUTO_MATCH_JACCARD = 0.35
@@ -864,7 +872,13 @@ async def _match_to_existing_stories(
             # on generic vocabulary and the LLM rubber-stamped.
             target_ac = sig.get("article_count") or 0
             target_small = target_ac and target_ac < 10
-            base_threshold = 0.45 if target_small else EMBEDDING_SIM_THRESHOLD
+            if target_small:
+                # Small-story rule wins — already a stricter gate.
+                base_threshold = 0.45
+            elif age_days > AGED_CANDIDATE_DAYS:
+                base_threshold = EMBEDDING_SIM_THRESHOLD_AGED
+            else:
+                base_threshold = EMBEDDING_SIM_THRESHOLD
             effective_threshold = min(base_threshold * trust_factor, 0.95)
             if sim >= effective_threshold:
                 if target_small:
