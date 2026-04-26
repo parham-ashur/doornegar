@@ -65,6 +65,15 @@ class Story(Base):
     # the maintenance pipeline skips regeneration for this story so manual
     # edits are preserved.
     is_edited: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # Editorial anchor — admin-edited fields the LLM is asked to preserve
+    # on subsequent re-runs. Replaces the frozen-forever semantics of
+    # is_edited: when summary_anchor is set, step_summarize still refreshes
+    # the analysis but the prompt instructs the model to keep the
+    # anchored tone/vocabulary while incorporating new articles. Shape:
+    #   {"state_summary_fa": str|null, "diaspora_summary_fa": str|null,
+    #    "bias_explanation_fa": str|null, "summary_fa": str|null,
+    #    "title_fa": str|null, "anchored_at": ISO8601}
+    summary_anchor: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     # Mean of all article embeddings in this story. Used by the clustering
     # pre-filter to quickly find candidate stories for new articles via
     # cosine similarity (avoids sending irrelevant stories to the LLM).

@@ -377,6 +377,37 @@ CHANNEL_SOURCE_MAP: dict[str, str] = {
 _MIN_POST_LENGTH = 50
 
 
+_URL_RE = re.compile(r"https?://[^\s<>\"'`]+")
+
+
+def _extract_post_urls(text: str) -> list[str]:
+    """Pull bare URLs out of a Telegram post body.
+
+    Used by D2 to detect "outlet re-broadcasts its own RSS link to
+    Telegram" — when the post text quotes the canonical article URL,
+    creating a parallel t.me Article would be a guaranteed duplicate.
+
+    Strips trailing punctuation (Persian/English) so a sentence-ending
+    `.` or `،` doesn't break the URL match. Caps at 5 URLs to avoid
+    pathological cases on link-spam posts.
+    """
+    if not text:
+        return []
+    raw = _URL_RE.findall(text)
+    cleaned: list[str] = []
+    for u in raw:
+        # Drop common trailing punctuation that's not part of a URL.
+        u = u.rstrip(".,;:!؟،؛»)>]")
+        # Skip our own t.me / aggregator domains — only outbound links.
+        low = u.lower()
+        if any(d in low for d in ("t.me/", "telegram.me/", "telegram.org/")):
+            continue
+        cleaned.append(u)
+        if len(cleaned) >= 5:
+            break
+    return cleaned
+
+
 def _clean_post_text(text: str) -> str:
     """Strip markdown artefacts from a Telegram post for use as article text.
 
@@ -495,6 +526,23 @@ async def convert_telegram_posts_to_articles(db: AsyncSession) -> dict:
         if not source.is_active:
             stats["skipped_no_source"] += 1
             continue
+
+        # D2 — Telegram-cites-RSS suppression. If the post text links
+        # to an article URL we already have ingested (typical pattern:
+        # outlets re-broadcast their own RSS articles to Telegram with
+        # the canonical link in the body), don't create a parallel
+        # Telegram Article. The TelegramPost row is preserved for
+        # social-signal aggregation. This eliminates the most common
+        # source of t.me-vs-RSS duplicates from the same outlet.
+        post_urls = _extract_post_urls(raw_text)
+        if post_urls:
+            existing = await db.execute(
+                select(Article.id).where(Article.url.in_(post_urls)).limit(1)
+            )
+            if existing.scalar_one_or_none() is not None:
+                stats.setdefault("skipped_cites_rss", 0)
+                stats["skipped_cites_rss"] += 1
+                continue
 
         # Build article fields
         cleaned = _clean_post_text(raw_text)

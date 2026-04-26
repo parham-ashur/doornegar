@@ -11,6 +11,11 @@ interface SummaryRatingProps {
 }
 
 export default function SummaryRating({ storyId }: SummaryRatingProps) {
+  // R2 — visible to everyone, not just raters. Trusted-rater submissions
+  // still go to /api/v1/feedback/summary-rating (one-vote, fast apply);
+  // anonymous submissions go to /api/v1/improvements with the same
+  // anti-spam header used elsewhere, and need 3-identity consensus
+  // before step_apply_summary_corrections picks them up.
   const { isRater, token } = useFeedback();
   const [rating, setRating] = useState(0);
   const [hovered, setHovered] = useState(0);
@@ -18,29 +23,42 @@ export default function SummaryRating({ storyId }: SummaryRatingProps) {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
-  if (!isRater) return null;
-
   async function handleSubmit() {
     if (rating === 0 || submitting) return;
     setSubmitting(true);
     try {
-      const body: Record<string, unknown> = {
-        story_id: storyId,
-        summary_rating: rating,
-      };
-      if (correction.trim()) {
-        body.summary_correction = correction.trim();
-      }
-      const res = await fetch(`${API}/api/v1/feedback/summary-rating`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(body),
-      });
-      if (res.ok) {
-        setSubmitted(true);
+      if (isRater && token) {
+        const body: Record<string, unknown> = {
+          story_id: storyId,
+          summary_rating: rating,
+        };
+        if (correction.trim()) body.summary_correction = correction.trim();
+        const res = await fetch(`${API}/api/v1/feedback/summary-rating`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(body),
+        });
+        if (res.ok) setSubmitted(true);
+      } else {
+        const { antiSpamHeaders } = await import("@/lib/antiSpamToken");
+        const res = await fetch(`${API}/api/v1/improvements`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...antiSpamHeaders() },
+          body: JSON.stringify({
+            target_type: "story_summary",
+            target_id: storyId,
+            issue_type: rating <= 2 ? "bad_summary" : "other",
+            current_value: String(rating),
+            suggested_value: correction.trim() || null,
+            reason: correction.trim()
+              ? `rating=${rating}/5, correction provided`
+              : `rating=${rating}/5`,
+          }),
+        });
+        if (res.ok) setSubmitted(true);
       }
     } catch {
       // silently fail

@@ -103,6 +103,8 @@ async def lifespan(app: FastAPI):
                 # to wait on `alembic upgrade head` to render correctly.
                 "ALTER TABLE stories ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ",
                 "CREATE INDEX IF NOT EXISTS idx_stories_archived_at ON stories(archived_at) WHERE archived_at IS NOT NULL",
+                # #6 — summary_anchor (editorial reference for re-runs)
+                "ALTER TABLE stories ADD COLUMN IF NOT EXISTS summary_anchor JSONB",
                 "ALTER TABLE improvement_feedback ADD COLUMN IF NOT EXISTS submitter_cookie VARCHAR(64)",
                 "CREATE INDEX IF NOT EXISTS idx_improvement_cookie_target ON improvement_feedback(target_id, submitter_cookie) WHERE submitter_cookie IS NOT NULL",
                 "CREATE INDEX IF NOT EXISTS idx_story_events_type_created ON story_events(event_type, created_at DESC)",

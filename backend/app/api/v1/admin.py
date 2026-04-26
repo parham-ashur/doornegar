@@ -1227,7 +1227,28 @@ async def edit_story(story_id: str, request: _EditStoryRequest, db: AsyncSession
         editorial_change = True
 
     if editorial_change:
-        story.is_edited = True
+        # #6 — instead of freezing forever via is_edited=True, write
+        # the edited fields into summary_anchor. The nightly cron
+        # treats anchored stories as eligible for refresh but instructs
+        # the LLM to preserve the anchor's tone/vocabulary while
+        # incorporating new articles. is_edited stays False so the
+        # nightly maintenance picks the story up.
+        from datetime import datetime as _dt
+        anchor = dict(story.summary_anchor or {})
+        if request.title_fa is not None:
+            anchor["title_fa"] = request.title_fa
+        if request.summary_fa is not None:
+            anchor["summary_fa"] = request.summary_fa
+        if request.state_summary_fa is not None:
+            anchor["state_summary_fa"] = request.state_summary_fa
+        if request.diaspora_summary_fa is not None:
+            anchor["diaspora_summary_fa"] = request.diaspora_summary_fa
+        if request.bias_explanation_fa is not None:
+            anchor["bias_explanation_fa"] = request.bias_explanation_fa
+        anchor["anchored_at"] = _dt.utcnow().isoformat() + "Z"
+        story.summary_anchor = anchor
+        # Keep is_edited=False so nightly picks the story up.
+        story.is_edited = False
 
     await db.commit()
 
@@ -1235,6 +1256,7 @@ async def edit_story(story_id: str, request: _EditStoryRequest, db: AsyncSession
         "status": "ok",
         "story_id": str(story.id),
         "is_edited": story.is_edited,
+        "summary_anchor_set": bool(story.summary_anchor),
         "title_fa": story.title_fa,
         "title_en": story.title_en,
         "priority": story.priority,

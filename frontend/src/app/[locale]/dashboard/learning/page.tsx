@@ -52,6 +52,7 @@ const EVENT_LABELS: Record<string, string> = {
   cluster_block_low_trust: "Blocked (low source trust)",
   source_trust_change: "Source trust changed",
   source_trust_fast_penalty: "Source trust (fast penalty)",
+  story_split_candidate: "Split candidate (centroid drift)",
 };
 
 const EVENT_COLORS: Record<string, string> = {
@@ -66,6 +67,7 @@ const EVENT_COLORS: Record<string, string> = {
   cluster_block_low_trust: "bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300",
   source_trust_change: "bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300",
   source_trust_fast_penalty: "bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300",
+  story_split_candidate: "bg-pink-50 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300",
 };
 
 const EVENT_TYPE_FILTERS: { key: string; label: string }[] = [
@@ -81,6 +83,7 @@ const EVENT_TYPE_FILTERS: { key: string; label: string }[] = [
   { key: "cluster_block_low_trust", label: "Low-trust block" },
   { key: "source_trust_change", label: "Trust change" },
   { key: "source_trust_fast_penalty", label: "Fast penalty" },
+  { key: "story_split_candidate", label: "Split candidate" },
 ];
 
 function timeAgo(iso: string | null): string {

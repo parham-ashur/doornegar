@@ -280,7 +280,12 @@ def diff_narratives(
         new = [s for s in current_sents if _normalize_for_compare(s) not in prev_keys]
         # Guard: if almost everything is "new" it's a full rewrite, not a
         # delta. Don't highlight — let the badge alone carry the signal.
-        if current_sents and len(new) / len(current_sents) > 0.8:
+        # Threshold lowered from 0.8 → 0.6 (Δ2): mid-cycle refreshes that
+        # touch most sentences are common on big-event stories, and the
+        # old threshold suppressed exactly the ones readers most want to
+        # see. 0.6 still kills genuine full rewrites where the prior
+        # snapshot is unrelated.
+        if current_sents and len(new) / len(current_sents) > 0.6:
             return []
         # Cap the callout length so it doesn't dominate the story card.
         return new[:4]

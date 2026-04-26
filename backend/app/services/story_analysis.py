@@ -132,6 +132,16 @@ STORY_ANALYSIS_PROMPT = """\
 
 {articles_block}
 
+# تعداد بولت‌های روایت بر اساس تعداد مقالات
+
+تعداد بولت‌های هر زیرگروه را بر اساس **حجم کل مقالات** خبر تنظیم کن (نه بر اساس تعداد مقالات همان زیرگروه — یک خبر بزرگ نیاز به تحلیل عمیق‌تر دارد، حتی اگر یک سمتش پوشش کمی داشته باشد):
+- کمتر از ۱۰ مقاله → ۱ تا ۲ بولت در هر زیرگروه
+- بین ۱۰ تا ۳۰ مقاله → ۲ تا ۳ بولت در هر زیرگروه
+- بین ۳۰ تا ۶۰ مقاله → ۳ تا ۴ بولت در هر زیرگروه
+- بیش از ۶۰ مقاله → ۴ تا ۵ بولت در هر زیرگروه؛ در صورت لزوم بولت‌ها را زیربخش بزن (مثلاً «دیپلماتیک» / «داخلی» / «اقتصادی»)
+
+اگر یک زیرگروه فقط ۱ مقاله دارد، حتی در خبرهای بزرگ ۱ بولت کافی است — نخواه بولت‌های اضافی برای پر کردن جا اختراع کنی.
+
 # عنوان (تیتر صفحه اصلی — مهم‌ترین خروجی)
 
 عنوان = خلاصه رویداد. خواننده باید فقط با خواندن عنوان بفهمد چه اتفاقی افتاده.
@@ -191,12 +201,12 @@ bias_explanation_fa باید **عمیق، مشخص و بدون هم‌پوشان
   "summary_fa": "<۱-۲ جمله، ۲۰-۳۰ کلمه — فقط حقایق اصلی برای کارت صفحه اصلی>",
   "narrative": {{
     "inside": {{
-      "principlist": ["<۲ تا ۳ بولت فارسی. هر بولت یک جمله کوتاه: رسانه‌های اصول‌گرا چه گفتند، چه واژگانی به‌کار بردند، چه چیزی را برجسته یا پنهان کردند>"],
-      "reformist":   ["<۲ تا ۳ بولت فارسی برای رسانه‌های اصلاح‌طلب داخل ایران>"]
+      "principlist": ["<تعداد بولت‌ها بر اساس راهنمای بالا. هر بولت یک جمله کوتاه: رسانه‌های اصول‌گرا چه گفتند، چه واژگانی به‌کار بردند، چه چیزی را برجسته یا پنهان کردند>"],
+      "reformist":   ["<تعداد بولت‌ها بر اساس راهنمای بالا برای رسانه‌های اصلاح‌طلب داخل ایران>"]
     }},
     "outside": {{
-      "moderate":    ["<۲ تا ۳ بولت فارسی برای رسانه‌های میانه‌روی برون‌مرزی>"],
-      "radical":     ["<۲ تا ۳ بولت فارسی برای رسانه‌های رادیکال برون‌مرزی>"]
+      "moderate":    ["<تعداد بولت‌ها بر اساس راهنمای بالا برای رسانه‌های میانه‌روی برون‌مرزی>"],
+      "radical":     ["<تعداد بولت‌ها بر اساس راهنمای بالا برای رسانه‌های رادیکال برون‌مرزی>"]
     }}
   }},
   "state_summary_fa": "<۳-۴ جمله — **جوهر موضعِ این سمت**: چه می‌گویند، چه می‌خواهند، چه را برجسته می‌کنند، چه را پنهان. نام رسانه‌ها، عبارت «رسانه‌های حکومتی/درون‌مرزی»، یا «این سمت» را نیاور — خواننده می‌تواند با کلیک روی مقاله، بفهمد کدام رسانه چه گفت. فقط خودِ روایت. جمله‌ها باید مستقیم بیان موضع باشند («اقدام آمریکا غیرقانونی و زیاده‌خواهانه است»)، نه انتساب («حکومتی‌ها می‌گویند اقدام آمریکا غیرقانونی است»). یا null اگر هیچ رسانه‌ای از این سمت نباشد.>",
@@ -348,6 +358,7 @@ async def generate_story_analysis(
     related_stories: list[dict] | None = None,
     source_track_records: dict | None = None,
     old_summary: str | None = None,
+    summary_anchor: dict | None = None,
 ) -> dict:
     """Two-pass story analysis for maximum quality.
 
@@ -416,6 +427,31 @@ async def generate_story_analysis(
         lines.append("# خلاصه قبلی (تحلیل پیشین این موضوع)")
         lines.append(f"  {old_summary[:300]}")
         lines.append("  فقط اطلاعات جدید را در فیلد delta بنویس. تکرار نکن.\n")
+
+    # #6 — editorial anchor. When admin has hand-edited any of the
+    # narrative fields (state_summary_fa / diaspora_summary_fa /
+    # bias_explanation_fa / summary_fa / title_fa), those become a
+    # canonical reference the LLM is asked to preserve. The new
+    # analysis should integrate fresh articles into the anchor's
+    # frame, not replace it. This converts the old "frozen forever"
+    # is_edited semantics into a learning signal.
+    if summary_anchor and any(summary_anchor.get(k) for k in (
+        "state_summary_fa", "diaspora_summary_fa", "bias_explanation_fa",
+        "summary_fa", "title_fa",
+    )):
+        lines.append("# لنگرگاه ویرایش سردبیر — مرجع برای حفظ لحن و موضع")
+        lines.append("سردبیر دورنگر این فیلدها را قبلاً اصلاح کرده است. لحن، واژگان کلیدی و موضع آنها را حفظ کن. تنها حقایق و رویدادهای جدید را اضافه کن. ساختار جمله و ترتیب نکات را تا حد ممکن نگه دار.")
+        if summary_anchor.get("title_fa"):
+            lines.append(f"  - title_fa مرجع: {summary_anchor['title_fa'][:200]}")
+        if summary_anchor.get("summary_fa"):
+            lines.append(f"  - summary_fa مرجع: {summary_anchor['summary_fa'][:300]}")
+        if summary_anchor.get("state_summary_fa"):
+            lines.append(f"  - state_summary_fa مرجع: {summary_anchor['state_summary_fa'][:400]}")
+        if summary_anchor.get("diaspora_summary_fa"):
+            lines.append(f"  - diaspora_summary_fa مرجع: {summary_anchor['diaspora_summary_fa'][:400]}")
+        if summary_anchor.get("bias_explanation_fa"):
+            lines.append(f"  - bias_explanation_fa مرجع: {summary_anchor['bias_explanation_fa'][:600]}")
+        lines.append("اگر مقالات جدید با مرجع تناقض دارند، در bias_explanation تناقض را به‌عنوان یک نکته اضافه کن — مرجع را بی‌هدف بازنویسی نکن.\n")
 
     # Inject telegram media channel posts as supplementary source context
     try:

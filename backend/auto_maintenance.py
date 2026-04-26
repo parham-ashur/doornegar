@@ -915,13 +915,21 @@ async def step_summarize():
         #    hand-edits aren't clobbered.
         MAX_STORIES_PER_RUN = 15  # quality over quantity — deep analysis on top 15 only
         retry_cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+        # #6 — is_edited stories are NO LONGER skipped if they have a
+        # summary_anchor. Anchored stories refresh on the normal
+        # cadence, but the LLM is constrained to preserve the
+        # anchor's tone/vocabulary. Stories with is_edited=True AND
+        # no anchor still skip (legacy behavior — protects manual
+        # work that hasn't been migrated).
         result = await db.execute(
             select(Story)
             .options(selectinload(Story.articles))
             .where(
                 Story.article_count >= 5,
                 (Story.llm_failed_at.is_(None)) | (Story.llm_failed_at < retry_cutoff),
-                Story.is_edited.is_(False),
+                # Skip ONLY when is_edited and no anchor — preserves
+                # untouched manual edits, lets anchored ones refresh.
+                (Story.is_edited.is_(False)) | (Story.summary_anchor.isnot(None)),
             )
             .order_by(Story.article_count.desc())
         )
@@ -938,8 +946,23 @@ async def step_summarize():
         # across maintenance runs long after the story stopped evolving.
         ANALYSIS_LOCK_HOURS = 48
 
+        # #7 — layered re-eval triggers. Replace the binary
+        # "articles_hash changed?" check with three signals:
+        #   * volume: ≥VOLUME_TRIGGER new articles since last analysis
+        #   * drift: cosine similarity of new-article centroid vs
+        #     stored centroid < DRIFT_THRESHOLD → flag as a possible
+        #     story split and SKIP refresh (let HITL handle it)
+        #   * hash change with neither volume nor drift → still refresh
+        #     (small drips of relevant articles are fine to integrate)
+        # Maturity lock stays as the cost-saving safety net for now.
+        VOLUME_TRIGGER = 5
+        DRIFT_THRESHOLD = 0.75
+
+        from app.nlp.embeddings import cosine_similarity as _cs_eval
+
         all_candidates: list[Story] = []
         newly_locked = 0
+        split_candidates = 0
         for s in scan_candidates:
             if s.summary_fa is None:
                 all_candidates.append(s)
@@ -955,7 +978,61 @@ async def step_summarize():
                 continue
             last_hash = b.get("articles_hash") if isinstance(b, dict) else None
             cur_hash = _articles_hash(s)
-            needs_rerun = (last_hash != cur_hash)
+            hash_changed = (last_hash != cur_hash)
+
+            # New articles since last analysis — diff the article id
+            # set against the previous hash's source set. We don't
+            # have the old set, so use article_count as a proxy:
+            # `new_articles = current_count - count_at_last_hash`.
+            # Stored alongside the hash on each successful run.
+            count_at_last = b.get("articles_count_at_hash") if isinstance(b, dict) else None
+            new_articles = (s.article_count or 0) - (count_at_last or 0) if count_at_last is not None else None
+
+            # Drift check — only when we have both centroid and recent
+            # article embeddings. Compares the centroid against the
+            # mean of articles ingested in the last 7 days. If they
+            # diverge significantly, the cluster is drifting and
+            # might be a different story now.
+            drift_flag = False
+            if hash_changed and s.centroid_embedding and new_articles and new_articles >= 3:
+                recent = [a for a in (s.articles or []) if a.embedding and a.published_at and (datetime.now(timezone.utc) - (a.published_at if a.published_at.tzinfo else a.published_at.replace(tzinfo=timezone.utc))).days <= 7]
+                if len(recent) >= 3:
+                    # Mean of recent embeddings
+                    dim = len(recent[0].embedding or [])
+                    if dim > 0:
+                        mean_recent = [sum(r.embedding[i] for r in recent) / len(recent) for i in range(dim)]
+                        sim = _cs_eval(s.centroid_embedding, mean_recent)
+                        if sim < DRIFT_THRESHOLD:
+                            drift_flag = True
+                            split_candidates += 1
+                            # Stash a HITL hint inside the blob; the dashboard
+                            # /dashboard/edit-stories surfaces these.
+                            b["split_candidate"] = {
+                                "detected_at": datetime.now(timezone.utc).isoformat(),
+                                "drift_cosine": round(float(sim), 3),
+                                "new_articles_7d": len(recent),
+                            }
+                            s.summary_en = _json.dumps(b, ensure_ascii=False)
+                            # Emit a story_event so /dashboard/learning shows it.
+                            from app.services.events import log_event as _log_split
+                            await _log_split(
+                                db,
+                                event_type="story_split_candidate",
+                                actor="maintenance",
+                                story_id=s.id,
+                                signals={
+                                    "drift_cosine": round(float(sim), 3),
+                                    "new_articles_7d": len(recent),
+                                },
+                            )
+                            # Don't refresh — the cluster might be wrong.
+                            continue
+
+            # Volume gate — refresh on EITHER large new-article batch OR
+            # hash change. Small drips don't trigger refresh by themselves.
+            volume_trigger = (new_articles is not None and new_articles >= VOLUME_TRIGGER)
+            needs_rerun = hash_changed and (volume_trigger or count_at_last is None)
+
             # Maturity check — if story is older than the lock window AND
             # has a real analysis, stamp the lock and skip re-running.
             lu = s.last_updated_at
@@ -973,6 +1050,9 @@ async def step_summarize():
 
         if newly_locked:
             logger.info(f"Summarize: locked {newly_locked} mature stories (>{ANALYSIS_LOCK_HOURS}h since last update)")
+        if split_candidates:
+            logger.info(f"Summarize: flagged {split_candidates} story(ies) as split candidates (centroid drift)")
+        if newly_locked or split_candidates:
             await db.commit()
 
         # 3. Rank by analysis priority (bias-richness, not just article count)
@@ -1116,6 +1196,7 @@ async def step_summarize():
                     related_stories=related if related else None,
                     source_track_records=source_records if source_records else None,
                     old_summary=_old_summary,
+                    summary_anchor=story.summary_anchor,
                 )
                 story.summary_fa = analysis.get("summary_fa")
                 # Update title if LLM returned a better one
@@ -1166,6 +1247,11 @@ async def step_summarize():
                 # detect composition drift and re-analyze — see the
                 # articles_hash check above in step_summarize.
                 extras["articles_hash"] = _articles_hash(story)
+                # #7 — also stamp the article count at this hash so the
+                # next run can compute "new articles since last analysis"
+                # for the volume trigger. Replaces the old simple "any
+                # hash change → rerun" rule.
+                extras["articles_count_at_hash"] = story.article_count or 0
                 story.summary_en = _json.dumps(extras, ensure_ascii=False)
                 story.llm_failed_at = None  # clear any previous failure
                 await db.commit()
@@ -1887,6 +1973,132 @@ async def step_apply_summary_corrections():
             except Exception as e:
                 stats["failed"] += 1
                 logger.warning(f"Summary regen failed for story {story.id}: {e}")
+
+        # ── R2 — anonymous summary corrections via improvement_feedback ──
+        # SummaryRating now also writes to improvement_feedback for anon
+        # users. We act on a story when ≥3 distinct identities (cookie
+        # or IP fingerprint) flagged it with `bad_summary`. Each row
+        # may carry a suggested correction in `suggested_value`; we
+        # concatenate up to 5 of them as the prompt input.
+        from sqlalchemy import distinct
+        from app.models.improvement import ImprovementFeedback as _IF
+
+        remaining_cap = max(0, 20 - stats["regenerated"])
+        if remaining_cap > 0:
+            identity_expr = func.coalesce(_IF.submitter_cookie, _IF.submitter_fingerprint)
+            anon_groups = (await db.execute(
+                select(
+                    _IF.target_id,
+                    func.count(distinct(identity_expr)).label("voters"),
+                )
+                .where(
+                    _IF.target_type == "story_summary",
+                    _IF.issue_type == "bad_summary",
+                    _IF.status == "open",
+                    identity_expr.isnot(None),
+                )
+                .group_by(_IF.target_id)
+                .having(func.count(distinct(identity_expr)) >= 3)
+                .limit(remaining_cap)
+            )).all()
+
+            for target_id, voters in anon_groups:
+                if not target_id:
+                    continue
+                try:
+                    story_uuid = uuid.UUID(target_id)
+                except ValueError:
+                    continue
+                story = (await db.execute(
+                    select(Story).where(Story.id == story_uuid)
+                )).scalar_one_or_none()
+                if not story or story.is_edited or not story.summary_fa:
+                    continue
+                # Pull up to 5 actual correction texts to feed the LLM.
+                corr_rows = (await db.execute(
+                    select(_IF.suggested_value, _IF.reason)
+                    .where(
+                        _IF.target_type == "story_summary",
+                        _IF.target_id == target_id,
+                        _IF.issue_type == "bad_summary",
+                        _IF.status == "open",
+                    )
+                    .limit(5)
+                )).all()
+                corrections_lines: list[str] = []
+                for sv, rs in corr_rows:
+                    txt = (sv or rs or "").strip()
+                    if txt and len(txt) >= 5:
+                        corrections_lines.append(f"- {txt[:200]}")
+                if not corrections_lines:
+                    # Multiple low ratings but no actual text — count as
+                    # signal but don't have anything to feed the LLM.
+                    # Mark in_progress so we stop polling these rows.
+                    await db.execute(
+                        update(_IF)
+                        .where(
+                            _IF.target_type == "story_summary",
+                            _IF.target_id == target_id,
+                            _IF.issue_type == "bad_summary",
+                            _IF.status == "open",
+                        )
+                        .values(status="wont_do", admin_notes="No correction text provided.", resolved_at=datetime.now(timezone.utc))
+                    )
+                    continue
+                combined_correction = (
+                    f"چند خواننده ({int(voters)} نفر) گفته‌اند خلاصه نادرست است. اصلاحات پیشنهادی:\n"
+                    + "\n".join(corrections_lines)
+                )
+                try:
+                    prompt = prompt_template.format(
+                        title_fa=story.title_fa or "",
+                        summary_current=(story.summary_fa or "")[:600],
+                        correction=combined_correction[:1000],
+                    )
+                    params = build_openai_params(
+                        model=settings.translation_model,
+                        prompt=prompt,
+                        max_tokens=512,
+                        temperature=0.3,
+                    )
+                    response = await client.chat.completions.create(**params)
+                    await log_llm_usage(
+                        model=settings.translation_model,
+                        purpose="feedback.summary_regen_anon",
+                        usage=response.usage,
+                        story_id=story.id,
+                    )
+                    new_summary = (response.choices[0].message.content or "").strip()
+                    if new_summary and len(new_summary) > 30:
+                        await db.execute(
+                            update(Story)
+                            .where(Story.id == story.id)
+                            .values(summary_fa=new_summary)
+                        )
+                        await db.execute(
+                            update(_IF)
+                            .where(
+                                _IF.target_type == "story_summary",
+                                _IF.target_id == target_id,
+                                _IF.issue_type == "bad_summary",
+                                _IF.status == "open",
+                            )
+                            .values(status="done", resolved_at=datetime.now(timezone.utc))
+                        )
+                        await _log_event(
+                            db,
+                            event_type="feedback_summary_regen",
+                            actor="anon_consensus",
+                            story_id=story.id,
+                            signals={"voters": int(voters), "corrections_used": len(corrections_lines)},
+                        )
+                        stats["regenerated"] += 1
+                        logger.info(f"  Regenerated summary for story {story.id} from anon consensus ({voters} voters)")
+                    else:
+                        stats["skipped"] += 1
+                except Exception as e:
+                    stats["failed"] += 1
+                    logger.warning(f"Anon summary regen failed for story {story.id}: {e}")
 
         await db.commit()
 
@@ -3567,7 +3779,16 @@ async def step_deduplicate_articles():
                     dupe.story_id = None
                     stats["removed"] += 1
 
-        # Layer 3: Embedding similarity > 0.92 within 48h
+        # Layer 3: Embedding similarity > 0.92 within 48h.
+        # D1 — when both an RSS and t.me article from the same outlet
+        # land in the same story and look near-identical, prefer the
+        # RSS one regardless of length: the canonical URL is the one
+        # readers want to follow, and the t.me copy is usually a
+        # truncated re-broadcast. Length tiebreaker still applies for
+        # RSS-vs-RSS and t.me-vs-t.me cases.
+        # Cap raised 200 → 800 so the dedup window covers a busier
+        # day's ingest. The O(n²) pairwise check is bounded by
+        # `same story_id` so the practical work is n × avg_cluster_size.
         cutoff = datetime.now(timezone.utc) - timedelta(hours=48)
         recent = await db.execute(
             select(Article)
@@ -3577,9 +3798,12 @@ async def step_deduplicate_articles():
                 Article.story_id.isnot(None),
             )
             .order_by(Article.ingested_at.desc())
-            .limit(200)
+            .limit(800)
         )
         recent_articles = list(recent.scalars().all())
+
+        def _is_telegram(art) -> bool:
+            return bool(art.url) and "t.me/" in art.url
 
         if len(recent_articles) >= 2:
             from app.nlp.embeddings import cosine_similarity
@@ -3593,7 +3817,14 @@ async def step_deduplicate_articles():
                     if a.story_id == b.story_id:
                         sim = cosine_similarity(a.embedding, b.embedding)
                         if sim > 0.92:
-                            keeper = a if len(a.content_text or "") >= len(b.content_text or "") else b
+                            a_tg = _is_telegram(a)
+                            b_tg = _is_telegram(b)
+                            if a_tg != b_tg:
+                                # One RSS, one Telegram — keep the RSS one.
+                                keeper = b if a_tg else a
+                            else:
+                                # Same kind — fall back to length tiebreak.
+                                keeper = a if len(a.content_text or "") >= len(b.content_text or "") else b
                             dupe = b if keeper is a else a
                             dupe.story_id = None
                             seen_ids.add(dupe.id)
