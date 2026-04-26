@@ -6,9 +6,7 @@ import TelegramAnalyzingAnimation from "@/components/common/TelegramAnalyzingAni
 import {
   cleanClaim,
   cleanPrediction,
-  displayClaims,
   displayPredictions,
-  getCredLabel,
 } from "@/lib/telegram-text";
 import type { TelegramAnalysis } from "@/lib/types";
 
@@ -22,8 +20,7 @@ interface AnalysisItem {
 interface RankedItem {
   text: string;
   pct?: number;
-  supporterCount?: number;
-  analystsTotal?: number;
+  supporters?: string[];
   storyId: string;
 }
 
@@ -91,34 +88,25 @@ export default function TelegramDiscussions({
     );
   }
 
-  // Collect unique predictions and claims, ranked by length (longer = more detailed = better)
+  // Collect unique predictions, ranked by length (longer = more detailed = better)
   const predictions: RankedItem[] = [];
-  const claims: RankedItem[] = [];
   const seenPred = new Set<string>();
-  const seenClaim = new Set<string>();
 
   for (const item of items) {
     const preds = displayPredictions(item.analysis);
-    const kclaims = displayClaims(item.analysis);
     for (const p of preds) {
       const text = typeof p === "string" ? p : p.text || "";
       const pct = typeof p === "object" ? p.pct : undefined;
-      const supporterCount = typeof p === "object" ? p.supporter_count : undefined;
-      const analystsTotal = typeof p === "object" ? p.analysts_total : undefined;
+      const supporters =
+        typeof p === "object" && Array.isArray(p.supporters)
+          ? p.supporters.filter((s): s is string => typeof s === "string" && s.length > 0)
+          : undefined;
       // Dedup by full text — first-30-chars was collapsing every prediction
       // starting with «احتمال ادامه …» into one.
       const key = text.trim();
       if (text && !seenPred.has(key)) {
         seenPred.add(key);
-        predictions.push({ text, pct, supporterCount, analystsTotal, storyId: item.storyId });
-      }
-    }
-    for (const c of kclaims) {
-      const text = typeof c === "string" ? c : c.text || "";
-      const key = text.trim();
-      if (text && !seenClaim.has(key)) {
-        seenClaim.add(key);
-        claims.push({ text, storyId: item.storyId });
+        predictions.push({ text, pct, supporters, storyId: item.storyId });
       }
     }
   }
@@ -130,60 +118,54 @@ export default function TelegramDiscussions({
 
   // Sort predictions by pct (if available), then by length
   predictions.sort((a, b) => (b.pct || 0) - (a.pct || 0) || b.text.length - a.text.length);
-  claims.sort((a, b) => b.text.length - a.text.length);
+
+  // Source-dedup pass: each Telegram channel can back at most one prediction.
+  // Walk in display-order (already sorted), attribute each supporter to the
+  // first prediction it appears under, drop later mentions, and drop any
+  // prediction that ends up with zero supporters AFTER filtering — but only
+  // if it had supporters to begin with. Predictions with no supporters
+  // metadata at all (legacy data) stay so the section isn't empty.
+  const usedSources = new Set<string>();
+  const dedupedPreds: RankedItem[] = [];
+  for (const p of predictions) {
+    if (!p.supporters || p.supporters.length === 0) {
+      dedupedPreds.push(p);
+      continue;
+    }
+    const fresh: string[] = [];
+    const seenLocal = new Set<string>();
+    for (const s of p.supporters) {
+      if (usedSources.has(s) || seenLocal.has(s)) continue;
+      seenLocal.add(s);
+      fresh.push(s);
+    }
+    if (fresh.length === 0) continue;
+    fresh.forEach(s => usedSources.add(s));
+    dedupedPreds.push({ ...p, supporters: fresh });
+  }
 
   return (
-    <div className="animate-[fadeIn_0.2s_ease-in] space-y-4">
-      {/* Predictions */}
-      {predictions.length > 0 && (
+    <div className="animate-[fadeIn_0.2s_ease-in]">
+      {dedupedPreds.length > 0 && (
         <div>
           <h4 className="text-[13px] font-black text-blue-600 dark:text-blue-400 mb-2">پیش‌بینی‌ها</h4>
           <div className="space-y-2">
-            {predictions.slice(0, 4).map((item, i) => {
-              return (
-                <Link
-                  key={i}
-                  href={`/${locale}/stories/${item.storyId}?tg=predictions&hl=${encodeURIComponent(clean(item.text).slice(0, 40))}#telegram`}
-                  className="block group border-b border-slate-100 dark:border-slate-800 pb-2 last:border-0 last:pb-0"
-                >
-                  {/* Analyst-count label («N از M تحلیلگر») removed on
-                      Parham's request — the small counts (1/16, 2/16)
-                      read as weak signal on the homepage and distract
-                      from the prediction itself. Still available on the
-                      story page where the full discourse context makes
-                      the ratio meaningful. */}
-                  <p className="text-[13px] leading-6 text-slate-600 dark:text-slate-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-3">
-                    {clean(item.text)}
+            {dedupedPreds.slice(0, 4).map((item, i) => (
+              <Link
+                key={i}
+                href={`/${locale}/stories/${item.storyId}?tg=predictions&hl=${encodeURIComponent(clean(item.text).slice(0, 40))}#telegram`}
+                className="block group border-b border-slate-100 dark:border-slate-800 pb-2 last:border-0 last:pb-0"
+              >
+                <p className="text-[13px] leading-6 text-slate-600 dark:text-slate-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-3">
+                  {clean(item.text)}
+                </p>
+                {item.supporters && item.supporters.length > 0 && (
+                  <p className="text-[11px] leading-5 text-slate-400 dark:text-slate-500 mt-1">
+                    {item.supporters.join("، ")}
                   </p>
-                </Link>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Claims */}
-      {claims.length > 0 && (
-        <div>
-          <h4 className="text-[13px] font-black text-amber-600 dark:text-amber-400 mb-2">ادعاهای کلیدی</h4>
-          <div className="space-y-2">
-            {claims.slice(0, 3).map((item, i) => {
-              const cred = getCredLabel(item.text);
-              return (
-                <Link
-                  key={i}
-                  href={`/${locale}/stories/${item.storyId}?tg=claims&hl=${encodeURIComponent(clean(item.text).slice(0, 40))}#telegram`}
-                  className="block group border-b border-slate-100 dark:border-slate-800 pb-2 last:border-0 last:pb-0"
-                >
-                  <p className="text-[13px] leading-6 text-slate-600 dark:text-slate-400 group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors line-clamp-3">
-                    {clean(item.text)}
-                  </p>
-                  {cred && (
-                    <p className={`text-[13px] ${cred.color} text-left`}>{cred.label}</p>
-                  )}
-                </Link>
-              );
-            })}
+                )}
+              </Link>
+            ))}
           </div>
         </div>
       )}
