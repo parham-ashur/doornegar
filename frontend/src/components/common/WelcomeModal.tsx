@@ -24,6 +24,16 @@ export default function WelcomeModal() {
       }
       const seen = localStorage.getItem(STORAGE_KEY);
       if (!seen) {
+        // Mark "seen" the moment we decide to show the modal — not on
+        // close. Otherwise users who close the tab or navigate away
+        // without clicking the X see the popup on every visit. The
+        // earliest decision point is the first render that would
+        // surface the modal, so write here. Caveat: iOS/macOS Safari
+        // ITP wipes localStorage after 7 days of no first-party
+        // interaction; users on those browsers may still see it
+        // intermittently — a cookie would solve it but contradicts
+        // the no-cookies footnote, so we accept the limitation.
+        localStorage.setItem(STORAGE_KEY, new Date().toISOString());
         setTimeout(() => setVisible(true), 800);
       }
     } catch {}
@@ -31,8 +41,11 @@ export default function WelcomeModal() {
 
   const close = () => {
     setVisible(false);
+    // Idempotent re-write so manual clicks also stamp the time. Useful
+    // if a future change ever wants to know when the user last saw
+    // the modal (e.g. to surface a refreshed version after N months).
     try {
-      localStorage.setItem(STORAGE_KEY, "1");
+      localStorage.setItem(STORAGE_KEY, new Date().toISOString());
     } catch {}
   };
 
