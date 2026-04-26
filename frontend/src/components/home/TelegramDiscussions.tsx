@@ -119,6 +119,54 @@ export default function TelegramDiscussions({
   // Sort predictions by pct (if available), then by length
   predictions.sort((a, b) => (b.pct || 0) - (a.pct || 0) || b.text.length - a.text.length);
 
+  // Near-duplicate dedup: exact-text dedup misses paraphrases like
+  // «مذاکرات شکست خواهد خورد» vs «مذاکرات به نتیجه نخواهد رسید» that
+  // describe the same prediction in slightly different wording. Use
+  // Jaccard over content tokens (Persian/Arabic char-folded, stopwords
+  // dropped) and keep only the first-ranked variant when overlap ≥ 0.55.
+  const STOPWORDS = new Set([
+    "و", "که", "از", "به", "در", "این", "آن", "است", "را", "با", "بر",
+    "هم", "هر", "اگر", "یا", "تا", "ها", "های", "خواهد", "می‌شود", "می",
+    "شود", "بود", "بودن", "شدن", "نیز", "ولی", "اما", "ای", "یک",
+  ]);
+  const toTokens = (s: string): Set<string> => {
+    const norm = clean(s)
+      .replace(/[«»"'.,،؛؟!:()\[\]\-–—]/g, " ")
+      .replace(/ي/g, "ی")
+      .replace(/ك/g, "ک")
+      .replace(/[\u200B-\u200F]/g, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+    return new Set(
+      norm.split(" ").filter((t) => t.length >= 2 && !STOPWORDS.has(t))
+    );
+  };
+  const jaccard = (a: Set<string>, b: Set<string>): number => {
+    if (a.size === 0 || b.size === 0) return 0;
+    let inter = 0;
+    a.forEach((x) => {
+      if (b.has(x)) inter++;
+    });
+    return inter / (a.size + b.size - inter);
+  };
+  const NEAR_DUP_THRESHOLD = 0.55;
+  const acceptedTokens: Set<string>[] = [];
+  const semanticUnique: RankedItem[] = [];
+  for (const p of predictions) {
+    const tok = toTokens(p.text);
+    let isDup = false;
+    for (const prev of acceptedTokens) {
+      if (jaccard(tok, prev) >= NEAR_DUP_THRESHOLD) {
+        isDup = true;
+        break;
+      }
+    }
+    if (isDup) continue;
+    acceptedTokens.push(tok);
+    semanticUnique.push(p);
+  }
+
   // Source-dedup pass: each Telegram channel can back at most one prediction.
   // Walk in display-order (already sorted), attribute each supporter to the
   // first prediction it appears under, drop later mentions, and drop any
@@ -127,7 +175,7 @@ export default function TelegramDiscussions({
   // metadata at all (legacy data) stay so the section isn't empty.
   const usedSources = new Set<string>();
   const dedupedPreds: RankedItem[] = [];
-  for (const p of predictions) {
+  for (const p of semanticUnique) {
     if (!p.supporters || p.supporters.length === 0) {
       dedupedPreds.push(p);
       continue;
