@@ -447,17 +447,25 @@ export default async function HomeBody({
   // heavy fallback, but never beyond 7d. Earlier code's "any state_only
   // ever" fallback removed — those slots simply stay empty when
   // there's nothing fresh, which is honest signal.
+  //
+  // Re-validate one-sidedness against current state_pct/diaspora_pct.
+  // Backend's is_blindspot is computed from per-article side counts at
+  // recount time, while the homepage displays distinct-source pcts —
+  // when new articles tip a previously one-sided story toward balance
+  // the flag can lag the visible split. Gate the formal pick by the
+  // same 60/40 source threshold the heuristic uses so we never show a
+  // «نگاه یک‌جانبه» card whose own percentages contradict the label.
   const blindFresh = withinAge(BLINDSPOT_MAX_AGE_MS);
   const conservativeBlind =
-    blindspots.find(s => s.blindspot_type === "state_only" && blindFresh(s) && hasUpdate(s)) ||
-    blindspots.find(s => s.blindspot_type === "state_only" && blindFresh(s)) ||
+    blindspots.find(s => s.blindspot_type === "state_only" && blindFresh(s) && hasUpdate(s) && stateHeavy(s)) ||
+    blindspots.find(s => s.blindspot_type === "state_only" && blindFresh(s) && stateHeavy(s)) ||
     [...stories].filter(stateHeavy).filter(blindFresh).sort((a, b) =>
       (b.state_pct - b.diaspora_pct) - (a.state_pct - a.diaspora_pct)
     )[0] ||
     undefined;
   const oppositionBlind =
-    blindspots.find(s => s.blindspot_type === "diaspora_only" && blindFresh(s) && hasUpdate(s)) ||
-    blindspots.find(s => s.blindspot_type === "diaspora_only" && blindFresh(s)) ||
+    blindspots.find(s => s.blindspot_type === "diaspora_only" && blindFresh(s) && hasUpdate(s) && diasporaHeavy(s)) ||
+    blindspots.find(s => s.blindspot_type === "diaspora_only" && blindFresh(s) && diasporaHeavy(s)) ||
     [...stories].filter(diasporaHeavy).filter(blindFresh).sort((a, b) =>
       (b.diaspora_pct - b.state_pct) - (a.diaspora_pct - a.state_pct)
     )[0] ||
