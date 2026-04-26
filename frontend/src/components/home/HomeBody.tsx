@@ -1089,13 +1089,13 @@ export default async function HomeBody({
                         <div className="flex gap-0 text-center">
                           <div className="flex-1 py-3 bg-[#1e3a5f]/10 dark:bg-blue-900/20 border-t-[3px] border-[#1e3a5f]">
                             <p className="text-[15px] font-black text-[#1e3a5f] dark:text-blue-300 line-clamp-1 px-2">
-                              <RotatingWord words={item.conservativeWords} delayMs={idx * 600} />
+                              <RotatingWord words={item.conservativeWords} />
                             </p>
                             <p className="text-[15px] text-[#1e3a5f] dark:text-blue-300 font-medium mt-1">درون‌مرزی</p>
                           </div>
                           <div className="flex-1 py-3 bg-[#ea580c]/10 dark:bg-orange-900/20 border-t-[3px] border-[#ea580c]">
                             <p className="text-[15px] font-black text-[#ea580c] dark:text-orange-400 line-clamp-1 px-2">
-                              <RotatingWord words={item.oppositionWords} delayMs={idx * 600} />
+                              <RotatingWord words={item.oppositionWords} />
                             </p>
                             <p className="text-[15px] text-[#ea580c] dark:text-orange-400 font-medium mt-1">برون‌مرزی</p>
                           </div>
@@ -1536,13 +1536,13 @@ function MobileHome({
                   <div className="flex gap-0 text-center">
                     <div className="flex-1 py-2 bg-[#1e3a5f]/10 dark:bg-blue-900/20 border-t-[3px] border-[#1e3a5f]">
                       <p className="text-[15px] font-black text-[#1e3a5f] dark:text-blue-300 line-clamp-1 px-2">
-                        <RotatingWord words={item.conservativeWords} delayMs={idx * 600} />
+                        <RotatingWord words={item.conservativeWords} />
                       </p>
                       <p className="text-[12px] text-[#1e3a5f] dark:text-blue-300 font-medium mt-1">درون‌مرزی</p>
                     </div>
                     <div className="flex-1 py-2 bg-[#ea580c]/10 dark:bg-orange-900/20 border-t-[3px] border-[#ea580c]">
                       <p className="text-[15px] font-black text-[#ea580c] dark:text-orange-400 line-clamp-1 px-2">
-                        <RotatingWord words={item.oppositionWords} delayMs={idx * 600} />
+                        <RotatingWord words={item.oppositionWords} />
                       </p>
                       <p className="text-[12px] text-[#ea580c] dark:text-orange-400 font-medium mt-1">برون‌مرزی</p>
                     </div>
