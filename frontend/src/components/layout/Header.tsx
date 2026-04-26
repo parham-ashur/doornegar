@@ -88,8 +88,8 @@ export default function Header() {
         {/* Worker animation — saved in HeaderAnimation.saved.tsx, re-enable later */}
         {/* <HeaderAnimation /> */}
 
-        {/* Desktop nav — hidden for now, re-enable by uncommenting */}
-        {/* <nav className="hidden items-center gap-1 md:flex header-fade">
+        {/* Desktop nav */}
+        <nav className="hidden items-center gap-1 md:flex header-fade">
           {navLinks.map((link) => (
             <Link
               key={link.href}
@@ -99,26 +99,26 @@ export default function Header() {
               {link.label}
             </Link>
           ))}
-        </nav> */}
+        </nav>
 
-        {/* Tehran date/time — left side */}
-        <div className="header-fade">
+        {/* Tehran date/time — left side, desktop only */}
+        <div className="header-fade hidden md:block">
           <WorldClocks />
         </div>
 
-        {/* Mobile toggle — hidden while nav is disabled */}
-        {/* <button
+        {/* Mobile hamburger */}
+        <button
           onClick={() => setMobileOpen(!mobileOpen)}
           aria-label={mobileOpen ? "بستن منو" : "باز کردن منو"}
           aria-expanded={mobileOpen}
           className="p-3 text-slate-500 dark:text-slate-400 md:hidden header-fade"
         >
           {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-        </button> */}
+        </button>
       </div>
 
-      {/* Mobile nav — hidden while nav is disabled */}
-      {/* {mobileOpen && (
+      {/* Mobile nav */}
+      {mobileOpen && (
         <nav className="border-t border-slate-200 bg-white px-4 py-2 md:hidden dark:border-slate-800 dark:bg-[#0a0e1a]" dir="rtl">
           {navLinks.map((link) => (
             <Link
@@ -131,7 +131,7 @@ export default function Header() {
             </Link>
           ))}
         </nav>
-      )} */}
+      )}
     </header>
     </>
   );
