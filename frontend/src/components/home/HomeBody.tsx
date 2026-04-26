@@ -790,7 +790,7 @@ export default async function HomeBody({
             everything aligned. */}
         <div className="col-span-3 py-6 pl-6 border-l border-slate-200 dark:border-slate-800 flex flex-col overflow-hidden" style={{ maxHeight: 780 }}>
           <h3 className="text-[18px] font-black text-slate-900 dark:text-white mb-3 pb-2 border-b border-slate-200 dark:border-slate-800 shrink-0">
-            پیش‌بینی روایت‌های تلگرام
+            پیش‌بینی تحلیل‌های تلگرام
           </h3>
           <div className="flex-1 min-h-0 overflow-hidden">
             <TelegramDiscussions prefetchedData={prefetchedTelegram} storyIds={telegramAnalysisIds} locale={locale} />
