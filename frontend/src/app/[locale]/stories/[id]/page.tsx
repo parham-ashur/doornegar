@@ -6,6 +6,7 @@ import CoverageBar from "@/components/common/CoverageBar";
 import PoliticalSpectrum from "@/components/source/PoliticalSpectrum";
 import StatsPanel from "@/components/story/StatsPanel";
 import StoryAnalysisPanel from "@/components/story/StoryAnalysisPanel";
+import DoornamaBriefing from "@/components/story/DoornamaBriefing";
 import StoryTimeline from "@/components/story/StoryTimeline";
 import ArticleFilterList from "@/components/story/ArticleFilterList";
 
@@ -260,6 +261,9 @@ export default async function StoryDetailPage({
               </p>
             </details>
           )}
+          {/* دورنما — at-a-glance prose synthesis. Only renders for top-N
+              trending stories where the backend doornama step has run. */}
+          <DoornamaBriefing briefing={analysis?.briefing_fa} />
           {/* Bias comparison */}
           <StoryAnalysisPanel analysis={analysis} />
 

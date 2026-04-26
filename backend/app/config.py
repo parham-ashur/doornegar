@@ -48,6 +48,12 @@ class Settings(BaseSettings):
     # tiering — together they keep premium-tier spend tight on the hero
     # band while still giving cheaper analysis to the long tail.
     premium_story_top_n: int = 5
+    # Top-N trending stories that get a دورنما briefing (gpt-5-mini prose
+    # synthesis on top of the structured analysis). Independent of
+    # premium_story_top_n so we can broaden the briefing tier without
+    # also broadening the premium-analysis tier.
+    doornama_top_n: int = 20
+    doornama_model: str = "gpt-5-mini"
 
     # NLP
     embedding_model: str = "paraphrase-multilingual-MiniLM-L12-v2"

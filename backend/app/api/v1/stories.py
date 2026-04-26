@@ -212,6 +212,7 @@ async def get_story_analysis(request: Request, story_id: uuid.UUID, db: AsyncSes
         analyst=extra.get("analyst"),
         silence_analysis=extra.get("silence_analysis"),
         coordinated_messaging=extra.get("coordinated_messaging"),
+        briefing_fa=extra.get("briefing_fa"),
     )
 
 
@@ -287,6 +288,7 @@ async def get_story_analyses_batch(
             "analyst": extra.get("analyst"),
             "silence_analysis": extra.get("silence_analysis"),
             "coordinated_messaging": extra.get("coordinated_messaging"),
+            "briefing_fa": extra.get("briefing_fa"),
         }
     return out
 

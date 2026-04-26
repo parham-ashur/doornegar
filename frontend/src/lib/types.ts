@@ -264,6 +264,9 @@ export interface StoryAnalysis {
     similarity: number;
     time_window_hours: number;
   } | null;
+  /** دورنما — flowing-prose narrative synthesis. Generated for top-N
+   *  trending stories only; null on long-tail stories. */
+  briefing_fa?: string | null;
 }
 
 // ─── Telegram analysis ──────────────────────────

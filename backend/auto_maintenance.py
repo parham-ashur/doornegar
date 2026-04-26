@@ -919,6 +919,15 @@ async def step_summarize():
             .limit(settings.premium_story_top_n)
         )
         top_ids = {row[0] for row in top_result.all()}
+        # دورنما tier — broader top-N for prose synthesis on top of the
+        # structured analysis. Independent of premium_story_top_n.
+        doornama_result = await db.execute(
+            select(Story.id)
+            .where(Story.article_count >= 5)
+            .order_by(Story.priority.desc(), Story.trending_score.desc())
+            .limit(settings.doornama_top_n)
+        )
+        doornama_top_ids = {row[0] for row in doornama_result.all()}
 
         # 2. Find stories that need a summary. Two flavors:
         #    (a) summary_fa is NULL — never analyzed
@@ -1269,6 +1278,55 @@ async def step_summarize():
                 # for the volume trigger. Replaces the old simple "any
                 # hash change → rerun" rule.
                 extras["articles_count_at_hash"] = story.article_count or 0
+
+                # دورنما — narrative-synthesis prose for the top N
+                # trending stories. Skip-if-unchanged via briefing_hash
+                # so unchanged top stories don't re-pay the LLM cost
+                # on every pass.
+                if story.id in doornama_top_ids:
+                    from app.services.doornama import (
+                        compute_briefing_hash,
+                        generate_doornama_briefing,
+                    )
+
+                    prior = old_extras if isinstance(old_extras, dict) else {}
+                    new_hash = compute_briefing_hash(
+                        state_summary_fa=extras.get("state_summary_fa"),
+                        diaspora_summary_fa=extras.get("diaspora_summary_fa"),
+                        independent_summary_fa=extras.get("independent_summary_fa"),
+                        bias_explanation_fa=extras.get("bias_explanation_fa"),
+                        silence_analysis=extras.get("silence_analysis"),
+                        narrative_arc=extras.get("narrative_arc"),
+                    )
+                    if new_hash == prior.get("briefing_hash") and prior.get("briefing_fa"):
+                        # Inputs unchanged — carry the prior briefing forward.
+                        extras["briefing_fa"] = prior["briefing_fa"]
+                        extras["briefing_hash"] = prior["briefing_hash"]
+                    else:
+                        anchor_briefing = None
+                        if isinstance(story.summary_anchor, dict):
+                            anchor_briefing = story.summary_anchor.get("briefing_fa")
+                        await _keepalive(db)
+                        result = await generate_doornama_briefing(
+                            story_id=str(story.id),
+                            title_fa=story.title_fa,
+                            state_summary_fa=extras.get("state_summary_fa"),
+                            diaspora_summary_fa=extras.get("diaspora_summary_fa"),
+                            independent_summary_fa=extras.get("independent_summary_fa"),
+                            bias_explanation_fa=extras.get("bias_explanation_fa"),
+                            silence_analysis=extras.get("silence_analysis"),
+                            narrative_arc=extras.get("narrative_arc"),
+                            summary_anchor_briefing_fa=anchor_briefing,
+                        )
+                        if result:
+                            extras["briefing_fa"] = result["briefing_fa"]
+                            extras["briefing_hash"] = result["briefing_hash"]
+                        elif prior.get("briefing_fa"):
+                            # On failure, leave any prior briefing in
+                            # place — better stale than empty.
+                            extras["briefing_fa"] = prior["briefing_fa"]
+                            extras["briefing_hash"] = prior.get("briefing_hash")
+
                 story.summary_en = _json.dumps(extras, ensure_ascii=False)
                 story.llm_failed_at = None  # clear any previous failure
                 await db.commit()
