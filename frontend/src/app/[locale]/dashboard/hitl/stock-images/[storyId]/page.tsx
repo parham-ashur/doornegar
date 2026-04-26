@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { adminHeaders, hasAdminToken } from "../../_auth";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+type Source = "article" | "wikimedia" | "unsplash";
 
 interface Photo {
   id: string;
@@ -14,9 +16,15 @@ interface Photo {
   alt: string | null;
   author_name: string | null;
   author_url: string | null;
-  unsplash_url: string | null;
-  width: number;
-  height: number;
+  // Source-specific extras (any may be undefined depending on the tab)
+  unsplash_url?: string | null;
+  wikimedia_url?: string | null;
+  license?: string | null;
+  article_title_fa?: string | null;
+  source_name_fa?: string | null;
+  published_at?: string | null;
+  width?: number;
+  height?: number;
 }
 
 interface StoryContext {
@@ -30,9 +38,9 @@ interface StoryContext {
 }
 
 // Trim title down to search-friendly English keywords: drop leading numbers
-// (dates, counts that Unsplash ignores), collapse whitespace, cap at 7 words
-// so we don't over-constrain the query. Title_en from Niloofar tends to be
-// an event sentence — the first clause is the richest search signal.
+// (dates, counts that picker APIs ignore), collapse whitespace, cap at 7
+// words so we don't over-constrain the query. Title_en from Niloofar tends
+// to be an event sentence — the first clause is the richest search signal.
 function toSearchQuery(titleEn: string): string {
   if (!titleEn) return "";
   const firstClause = titleEn.split(/[;:]/)[0] || titleEn;
@@ -48,6 +56,7 @@ export default function StockImagesPage() {
   const storyId = params.storyId;
   const [authed, setAuthed] = useState(false);
   const [token, setToken] = useState("");
+  const [source, setSource] = useState<Source>("article");
   const [query, setQuery] = useState("");
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [loading, setLoading] = useState(false);
@@ -55,13 +64,12 @@ export default function StockImagesPage() {
   const [msg, setMsg] = useState("");
   const [story, setStory] = useState<StoryContext | null>(null);
   const [storyLoading, setStoryLoading] = useState(true);
+  const [articleImagesLoaded, setArticleImagesLoaded] = useState(false);
 
   useEffect(() => {
     setAuthed(hasAdminToken());
   }, []);
 
-  // Pull story context so the curator sees what they're choosing an
-  // image FOR without tabbing back to the story page every time.
   useEffect(() => {
     if (!storyId) return;
     let cancelled = false;
@@ -82,9 +90,6 @@ export default function StockImagesPage() {
           first_published_at: d.first_published_at || null,
         };
         setStory(ctx);
-        // Prefill the search bar with English keywords extracted from the
-        // story title so the first search is one-click instead of a manual
-        // retype. Curator can edit before hitting Search.
         if (!query.trim()) {
           setQuery(toSearchQuery(ctx.title_en));
         }
@@ -99,15 +104,54 @@ export default function StockImagesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storyId]);
 
-  const search = async () => {
-    if (!query.trim()) return;
+  const loadArticleImages = async () => {
+    if (!authed || !storyId) return;
     setLoading(true);
     setPhotos([]);
     try {
       const res = await fetch(
-        `${API}/api/v1/admin/hitl/unsplash-search?q=${encodeURIComponent(query)}&per_page=9`,
+        `${API}/api/v1/admin/hitl/stories/${storyId}/article-images`,
         { headers: adminHeaders() }
       );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setMsg(err.detail || "Could not load article images");
+        return;
+      }
+      const data = await res.json();
+      setPhotos(data.results || []);
+      setArticleImagesLoaded(true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Auto-load article-images tab on first auth so the curator immediately
+  // sees the existing photos without an extra click. Other tabs still
+  // require a search.
+  useEffect(() => {
+    if (authed && source === "article" && !articleImagesLoaded) {
+      void loadArticleImages();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authed, source]);
+
+  const search = async () => {
+    if (source === "article") {
+      void loadArticleImages();
+      return;
+    }
+    if (!query.trim()) return;
+    setLoading(true);
+    setPhotos([]);
+    try {
+      const path =
+        source === "wikimedia"
+          ? `wikimedia-search?q=${encodeURIComponent(query)}&per_page=12`
+          : `unsplash-search?q=${encodeURIComponent(query)}&per_page=9`;
+      const res = await fetch(`${API}/api/v1/admin/hitl/${path}`, {
+        headers: adminHeaders(),
+      });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         setMsg(err.detail || "Search error");
@@ -142,6 +186,16 @@ export default function StockImagesPage() {
     }
   };
 
+  const tabs = useMemo(
+    () =>
+      [
+        { id: "article" as const, label: "Article images", hint: "From this story's articles" },
+        { id: "wikimedia" as const, label: "Wikimedia", hint: "Best for named people" },
+        { id: "unsplash" as const, label: "Unsplash", hint: "Generic stock" },
+      ],
+    []
+  );
+
   if (!authed) {
     return (
       <div>
@@ -170,6 +224,8 @@ export default function StockImagesPage() {
     );
   }
 
+  const showSearchBar = source !== "article";
+
   return (
     <div>
       <a
@@ -181,12 +237,9 @@ export default function StockImagesPage() {
         ← Open story page
       </a>
       <h1 className="text-xl font-black text-slate-900 dark:text-white mb-4">
-        Pick image from Unsplash
+        Pick image
       </h1>
 
-      {/* Story context card — gives the curator the title, English
-          translation, summary, and basic stats in one panel so they
-          don't have to flip between tabs. */}
       {storyLoading && (
         <div className="mb-5 text-[12px] text-slate-400">Loading story context…</div>
       )}
@@ -216,31 +269,67 @@ export default function StockImagesPage() {
         </div>
       )}
 
-      <p className="text-[13px] text-slate-500 mb-3 leading-6">
-        Search bar is pre-filled with English keywords from the story title.
-        Edit before searching if you want. Unsplash's Farsi query coverage is
-        weak, so English works better.
-      </p>
-
-      <div className="flex gap-2 mb-6">
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && search()}
-          placeholder="iran protest"
-          dir="ltr"
-          className="flex-1 px-3 py-2 text-[13px] border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
-        />
-        <button
-          type="button"
-          onClick={search}
-          disabled={loading || !query.trim()}
-          className="px-5 py-2 text-[13px] bg-blue-600 text-white disabled:opacity-50"
-        >
-          {loading ? "..." : "Search"}
-        </button>
+      <div className="flex gap-1 mb-5 border-b border-slate-200 dark:border-slate-800">
+        {tabs.map((t) => {
+          const active = source === t.id;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => {
+                setSource(t.id);
+                setMsg("");
+                setPhotos([]);
+                if (t.id === "article") void loadArticleImages();
+              }}
+              className={
+                "px-4 py-2 text-[13px] -mb-px border-b-2 " +
+                (active
+                  ? "border-blue-600 text-slate-900 dark:text-white font-semibold"
+                  : "border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300")
+              }
+            >
+              {t.label}
+              <span className="ml-2 text-[11px] text-slate-400">{t.hint}</span>
+            </button>
+          );
+        })}
       </div>
+
+      {showSearchBar ? (
+        <>
+          <p className="text-[13px] text-slate-500 mb-3 leading-6">
+            {source === "wikimedia"
+              ? "Wikimedia Commons hosts free-to-use photos and works best for named people (politicians, officials) and well-known places. License is shown on each result."
+              : "Search bar is pre-filled with English keywords from the story title. Edit before searching if you want. Unsplash is generic stock — prefer the Article or Wikimedia tabs for news subjects."}
+          </p>
+          <div className="flex gap-2 mb-6">
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && search()}
+              placeholder={source === "wikimedia" ? "JD Vance" : "iran protest"}
+              dir="ltr"
+              className="flex-1 px-3 py-2 text-[13px] border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+            />
+            <button
+              type="button"
+              onClick={search}
+              disabled={loading || !query.trim()}
+              className="px-5 py-2 text-[13px] bg-blue-600 text-white disabled:opacity-50"
+            >
+              {loading ? "..." : "Search"}
+            </button>
+          </div>
+        </>
+      ) : (
+        <p className="text-[13px] text-slate-500 mb-5 leading-6">
+          Photos already collected from articles in this story. Picking one
+          re-uploads it to R2 and pins it as the cover — independent of the
+          original article so the cover survives if that article is removed.
+        </p>
+      )}
 
       {msg && (
         <p
@@ -251,14 +340,20 @@ export default function StockImagesPage() {
         </p>
       )}
 
+      {!loading && photos.length === 0 && source === "article" && articleImagesLoaded && (
+        <p className="text-[13px] text-slate-500">
+          No usable article images for this story. Try the Wikimedia or Unsplash
+          tabs.
+        </p>
+      )}
+
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         {photos.map((p) => (
           <div
             key={p.id}
             className="border border-slate-200 dark:border-slate-800 overflow-hidden"
           >
-            {/* Using plain img on purpose — we're displaying Unsplash preview
-                thumbs, which we don't want run through Next's optimizer. */}
+            {/* Plain img on purpose — picker thumbs shouldn't go through Next's optimizer. */}
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={p.regular_url}
@@ -266,17 +361,26 @@ export default function StockImagesPage() {
               className="w-full h-40 object-cover"
             />
             <div className="p-2">
-              <p className="text-[12px] text-slate-500 truncate" dir="ltr">
-                by{" "}
-                <a
-                  href={p.author_url || "#"}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-blue-500"
-                >
-                  {p.author_name}
-                </a>
-              </p>
+              {source === "article" ? (
+                <p className="text-[12px] text-slate-500 truncate" title={p.article_title_fa || ""}>
+                  {p.article_title_fa || "(untitled article)"}
+                </p>
+              ) : (
+                <p className="text-[12px] text-slate-500 truncate" dir="ltr">
+                  by{" "}
+                  <a
+                    href={p.author_url || "#"}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-blue-500"
+                  >
+                    {p.author_name || "unknown"}
+                  </a>
+                  {p.license && (
+                    <span className="ml-1 text-slate-400">· {p.license}</span>
+                  )}
+                </p>
+              )}
               <button
                 type="button"
                 onClick={() => pin(p)}

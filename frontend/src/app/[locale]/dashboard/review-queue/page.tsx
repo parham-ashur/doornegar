@@ -58,6 +58,8 @@ export default function ReviewQueuePage() {
   const [minTier, setMinTier] = useState<1 | 2 | 3>(1);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [manualInput, setManualInput] = useState("");
+  const [manualBusy, setManualBusy] = useState(false);
 
   useEffect(() => {
     if (!hasAdminToken()) {
@@ -110,6 +112,45 @@ export default function ReviewQueuePage() {
     }
   };
 
+  // Accept either a bare UUID or any URL containing one — pasting the
+  // /fa/stories/<id> URL from the address bar is the common case.
+  const UUID_RE =
+    /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+
+  const manualAction = async (action: "freeze" | "unfreeze") => {
+    const match = manualInput.trim().match(UUID_RE);
+    if (!match) {
+      setMsg("Could not find a story UUID in that input.");
+      return;
+    }
+    const storyId = match[0];
+    setManualBusy(true);
+    setMsg(null);
+    const res = await fetch(
+      `${API}/api/v1/admin/hitl/stories/${storyId}/${action}`,
+      { method: "POST", headers: adminHeaders() }
+    );
+    setManualBusy(false);
+    if (res.ok) {
+      if (action === "freeze") {
+        setQueue((q) =>
+          q ? { ...q, items: q.items.filter((i) => i.story_id !== storyId) } : q
+        );
+        setMsg(
+          `Frozen ${storyId.slice(0, 8)} · matcher will skip it from now on.`
+        );
+      } else {
+        setMsg(
+          `Unfrozen ${storyId.slice(0, 8)} · matcher will re-evaluate next pass.`
+        );
+      }
+      setManualInput("");
+    } else {
+      const err = await res.json().catch(() => ({}));
+      setMsg(err.detail || `${action} failed.`);
+    }
+  };
+
   if (!hasAdminToken()) {
     return (
       <div>
@@ -145,6 +186,48 @@ export default function ReviewQueuePage() {
         single-source. Image gaps listed separately so the picker doesn't
         conflict with the freeze workflow.
       </p>
+
+      {/* Manual freeze/unfreeze — for stories you already know are over
+          and don't want to wait for the guardrail to flag. Accepts the
+          story page URL or a bare UUID. */}
+      <div className="mb-4 border border-slate-200 dark:border-slate-800 p-3">
+        <div className="text-[12px] font-black text-slate-700 dark:text-slate-300 mb-1">
+          Freeze a specific story
+        </div>
+        <p className="text-[11px] text-slate-500 mb-2">
+          Paste the story page URL or its UUID. Freezing tells the matcher to
+          stop attaching new articles. Unfreeze re-opens it.
+        </p>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={manualInput}
+            onChange={(e) => setManualInput(e.target.value)}
+            onKeyDown={(e) =>
+              e.key === "Enter" && !manualBusy && manualAction("freeze")
+            }
+            placeholder="https://doornegar.org/fa/stories/<uuid>  or  <uuid>"
+            dir="ltr"
+            className="flex-1 px-2 py-1 text-[12px] border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+          />
+          <button
+            type="button"
+            onClick={() => manualAction("freeze")}
+            disabled={manualBusy || !manualInput.trim()}
+            className="text-[12px] px-3 py-1 bg-slate-900 dark:bg-white text-white dark:text-slate-900 disabled:opacity-40"
+          >
+            {manualBusy ? "…" : "Freeze"}
+          </button>
+          <button
+            type="button"
+            onClick={() => manualAction("unfreeze")}
+            disabled={manualBusy || !manualInput.trim()}
+            className="text-[12px] px-3 py-1 border border-slate-300 dark:border-slate-700 disabled:opacity-40"
+          >
+            Unfreeze
+          </button>
+        </div>
+      </div>
 
       {/* Tier count pills + filter */}
       <div className="flex flex-wrap items-center gap-2 mb-4">

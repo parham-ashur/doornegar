@@ -683,6 +683,135 @@ async def pin_image_to_story(
     return {"status": "ok", "r2_url": r2_url}
 
 
+def _is_bad_image_url(url: str | None) -> bool:
+    if not url:
+        return True
+    u = url.lower()
+    return (
+        "favicon" in u
+        or "/icon" in u
+        or "logo" in u
+        or "sprite" in u
+        or u.endswith(".svg")
+        or "1x1" in u
+        or "placeholder" in u
+    )
+
+
+@router.get("/stories/{story_id}/article-images")
+async def story_article_images(
+    story_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Existing usable images from the story's own articles. First place
+    the curator should look — if a clustered article already has a clean
+    photo, the cover should match what readers see in the article list
+    rather than a generic stock photo."""
+    result = await db.execute(
+        select(Story)
+        .options(selectinload(Story.articles).selectinload(Article.source))
+        .where(Story.id == story_id)
+    )
+    story = result.scalar_one_or_none()
+    if not story:
+        raise HTTPException(status_code=404, detail="Story not found")
+
+    seen: set[str] = set()
+    results = []
+    for a in (story.articles or []):
+        if _is_bad_image_url(a.image_url):
+            continue
+        if a.image_url in seen:
+            continue
+        seen.add(a.image_url)
+        src = a.source
+        results.append(
+            {
+                "id": str(a.id),
+                "thumb_url": a.image_url,
+                "regular_url": a.image_url,
+                "raw_url": a.image_url,
+                "alt": a.title_fa or a.title_en or "",
+                "author_name": (src.name_en or src.name_fa) if src else None,
+                "author_url": a.url,
+                "article_title_fa": a.title_fa,
+                "article_url": a.url,
+                "source_name_fa": (src.name_fa if src else None),
+                "published_at": a.published_at.isoformat() if a.published_at else None,
+            }
+        )
+    return {"results": results, "count": len(results)}
+
+
+@router.get("/wikimedia-search")
+async def wikimedia_search(
+    q: str = Query(..., min_length=2, max_length=200),
+    per_page: int = Query(default=12, ge=1, le=24),
+):
+    """Search Wikimedia Commons for candidate images. No API key needed —
+    Commons only hosts free-to-use media. Best option for named public
+    figures (politicians, officials) where Unsplash returns generic
+    stock photos that don't match the subject."""
+    import re as _re
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(
+                "https://commons.wikimedia.org/w/api.php",
+                params={
+                    "action": "query",
+                    "generator": "search",
+                    "gsrsearch": f"{q} filetype:bitmap",
+                    "gsrnamespace": 6,
+                    "gsrlimit": per_page,
+                    "prop": "imageinfo",
+                    "iiprop": "url|extmetadata|size|user",
+                    "iiurlwidth": 800,
+                    "format": "json",
+                    "formatversion": 2,
+                    "origin": "*",
+                },
+                headers={"User-Agent": "Doornegar/1.0 (https://doornegar.org)"},
+            )
+            r.raise_for_status()
+            data = r.json()
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"Wikimedia error: {e}")
+
+    pages = (data.get("query") or {}).get("pages", []) or []
+    # Commons returns pages in arbitrary order; sort by search index when present
+    pages.sort(key=lambda p: (p.get("index") or 9999))
+
+    results = []
+    for page in pages:
+        info_list = page.get("imageinfo") or []
+        if not info_list:
+            continue
+        info = info_list[0]
+        meta = info.get("extmetadata") or {}
+        artist_html = (meta.get("Artist") or {}).get("value") or ""
+        author_name = _re.sub(r"<[^>]+>", "", artist_html).strip() or info.get("user") or None
+        license_short = (meta.get("LicenseShortName") or {}).get("value") or None
+        title = page.get("title") or ""
+        alt = title.replace("File:", "").rsplit(".", 1)[0]
+        results.append(
+            {
+                "id": str(page.get("pageid")),
+                "thumb_url": info.get("thumburl") or info.get("url"),
+                "regular_url": info.get("thumburl") or info.get("url"),
+                "raw_url": info.get("url"),
+                "alt": alt,
+                "author_name": author_name,
+                "author_url": info.get("descriptionurl"),
+                "wikimedia_url": info.get("descriptionurl"),
+                "license": license_short,
+                "width": info.get("width"),
+                "height": info.get("height"),
+            }
+        )
+    return {"results": results}
+
+
 # ─── 6. Story guardrail actions: freeze + split ──────────────
 
 class FreezeResponse(BaseModel):
