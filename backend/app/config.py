@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     # synthesis on top of the structured analysis). Independent of
     # premium_story_top_n so we can broaden the briefing tier without
     # also broadening the premium-analysis tier.
-    doornama_top_n: int = 20
+    doornama_top_n: int = 10
     doornama_model: str = "gpt-5-mini"
 
     # NLP
