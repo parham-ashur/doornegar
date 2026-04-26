@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { unstable_noStore as noStore } from "next/cache";
 import { Fragment, type ReactNode } from "react";
 import SafeImage from "@/components/common/SafeImage";
 import SafeImageStatic from "@/components/common/SafeImageStatic";
@@ -335,7 +336,16 @@ export default async function HomeBody({
     await new Promise((r) => setTimeout(r, 1500 * attempt));
     _stories = await fetchAPI<StoryBrief[]>("/api/v1/stories/trending?limit=50");
   }
-  if (_stories === null) _stories = [];
+  // If trending is genuinely null after retries, the API is down. Opt
+  // OUT of the ISR cache for this response so the empty state isn't
+  // served for the next 300s — the next request triggers a fresh SSR
+  // attempt instead. We still render the empty state to keep the
+  // initial `next build` prerender working when no data is available.
+  const apiIsDown = _stories === null;
+  if (apiIsDown) {
+    noStore();
+    _stories = [];
+  }
 
   // Skip stories that only have a source-logo fallback as their cover.
   // Per Parham's rule, a story without a real image should never surface
@@ -346,10 +356,17 @@ export default async function HomeBody({
   // undefined as "assume true" so a rollout of the backend flag doesn't
   // blank the homepage on stale caches.
   const hasImage = (s: StoryBrief) => s.has_real_image !== false;
-  let stories = _stories.filter(hasImage);
+  let stories = (_stories || []).filter(hasImage);
   let blindspots = _blindspots.filter(hasImage);
 
   if (stories.length === 0) {
+    // Belt-and-suspenders: if we got here with stories=[] after the
+    // API succeeded with an actually-empty result (not the down-API
+    // path above), still opt out of caching. An empty homepage cached
+    // for 5 min is worse than re-fetching every request — the page is
+    // unusable either way and we want the moment data appears to
+    // surface as soon as possible.
+    noStore();
     return (
       <div dir="rtl" className="mx-auto max-w-7xl px-4 py-24 text-center">
         <h2 className="text-xl font-bold text-slate-900 dark:text-white">هنوز موضوعی ایجاد نشده</h2>
