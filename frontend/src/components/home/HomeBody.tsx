@@ -7,6 +7,7 @@ import WelcomeModal from "@/components/common/WelcomeModal";
 import type { StoryBrief, TelegramAnalysis } from "@/lib/types";
 import TelegramDiscussions from "@/components/home/TelegramDiscussions";
 import WeeklyDigest from "@/components/home/WeeklyDigest";
+import RotatingWord from "@/components/home/RotatingWord";
 import { StoryFeedback } from "@/components/home/FeedbackOverlay";
 import { formatRelativeTime, splitBiasPoints, toFa } from "@/lib/utils";
 import {
@@ -630,8 +631,11 @@ export default async function HomeBody({
   type BattleItem = {
     storyId: string;
     title: string;
-    conservative: string;
-    opposition: string;
+    // Lists of distinct loaded words, sorted shortest-first. RotatingWord
+    // cycles through them with a fade animation; if a story only yielded
+    // one word the component renders it static (no flicker).
+    conservativeWords: string[];
+    oppositionWords: string[];
     stateSummary: string;
     diasporaSummary: string;
   };
@@ -661,11 +665,21 @@ export default async function HomeBody({
     return true;
   };
   const battleItems: BattleItem[] = [];
-  const pickShort = (ws: string[]): string => {
-    const cleaned = ws.map(w => w.replace(/[«»]/g, "").trim()).filter(w => w.length >= 4);
-    if (!cleaned.length) return ws[0]?.replace(/[«»]/g, "") || "";
-    cleaned.sort((a, b) => a.length - b.length);
-    return cleaned[0];
+  const buildWordList = (ws: string[]): string[] => {
+    // Strip «», dedupe, drop too-short, sort shortest-first so the first
+    // paint shows the most compact word; cap at 6 so the rotation cycle
+    // doesn't stretch into minutes on noisy stories.
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const raw of ws) {
+      const w = raw.replace(/[«»]/g, "").trim();
+      if (w.length < 3) continue;
+      if (seen.has(w)) continue;
+      seen.add(w);
+      out.push(w);
+    }
+    out.sort((a, b) => a.length - b.length);
+    return out.slice(0, 6);
   };
   // Scan the top 12 disputed candidates so we can reliably fill the
   // 4-story تقابل روایت‌ها box — previously 2 slots here + 2 in the
@@ -684,28 +698,40 @@ export default async function HomeBody({
     const diasporaSummary = analysis.diaspora_summary_fa || "";
     const biasText = analysis.bias_explanation_fa;
     if (words?.conservative?.length && words?.opposition?.length) {
-      battleItems.push({
-        storyId: story.id,
-        title: story.title_fa || "",
-        conservative: `«${pickShort(words.conservative)}»`,
-        opposition: `«${pickShort(words.opposition)}»`,
-        stateSummary,
-        diasporaSummary,
-      });
-      continue;
-    }
-    if (biasText) {
-      const quotes = biasText.match(/«[^»]+»/g);
-      if (quotes && quotes.length >= 2) {
+      const cw = buildWordList(words.conservative);
+      const ow = buildWordList(words.opposition);
+      if (cw.length && ow.length) {
         battleItems.push({
           storyId: story.id,
           title: story.title_fa || "",
-          conservative: quotes[0],
-          opposition: quotes[1],
+          conservativeWords: cw,
+          oppositionWords: ow,
           stateSummary,
           diasporaSummary,
         });
         continue;
+      }
+    }
+    if (biasText) {
+      const quotes = biasText.match(/«[^»]+»/g);
+      if (quotes && quotes.length >= 2) {
+        // Bias-text fallback: split the matched quotes into halves so each
+        // side still gets a list to rotate through (instead of a single
+        // word). Shortest-first ordering happens inside buildWordList.
+        const half = Math.floor(quotes.length / 2);
+        const cw = buildWordList(quotes.slice(0, Math.max(half, 1)));
+        const ow = buildWordList(quotes.slice(Math.max(half, 1)));
+        if (cw.length && ow.length) {
+          battleItems.push({
+            storyId: story.id,
+            title: story.title_fa || "",
+            conservativeWords: cw,
+            oppositionWords: ow,
+            stateSummary,
+            diasporaSummary,
+          });
+          continue;
+        }
       }
     }
   }
@@ -1062,11 +1088,15 @@ export default async function HomeBody({
                             truncates anything that doesn't fit. */}
                         <div className="flex gap-0 text-center">
                           <div className="flex-1 py-3 bg-[#1e3a5f]/10 dark:bg-blue-900/20 border-t-[3px] border-[#1e3a5f]">
-                            <p className="text-[15px] font-black text-[#1e3a5f] dark:text-blue-300 line-clamp-1 px-2">{item.conservative}</p>
+                            <p className="text-[15px] font-black text-[#1e3a5f] dark:text-blue-300 line-clamp-1 px-2">
+                              <RotatingWord words={item.conservativeWords} delayMs={idx * 600} />
+                            </p>
                             <p className="text-[15px] text-[#1e3a5f] dark:text-blue-300 font-medium mt-1">درون‌مرزی</p>
                           </div>
                           <div className="flex-1 py-3 bg-[#ea580c]/10 dark:bg-orange-900/20 border-t-[3px] border-[#ea580c]">
-                            <p className="text-[15px] font-black text-[#ea580c] dark:text-orange-400 line-clamp-1 px-2">{item.opposition}</p>
+                            <p className="text-[15px] font-black text-[#ea580c] dark:text-orange-400 line-clamp-1 px-2">
+                              <RotatingWord words={item.oppositionWords} delayMs={idx * 600} />
+                            </p>
                             <p className="text-[15px] text-[#ea580c] dark:text-orange-400 font-medium mt-1">برون‌مرزی</p>
                           </div>
                         </div>
@@ -1251,8 +1281,8 @@ function MobileHome({
   battleItems: Array<{
     storyId: string;
     title: string;
-    conservative: string;
-    opposition: string;
+    conservativeWords: string[];
+    oppositionWords: string[];
     stateSummary: string;
     diasporaSummary: string;
   }>;
@@ -1505,11 +1535,15 @@ function MobileHome({
                   </h4>
                   <div className="flex gap-0 text-center">
                     <div className="flex-1 py-2 bg-[#1e3a5f]/10 dark:bg-blue-900/20 border-t-[3px] border-[#1e3a5f]">
-                      <p className="text-[15px] font-black text-[#1e3a5f] dark:text-blue-300 line-clamp-1 px-2">{item.conservative}</p>
+                      <p className="text-[15px] font-black text-[#1e3a5f] dark:text-blue-300 line-clamp-1 px-2">
+                        <RotatingWord words={item.conservativeWords} delayMs={idx * 600} />
+                      </p>
                       <p className="text-[12px] text-[#1e3a5f] dark:text-blue-300 font-medium mt-1">درون‌مرزی</p>
                     </div>
                     <div className="flex-1 py-2 bg-[#ea580c]/10 dark:bg-orange-900/20 border-t-[3px] border-[#ea580c]">
-                      <p className="text-[15px] font-black text-[#ea580c] dark:text-orange-400 line-clamp-1 px-2">{item.opposition}</p>
+                      <p className="text-[15px] font-black text-[#ea580c] dark:text-orange-400 line-clamp-1 px-2">
+                        <RotatingWord words={item.oppositionWords} delayMs={idx * 600} />
+                      </p>
                       <p className="text-[12px] text-[#ea580c] dark:text-orange-400 font-medium mt-1">برون‌مرزی</p>
                     </div>
                   </div>
