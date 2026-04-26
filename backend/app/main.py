@@ -113,6 +113,16 @@ async def lifespan(app: FastAPI):
                 # the LLM tax on every pipeline run.
                 "ALTER TABLE articles ADD COLUMN IF NOT EXISTS cluster_attempts INTEGER NOT NULL DEFAULT 0",
                 "CREATE INDEX IF NOT EXISTS idx_articles_unclustered_retry ON articles(ingested_at) WHERE story_id IS NULL AND cluster_attempts < 3",
+                # Content-type filter (migration u6p7q8r9s0t1) — rss_category
+                # captured at ingest, content_type set by classifier step,
+                # Source.content_filters whitelists allowed labels per outlet.
+                "ALTER TABLE articles ADD COLUMN IF NOT EXISTS rss_category TEXT",
+                "ALTER TABLE articles ADD COLUMN IF NOT EXISTS content_type VARCHAR(20)",
+                "ALTER TABLE articles ADD COLUMN IF NOT EXISTS content_type_confidence DOUBLE PRECISION",
+                "CREATE INDEX IF NOT EXISTS idx_articles_content_type ON articles(content_type) WHERE content_type IS NOT NULL",
+                "ALTER TABLE sources ADD COLUMN IF NOT EXISTS content_filters JSONB",
+                "UPDATE sources SET content_filters = '{\"allowed\": [\"news\"]}'::jsonb WHERE content_filters IS NULL",
+                "UPDATE articles SET content_type = 'news', content_type_confidence = 1.0 WHERE content_type IS NULL",
                 # LLM usage / cost ledger — every OpenAI call logged here.
                 """CREATE TABLE IF NOT EXISTS llm_usage_logs (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

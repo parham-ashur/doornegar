@@ -38,6 +38,16 @@ async def process():
         print(f"NLP processing stats: {stats}")
 
 
+async def classify_content():
+    """Label unclassified articles by content type (news / opinion / etc.)."""
+    from app.database import async_session
+    from app.services.content_type import classify_unclassified_articles
+
+    async with async_session() as db:
+        stats = await classify_unclassified_articles(db, batch_size=400)
+        print(f"Content-type classifier stats: {stats}")
+
+
 async def cluster():
     """Run story clustering."""
     from app.database import async_session
@@ -84,23 +94,28 @@ async def pipeline():
     from app.services.nlp_pipeline import process_unprocessed_articles
 
     async with async_session() as db:
-        print("Step 1/6: Ingesting RSS feeds...")
+        print("Step 1/7: Ingesting RSS feeds...")
         stats = await ingest_all_sources(db)
         print(f"  → {stats}")
 
-        print("Step 2/6: NLP processing...")
+        print("Step 2/7: Classifying content type...")
+        from app.services.content_type import classify_unclassified_articles
+        stats = await classify_unclassified_articles(db, batch_size=400)
+        print(f"  → {stats}")
+
+        print("Step 3/7: NLP processing...")
         stats = await process_unprocessed_articles(db)
         print(f"  → {stats}")
 
-        print("Step 3/6: Clustering stories...")
+        print("Step 4/7: Clustering stories...")
         stats = await cluster_articles(db)
         print(f"  → {stats}")
 
-        print("Step 4/6: Bias scoring...")
+        print("Step 5/7: Bias scoring...")
         stats = await score_unscored_articles(db)
         print(f"  → {stats}")
 
-        print("Step 5/6: Telegram ingestion...")
+        print("Step 6/7: Telegram ingestion...")
         try:
             from app.services.telegram_service import ingest_all_channels
             stats = await ingest_all_channels(db)
@@ -108,7 +123,7 @@ async def pipeline():
         except Exception as e:
             print(f"  → Skipped (Telegram not configured): {e}")
 
-        print("Step 6/6: Converting Telegram posts to articles...")
+        print("Step 7/7: Converting Telegram posts to articles...")
         try:
             from app.services.telegram_service import convert_telegram_posts_to_articles
             stats = await convert_telegram_posts_to_articles(db)
@@ -539,6 +554,7 @@ if __name__ == "__main__":
         print("  seed      - Seed database with news sources & Telegram channels")
         print("  ingest    - Fetch articles from RSS feeds")
         print("  process   - Run NLP pipeline (embeddings, keywords, translation)")
+        print("  classify-content - Label unclassified articles by content type")
         print("  cluster   - Group articles into stories")
         print("  score     - Run LLM bias scoring")
         print("  telegram  - Fetch posts from Telegram channels")
@@ -552,6 +568,7 @@ if __name__ == "__main__":
         "seed": seed,
         "ingest": ingest,
         "process": process,
+        "classify-content": classify_content,
         "cluster": cluster,
         "score": score,
         "telegram": telegram,

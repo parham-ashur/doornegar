@@ -32,6 +32,14 @@ class Article(Base):
     # Classification
     language: Mapped[str] = mapped_column(String(5), default="fa")
     categories: Mapped[dict] = mapped_column(JSONB, default=list)
+    # Raw category/section captured from RSS feedparser entry. Used as a
+    # weak signal for content-type classification.
+    rss_category: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Content-type classifier verdict — gates downstream NLP. One of:
+    # news, opinion, discussion, aggregation, other, unclassified.
+    # Only labels in Source.content_filters['allowed'] reach NLP.
+    content_type: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
+    content_type_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     # NLP outputs
     # embedding stored as JSON array for MVP (pgvector not required)

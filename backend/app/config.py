@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     story_analysis_model: str = "gpt-4o-mini"       # baseline (non-trending)
     story_analysis_premium_model: str = "gpt-5-mini"  # premium (top-N)
     translation_model: str = "gpt-4.1-nano"         # economy
+    content_type_model: str = "gpt-4.1-nano"        # economy — drop-noise classifier
     # Only the top-N trending stories get gpt-5-mini for story analysis;
     # the rest use gpt-4o-mini. Kept at 5 to mirror the telegram Pass 2
     # tiering — together they keep premium-tier spend tight on the hero

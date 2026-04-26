@@ -200,6 +200,7 @@ const QUICK_LINKS: HITLLink[] = [
   { key: "d", label: "Main dashboard", href: "/fa/dashboard", icon: "📊" },
   { key: "$", label: "Cost", href: "/fa/dashboard/cost", icon: "💵" },
   { key: "x", label: "Actions", href: "/fa/dashboard/actions", icon: "⚙" },
+  { key: "f", label: "Content filter", href: "/fa/dashboard/content-filter", icon: "🧹" },
   { key: "r", label: "Rate stories", href: "/fa/rate", icon: "⭐" },
 ];
 

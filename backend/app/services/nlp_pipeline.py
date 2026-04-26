@@ -16,12 +16,13 @@ from datetime import datetime, timezone
 
 import httpx
 from langdetect import detect
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from trafilatura import extract
 
 from app.config import settings
 from app.models.article import Article
+from app.models.source import Source
 from app.nlp.embeddings import generate_embeddings_batch
 from app.nlp.persian import extract_keywords, extract_text_for_embedding, normalize
 from app.services.translation import translate_batch_fa_to_en, translate_en_to_fa
@@ -34,9 +35,18 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
 
     Returns stats: {processed, failed, skipped}.
     """
+    # Gate: only articles whose content_type is in the source's
+    # allowed whitelist reach NLP. Unclassified rows (content_type
+    # IS NULL) wait for the next classifier pass; non-news labels
+    # never reach the embedder, saving the bulk of the work.
     result = await db.execute(
         select(Article)
-        .where(Article.processed_at.is_(None))
+        .join(Source, Source.id == Article.source_id)
+        .where(
+            Article.processed_at.is_(None),
+            Article.content_type.isnot(None),
+            text("(sources.content_filters -> 'allowed') @> to_jsonb(articles.content_type)"),
+        )
         .order_by(Article.ingested_at.desc())
         .limit(batch_size)
     )

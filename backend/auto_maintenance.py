@@ -46,6 +46,7 @@ STEP_TIMEOUTS_SEC = {
     "ingest_rss": 900,             # RSS only — hourly mode, stricter budget
     "prune_noise": 180,            # single UPDATE/DELETE batch, no LLM
     "recount": 60,                 # two UPDATE…FROM (GROUP BY) queries, no LLM
+    "classify_content_type": 600,  # heuristic + small LLM batches, capped per run
     "detect_hourly_updates": 120,  # pure SQL aggregate, no LLM
     "audit_clusters": 300,         # sample + cosine, no LLM
     "process": 1800,               # embeddings + translation over many articles
@@ -482,6 +483,22 @@ async def step_prune_noise():
         f"tg-articles {stats['articles_deleted']}/{stats['articles_checked']}, "
         f"rss-short {stats.get('rss_short_deleted', 0)}/{stats.get('rss_short_checked', 0)}"
     )
+    return stats
+
+
+async def step_classify_content_type():
+    """Label every newly-ingested article as news / opinion / discussion /
+    aggregation / other before it reaches NLP. Only labels in each
+    source's allowed-list (default ``["news"]``) get processed
+    downstream — the rest of the row is preserved for audit.
+    """
+    from app.database import async_session
+    from app.services.content_type import classify_unclassified_articles
+
+    async with async_session() as db:
+        stats = await classify_unclassified_articles(db, batch_size=400)
+
+    logger.info(f"Content-type classifier: {stats}")
     return stats
 
 
@@ -5861,6 +5878,7 @@ FULL_PIPELINE = [
     ("ingest", "Ingest RSS + Telegram (may take 10-20 min)", "step_ingest"),
     ("prune_noise", "Drop too-short Telegram posts/articles before NLP", "step_prune_noise"),
     ("recount", "Recount article_count / source_count from attached rows", "step_recount_stories"),
+    ("classify_content_type", "Classify content type (news / opinion / discussion / aggregation / other)", "step_classify_content_type"),
     ("process", "NLP process (embed, translate, extract)", "step_process"),
     ("backfill_farsi_titles", "Backfill Farsi titles", "step_backfill_farsi_titles"),
     ("cluster", "Cluster articles into stories", "step_cluster"),
@@ -5933,6 +5951,7 @@ INGEST_ONLY_PIPELINE = [
     ("ingest", "Ingest RSS + Telegram", "step_ingest"),
     ("prune_noise", "Drop too-short Telegram posts/articles before NLP", "step_prune_noise"),
     ("recount", "Recount article_count / source_count from attached rows", "step_recount_stories"),
+    ("classify_content_type", "Classify content type (news / opinion / discussion / aggregation / other)", "step_classify_content_type"),
     ("process", "NLP process (embed, translate, extract)", "step_process"),
     ("backfill_farsi_titles", "Backfill Farsi titles", "step_backfill_farsi_titles"),
     ("cluster", "Cluster articles into stories", "step_cluster"),
@@ -5954,6 +5973,7 @@ INGEST_ONLY_PIPELINE = [
 # detecting intra-day story updates for the "بروزرسانی" badge.
 HOURLY_PIPELINE = [
     ("ingest_rss", "RSS-only ingest (no Telegram)", "step_ingest_rss"),
+    ("classify_content_type", "Classify content type (news / opinion / discussion / aggregation / other)", "step_classify_content_type"),
     ("process", "NLP process (embed, translate, extract)", "step_process"),
     ("cluster", "Cluster new articles into stories", "step_cluster"),
     ("centroids", "Recompute story centroid embeddings", "step_recompute_centroids"),

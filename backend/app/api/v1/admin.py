@@ -925,6 +925,114 @@ async def sources_stats(db: AsyncSession = Depends(get_db)):
     return {"sources": rows, "generated_at": now.isoformat()}
 
 
+@router.get("/content-type/stats", dependencies=[Depends(require_admin)])
+async def content_type_stats(
+    days: int = Query(7, ge=1, le=90),
+    db: AsyncSession = Depends(get_db),
+):
+    """Per-source breakdown of how the content-type filter has labelled
+    articles. Drives /dashboard/content-filter.
+
+    Returns:
+      - rollup: total, kept, dropped, unclassified for the window
+      - by_label: count per content_type label
+      - sources: per-source rows (top 60 by total) with kept/dropped split
+    """
+    from app.services.content_type import LABELS
+
+    now = datetime.now(timezone.utc)
+    window_start = now - timedelta(days=days)
+
+    rollup_result = await db.execute(
+        select(
+            func.count(Article.id).label("total"),
+            func.count(Article.id).filter(Article.content_type.is_(None)).label("unclassified"),
+            func.count(Article.id).filter(Article.content_type == "news").label("news"),
+            func.count(Article.id).filter(Article.content_type == "opinion").label("opinion"),
+            func.count(Article.id).filter(Article.content_type == "discussion").label("discussion"),
+            func.count(Article.id).filter(Article.content_type == "aggregation").label("aggregation"),
+            func.count(Article.id).filter(Article.content_type == "other").label("other"),
+        )
+        .where(Article.ingested_at >= window_start)
+    )
+    r = rollup_result.one()
+    by_label = {
+        "news": int(r.news or 0),
+        "opinion": int(r.opinion or 0),
+        "discussion": int(r.discussion or 0),
+        "aggregation": int(r.aggregation or 0),
+        "other": int(r.other or 0),
+    }
+    total = int(r.total or 0)
+    unclassified = int(r.unclassified or 0)
+    kept = by_label["news"]
+    dropped = total - kept - unclassified
+
+    # Per-source breakdown.
+    src_result = await db.execute(
+        select(
+            Source.id,
+            Source.slug,
+            Source.name_fa,
+            Source.name_en,
+            Source.state_alignment,
+            Source.content_filters,
+            func.count(Article.id).label("total"),
+            func.count(Article.id).filter(Article.content_type.is_(None)).label("unclassified"),
+            func.count(Article.id).filter(Article.content_type == "news").label("news"),
+            func.count(Article.id).filter(Article.content_type == "opinion").label("opinion"),
+            func.count(Article.id).filter(Article.content_type == "discussion").label("discussion"),
+            func.count(Article.id).filter(Article.content_type == "aggregation").label("aggregation"),
+            func.count(Article.id).filter(Article.content_type == "other").label("other"),
+        )
+        .join(Article, Article.source_id == Source.id)
+        .where(Article.ingested_at >= window_start)
+        .group_by(Source.id)
+        .order_by(func.count(Article.id).desc())
+        .limit(60)
+    )
+
+    sources_rows = []
+    for s in src_result.all():
+        s_total = int(s.total or 0)
+        s_news = int(s.news or 0)
+        s_unclassified = int(s.unclassified or 0)
+        s_dropped = s_total - s_news - s_unclassified
+        sources_rows.append({
+            "id": str(s.id),
+            "slug": s.slug,
+            "name_fa": s.name_fa,
+            "name_en": s.name_en,
+            "state_alignment": s.state_alignment,
+            "allowed": (s.content_filters or {}).get("allowed", ["news"]),
+            "total": s_total,
+            "kept": s_news,
+            "dropped": s_dropped,
+            "unclassified": s_unclassified,
+            "by_label": {
+                "news": int(s.news or 0),
+                "opinion": int(s.opinion or 0),
+                "discussion": int(s.discussion or 0),
+                "aggregation": int(s.aggregation or 0),
+                "other": int(s.other or 0),
+            },
+        })
+
+    return {
+        "window_days": days,
+        "generated_at": now.isoformat(),
+        "rollup": {
+            "total": total,
+            "kept": kept,
+            "dropped": dropped,
+            "unclassified": unclassified,
+        },
+        "by_label": by_label,
+        "labels": list(LABELS),
+        "sources": sources_rows,
+    }
+
+
 @router.get("/channels/stats", dependencies=[Depends(require_admin)])
 async def channels_stats(db: AsyncSession = Depends(get_db)):
     """Per-channel Telegram post counts + freshness for the admin fetch dashboard."""

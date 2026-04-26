@@ -123,6 +123,29 @@ def detect_language(text: str) -> str:
         return "fa"
 
 
+def _extract_rss_category(entry: dict) -> str | None:
+    """Pull a category/section label from an RSS entry.
+
+    feedparser exposes <category> as either entry.tags (list of dicts
+    with 'term') or entry.category (string). Both forms occur across
+    Iranian outlets. Returns the first non-empty label, lowercased and
+    trimmed; None if absent.
+    """
+    tags = entry.get("tags")
+    if isinstance(tags, list):
+        for tag in tags:
+            if isinstance(tag, dict):
+                label = (tag.get("term") or tag.get("label") or "").strip()
+                if label:
+                    return label[:120]
+    raw = entry.get("category")
+    if isinstance(raw, str):
+        label = raw.strip()
+        if label:
+            return label[:120]
+    return None
+
+
 def parse_published_date(entry: dict) -> datetime | None:
     """Extract published date from a feed entry."""
     for field in ("published_parsed", "updated_parsed"):
@@ -221,6 +244,7 @@ async def ingest_source(source: Source, db: AsyncSession) -> dict:
 
                 language = detect_language(title)
                 published_at = parse_published_date(entry)
+                rss_category = _extract_rss_category(entry)
 
                 # Upsert: skip if URL already exists
                 stmt = (
@@ -234,6 +258,7 @@ async def ingest_source(source: Source, db: AsyncSession) -> dict:
                         author=entry.get("author"),
                         language=language,
                         published_at=published_at,
+                        rss_category=rss_category,
                     )
                     .on_conflict_do_nothing(index_elements=["url"])
                     .returning(Article.id)

@@ -54,6 +54,17 @@ class Source(Base):
     description_en: Mapped[str | None] = mapped_column(Text, nullable=True)
     description_fa: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Per-source content-type whitelist. Articles whose content_type is
+    # not in 'allowed' never reach NLP. Default keeps only original
+    # reporting; flip a source to {"allowed": ["news", "opinion"]} to
+    # admit op-eds from that outlet specifically.
+    content_filters: Mapped[dict] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=lambda: {"allowed": ["news"]},
+        server_default='{"allowed": ["news"]}',
+    )
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
