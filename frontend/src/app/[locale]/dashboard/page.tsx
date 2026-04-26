@@ -282,6 +282,23 @@ export default function DashboardPage() {
 
   useEffect(() => { fetchDashboard(); }, [fetchDashboard]);
 
+  // Content-type filter rollup (last 7 days). Surfaces how much of the
+  // ingest pool the classifier kept vs dropped, right next to the
+  // article + telegram counters so the impact is visible at a glance.
+  const [contentFilter, setContentFilter] = useState<{
+    rollup: { total: number; kept: number; dropped: number; unclassified: number };
+    by_label: { opinion: number; discussion: number; aggregation: number; other: number; news: number };
+  } | null>(null);
+
+  const fetchContentFilter = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}/api/v1/admin/content-type/stats?days=7`, { headers: authHeaders() });
+      if (res.ok) setContentFilter(await res.json());
+    } catch {}
+  }, [authHeaders]);
+
+  useEffect(() => { if (authed) fetchContentFilter(); }, [authed, fetchContentFilter]);
+
   // Diagnostics
   const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null);
   const [diagLoading, setDiagLoading] = useState(false);
@@ -1132,12 +1149,52 @@ export default function DashboardPage() {
       </a>
 
       {/* Stat Cards */}
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mb-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard icon={<Newspaper className="h-5 w-5 text-blue-600 dark:text-blue-400" />} iconBg="bg-blue-100 dark:bg-blue-900/20" label="Total Articles" value={d.articles.total.toLocaleString()} sub={`${d.articles.last_24h} in last 24h`} />
         <StatCard icon={<Database className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />} iconBg="bg-emerald-100 dark:bg-emerald-900/20" label="Visible Stories" value={d.stories.visible} sub={`${d.stories.total} total (${d.stories.hidden} hidden)`} />
         <StatCard icon={<MessageSquare className="h-5 w-5 text-purple-600 dark:text-purple-400" />} iconBg="bg-purple-100 dark:bg-purple-900/20" label="Telegram Posts" value={d.telegram.total_posts.toLocaleString()} sub={`${d.telegram.posts_24h} in 24h · ${d.telegram.active} active channels`} />
         <StatCard icon={<BarChart3 className="h-5 w-5 text-amber-600 dark:text-amber-400" />} iconBg="bg-amber-100 dark:bg-amber-900/20" label="Bias Scores" value={d.bias_scores.total} sub={`${d.bias_scores.coverage_pct}% coverage`} />
       </div>
+
+      {/* Content-filter rollup. Sits directly under the Articles +
+          Telegram counts so the kept/dropped split is visible at a
+          glance. Per-source detail lives at /dashboard/content-filter. */}
+      {contentFilter && contentFilter.rollup.total > 0 && (
+        <div className="mb-6 border border-slate-200 dark:border-slate-800 px-4 py-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
+          <span className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            Content filter · 7d
+          </span>
+          <span className="text-slate-700 dark:text-slate-300">
+            {contentFilter.rollup.total.toLocaleString()} ingested
+          </span>
+          <span className="text-emerald-700 dark:text-emerald-400">
+            <strong className="font-bold">{contentFilter.rollup.kept.toLocaleString()}</strong> kept (news)
+          </span>
+          <span className="text-amber-700 dark:text-amber-400">
+            <strong className="font-bold">{contentFilter.rollup.dropped.toLocaleString()}</strong> dropped
+            {contentFilter.rollup.dropped > 0 && (
+              <span className="text-[12px] text-slate-400 dark:text-slate-500">
+                {" "}
+                ({(["opinion", "discussion", "aggregation", "other"] as const)
+                  .filter((k) => contentFilter.by_label[k] > 0)
+                  .map((k) => `${k} ${contentFilter.by_label[k]}`)
+                  .join(", ")})
+              </span>
+            )}
+          </span>
+          {contentFilter.rollup.unclassified > 0 && (
+            <span className="text-slate-500 dark:text-slate-400">
+              {contentFilter.rollup.unclassified.toLocaleString()} unclassified
+            </span>
+          )}
+          <a
+            href="/fa/dashboard/content-filter"
+            className="ml-auto text-blue-600 dark:text-blue-400 hover:underline text-[12px]"
+          >
+            per-source detail →
+          </a>
+        </div>
+      )}
 
       {/* Maintenance + Costs */}
       <div className="mb-6 grid gap-4 sm:grid-cols-2">

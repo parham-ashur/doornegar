@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, ExternalLink } from "lucide-react";
 import TelegramAnalyzingAnimation from "@/components/common/TelegramAnalyzingAnimation";
 import {
   cleanClaim,
@@ -10,9 +10,12 @@ import {
   displayPredictions,
   getCredLabel,
 } from "@/lib/telegram-text";
+import { formatRelativeTime } from "@/lib/utils";
 import type { TelegramAnalysis } from "@/lib/types";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const POST_PREVIEW_CHARS = 280;
+const MAX_POSTS_RENDERED = 8;
 
 interface ChannelStat {
   name: string;
@@ -20,13 +23,34 @@ interface ChannelStat {
   posts: number;
 }
 
+interface SocialPost {
+  id: string;
+  message_id: number;
+  text: string | null;
+  date: string;
+  views: number | null;
+  channel: {
+    username: string;
+    title: string;
+    channel_type: string;
+  } | null;
+}
+
+const CHANNEL_TYPE_LABEL: Record<string, string> = {
+  commentary: "تحلیلگر",
+  activist: "فعال",
+  political_party: "حزبی",
+  citizen: "شهروند",
+  news: "خبری",
+};
+
 function CollapsibleSection({ title, children }: { title: string; children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="border-t border-slate-100 dark:border-slate-800">
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center justify-between w-full py-2 text-[13px] font-bold text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
+        className="flex items-center justify-between w-full py-2 text-[15px] font-bold text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
       >
         <span>{title}</span>
         <ChevronDown className={`h-3 w-3 transition-transform ${open ? "rotate-180" : ""}`} />
@@ -40,6 +64,7 @@ export default function StoryTelegramSection({ storyId, initialTab, highlightTex
   const [analysis, setAnalysis] = useState<TelegramAnalysis | null>(null);
   const [postCount, setPostCount] = useState<number>(0);
   const [channels, setChannels] = useState<ChannelStat[]>([]);
+  const [posts, setPosts] = useState<SocialPost[]>([]);
   const [dataReady, setDataReady] = useState(false);
   const skipAnimation = !!(initialTab || highlightText);
   const [animDone, setAnimDone] = useState(skipAnimation);
@@ -75,20 +100,26 @@ export default function StoryTelegramSection({ storyId, initialTab, highlightTex
   useEffect(() => {
     let cancelled = false;
 
-    fetch(`${API}/api/v1/social/stories/${storyId}/telegram-analysis`)
-      .then(r => r.ok ? r.json() : null)
-      .catch(() => null)
-      .then(res => {
-        if (cancelled) return;
-        setPostCount(res?.total_posts || 0);
-        setChannels(res?.channels || []);
-        if (res?.status === "ok" && res.analysis) {
-          setAnalysis(res.analysis);
-        } else {
-          setNoData(true);
-        }
-        setDataReady(true);
-      });
+    // Two parallel fetches: the cached LLM analysis (predictions /
+    // claims / discourse) and the raw post list (analyst commentary
+    // we can render verbatim with a deep link). Both are read-only.
+    Promise.all([
+      fetch(`${API}/api/v1/social/stories/${storyId}/telegram-analysis`).then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch(`${API}/api/v1/social/stories/${storyId}/social?limit=${MAX_POSTS_RENDERED}`).then(r => r.ok ? r.json() : null).catch(() => null),
+    ]).then(([analysisRes, socialRes]) => {
+      if (cancelled) return;
+      setPostCount(analysisRes?.total_posts || 0);
+      setChannels(analysisRes?.channels || []);
+      if (analysisRes?.status === "ok" && analysisRes.analysis) {
+        setAnalysis(analysisRes.analysis);
+      } else {
+        setNoData(true);
+      }
+      if (Array.isArray(socialRes?.posts)) {
+        setPosts(socialRes.posts.filter((p: SocialPost) => p.text && p.channel?.username));
+      }
+      setDataReady(true);
+    });
 
     return () => { cancelled = true; };
   }, [storyId]);
@@ -97,7 +128,7 @@ export default function StoryTelegramSection({ storyId, initialTab, highlightTex
 
   if (!dataReady || !animDone) {
     if (skipAnimation) {
-      return <p className="text-[13px] text-slate-400 animate-pulse">بارگذاری...</p>;
+      return <p className="text-[15px] text-slate-400 animate-pulse">بارگذاری...</p>;
     }
     return <TelegramAnalyzingAnimation durationMs={2000} onComplete={handleAnimComplete} />;
   }
@@ -105,7 +136,7 @@ export default function StoryTelegramSection({ storyId, initialTab, highlightTex
   if (noData || !analysis) {
     return (
       <div className="border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/40 p-3">
-        <p className="text-[13px] leading-6 text-slate-500 dark:text-slate-400">
+        <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400">
           {postCount > 0
             ? `تا الان ${postCount} پست مرتبط در تلگرام جمع شده است، اما برای تحلیل عمیق (پیش‌بینی‌ها، ادعاهای کلیدی، اجماع و اختلاف) به تعداد بیشتری پست از کانال‌های تحلیلی نیاز داریم. به‌محض رسیدن تعداد لازم، این بخش خودکار تکمیل می‌شود.`
             : "این خبر هنوز در کانال‌های تحلیلی تلگرام بازتاب نیافته است. به‌محض انتشار تعداد مناسبی پست، پیش‌بینی‌ها و ادعاهای کلیدی در همین بخش نمایش داده می‌شوند."}
@@ -125,7 +156,7 @@ export default function StoryTelegramSection({ storyId, initialTab, highlightTex
   return (
     <div className="space-y-3 animate-[fadeIn_0.2s_ease-in]">
       {/* Summary */}
-      <p className="text-[14px] leading-6 text-slate-600 dark:text-slate-400">
+      <p className="text-[15px] leading-6 text-slate-600 dark:text-slate-400">
         {analysis.discourse_summary}
       </p>
 
@@ -135,7 +166,7 @@ export default function StoryTelegramSection({ storyId, initialTab, highlightTex
           <div className="flex gap-0 border-b border-slate-200 dark:border-slate-700 mb-2">
             <button
               onClick={() => setActiveTab("predictions")}
-              className={`text-[13px] font-bold px-3 py-1.5 border-b-2 transition-colors ${
+              className={`text-[15px] font-bold px-3 py-1.5 border-b-2 transition-colors ${
                 activeTab === "predictions"
                   ? "border-blue-500 text-blue-600 dark:text-blue-400"
                   : "border-transparent text-slate-400 hover:text-slate-600"
@@ -145,7 +176,7 @@ export default function StoryTelegramSection({ storyId, initialTab, highlightTex
             </button>
             <button
               onClick={() => setActiveTab("claims")}
-              className={`text-[13px] font-bold px-3 py-1.5 border-b-2 transition-colors ${
+              className={`text-[15px] font-bold px-3 py-1.5 border-b-2 transition-colors ${
                 activeTab === "claims"
                   ? "border-blue-500 text-blue-600 dark:text-blue-400"
                   : "border-transparent text-slate-400 hover:text-slate-600"
@@ -161,7 +192,7 @@ export default function StoryTelegramSection({ storyId, initialTab, highlightTex
               const isHighlighted = !!(highlightText && clean(text).includes(highlightText));
               return (
                 <div key={i} ref={isHighlighted ? highlightRef : undefined} className={isHighlighted ? "bg-blue-50 dark:bg-blue-900/20 -mx-2 px-2 py-1 border-r-2 border-blue-500" : ""}>
-                  <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400">• {clean(text)}</p>
+                  <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400">• {clean(text)}</p>
                 </div>
               );
             })}
@@ -171,9 +202,9 @@ export default function StoryTelegramSection({ storyId, initialTab, highlightTex
               const cred = getCredLabel(text);
               return (
                 <div key={i} ref={isHighlighted ? highlightRef : undefined} className={isHighlighted ? "bg-amber-50 dark:bg-amber-900/20 -mx-2 px-2 py-1 border-r-2 border-amber-500" : ""}>
-                  <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400">• {clean(text)}</p>
+                  <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400">• {clean(text)}</p>
                   {cred && (
-                    <p className={`text-[13px] ${cred.color} mr-3`}>{cred.label}</p>
+                    <p className={`text-[15px] ${cred.color} mr-3`}>{cred.label}</p>
                   )}
                 </div>
               );
@@ -185,38 +216,90 @@ export default function StoryTelegramSection({ storyId, initialTab, highlightTex
       {/* Collapsible sections */}
       {analysis.consensus && (
         <CollapsibleSection title="اجماع و اختلاف">
-          <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400">{analysis.consensus}</p>
+          <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400">{analysis.consensus}</p>
         </CollapsibleSection>
       )}
 
       {analysis.missing_voices && (
         <CollapsibleSection title="صداهای غایب">
-          <p className="text-[13px] leading-5 text-amber-600 dark:text-amber-400">{analysis.missing_voices}</p>
+          <p className="text-[15px] leading-6 text-amber-600 dark:text-amber-400">{analysis.missing_voices}</p>
         </CollapsibleSection>
       )}
 
-      {/* Telegram references — every channel that contributed posts to
-          this story, shown as chips with their post counts. «پست مستقیم»
-          flags that these are posts directly linked to THIS story; the
-          prediction/claim analysis above may also draw on neighbor-story
-          posts via the neighbor-pooling fallback. */}
-      {channels.length > 0 && (
+      {/* Telegram references — actual analyst commentary posts attached
+          to this story. Each row has the channel label, the timestamp,
+          a text preview, and a deep link back to the original post on
+          Telegram. Posts from RSS-mirror channels are excluded server-
+          side (they already appear in the article list). When the post
+          list is empty, fall back to the channel chip summary so the
+          old behaviour still renders for stories whose analysis ran
+          before the schema extension. */}
+      {(posts.length > 0 || channels.length > 0) && (
         <div className="pt-3 mt-2 border-t border-slate-200 dark:border-slate-800">
           <h4 className="text-[12px] font-bold text-slate-600 dark:text-slate-400 mb-2">
             منابع تلگرامی — {channels.length} کانال، {postCount} پست مستقیم
           </h4>
-          <div className="flex flex-wrap gap-1.5">
-            {channels.map((ch, i) => (
-              <span
-                key={i}
-                className="inline-flex items-center gap-1.5 px-2 py-0.5 text-[12px] border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300"
-              >
-                <span className="font-medium">{ch.name}</span>
-                <span className="text-slate-400 text-[11px]">·</span>
-                <span className="text-slate-500 dark:text-slate-400 text-[11px]">{ch.posts}</span>
-              </span>
-            ))}
-          </div>
+          {posts.length > 0 ? (
+            <ul className="space-y-2.5">
+              {posts.map((p) => {
+                if (!p.channel || !p.text) return null;
+                const href = `https://t.me/${p.channel.username}/${p.message_id}`;
+                const truncated = p.text.length > POST_PREVIEW_CHARS;
+                const preview = truncated
+                  ? p.text.slice(0, POST_PREVIEW_CHARS).trimEnd() + "…"
+                  : p.text;
+                const typeLabel = CHANNEL_TYPE_LABEL[p.channel.channel_type] || null;
+                return (
+                  <li key={p.id} className="border-r-2 border-slate-200 dark:border-slate-700 pr-3">
+                    <div className="flex items-center gap-2 mb-1 text-[12px]">
+                      <a
+                        href={href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-bold text-slate-700 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400"
+                      >
+                        {p.channel.title}
+                      </a>
+                      {typeLabel && (
+                        <span className="text-slate-400 text-[12px]">{typeLabel}</span>
+                      )}
+                      <span className="text-slate-300 dark:text-slate-600">·</span>
+                      <time className="text-slate-400 text-[12px]">
+                        {formatRelativeTime(p.date, "fa")}
+                      </time>
+                    </div>
+                    <p className="text-[15px] leading-6 text-slate-600 dark:text-slate-300 whitespace-pre-line break-words">
+                      {preview}
+                    </p>
+                    {truncated && (
+                      <a
+                        href={href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 mt-1 text-[12px] text-blue-600 dark:text-blue-400 hover:underline"
+                      >
+                        ادامه در تلگرام
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {channels.map((ch, i) => (
+                <span
+                  key={i}
+                  className="inline-flex items-center gap-1.5 px-2 py-0.5 text-[12px] border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300"
+                >
+                  <span className="font-medium">{ch.name}</span>
+                  <span className="text-slate-400 text-[12px]">·</span>
+                  <span className="text-slate-500 dark:text-slate-400 text-[12px]">{ch.posts}</span>
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

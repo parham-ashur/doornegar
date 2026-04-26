@@ -62,7 +62,7 @@ export default function RelatedStoriesSlider({
     >
       <div className="px-4 sm:px-0 mb-4 flex items-baseline justify-between">
         <h2 className="text-base font-black text-slate-900 dark:text-white">خبرهای مرتبط</h2>
-        <span className="text-[11px] text-slate-400">{toFa(stories.length)} خبر</span>
+        <span className="text-[12px] text-slate-400">{toFa(stories.length)} خبر</span>
       </div>
 
       <div
@@ -92,10 +92,10 @@ export default function RelatedStoriesSlider({
                   )}
                 </div>
                 <div className="p-3">
-                  <h3 className="text-[13px] leading-6 font-bold text-slate-900 dark:text-slate-100 group-hover:text-blue-700 dark:group-hover:text-blue-300 line-clamp-3">
+                  <h3 className="text-[15px] leading-6 font-bold text-slate-900 dark:text-slate-100 group-hover:text-blue-700 dark:group-hover:text-blue-300 line-clamp-3">
                     {s.title_fa || s.title_en}
                   </h3>
-                  <div className="mt-2 flex items-center gap-3 text-[11px] text-slate-500">
+                  <div className="mt-2 flex items-center gap-3 text-[12px] text-slate-500">
                     <span>{toFa(s.source_count)} رسانه</span>
                     <span>·</span>
                     <span>{toFa(s.article_count)} مقاله</span>

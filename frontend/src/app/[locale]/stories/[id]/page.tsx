@@ -246,17 +246,17 @@ export default async function StoryDetailPage({
           {story.editorial_context_fa?.context && (
             <details className="group mb-4 border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50">
               <summary className="flex items-center justify-between cursor-pointer list-none px-4 py-2.5 select-none">
-                <span className="text-[13px] font-bold text-slate-500 dark:text-slate-400">
+                <span className="text-[15px] font-bold text-slate-500 dark:text-slate-400">
                   زمینه خبر
                 </span>
                 <span
                   aria-hidden="true"
-                  className="text-slate-400 text-[11px] transition-transform group-open:rotate-90"
+                  className="text-slate-400 text-[12px] transition-transform group-open:rotate-90"
                 >
                   ◀
                 </span>
               </summary>
-              <p className="text-[13px] leading-6 text-slate-700 dark:text-slate-300 px-4 pb-3 pt-1">
+              <p className="text-[15px] leading-6 text-slate-700 dark:text-slate-300 px-4 pb-3 pt-1">
                 {story.editorial_context_fa.context}
               </p>
             </details>
@@ -283,12 +283,12 @@ export default async function StoryDetailPage({
               as «زمینه خبر» above. */}
           <details className="hidden lg:block group my-6 border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50">
             <summary className="flex items-center justify-between cursor-pointer list-none px-4 py-2.5 select-none">
-              <span className="text-[13px] font-bold text-slate-700 dark:text-slate-300">
+              <span className="text-[15px] font-bold text-slate-700 dark:text-slate-300">
                 روند پوشش خبری
               </span>
               <span
                 aria-hidden="true"
-                className="text-slate-400 text-[11px] transition-transform group-open:rotate-90"
+                className="text-slate-400 text-[12px] transition-transform group-open:rotate-90"
               >
                 ◀
               </span>

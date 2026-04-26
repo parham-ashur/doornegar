@@ -29,6 +29,18 @@ class TelegramChannelResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class TelegramChannelLite(BaseModel):
+    """Minimal channel info embedded inside post responses so the
+    frontend can render the channel label and build the deep link
+    (https://t.me/{username}/{message_id}) without a second round-trip."""
+
+    username: str
+    title: str
+    channel_type: str
+
+    model_config = {"from_attributes": True}
+
+
 class TelegramPostResponse(BaseModel):
     id: uuid.UUID
     channel_id: uuid.UUID
@@ -46,6 +58,7 @@ class TelegramPostResponse(BaseModel):
     shares_news_link: bool
     is_commentary: bool
     created_at: datetime
+    channel: TelegramChannelLite | None = None
 
     model_config = {"from_attributes": True}
 

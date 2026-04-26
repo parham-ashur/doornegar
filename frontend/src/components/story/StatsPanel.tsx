@@ -71,8 +71,8 @@ export default function StatsPanel({
             <svg className="h-4 w-4" viewBox="0 0 24 24" fill="#2AABEE"><path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/></svg>
           </div>
           <div className="text-right flex-1">
-            <p className="text-[13px] font-bold text-blue-700 dark:text-blue-300 group-hover:text-blue-900 dark:group-hover:text-blue-200 transition-colors">دیدن تحلیل تلگرام</p>
-            <p className="text-[13px] text-slate-400 dark:text-slate-500">پیش‌بینی‌ها، ادعاها و تحلیل کانال‌ها</p>
+            <p className="text-[15px] font-bold text-blue-700 dark:text-blue-300 group-hover:text-blue-900 dark:group-hover:text-blue-200 transition-colors">دیدن تحلیل تلگرام</p>
+            <p className="text-[15px] text-slate-400 dark:text-slate-500">پیش‌بینی‌ها، ادعاها و تحلیل کانال‌ها</p>
           </div>
           <Eye className="h-4 w-4 text-blue-400 dark:text-blue-500 group-hover:text-blue-600 transition-colors shrink-0" />
         </button>
@@ -82,9 +82,9 @@ export default function StatsPanel({
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <svg className="h-4 w-4" viewBox="0 0 24 24" fill="#2AABEE"><path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/></svg>
-              <h4 className="text-[14px] font-bold text-slate-900 dark:text-white">تحلیل روایت‌های تلگرام</h4>
+              <h4 className="text-[15px] font-bold text-slate-900 dark:text-white">تحلیل روایت‌های تلگرام</h4>
             </div>
-            <button onClick={() => setShowTelegram(false)} className="text-[13px] text-slate-400 hover:text-slate-600">بستن</button>
+            <button onClick={() => setShowTelegram(false)} className="text-[15px] text-slate-400 hover:text-slate-600">بستن</button>
           </div>
           <StoryTelegramSection storyId={storyId!} initialTab={initialTab} highlightText={highlightText} scrollTargetId={containerId} />
         </div>
@@ -95,17 +95,17 @@ export default function StatsPanel({
         <div className="border-t border-slate-200 dark:border-slate-800 pt-4">
           <div className="flex items-center gap-2 mb-2">
             <TrendingUp className="h-3.5 w-3.5 text-emerald-500" />
-            <h4 className="text-[14px] font-bold text-slate-900 dark:text-white">تغییرات جدید</h4>
+            <h4 className="text-[15px] font-bold text-slate-900 dark:text-white">تغییرات جدید</h4>
           </div>
-          <p className="text-[14px] leading-5 text-emerald-600 dark:text-emerald-400">{delta}</p>
+          <p className="text-[15px] leading-6 text-emerald-600 dark:text-emerald-400">{delta}</p>
         </div>
       )}
 
       {/* Narrative arc */}
       {narrativeArc?.evolution && (
         <div className="border-t border-slate-200 dark:border-slate-800 pt-4">
-          <h4 className="text-[14px] font-bold text-slate-900 dark:text-white mb-2">تحول روایت</h4>
-          <p className="text-[14px] leading-5 text-slate-500 dark:text-slate-400">{narrativeArc.evolution}</p>
+          <h4 className="text-[15px] font-bold text-slate-900 dark:text-white mb-2">تحول روایت</h4>
+          <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400">{narrativeArc.evolution}</p>
         </div>
       )}
 
@@ -116,7 +116,7 @@ export default function StatsPanel({
         <div className="border-t border-slate-200 dark:border-slate-800 pt-4">
           <div className="flex items-center gap-2 mb-2">
             <VolumeX className="h-3.5 w-3.5 text-amber-500" />
-            <h4 className="flex items-center gap-1 text-[14px] font-bold text-slate-900 dark:text-white">
+            <h4 className="flex items-center gap-1 text-[15px] font-bold text-slate-900 dark:text-white">
               سکوت رسانه‌ای
               <span
                 className="inline-flex items-center cursor-help text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
@@ -130,7 +130,7 @@ export default function StatsPanel({
               </span>
             </h4>
           </div>
-          <p className="text-[14px] leading-5 text-amber-600 dark:text-amber-400">
+          <p className="text-[15px] leading-6 text-amber-600 dark:text-amber-400">
             {typeof silenceAnalysis === "string"
               ? silenceAnalysis
               : silenceAnalysis.hypothesis_fa
@@ -147,7 +147,7 @@ export default function StatsPanel({
         <div className="border-t border-slate-200 dark:border-slate-800 pt-4">
           <div className="flex items-center gap-2 mb-2">
             <Radio className="h-3.5 w-3.5 text-red-500" />
-            <h4 className="flex items-center gap-1 text-[14px] font-bold text-slate-900 dark:text-white">
+            <h4 className="flex items-center gap-1 text-[15px] font-bold text-slate-900 dark:text-white">
               پیام هماهنگ
               <span
                 className="inline-flex items-center cursor-help text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
@@ -161,11 +161,11 @@ export default function StatsPanel({
               </span>
             </h4>
           </div>
-          <p className="text-[14px] text-slate-500 dark:text-slate-400">
+          <p className="text-[15px] text-slate-500 dark:text-slate-400">
             {coordination.sources?.length || 0} رسانه {coordination.side === "state" ? "درون‌مرزی" : "برون‌مرزی"} پیام مشابه منتشر کردند
           </p>
           {coordination.sources && (
-            <p className="text-[13px] text-slate-400 mt-1">{coordination.sources.join(" · ")}</p>
+            <p className="text-[15px] text-slate-400 mt-1">{coordination.sources.join(" · ")}</p>
           )}
         </div>
       )}
@@ -174,10 +174,10 @@ export default function StatsPanel({
       <div className="border-t border-slate-200 dark:border-slate-800 pt-4">
         <div className="flex items-center gap-2 mb-3">
           <BarChart3 className="h-4 w-4 text-slate-400" />
-          <h4 className="text-[14px] font-bold text-slate-900 dark:text-white">آمار</h4>
+          <h4 className="text-[15px] font-bold text-slate-900 dark:text-white">آمار</h4>
         </div>
 
-        <div className="space-y-3 text-[13px]">
+        <div className="space-y-3 text-[15px]">
           {/* Dispute score. The score is LLM-generated (not a deterministic
               formula); the tooltip lets a curious reader see the three
               reference points the model anchors on. */}
@@ -225,13 +225,13 @@ export default function StatsPanel({
             <div className="flex items-center gap-4">
               {articleCount != null && (
                 <div className="flex items-center gap-1.5">
-                  <span className="text-[14px] font-black text-slate-800 dark:text-slate-200">{toFa(articleCount)}</span>
+                  <span className="text-[15px] font-black text-slate-800 dark:text-slate-200">{toFa(articleCount)}</span>
                   <span className="text-slate-400">مقاله</span>
                 </div>
               )}
               {sourceCount != null && (
                 <div className="flex items-center gap-1.5">
-                  <span className="text-[14px] font-black text-slate-800 dark:text-slate-200">{toFa(sourceCount)}</span>
+                  <span className="text-[15px] font-black text-slate-800 dark:text-slate-200">{toFa(sourceCount)}</span>
                   <span className="text-slate-400">رسانه</span>
                 </div>
               )}
@@ -261,7 +261,7 @@ export default function StatsPanel({
           )}
 
           {!stateFraming && !diasporaFraming && analysis?.dispute_score == null && (
-            <p className="text-[13px] text-slate-400">آمار پس از اجرای تحلیل در دسترس خواهد بود</p>
+            <p className="text-[15px] text-slate-400">آمار پس از اجرای تحلیل در دسترس خواهد بود</p>
           )}
         </div>
       </div>

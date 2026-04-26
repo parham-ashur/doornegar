@@ -203,12 +203,12 @@ export default function ArticleFilterList({ articles, storyId, sidebarSync }: Ar
                       </span>
                     )}
                     {badge && (
-                      <span className={`text-[11px] font-bold ${badge.color}`}>
+                      <span className={`text-[12px] font-bold ${badge.color}`}>
                         {badge.label}
                       </span>
                     )}
                     {g.dayLabel && (
-                      <span className="inline-flex items-center gap-1 text-[11px] text-slate-400">
+                      <span className="inline-flex items-center gap-1 text-[12px] text-slate-400">
                         <Clock className="h-3 w-3" />
                         {g.dayLabel}
                         {g.items.length > 1 && (
@@ -249,7 +249,7 @@ export default function ArticleFilterList({ articles, storyId, sidebarSync }: Ar
                             href={articleHref(a.url)}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-[13px] leading-5 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:underline line-clamp-2"
+                            className="text-[15px] leading-6 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:underline line-clamp-2"
                           >
                             {a.title_fa || a.title_original}
                           </a>

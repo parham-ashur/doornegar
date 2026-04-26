@@ -138,7 +138,7 @@ function Meta({ story }: { story: StoryBrief }) {
   const hasSides = insidePct > 0 || outsidePct > 0;
   return (
     <div className="mt-1.5" dir="rtl">
-      <div className="flex items-center justify-between text-[13px] leading-5">
+      <div className="flex items-center justify-between text-[15px] leading-6">
         <p className="text-slate-400 dark:text-slate-500">
           {toFa(story.source_count)} رسانه · {toFa(story.article_count)} مقاله
           {published && <span>{" · "}نشر {published}</span>}
@@ -192,7 +192,7 @@ function UpdateDeltaCallout({
       {items.map((sentence, i) => (
         <p
           key={i}
-          className="text-[13px] leading-5 text-emerald-900 dark:text-emerald-100"
+          className="text-[15px] leading-6 text-emerald-900 dark:text-emerald-100"
         >
           <span className="inline-block ml-1 align-middle text-[10px] font-black text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/40 px-1 py-0.5">
             به‌روز
@@ -800,9 +800,9 @@ export default async function HomeBody({
               return (
                 <div className="mt-2 inline-flex items-center gap-2 border border-orange-300 dark:border-orange-700 bg-orange-50 dark:bg-orange-900/20 px-2 py-1">
                   <span className="inline-block h-1.5 w-1.5 rounded-full bg-orange-500" />
-                  <span className="text-[11px] font-bold text-orange-700 dark:text-orange-300">بروزرسانی</span>
+                  <span className="text-[12px] font-bold text-orange-700 dark:text-orange-300">بروزرسانی</span>
                   {heroReason && (
-                    <span className="text-[11px] text-orange-700/80 dark:text-orange-300/80">
+                    <span className="text-[12px] text-orange-700/80 dark:text-orange-300/80">
                       {heroReason}
                     </span>
                   )}
@@ -813,8 +813,8 @@ export default async function HomeBody({
               Date.now() - new Date(hero.last_updated_at).getTime() < 2 * 3600 * 1000 && (
                 <div className="mt-2 inline-flex items-center gap-2 border border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/20 px-2 py-1">
                   <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                  <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300">مقالهٔ جدید</span>
-                  <span className="text-[11px] text-emerald-700/80 dark:text-emerald-300/80">
+                  <span className="text-[12px] font-bold text-emerald-700 dark:text-emerald-300">مقالهٔ جدید</span>
+                  <span className="text-[12px] text-emerald-700/80 dark:text-emerald-300/80">
                     {formatRelativeTime(hero.last_updated_at, "fa")}
                   </span>
                 </div>
@@ -834,7 +834,7 @@ export default async function HomeBody({
                   <div className="mt-3 space-y-1">
                     <UpdateDeltaCallout story={hero} field="bias" />
                     {points.map((point, i) => (
-                      <p key={i} className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-1">• {point}</p>
+                      <p key={i} className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-1">• {point}</p>
                     ))}
                   </div>
                 );
@@ -846,23 +846,23 @@ export default async function HomeBody({
                   {biasPoints.length > 0 && (
                     <div className="mb-3 space-y-1">
                       {biasPoints.map((point, i) => (
-                        <p key={i} className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-1">• {point}</p>
+                        <p key={i} className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-1">• {point}</p>
                       ))}
                     </div>
                   )}
                   <div className="grid grid-cols-2 gap-3">
                     {stateSummary && (
                       <div className="border-r-2 border-[#1e3a5f] pr-3">
-                        <p className="text-[13px] font-bold text-[#1e3a5f] dark:text-blue-300 mb-1">روایت درون‌مرزی</p>
+                        <p className="text-[15px] font-bold text-[#1e3a5f] dark:text-blue-300 mb-1">روایت درون‌مرزی</p>
                         <UpdateDeltaCallout story={hero} field="state" className="mb-1.5" />
-                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-3">{stateSummary}</p>
+                        <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-3">{stateSummary}</p>
                       </div>
                     )}
                     {diasporaSummary && (
                       <div className="border-r-2 border-[#ea580c] pr-3">
-                        <p className="text-[13px] font-bold text-[#ea580c] dark:text-orange-400 mb-1">روایت برون‌مرزی</p>
+                        <p className="text-[15px] font-bold text-[#ea580c] dark:text-orange-400 mb-1">روایت برون‌مرزی</p>
                         <UpdateDeltaCallout story={hero} field="diaspora" className="mb-1.5" />
-                        <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-3">{diasporaSummary}</p>
+                        <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-3">{diasporaSummary}</p>
                       </div>
                     )}
                   </div>
@@ -872,17 +872,17 @@ export default async function HomeBody({
             {/* Telegram discourse summary */}
             {heroTelegram?.discourse_summary && (
               <div className="mt-3 px-1">
-                <p className="text-[14px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">
+                <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-2">
                   <span className="font-bold text-slate-600 dark:text-slate-300">تحلیل روایت‌های تلگرام.</span>
                   {" "}{heroTelegram.discourse_summary}
                 </p>
                 {heroTelegram.predictions && heroTelegram.predictions.length > 0 && (
-                  <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-1">
+                  <p className="text-[15px] leading-6 text-slate-400 dark:text-slate-500 mt-1 line-clamp-1">
                     <span className="font-bold text-blue-500">پیش‌بینی:</span> {predictionText(heroTelegram.predictions[0])}
                   </p>
                 )}
                 {heroTelegram.key_claims && heroTelegram.key_claims.length > 0 && (
-                  <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-1">
+                  <p className="text-[15px] leading-6 text-slate-400 dark:text-slate-500 mt-1 line-clamp-1">
                     <span className="font-bold text-amber-500">ادعا:</span> {claimText(heroTelegram.key_claims[0])}
                   </p>
                 )}
@@ -912,7 +912,7 @@ export default async function HomeBody({
                 <h3 className="text-[18px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
                   {conservativeBlind.title_fa}
                 </h3>
-                <p className="mt-1.5 text-[13px] text-slate-400">
+                <p className="mt-1.5 text-[15px] text-slate-400">
                   فقط روایت درون‌مرزی · {conservativeBlind.article_count} مقاله
                 </p>
               </div>
@@ -932,7 +932,7 @@ export default async function HomeBody({
                 <h3 className="text-[18px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
                   {oppositionBlind.title_fa}
                 </h3>
-                <p className="mt-1.5 text-[13px] text-orange-500">
+                <p className="mt-1.5 text-[15px] text-orange-500">
                   فقط روایت برون‌مرزی · {oppositionBlind.article_count} مقاله
                 </p>
               </div>
@@ -972,16 +972,16 @@ export default async function HomeBody({
                         <div className="grid grid-cols-2 gap-3">
                           {stateSummary && (
                             <div className="border-r-2 border-[#1e3a5f] pr-3">
-                              <p className="text-[13px] font-bold text-[#1e3a5f] dark:text-blue-300 mb-1">روایت درون‌مرزی</p>
+                              <p className="text-[15px] font-bold text-[#1e3a5f] dark:text-blue-300 mb-1">روایت درون‌مرزی</p>
                               <UpdateDeltaCallout story={s} field="state" className="mb-1.5" />
-                              <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-4">{stateSummary}</p>
+                              <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-4">{stateSummary}</p>
                             </div>
                           )}
                           {diasporaSummary && (
                             <div className="border-r-2 border-[#ea580c] pr-3">
-                              <p className="text-[13px] font-bold text-[#ea580c] dark:text-orange-400 mb-1">روایت برون‌مرزی</p>
+                              <p className="text-[15px] font-bold text-[#ea580c] dark:text-orange-400 mb-1">روایت برون‌مرزی</p>
                               <UpdateDeltaCallout story={s} field="diaspora" className="mb-1.5" />
-                              <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-4">{diasporaSummary}</p>
+                              <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-4">{diasporaSummary}</p>
                             </div>
                           )}
                         </div>
@@ -991,22 +991,22 @@ export default async function HomeBody({
                       if (!bias) return null;
                       const firstPoint = splitBiasPoints(bias)[0];
                       if (!firstPoint) return null;
-                      return <p className="mt-1.5 text-[13px] leading-5 text-slate-400 dark:text-slate-500 line-clamp-1">• {firstPoint}</p>;
+                      return <p className="mt-1.5 text-[15px] leading-6 text-slate-400 dark:text-slate-500 line-clamp-1">• {firstPoint}</p>;
                     })()}
                     {/* Telegram strip — discourse + first prediction + first claim */}
                     {tg?.discourse_summary && (
                       <div className="mt-3 px-1">
-                        <p className="text-[14px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">
+                        <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-2">
                           <span className="font-bold text-slate-600 dark:text-slate-300">تحلیل روایت‌های تلگرام.</span>
                           {" "}{tg.discourse_summary}
                         </p>
                         {tg.predictions && tg.predictions.length > 0 && (
-                          <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-1">
+                          <p className="text-[15px] leading-6 text-slate-400 dark:text-slate-500 mt-1 line-clamp-1">
                             <span className="font-bold text-blue-500">پیش‌بینی:</span> {predictionText(tg.predictions[0])}
                           </p>
                         )}
                         {tg.key_claims && tg.key_claims.length > 0 && (
-                          <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-1">
+                          <p className="text-[15px] leading-6 text-slate-400 dark:text-slate-500 mt-1 line-clamp-1">
                             <span className="font-bold text-amber-500">ادعا:</span> {claimText(tg.key_claims[0])}
                           </p>
                         )}
@@ -1063,11 +1063,11 @@ export default async function HomeBody({
                         <div className="flex gap-0 text-center">
                           <div className="flex-1 py-3 bg-[#1e3a5f]/10 dark:bg-blue-900/20 border-t-[3px] border-[#1e3a5f]">
                             <p className="text-[15px] font-black text-[#1e3a5f] dark:text-blue-300 line-clamp-1 px-2">{item.conservative}</p>
-                            <p className="text-[13px] text-[#1e3a5f] dark:text-blue-300 font-medium mt-1">درون‌مرزی</p>
+                            <p className="text-[15px] text-[#1e3a5f] dark:text-blue-300 font-medium mt-1">درون‌مرزی</p>
                           </div>
                           <div className="flex-1 py-3 bg-[#ea580c]/10 dark:bg-orange-900/20 border-t-[3px] border-[#ea580c]">
                             <p className="text-[15px] font-black text-[#ea580c] dark:text-orange-400 line-clamp-1 px-2">{item.opposition}</p>
-                            <p className="text-[13px] text-[#ea580c] dark:text-orange-400 font-medium mt-1">برون‌مرزی</p>
+                            <p className="text-[15px] text-[#ea580c] dark:text-orange-400 font-medium mt-1">برون‌مرزی</p>
                           </div>
                         </div>
                         {/* Replace the generic context sentence with
@@ -1078,12 +1078,12 @@ export default async function HomeBody({
                         {(item.stateSummary || item.diasporaSummary) && (
                           <div className="mt-3 space-y-1">
                             {item.stateSummary && (
-                              <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">
+                              <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-2">
                                 <span className="text-[#1e3a5f] dark:text-blue-300 font-bold">• </span>{item.stateSummary}
                               </p>
                             )}
                             {item.diasporaSummary && (
-                              <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">
+                              <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-2">
                                 <span className="text-[#ea580c] dark:text-orange-400 font-bold">در مقابل </span>{item.diasporaSummary}
                               </p>
                             )}
@@ -1162,31 +1162,42 @@ export default async function HomeBody({
                       {s.title_fa}
                     </h3>
                     <UpdateBadge story={s} className="mt-1" />
-                    <p className="text-[14px] text-slate-400 mt-1">
+                    <p className="text-[15px] text-slate-400 mt-1">
                       {toFa(s.article_count)} مقاله · {toFa(s.source_count)} رسانه
                       {s.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300"> · درون‌مرزی {toFa(s.state_pct)}٪</span>}
                       {s.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400"> · برون‌مرزی {toFa(s.diaspora_pct)}٪</span>}
                     </p>
+                    {(s.first_published_at || s.last_updated_at) && (
+                      <p className="text-[12px] text-slate-400 dark:text-slate-500 mt-1">
+                        {s.first_published_at && (
+                          <>منتشر {formatRelativeTime(s.first_published_at, "fa")}</>
+                        )}
+                        {s.last_updated_at && s.first_published_at &&
+                          new Date(s.last_updated_at).getTime() - new Date(s.first_published_at).getTime() > 6 * 3600 * 1000 && (
+                          <> · بروزرسانی {formatRelativeTime(s.last_updated_at, "fa")}</>
+                        )}
+                      </p>
+                    )}
                     {stateS && (
-                      <p className="text-[14px] leading-5 text-slate-500 dark:text-slate-400 mt-1.5 line-clamp-2">
+                      <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 mt-1.5 line-clamp-2">
                         <span className="text-[#1e3a5f] dark:text-blue-300 font-bold">• </span>{stateS}
                       </p>
                     )}
                     {diasporaS && (
-                      <p className="text-[14px] leading-5 text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-2">
+                      <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-2">
                         <span className="text-[#ea580c] dark:text-orange-400 font-bold">• </span>{diasporaS}
                       </p>
                     )}
                     {!stateS && !diasporaS && fallbackBullets.map((b, j) => (
-                      <p key={j} className="text-[14px] leading-5 text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-2">• {b}</p>
+                      <p key={j} className="text-[15px] leading-6 text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-2">• {b}</p>
                     ))}
                     {tg?.predictions && tg.predictions.length > 0 && (
-                      <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-1 line-clamp-2">
+                      <p className="text-[15px] leading-6 text-slate-400 dark:text-slate-500 mt-1 line-clamp-2">
                         <span className="font-bold text-blue-500">پیش‌بینی:</span> {predictionText(tg.predictions[0])}
                       </p>
                     )}
                     {tg?.key_claims && tg.key_claims.length > 0 && (
-                      <p className="text-[13px] leading-5 text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-2">
+                      <p className="text-[15px] leading-6 text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-2">
                         <span className="font-bold text-amber-500">ادعا:</span> {claimText(tg.key_claims[0])}
                       </p>
                     )}
@@ -1306,11 +1317,11 @@ function MobileHome({
               <h1 className="text-[24px] font-black leading-snug text-slate-900 dark:text-white line-clamp-3">
                 {hero.title_fa}
               </h1>
-              <p className="mt-2 text-[13px] text-slate-400 dark:text-slate-500">
+              <p className="mt-2 text-[15px] text-slate-400 dark:text-slate-500">
                 {toFa(hero.source_count)} رسانه · {toFa(hero.article_count)} مقاله
               </p>
               {(hero.state_pct > 0 || hero.diaspora_pct > 0) && (
-                <p className="text-[13px] mt-0.5">
+                <p className="text-[15px] mt-0.5">
                   {hero.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300">درون‌مرزی {toFa(hero.state_pct)}٪</span>}
                   {hero.state_pct > 0 && hero.diaspora_pct > 0 && <span className="text-slate-300 dark:text-slate-600"> · </span>}
                   {hero.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400">برون‌مرزی {toFa(hero.diaspora_pct)}٪</span>}
@@ -1327,7 +1338,7 @@ function MobileHome({
               {heroBiasPoints.length > 0 && (
                 <div className="mb-3 space-y-1">
                   {heroBiasPoints.map((point, i) => (
-                    <p key={i} className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">• {point}</p>
+                    <p key={i} className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-2">• {point}</p>
                   ))}
                 </div>
               )}
@@ -1335,13 +1346,13 @@ function MobileHome({
                 {heroStateSummary && (
                   <div className="border-r-2 border-[#1e3a5f] pr-3">
                     <p className="text-[12px] font-bold text-[#1e3a5f] dark:text-blue-300 mb-1">روایت درون‌مرزی</p>
-                    <p className="text-[13px] leading-5 text-slate-600 dark:text-slate-400 line-clamp-5">{heroStateSummary}</p>
+                    <p className="text-[15px] leading-6 text-slate-600 dark:text-slate-400 line-clamp-5">{heroStateSummary}</p>
                   </div>
                 )}
                 {heroDiasporaSummary && (
                   <div className="border-r-2 border-[#ea580c] pr-3">
                     <p className="text-[12px] font-bold text-[#ea580c] dark:text-orange-400 mb-1">روایت برون‌مرزی</p>
-                    <p className="text-[13px] leading-5 text-slate-600 dark:text-slate-400 line-clamp-5">{heroDiasporaSummary}</p>
+                    <p className="text-[15px] leading-6 text-slate-600 dark:text-slate-400 line-clamp-5">{heroDiasporaSummary}</p>
                   </div>
                 )}
               </div>
@@ -1349,7 +1360,7 @@ function MobileHome({
           ) : heroBiasPoints.length > 0 ? (
             <div className="space-y-1">
               {heroBiasPoints.map((point, i) => (
-                <p key={i} className="text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">• {point}</p>
+                <p key={i} className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-2">• {point}</p>
               ))}
             </div>
           ) : null}
@@ -1358,17 +1369,17 @@ function MobileHome({
         {/* Telegram discourse summary + first prediction + first claim (same as desktop hero) */}
         {heroTelegram?.discourse_summary && (
           <div className="px-4 pt-3 pb-4">
-            <p className="text-[13px] leading-5 text-slate-600 dark:text-slate-400 line-clamp-3">
+            <p className="text-[15px] leading-6 text-slate-600 dark:text-slate-400 line-clamp-3">
               <span className="font-bold text-slate-700 dark:text-slate-200">تحلیل روایت‌های تلگرام.</span>
               {" "}{heroTelegram.discourse_summary}
             </p>
             {firstPredictionText && (
-              <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-500 mt-1.5 line-clamp-2">
+              <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-500 mt-1.5 line-clamp-2">
                 <span className="font-bold text-blue-500">پیش‌بینی:</span> {firstPredictionText}
               </p>
             )}
             {firstClaimText && (
-              <p className="text-[13px] leading-5 text-slate-500 dark:text-slate-500 mt-1 line-clamp-2">
+              <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-500 mt-1 line-clamp-2">
                 <span className="font-bold text-amber-500">ادعا:</span> {firstClaimText}
               </p>
             )}
@@ -1410,7 +1421,7 @@ function MobileHome({
                     <h3 className="text-[18px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
                       {conservativeBlind.title_fa}
                     </h3>
-                    <p className="mt-1 text-[13px] text-slate-400">
+                    <p className="mt-1 text-[15px] text-slate-400">
                       فقط روایت درون‌مرزی · {conservativeBlind.article_count} مقاله
                     </p>
                   </div>
@@ -1433,7 +1444,7 @@ function MobileHome({
                     <h3 className="text-[18px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
                       {oppositionBlind.title_fa}
                     </h3>
-                    <p className="mt-1 text-[13px] text-orange-500">
+                    <p className="mt-1 text-[15px] text-orange-500">
                       فقط روایت برون‌مرزی · {oppositionBlind.article_count} مقاله
                     </p>
                   </div>
@@ -1463,7 +1474,7 @@ function MobileHome({
                       {s.title_fa}
                     </h3>
                     <UpdateBadge story={s} className="mt-0.5" />
-                    <p className="text-[13px] text-slate-400 mt-0.5">
+                    <p className="text-[15px] text-slate-400 mt-0.5">
                       {toFa(s.article_count)} مقاله · {toFa(s.source_count)} رسانه
                       {s.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300"> · درون‌مرزی {toFa(s.state_pct)}٪</span>}
                       {s.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400"> · برون‌مرزی {toFa(s.diaspora_pct)}٪</span>}
@@ -1494,23 +1505,23 @@ function MobileHome({
                   </h4>
                   <div className="flex gap-0 text-center">
                     <div className="flex-1 py-2 bg-[#1e3a5f]/10 dark:bg-blue-900/20 border-t-[3px] border-[#1e3a5f]">
-                      <p className="text-[14px] font-black text-[#1e3a5f] dark:text-blue-300 line-clamp-1 px-2">{item.conservative}</p>
-                      <p className="text-[11px] text-[#1e3a5f] dark:text-blue-300 font-medium mt-1">درون‌مرزی</p>
+                      <p className="text-[15px] font-black text-[#1e3a5f] dark:text-blue-300 line-clamp-1 px-2">{item.conservative}</p>
+                      <p className="text-[12px] text-[#1e3a5f] dark:text-blue-300 font-medium mt-1">درون‌مرزی</p>
                     </div>
                     <div className="flex-1 py-2 bg-[#ea580c]/10 dark:bg-orange-900/20 border-t-[3px] border-[#ea580c]">
-                      <p className="text-[14px] font-black text-[#ea580c] dark:text-orange-400 line-clamp-1 px-2">{item.opposition}</p>
-                      <p className="text-[11px] text-[#ea580c] dark:text-orange-400 font-medium mt-1">برون‌مرزی</p>
+                      <p className="text-[15px] font-black text-[#ea580c] dark:text-orange-400 line-clamp-1 px-2">{item.opposition}</p>
+                      <p className="text-[12px] text-[#ea580c] dark:text-orange-400 font-medium mt-1">برون‌مرزی</p>
                     </div>
                   </div>
                   {(item.stateSummary || item.diasporaSummary) && (
                     <div className="mt-2.5 space-y-1">
                       {item.stateSummary && (
-                        <p className="text-[12px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">
+                        <p className="text-[12px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-2">
                           <span className="text-[#1e3a5f] dark:text-blue-300 font-bold">• </span>{item.stateSummary}
                         </p>
                       )}
                       {item.diasporaSummary && (
-                        <p className="text-[12px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">
+                        <p className="text-[12px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-2">
                           <span className="text-[#ea580c] dark:text-orange-400 font-bold">در مقابل </span>{item.diasporaSummary}
                         </p>
                       )}
@@ -1550,13 +1561,13 @@ function MobileHome({
                       {s.title_fa}
                     </h3>
                     <UpdateBadge story={s} className="mt-1" />
-                    <p className="mt-1 text-[13px] text-slate-400 dark:text-slate-500">
+                    <p className="mt-1 text-[15px] text-slate-400 dark:text-slate-500">
                       {toFa(s.source_count)} رسانه · {toFa(s.article_count)} مقاله
                       {s.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300"> · درون‌مرزی {toFa(s.state_pct)}٪</span>}
                       {s.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400"> · برون‌مرزی {toFa(s.diaspora_pct)}٪</span>}
                     </p>
                     {firstPoint && (
-                      <p className="mt-1.5 text-[14px] leading-5 text-slate-400 dark:text-slate-500 line-clamp-1">• {firstPoint}</p>
+                      <p className="mt-1.5 text-[15px] leading-6 text-slate-400 dark:text-slate-500 line-clamp-1">• {firstPoint}</p>
                     )}
                   </Link>
                 ),
