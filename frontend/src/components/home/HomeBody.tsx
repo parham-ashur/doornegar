@@ -431,11 +431,13 @@ export default async function HomeBody({
   // opposite column empty on the homepage. Fall back to the most heavily
   // one-sided story on that axis so both نگاه یک‌جانبه slots always show
   // something, even if the backend hasn't formally flagged it as a
-  // blindspot. 60/40 is the pragmatic threshold for "one-sided enough
-  // to be worth calling out" without crossing into strict blindspot
-  // territory (which the backend reserves for ≥80/20 coverage gaps).
-  const ONE_SIDED_MAJOR = 60;  // % covered by the dominant side
-  const ONE_SIDED_MINOR = 40;  // % covered by the minority side
+  // blindspot. 80/20 is the threshold for "one-sided enough to be
+  // worth calling out as a نگاه یک‌جانبه" — anything balanced beyond
+  // that erodes the meaning of the slot. The label below switches to
+  // «بیشتر» when the minority side has any coverage and «فقط» only
+  // when the minority side is at exactly 0%.
+  const ONE_SIDED_MAJOR = 80;  // % covered by the dominant side
+  const ONE_SIDED_MINOR = 20;  // % covered by the minority side
   const stateHeavy = (s: StoryBrief) =>
     (s.state_pct || 0) >= ONE_SIDED_MAJOR && (s.diaspora_pct || 0) <= ONE_SIDED_MINOR;
   const diasporaHeavy = (s: StoryBrief) =>
@@ -947,7 +949,7 @@ export default async function HomeBody({
                   {conservativeBlind.title_fa}
                 </h3>
                 <p className="mt-1.5 text-[15px] text-slate-400">
-                  فقط روایت درون‌مرزی · {conservativeBlind.article_count} مقاله
+                  {conservativeBlind.diaspora_pct > 0 ? "بیشتر" : "فقط"} روایت درون‌مرزی · {conservativeBlind.article_count} مقاله
                 </p>
               </div>
             </Link>
@@ -967,7 +969,7 @@ export default async function HomeBody({
                   {oppositionBlind.title_fa}
                 </h3>
                 <p className="mt-1.5 text-[15px] text-orange-500">
-                  فقط روایت برون‌مرزی · {oppositionBlind.article_count} مقاله
+                  {oppositionBlind.state_pct > 0 ? "بیشتر" : "فقط"} روایت برون‌مرزی · {oppositionBlind.article_count} مقاله
                 </p>
               </div>
             </Link>
@@ -1460,7 +1462,7 @@ function MobileHome({
                       {conservativeBlind.title_fa}
                     </h3>
                     <p className="mt-1 text-[15px] text-slate-400">
-                      فقط روایت درون‌مرزی · {conservativeBlind.article_count} مقاله
+                      {conservativeBlind.diaspora_pct > 0 ? "بیشتر" : "فقط"} روایت درون‌مرزی · {conservativeBlind.article_count} مقاله
                     </p>
                   </div>
                 </div>
@@ -1483,7 +1485,7 @@ function MobileHome({
                       {oppositionBlind.title_fa}
                     </h3>
                     <p className="mt-1 text-[15px] text-orange-500">
-                      فقط روایت برون‌مرزی · {oppositionBlind.article_count} مقاله
+                      {oppositionBlind.state_pct > 0 ? "بیشتر" : "فقط"} روایت برون‌مرزی · {oppositionBlind.article_count} مقاله
                     </p>
                   </div>
                 </div>
