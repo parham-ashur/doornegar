@@ -436,12 +436,23 @@ export default async function HomeBody({
   // that erodes the meaning of the slot. The label below switches to
   // «بیشتر» when the minority side has any coverage and «فقط» only
   // when the minority side is at exactly 0%.
-  const ONE_SIDED_MAJOR = 80;  // % covered by the dominant side
-  const ONE_SIDED_MINOR = 20;  // % covered by the minority side
+  const ONE_SIDED_MAJOR = 80;  // % covered by the dominant side (heuristic mint)
+  const ONE_SIDED_MINOR = 20;  // % covered by the minority side (heuristic mint)
+  // Backend-flagged blindspots get a looser live re-validation: the
+  // backend already classified them as one-sided, we just confirm the
+  // split hasn't flipped. Without this, formal blindspots whose minority
+  // climbed from 0% → 25% (still one-sided) would fail the 80/20 gate
+  // and leave a slot empty when the backend already named a candidate.
+  const ONE_SIDED_MAJOR_LOOSE = 70;
+  const ONE_SIDED_MINOR_LOOSE = 30;
   const stateHeavy = (s: StoryBrief) =>
     (s.state_pct || 0) >= ONE_SIDED_MAJOR && (s.diaspora_pct || 0) <= ONE_SIDED_MINOR;
   const diasporaHeavy = (s: StoryBrief) =>
     (s.diaspora_pct || 0) >= ONE_SIDED_MAJOR && (s.state_pct || 0) <= ONE_SIDED_MINOR;
+  const stateHeavyLoose = (s: StoryBrief) =>
+    (s.state_pct || 0) >= ONE_SIDED_MAJOR_LOOSE && (s.diaspora_pct || 0) <= ONE_SIDED_MINOR_LOOSE;
+  const diasporaHeavyLoose = (s: StoryBrief) =>
+    (s.diaspora_pct || 0) >= ONE_SIDED_MAJOR_LOOSE && (s.state_pct || 0) <= ONE_SIDED_MINOR_LOOSE;
 
   // F1 — blindspots restricted to BLINDSPOT_MAX_AGE_MS (7d). The
   // feature loses meaning if it shows month-old gaps. Fall through
@@ -459,15 +470,15 @@ export default async function HomeBody({
   // «نگاه یک‌جانبه» card whose own percentages contradict the label.
   const blindFresh = withinAge(BLINDSPOT_MAX_AGE_MS);
   const conservativeBlind =
-    blindspots.find(s => s.blindspot_type === "state_only" && blindFresh(s) && hasUpdate(s) && stateHeavy(s)) ||
-    blindspots.find(s => s.blindspot_type === "state_only" && blindFresh(s) && stateHeavy(s)) ||
+    blindspots.find(s => s.blindspot_type === "state_only" && blindFresh(s) && hasUpdate(s) && stateHeavyLoose(s)) ||
+    blindspots.find(s => s.blindspot_type === "state_only" && blindFresh(s) && stateHeavyLoose(s)) ||
     [...stories].filter(stateHeavy).filter(blindFresh).sort((a, b) =>
       (b.state_pct - b.diaspora_pct) - (a.state_pct - a.diaspora_pct)
     )[0] ||
     undefined;
   const oppositionBlind =
-    blindspots.find(s => s.blindspot_type === "diaspora_only" && blindFresh(s) && hasUpdate(s) && diasporaHeavy(s)) ||
-    blindspots.find(s => s.blindspot_type === "diaspora_only" && blindFresh(s) && diasporaHeavy(s)) ||
+    blindspots.find(s => s.blindspot_type === "diaspora_only" && blindFresh(s) && hasUpdate(s) && diasporaHeavyLoose(s)) ||
+    blindspots.find(s => s.blindspot_type === "diaspora_only" && blindFresh(s) && diasporaHeavyLoose(s)) ||
     [...stories].filter(diasporaHeavy).filter(blindFresh).sort((a, b) =>
       (b.diaspora_pct - b.state_pct) - (a.diaspora_pct - a.state_pct)
     )[0] ||

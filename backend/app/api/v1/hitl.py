@@ -1171,6 +1171,64 @@ async def review_queue(
     return ReviewQueueResponse(items=items, tier_counts=tier_counts)
 
 
+class FrozenStoryItem(BaseModel):
+    story_id: str
+    title_fa: str
+    article_count: int
+    source_count: int
+    frozen_at: datetime
+    last_updated_at: datetime | None
+    age_days: float | None
+
+
+class FrozenStoriesResponse(BaseModel):
+    items: list[FrozenStoryItem]
+    total: int
+
+
+@router.get("/frozen-stories", response_model=FrozenStoriesResponse)
+async def frozen_stories(
+    limit: int = Query(100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+):
+    """List currently frozen stories. Frozen stories skip matcher + merge
+    so no new articles attach. Use this view to unfreeze a story or audit
+    what's been taken out of rotation.
+    """
+    from sqlalchemy import text as _sql_text
+
+    rows = await db.execute(
+        select(
+            Story.id, Story.title_fa, Story.article_count, Story.source_count,
+            Story.frozen_at, Story.last_updated_at, Story.first_published_at,
+        )
+        .where(Story.frozen_at.isnot(None))
+        .order_by(Story.frozen_at.desc())
+        .limit(limit)
+    )
+    now = datetime.now(timezone.utc)
+    items: list[FrozenStoryItem] = []
+    for r in rows.all():
+        started = r[6] or r[5]
+        age = ((now - started).total_seconds() / 86400.0) if started else None
+        items.append(
+            FrozenStoryItem(
+                story_id=str(r[0]),
+                title_fa=r[1] or "",
+                article_count=r[2] or 0,
+                source_count=r[3] or 0,
+                frozen_at=r[4],
+                last_updated_at=r[5],
+                age_days=round(age, 2) if age is not None else None,
+            )
+        )
+    total_q = await db.execute(_sql_text(
+        "SELECT COUNT(*) FROM stories WHERE frozen_at IS NOT NULL"
+    ))
+    total = total_q.scalar() or 0
+    return FrozenStoriesResponse(items=items, total=int(total))
+
+
 class StoryEventItem(BaseModel):
     id: str
     story_id: str | None
