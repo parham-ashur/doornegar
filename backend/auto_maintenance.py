@@ -413,6 +413,25 @@ async def step_prune_noise():
 
     stats = {"tg_checked": 0, "tg_deleted": 0, "articles_checked": 0, "articles_deleted": 0}
 
+    async def _delete_articles_safe(db, ids: list) -> int:
+        """Delete articles, skipping any with FK references in dependent
+        tables (bias_scores / topics / ratings / feedback). Without this
+        guard the DELETE raises ForeignKeyViolationError and rolls back
+        the whole step. Articles that have been touched downstream aren't
+        "near-zero-value" anymore — preserving them is intentional.
+        """
+        if not ids:
+            return 0
+        result = await db.execute(_text("""
+            DELETE FROM articles
+            WHERE id = ANY(:ids)
+              AND NOT EXISTS (SELECT 1 FROM bias_scores WHERE article_id = articles.id)
+              AND NOT EXISTS (SELECT 1 FROM topics      WHERE article_id = articles.id)
+              AND NOT EXISTS (SELECT 1 FROM ratings     WHERE article_id = articles.id)
+              AND NOT EXISTS (SELECT 1 FROM feedback    WHERE article_id = articles.id)
+        """), {"ids": ids})
+        return getattr(result, "rowcount", 0) or 0
+
     async with async_session() as db:
         # Candidates: un-analyzed, unlinked Telegram posts
         tg_rows = (await db.execute(
@@ -449,9 +468,9 @@ async def step_prune_noise():
             )
             if is_noise(body, []):
                 art_to_delete.append(row.id)
-        if art_to_delete:
-            await db.execute(delete(Article).where(Article.id.in_(art_to_delete)))
-            stats["articles_deleted"] = len(art_to_delete)
+        deleted_n = await _delete_articles_safe(db, art_to_delete)
+        stats["articles_deleted"] = deleted_n
+        stats["articles_skipped_fk"] = len(art_to_delete) - deleted_n
 
         # Second pass — RSS-origin orphans with content_text < 200 chars.
         # These are usually feed stubs (nav fragments, "click to read",
@@ -473,8 +492,9 @@ async def step_prune_noise():
         stats["rss_short_checked"] = len(rss_short_rows)
         if rss_short_rows:
             ids = [row.id for row in rss_short_rows]
-            await db.execute(delete(Article).where(Article.id.in_(ids)))
-            stats["rss_short_deleted"] = len(ids)
+            deleted_n = await _delete_articles_safe(db, ids)
+            stats["rss_short_deleted"] = deleted_n
+            stats["rss_short_skipped_fk"] = len(ids) - deleted_n
 
         await db.commit()
 
@@ -6164,9 +6184,21 @@ async def run_maintenance(mode: str = "full"):
                     "elapsed": round(elapsed, 1),
                     "results": _json.dumps(results, ensure_ascii=False, default=str),
                     "steps": _json.dumps(
-                        [{"name": s["name"], "status": s["status"], "elapsed_s": s["elapsed_s"]}
-                         for s in maintenance_state.STATE.get("steps", [])],
+                        [
+                            {
+                                "name": s["name"],
+                                "status": s["status"],
+                                "elapsed_s": s["elapsed_s"],
+                                # Preserve stats — for failed steps this is
+                                # `{"error": "<message>"}` from the harness, so
+                                # the dashboard / curl output can show what went
+                                # wrong without scrolling Railway logs.
+                                "stats": s.get("stats"),
+                            }
+                            for s in maintenance_state.STATE.get("steps", [])
+                        ],
                         ensure_ascii=False,
+                        default=str,
                     ),
                 })
                 await _db.commit()
