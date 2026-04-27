@@ -425,10 +425,10 @@ async def step_prune_noise():
         result = await db.execute(_text("""
             DELETE FROM articles
             WHERE id = ANY(:ids)
-              AND NOT EXISTS (SELECT 1 FROM bias_scores WHERE article_id = articles.id)
-              AND NOT EXISTS (SELECT 1 FROM topics      WHERE article_id = articles.id)
-              AND NOT EXISTS (SELECT 1 FROM ratings     WHERE article_id = articles.id)
-              AND NOT EXISTS (SELECT 1 FROM feedback    WHERE article_id = articles.id)
+              AND NOT EXISTS (SELECT 1 FROM bias_scores       WHERE article_id = articles.id)
+              AND NOT EXISTS (SELECT 1 FROM topic_articles    WHERE article_id = articles.id)
+              AND NOT EXISTS (SELECT 1 FROM community_ratings WHERE article_id = articles.id)
+              AND NOT EXISTS (SELECT 1 FROM rater_feedback    WHERE article_id = articles.id)
         """), {"ids": ids})
         return getattr(result, "rowcount", 0) or 0
 
