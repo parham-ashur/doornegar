@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 
 import httpx
 from langdetect import detect
-from sqlalchemy import select, text
+from sqlalchemy import select, text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from trafilatura import extract
@@ -47,7 +47,7 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
         .where(
             Article.processed_at.is_(None),
             Article.content_type.isnot(None),
-            text("(sources.content_filters -> 'allowed') @> to_jsonb(articles.content_type)"),
+            sa_text("(sources.content_filters -> 'allowed') @> to_jsonb(articles.content_type)"),
         )
         .order_by(Article.ingested_at.desc())
         .limit(batch_size)
