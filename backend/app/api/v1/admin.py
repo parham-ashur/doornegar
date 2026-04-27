@@ -11,6 +11,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy import func, select
+from sqlalchemy import text as _sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -258,6 +259,73 @@ async def get_dashboard(db: AsyncSession = Depends(get_db)):
             "message": f"Bias score coverage: {bias_pct}% of articles",
         })
         actions_needed.append("Run: python manage.py score (score more articles)")
+
+    # ── Pipeline health checks (added after the 2026-04-27 NLP UnboundLocalError
+    #     incident: 14d of silent damage like the 2026-04-24 zero-embedding bug
+    #     because no metric watched the symptoms). Each check converts a known
+    #     silent-failure pattern into a visible Attention-list item.
+
+    # H1 — clustering stalled. articles_24h > 0 but new_stories_24h == 0 means
+    # fresh ingestion is happening yet not a single new cluster formed → matcher
+    # or cluster_new is broken (typically because embeddings are NULL).
+    if articles_24h >= 50 and new_stories_24h == 0:
+        issues.append({
+            "severity": "error",
+            "message": (
+                f"0 new stories in 24h despite {articles_24h} new articles — "
+                "clustering is producing nothing. Check NLP step + embedding health."
+            ),
+        })
+        actions_needed.append("Check /admin/maintenance/logs and /admin/embedding/health")
+
+    # H2 — embedding null rate. Sample last 24h: if >10% of articles have NULL
+    # embeddings, the matcher can't find candidates and cluster_new can't group.
+    embed_row = (await db.execute(_sa_text(
+        "SELECT count(*) AS total, "
+        "count(*) FILTER (WHERE embedding IS NULL) AS nulls "
+        "FROM articles WHERE ingested_at >= NOW() - interval '24 hours'"
+    ))).one()
+    embed_total = embed_row.total or 0
+    embed_nulls = embed_row.nulls or 0
+    embed_null_pct = round(100 * embed_nulls / max(1, embed_total), 1)
+    if embed_total >= 50 and embed_null_pct >= 50:
+        issues.append({
+            "severity": "error",
+            "message": (
+                f"{embed_nulls}/{embed_total} ({embed_null_pct}%) articles in last 24h "
+                "have NULL embedding — NLP pipeline likely crashing on import or first query."
+            ),
+        })
+    elif embed_total >= 50 and embed_null_pct >= 10:
+        issues.append({
+            "severity": "warning",
+            "message": (
+                f"{embed_nulls}/{embed_total} ({embed_null_pct}%) articles in last 24h "
+                "have NULL embedding — NLP pipeline degraded."
+            ),
+        })
+
+    # H3 — last maintenance run had failed steps. Surface the count + names so
+    # the operator sees errored steps without scrolling through Railway logs.
+    last_run = (await db.execute(_sa_text(
+        "SELECT run_at, steps FROM maintenance_logs "
+        "ORDER BY run_at DESC LIMIT 1"
+    ))).first()
+    if last_run and last_run.steps:
+        import json as _hjson
+        try:
+            steps = _hjson.loads(last_run.steps) if isinstance(last_run.steps, str) else last_run.steps
+        except Exception:
+            steps = None
+        if isinstance(steps, list):
+            failed = [s for s in steps if isinstance(s, dict) and s.get("status") == "error"]
+            if failed:
+                names = ", ".join(s.get("name", "?")[:40] for s in failed[:3])
+                more = f" (+{len(failed) - 3} more)" if len(failed) > 3 else ""
+                issues.append({
+                    "severity": "error" if len(failed) >= 3 else "warning",
+                    "message": f"Last maintenance had {len(failed)} failed step(s): {names}{more}",
+                })
 
     response = {
         "data": {
