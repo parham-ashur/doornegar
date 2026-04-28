@@ -707,7 +707,7 @@ async def step_bias_score():
     from app.services import maintenance_state as _ms
     async with async_session() as db:
         for batch_idx in range(MAX_PER_RUN // BATCH):
-            _ms.update_step_progress(
+            await _ms.update_step_progress(
                 total["scored"], MAX_PER_RUN, label=f"batch {batch_idx + 1}"
             )
             stats = await score_unscored_articles(
@@ -1187,7 +1187,7 @@ async def step_summarize():
         from app.services import maintenance_state as _ms
         _stories_total = len(stories)
         for _idx, story in enumerate(stories):
-            _ms.update_step_progress(_idx, _stories_total, label="story analysis")
+            await _ms.update_step_progress(_idx, _stories_total, label="story analysis")
             # Smart article selection: pick diverse articles (one per source,
             # balanced across alignments) instead of just most recent.
             art_result = await db.execute(
@@ -1495,7 +1495,7 @@ async def step_fix_images():
         for idx, (art_id, art_url) in enumerate(rows):
             stats["checked"] += 1
             if idx % 10 == 0:
-                _ms.update_step_progress(idx, total_n, label="HEAD-checking images")
+                await _ms.update_step_progress(idx, total_n, label="HEAD-checking images")
             if art_url and art_url.startswith("http://localhost"):
                 pending.append((art_id, None))
                 stats["nulled"] += 1
@@ -1511,7 +1511,7 @@ async def step_fix_images():
             except Exception:
                 pending.append((art_id, None))
                 stats["nulled"] += 1
-    _ms.update_step_progress(total_n, total_n, label="HEAD-check done")
+    await _ms.update_step_progress(total_n, total_n, label="HEAD-check done")
 
     # Flush updates in chunks of 100 with a fresh session per chunk. Each
     # chunk's connection is short-lived enough to escape the idle reaper.
@@ -6097,7 +6097,7 @@ async def step_migrate_images_to_r2():
     total_n = len(work)
     for idx, (article_id, old_url) in enumerate(work):
         if idx % 5 == 0:
-            _ms.update_step_progress(idx, total_n, label="downloading + uploading to R2")
+            await _ms.update_step_progress(idx, total_n, label="downloading + uploading to R2")
         stored = await download_image(old_url)
         if stored and stored != old_url:
             pending.append((article_id, stored))
@@ -6110,7 +6110,7 @@ async def step_migrate_images_to_r2():
             stats["failed"] += 1
 
     await _flush()
-    _ms.update_step_progress(total_n, total_n, label="R2 migration done")
+    await _ms.update_step_progress(total_n, total_n, label="R2 migration done")
 
     logger.info(f"Migrate images R2: {stats}")
     return stats
@@ -6318,53 +6318,53 @@ async def run_maintenance(mode: str = "full"):
     logger.info(f"Maintenance started at {datetime.now().strftime('%Y-%m-%d %H:%M')} (mode={mode}, steps={len(pipeline)})")
     logger.info("=" * 50)
 
-    maintenance_state.start_run(total_steps=len(pipeline))
+    await maintenance_state.start_run(total_steps=len(pipeline))
     results = {}
 
     try:
         for key, display, func in pipeline:
-            maintenance_state.begin_step(display)
+            await maintenance_state.begin_step(display)
             timeout = STEP_TIMEOUTS_SEC.get(key, DEFAULT_STEP_TIMEOUT_SEC)
             try:
                 result = await asyncio.wait_for(func(), timeout=timeout)
                 results[key] = result
-                maintenance_state.end_step(display, "ok", result)
+                await maintenance_state.end_step(display, "ok", result)
             except asyncio.TimeoutError:
                 logger.error(f"{display} timed out after {timeout}s — continuing")
                 err = {"error": f"timeout after {timeout}s"}
                 results[key] = err
-                maintenance_state.end_step(display, "error", err)
+                await maintenance_state.end_step(display, "error", err)
             except Exception as e:
                 logger.error(f"{display} failed: {e}")
                 err = {"error": str(e)}
                 results[key] = err
-                maintenance_state.end_step(display, "error", err)
+                await maintenance_state.end_step(display, "error", err)
 
         # Doc update is full-pipeline-only; skip in ingest-only mode.
         if mode == "full":
-            maintenance_state.begin_step("Update project docs")
+            await maintenance_state.begin_step("Update project docs")
             try:
                 results["docs"] = await asyncio.wait_for(
                     step_update_docs(results, start),
                     timeout=DEFAULT_STEP_TIMEOUT_SEC,
                 )
-                maintenance_state.end_step("Update project docs", "ok", results["docs"])
+                await maintenance_state.end_step("Update project docs", "ok", results["docs"])
             except asyncio.TimeoutError:
                 logger.error("Doc update timed out — continuing")
                 err = {"error": f"timeout after {DEFAULT_STEP_TIMEOUT_SEC}s"}
                 results["docs"] = err
-                maintenance_state.end_step("Update project docs", "error", err)
+                await maintenance_state.end_step("Update project docs", "error", err)
             except Exception as e:
                 logger.error(f"Doc update failed: {e}")
                 err = {"error": str(e)}
                 results["docs"] = err
-                maintenance_state.end_step("Update project docs", "error", err)
+                await maintenance_state.end_step("Update project docs", "error", err)
 
         elapsed = time.time() - start
         logger.info(f"Maintenance complete in {elapsed:.0f}s")
         logger.info(f"Results: {results}")
         logger.info("=" * 50)
-        maintenance_state.finish_run("success", results=results, total_elapsed_s=elapsed)
+        await maintenance_state.finish_run("success", results=results, total_elapsed_s=elapsed)
 
         # Persist log to database so it survives container restarts
         try:
@@ -6407,7 +6407,7 @@ async def run_maintenance(mode: str = "full"):
 
     except Exception as e:
         logger.exception("Maintenance run crashed")
-        maintenance_state.finish_run(
+        await maintenance_state.finish_run(
             "error", results=results, error=str(e), total_elapsed_s=time.time() - start
         )
 
