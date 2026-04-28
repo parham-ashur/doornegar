@@ -100,28 +100,35 @@ def try_acquire_lock(label: str) -> bool:
     DO NOTHING gives us atomic test-and-set semantics in one round trip.
     A stale lock (older than LOCK_STALE_SEC) is forced-overridden so a
     process that died mid-run doesn't permanently block the system.
-    """
-    import psycopg2  # noqa: F401  (sync driver — fine for this small probe)
-    from app.config import settings as _settings
-    from sqlalchemy import create_engine, text as _t
 
-    sync_url = (_settings.database_url or "").replace("+asyncpg", "")
-    if not sync_url:
-        logger.warning("DATABASE_URL unset — proceeding without lock")
-        return True
-    try:
-        eng = create_engine(sync_url, pool_pre_ping=True)
-        with eng.begin() as conn:
+    Uses the existing async_session (asyncpg under the hood) via a
+    short-lived asyncio.run(). The earlier sync-driver implementation
+    silently fail-opened in production because psycopg2 isn't installed
+    in the Railway image — only asyncpg is.
+    """
+    async def _acquire() -> bool:
+        from app.database import async_session
+        from sqlalchemy import text as _t
+        # Compute the stale cutoff in Python so we don't rely on
+        # `int || ' seconds'::interval` working through asyncpg's type
+        # binding — that concat fails on Postgres because asyncpg binds
+        # integers as int4 and `int4 || text` has no operator.
+        stale_cutoff = datetime.now(timezone.utc) - timedelta(seconds=LOCK_STALE_SEC)
+        async with async_session() as db:
             # Self-heal: clear stale locks before we try to take ours.
-            conn.execute(_t(
+            await db.execute(_t(
                 "DELETE FROM maintenance_lock "
-                "WHERE id = :k AND acquired_at < NOW() - (:s || ' seconds')::interval"
-            ), {"k": LOCK_KEY_INT, "s": LOCK_STALE_SEC})
-            result = conn.execute(_t(
+                "WHERE id = :k AND acquired_at < :cutoff"
+            ), {"k": LOCK_KEY_INT, "cutoff": stale_cutoff})
+            result = await db.execute(_t(
                 "INSERT INTO maintenance_lock (id, label, acquired_at) "
                 "VALUES (:k, :label, NOW()) ON CONFLICT (id) DO NOTHING"
             ), {"k": LOCK_KEY_INT, "label": label})
+            await db.commit()
             return (result.rowcount or 0) > 0
+
+    try:
+        return asyncio.run(_acquire())
     except Exception as e:
         logger.warning(
             "Could not check maintenance lock: %s — proceeding without lock", e
@@ -131,17 +138,16 @@ def try_acquire_lock(label: str) -> bool:
 
 def release_lock() -> None:
     """Drop the maintenance lock row. Safe if it's already gone."""
-    from app.config import settings as _settings
-    from sqlalchemy import create_engine, text as _t
+    async def _release() -> None:
+        from app.database import async_session
+        from sqlalchemy import text as _t
+        async with async_session() as db:
+            await db.execute(_t("DELETE FROM maintenance_lock WHERE id = :k"),
+                             {"k": LOCK_KEY_INT})
+            await db.commit()
 
-    sync_url = (_settings.database_url or "").replace("+asyncpg", "")
-    if not sync_url:
-        return
     try:
-        eng = create_engine(sync_url, pool_pre_ping=True)
-        with eng.begin() as conn:
-            conn.execute(_t("DELETE FROM maintenance_lock WHERE id = :k"),
-                         {"k": LOCK_KEY_INT})
+        asyncio.run(_release())
     except Exception as e:
         logger.warning("Could not release maintenance lock: %s", e)
 

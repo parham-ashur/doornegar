@@ -1038,7 +1038,24 @@ async def reassign_posts_by_embedding(
     below_gap = 0
     unchanged = 0
 
-    for post, emb in zip(posts, embeddings):
+    # Accumulate (post_id, new_story_id) updates and flush in fresh-session
+    # chunks at the end. Holding `db` across 3000 posts × embeddings batch
+    # + cosine loop has the same shape as the bug we fixed in
+    # `link_posts_by_embedding` — Neon kills the idle connection mid-loop
+    # (17 min in the 2026-04-27 run) and the next UPDATE raises
+    # InterfaceError "connection is closed".
+    pending_reassign: list[tuple] = []  # (post_id, new_story_id)
+
+    # Wire per-post progress for the dashboard's running-step banner.
+    try:
+        from app.services import maintenance_state as _ms
+    except Exception:
+        _ms = None
+    total_posts = len(posts)
+
+    for idx, (post, emb) in enumerate(zip(posts, embeddings)):
+        if _ms is not None and idx % 50 == 0:
+            _ms.update_step_progress(idx, total_posts, label="cosine + reassign decisions")
         if not emb or all(v == 0 for v in emb) or any(v is None for v in emb):
             continue
 
@@ -1080,27 +1097,31 @@ async def reassign_posts_by_embedding(
             below_gap += 1
             continue
 
-        await db.execute(
-            update(TelegramPost)
-            .where(TelegramPost.id == post.id)
-            .values(story_id=best_story_id)
-        )
+        pending_reassign.append((post.id, best_story_id))
         reassigned += 1
         moves[current_story] = moves.get(current_story, 0) - 1
         moves[best_story_id] = moves.get(best_story_id, 0) + 1
+
+    if _ms is not None:
+        _ms.update_step_progress(total_posts, total_posts, label="flushing updates")
+
+    # Apply reassignments via the shared chunked-session helper (same one
+    # link_posts_by_embedding uses) so each chunk gets a fresh connection.
+    await _flush_telegram_post_links(pending_reassign)
 
     # Invalidate cached telegram_analysis on every story whose post
     # count changed — the next API read will regenerate with the
     # corrected post set instead of returning stale predictions.
     affected_story_ids = {sid for sid, delta in moves.items() if delta != 0}
     if affected_story_ids:
-        await db.execute(
-            update(Story)
-            .where(Story.id.in_(affected_story_ids))
-            .values(telegram_analysis=None)
-        )
-
-    await db.commit()
+        from app.database import async_session as _ses_inv
+        async with _ses_inv() as db_inv:
+            await db_inv.execute(
+                update(Story)
+                .where(Story.id.in_(affected_story_ids))
+                .values(telegram_analysis=None)
+            )
+            await db_inv.commit()
     logger.info(
         f"Reassigned {reassigned} telegram posts across {len(affected_story_ids)} "
         f"stories (examined={len(posts)}, unchanged={unchanged}, below_gap={below_gap}, "
