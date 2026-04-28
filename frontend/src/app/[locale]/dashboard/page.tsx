@@ -793,9 +793,15 @@ export default function DashboardPage() {
   // Progress modal shown while maintenance is running or just finished.
   // Collapses to a small bottom-right pill when `maintMinimized` is true.
   const isMaintVisible = running === "maintenance" || maintResult;
-  const totalSteps = maintLive?.total_steps || 14;
+  // total_steps comes from the running pipeline (54 full / 12 ingest / 7
+  // hourly). Default to 0 when missing so we don't render a misleading
+  // "Step N of 14" — that 14 was a legacy default that no longer matches
+  // any real pipeline. When 0, the UI hides the "of N" suffix.
+  const totalSteps = Number(maintLive?.total_steps) || 0;
   const doneSteps = (maintLive?.steps || []).length;
-  const pct = Math.min(100, Math.round((doneSteps / totalSteps) * 100));
+  const pct = totalSteps > 0
+    ? Math.min(100, Math.round((doneSteps / totalSteps) * 100))
+    : 0;
   const failedSteps = (maintLive?.steps || []).filter((s: any) => s.status !== "ok");
   const resultMetrics = summaryMetrics(maintResult && !maintResult.error ? maintResult : null);
 
@@ -853,7 +859,9 @@ export default function DashboardPage() {
               {running === "maintenance" ? (
                 <>
                   Elapsed <span className="font-mono">{fmtDuration(maintElapsed)}</span>
-                  {" · "}Step {doneSteps + 1} of {totalSteps}
+                  {totalSteps > 0
+                    ? <>{" · "}Step {doneSteps + 1} of {totalSteps}</>
+                    : <>{" · "}Step {doneSteps + 1}</>}
                   {failedSteps.length > 0 && (
                     <> · <span className="text-red-600 dark:text-red-400">{failedSteps.length} failed</span></>
                   )}
@@ -917,8 +925,10 @@ export default function DashboardPage() {
             <>
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-[11px] text-slate-500">
-                  <span>Step {doneSteps + 1} of {totalSteps}</span>
-                  <span>{pct}%</span>
+                  <span>{totalSteps > 0
+                    ? `Step ${doneSteps + 1} of ${totalSteps}`
+                    : `Step ${doneSteps + 1}`}</span>
+                  <span>{totalSteps > 0 ? `${pct}%` : "—"}</span>
                 </div>
                 <div className="h-2 w-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
                   <div className="h-full bg-blue-500 transition-all duration-500" style={{ width: `${pct}%` }} />
