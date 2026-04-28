@@ -972,6 +972,154 @@ async def maintenance_logs(
         return {"error": str(e), "hint": "Run /admin/create-tables to create the maintenance_logs table"}
 
 
+@router.get("/maintenance/baseline-comparison")
+async def maintenance_baseline_comparison(
+    baseline_n: int = Query(5, ge=2, le=20),
+    elapsed_threshold: float = Query(2.0, ge=1.1, le=5.0),
+    db: AsyncSession = Depends(get_db),
+):
+    """Compare the most recent maintenance run's per-step elapsed +
+    headline result counters against the median of the prior N runs.
+
+    Surfaces "this looks different than usual" — a sensor on top of the
+    data we already collect every run. The threshold is the multiplicative
+    factor at which we flag (default 2.0 = step took ≥2× or ≤0.5× the
+    historical median).
+
+    Returns:
+        {
+          "baseline_runs": int,                    # how many priors we compared against
+          "current_run_at": iso str,
+          "step_regressions": [                    # sorted by ratio desc
+              {"name", "elapsed_s", "median_elapsed_s", "ratio", "direction"}
+          ],
+          "result_regressions": [
+              {"key", "current", "median", "ratio", "direction"}
+          ],
+        }
+    """
+    from sqlalchemy import text as _t
+    import json as _bj
+    from statistics import median
+
+    rows = (await db.execute(_t(
+        "SELECT run_at, results, steps FROM maintenance_logs "
+        "WHERE status = 'success' "
+        "ORDER BY run_at DESC LIMIT :n"
+    ), {"n": baseline_n + 1})).all()
+
+    if len(rows) < 2:
+        return {
+            "baseline_runs": 0,
+            "current_run_at": None,
+            "step_regressions": [],
+            "result_regressions": [],
+            "note": "Need at least 2 successful runs to compare.",
+        }
+
+    def _parse_steps(raw):
+        if not raw:
+            return []
+        try:
+            v = _bj.loads(raw) if isinstance(raw, str) else raw
+            return v if isinstance(v, list) else []
+        except Exception:
+            return []
+
+    def _parse_results(raw):
+        if not raw:
+            return {}
+        try:
+            v = _bj.loads(raw) if isinstance(raw, str) else raw
+            return v if isinstance(v, dict) else {}
+        except Exception:
+            return {}
+
+    current = rows[0]
+    priors = rows[1:]
+
+    cur_steps = {s["name"]: s for s in _parse_steps(current[2]) if isinstance(s, dict) and s.get("name")}
+    prior_step_elapsed: dict[str, list[float]] = {}
+    for r in priors:
+        for s in _parse_steps(r[2]):
+            if not isinstance(s, dict):
+                continue
+            name = s.get("name")
+            elapsed = s.get("elapsed_s")
+            if name and isinstance(elapsed, (int, float)):
+                prior_step_elapsed.setdefault(name, []).append(float(elapsed))
+
+    step_regressions = []
+    for name, cs in cur_steps.items():
+        cur_elapsed = cs.get("elapsed_s")
+        if not isinstance(cur_elapsed, (int, float)) or cur_elapsed < 1.0:
+            continue
+        priors_list = prior_step_elapsed.get(name, [])
+        if len(priors_list) < 2:
+            continue
+        med = median(priors_list)
+        if med < 1.0:
+            continue
+        ratio = cur_elapsed / med
+        if ratio >= elapsed_threshold or ratio <= (1.0 / elapsed_threshold):
+            step_regressions.append({
+                "name": name,
+                "elapsed_s": round(float(cur_elapsed), 1),
+                "median_elapsed_s": round(float(med), 1),
+                "ratio": round(float(ratio), 2),
+                "direction": "slower" if ratio > 1 else "faster",
+            })
+
+    # Compare top-level numeric values in `results` (e.g., ingest.new,
+    # cluster.matched_to_existing, summarize.generated). Walks one level
+    # deep into nested dicts; everything beyond that ignored.
+    def _flatten_numeric(d, prefix=""):
+        out = {}
+        if not isinstance(d, dict):
+            return out
+        for k, v in d.items():
+            key = f"{prefix}.{k}" if prefix else k
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                out[key] = float(v)
+            elif isinstance(v, dict):
+                out.update(_flatten_numeric(v, key))
+        return out
+
+    cur_flat = _flatten_numeric(_parse_results(current[1]))
+    prior_flat: dict[str, list[float]] = {}
+    for r in priors:
+        for k, v in _flatten_numeric(_parse_results(r[1])).items():
+            prior_flat.setdefault(k, []).append(v)
+
+    result_regressions = []
+    for k, cur_v in cur_flat.items():
+        priors_list = prior_flat.get(k, [])
+        if len(priors_list) < 2:
+            continue
+        med = median(priors_list)
+        if med == 0 or abs(med) < 1.0:
+            continue
+        ratio = cur_v / med
+        if ratio >= elapsed_threshold or ratio <= (1.0 / elapsed_threshold):
+            result_regressions.append({
+                "key": k,
+                "current": cur_v,
+                "median": round(float(med), 1),
+                "ratio": round(float(ratio), 2),
+                "direction": "higher" if ratio > 1 else "lower",
+            })
+
+    step_regressions.sort(key=lambda r: r["ratio"], reverse=True)
+    result_regressions.sort(key=lambda r: r["ratio"], reverse=True)
+
+    return {
+        "baseline_runs": len(priors),
+        "current_run_at": current[0].isoformat() if current[0] else None,
+        "step_regressions": step_regressions,
+        "result_regressions": result_regressions,
+    }
+
+
 @router.get("/maintenance/status")
 async def maintenance_status():
     """Return the current maintenance run state (for dashboard polling).

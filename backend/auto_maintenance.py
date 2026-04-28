@@ -3570,18 +3570,39 @@ async def step_archive_stale():
             story.archived_at = now
             stats["soft_archived"] += 1
 
-        # Tier 2 — delete tiny stale stories (existing behavior).
+        # Tier 2 — delete tiny stale stories. Mirror the FK-safe pattern
+        # from step_prune_stagnant: clear all nullable references first,
+        # then delete only stories with no audit/snapshot rows still
+        # pointing at them. Without this guard the DELETE raises
+        # ForeignKeyViolationError exactly like prune-stagnant did
+        # before the 2026-04-28 fix.
+        from sqlalchemy import text as _safe_t
         result = await db.execute(
-            select(Story).where(
+            select(Story.id).where(
                 Story.last_updated_at < hard_cutoff,
                 Story.article_count < 3,
             )
         )
-        stale = list(result.scalars().all())
-        for story in stale:
-            await db.execute(update(Article).where(Article.story_id == story.id).values(story_id=None))
-            await db.execute(delete(Story).where(Story.id == story.id))
-            stats["hard_deleted"] += 1
+        stale_ids = [row[0] for row in result.all()]
+        if stale_ids:
+            for table, col in (
+                ("articles", "story_id"),
+                ("telegram_posts", "story_id"),
+                ("rater_feedback", "story_id"),
+                ("analyst_takes", "story_id"),
+                ("stories", "split_from_id"),
+            ):
+                await db.execute(_safe_t(
+                    f"UPDATE {table} SET {col} = NULL WHERE {col} = ANY(:ids)"
+                ), {"ids": stale_ids})
+            del_result = await db.execute(_safe_t("""
+                DELETE FROM stories
+                WHERE id = ANY(:ids)
+                  AND NOT EXISTS (SELECT 1 FROM story_events WHERE story_id = stories.id)
+                  AND NOT EXISTS (SELECT 1 FROM social_sentiment_snapshots WHERE story_id = stories.id)
+            """), {"ids": stale_ids})
+            stats["hard_deleted"] = del_result.rowcount or 0
+            stats["hard_skipped_with_history"] = len(stale_ids) - stats["hard_deleted"]
 
         # Recount article_count for ALL stories (in case articles were added/removed)
         result = await db.execute(select(Story).where(Story.article_count >= 1))
