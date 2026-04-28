@@ -948,52 +948,80 @@ async def diagnostics(db: AsyncSession = Depends(get_db)):
     }
 
 
-# Lock so we don't start two maintenance runs at once.
-_maintenance_lock = asyncio.Lock()
-
-
-async def _run_maintenance_background():
-    """Run the full maintenance cycle as a background task.
-
-    The per-step progress is tracked in app.services.maintenance_state.STATE
-    (populated by auto_maintenance.run_maintenance).
-    """
-    import sys
-    from app.services import maintenance_state
-
-    try:
-        backend_dir = str(Path(__file__).parent.parent.parent.parent)
-        if backend_dir not in sys.path:
-            sys.path.insert(0, backend_dir)
-        from auto_maintenance import run_maintenance
-
-        await run_maintenance()
-    except Exception as e:
-        logger.exception("Background maintenance failed")
-        maintenance_state.finish_run("error", error=str(e))
-
-
 @router.post("/maintenance/run")
-async def run_maintenance_endpoint():
-    """Kick off a maintenance run in the background and return immediately.
+async def run_maintenance_endpoint(mode: str = Query("full", pattern="^(full|ingest|hourly)$")):
+    """Spawn a detached subprocess to run the maintenance pipeline.
 
-    Poll /maintenance/status to see per-step progress. The previous
-    synchronous implementation hit Railway's 2-minute proxy timeout.
+    The previous implementation used `asyncio.create_task` to run the
+    pipeline on the same uvicorn process. That worked until full-backlog
+    runs hit the cosine-similarity loops, which are pure synchronous
+    Python and never yielded — the event loop got starved for 30-60+
+    seconds at a stretch and the API stopped responding to /health and
+    /admin/maintenance/status (observed 2026-04-28).
+
+    The cron-service container handles maintenance correctly because it's
+    a separate Railway service with its own resources. This endpoint now
+    mirrors that pattern: spawn `python auto_maintenance.py --mode <m>`
+    as a detached subprocess on the API container. The subprocess uses
+    the existing maintenance_lock table to refuse double-runs, so
+    triggering this while the cron service is also running is safe.
+
+    Note: live per-step progress is no longer tracked in the API
+    process's in-memory STATE — the subprocess runs in its own Python
+    process. The dashboard can still see the most recent completed run
+    via /admin/maintenance/logs, and live health checks via
+    /admin/dashboard. Phase-2 (DB-backed live progress for cross-process
+    visibility) is queued separately.
     """
-    from app.services import maintenance_state as _ms
+    import subprocess
+    import sys
 
-    async with _maintenance_lock:
-        if _ms.STATE.get("status") == "running":
-            return {
-                "status": "already_running",
-                "message": "A maintenance run is already in progress",
-                "state": _ms.STATE,
-            }
-        # Fire and forget — uvicorn keeps the coroutine alive
-        asyncio.create_task(_run_maintenance_background())
+    backend_dir = Path(__file__).parent.parent.parent.parent
+    script = backend_dir / "auto_maintenance.py"
+    if not script.is_file():
+        raise HTTPException(
+            status_code=500,
+            detail=f"auto_maintenance.py not found at {script}",
+        )
+
+    # Spawn detached. start_new_session=True puts the subprocess in its
+    # own process group so it survives if the API process is restarted
+    # (subject to container-level lifecycle — Railway will SIGTERM
+    # everything when redeploying anyway). stdout/stderr inherit from the
+    # parent so subprocess logs land in the same Railway log stream.
+    try:
+        proc = subprocess.Popen(
+            [sys.executable, "auto_maintenance.py", "--mode", mode],
+            cwd=str(backend_dir),
+            start_new_session=True,
+        )
+    except Exception as e:
+        logger.exception("Failed to spawn maintenance subprocess")
+        raise HTTPException(status_code=500, detail=f"Spawn failed: {e}")
+
+    # Brief liveness probe: if the subprocess died within 100ms, it
+    # likely crashed at import. Surface that instead of returning a
+    # confident "started" message that's about to be wrong.
+    await asyncio.sleep(0.1)
+    early_rc = proc.poll()
+    if early_rc is not None:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Subprocess exited immediately with code {early_rc}. "
+                   "Check Railway logs for the doornegar service.",
+        )
+
     return {
         "status": "started",
-        "message": "Maintenance is running in the background. Poll /admin/maintenance/status.",
+        "pid": proc.pid,
+        "mode": mode,
+        "message": (
+            "Maintenance running in a detached subprocess on the API container. "
+            "The subprocess writes a row to maintenance_logs on completion. "
+            "Watch Railway logs for the doornegar service for live progress. "
+            "If another run already holds the maintenance_lock, this subprocess "
+            "will log a warning and exit immediately."
+        ),
     }
 
 
@@ -1181,26 +1209,44 @@ async def maintenance_baseline_comparison(
 async def maintenance_status():
     """Return the current maintenance run state (for dashboard polling).
 
+    Reads from the cross-process tmpfile mirror first (so the API can see
+    what a maintenance subprocess on the same container is doing), then
+    falls back to the API process's in-memory STATE if no file is
+    present (legacy case — pre-2026-04-28 the API ran maintenance
+    in-process).
+
     Shape:
     {
       status: idle | running | success | error,
       started_at, finished_at, elapsed_s,
-      current_step: str | null,             # step currently executing
+      current_step: str | null,
       current_step_started: float | null,
-      steps: [{name, status, elapsed_s, stats}, ...],  # completed so far
-      results: dict | null,                 # final results (populated at end)
+      current_step_elapsed_s: float | null,
+      current_step_progress: {done, total, label} | null,
+      steps: [{name, status, elapsed_s, stats}, ...],
+      results: dict | null,
       error: str | null,
+      pid: int | null,                # the subprocess PID, when applicable
+      source: "file" | "memory",      # where the state was read from
     }
     """
     from app.services import maintenance_state as _ms
-    import time
+    import time as _time
 
-    state = dict(_ms.STATE)
-    # Add current step elapsed for a live ticker
+    persisted = _ms.read_persisted()
+    if persisted is not None:
+        state = dict(persisted)
+        state["source"] = "file"
+    else:
+        state = dict(_ms.STATE)
+        state["source"] = "memory"
+
+    # Add live current-step elapsed for the dashboard ticker.
     if state.get("current_step") and state.get("current_step_started"):
-        state["current_step_elapsed_s"] = round(time.time() - state["current_step_started"], 1)
-    # Total steps so frontend can show accurate progress bar
-    state["total_steps"] = _ms.STATE.get("total_steps", 14)
+        state["current_step_elapsed_s"] = round(
+            _time.time() - state["current_step_started"], 1
+        )
+    state["total_steps"] = state.get("total_steps", 14)
     return state
 
 
