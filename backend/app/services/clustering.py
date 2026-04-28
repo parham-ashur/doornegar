@@ -813,7 +813,18 @@ async def _match_to_existing_stories(
 
     now_utc = datetime.now(timezone.utc)
 
-    for article in articles:
+    import asyncio as _async_yield
+    for _outer_idx, article in enumerate(articles):
+        # Yield to the event loop every 25 articles. Each iteration runs
+        # hundreds of synchronous cosine ops + Python checks, and at
+        # several hundred articles × several hundred candidate stories
+        # the cumulative CPU work starves uvicorn for 30-60+ seconds —
+        # the dashboard's status polling can't refresh and /health
+        # times out (observed 2026-04-28 during the dashboard-triggered
+        # full run). `await asyncio.sleep(0)` is the cheapest yield —
+        # it lets pending coroutines run a tick, then resumes here.
+        if _outer_idx and _outer_idx % 25 == 0:
+            await _async_yield.sleep(0)
         # Reserved articles skip matching entirely — they'll flow into
         # new-cluster creation along with the unmatched remainder.
         if article.id in reserved_ids:

@@ -848,7 +848,14 @@ async def link_posts_by_embedding(db: AsyncSession, threshold: float = 0.35) -> 
 
     linked_by_embedding = 0
     via_article_rescue = 0
-    for post, emb in zip(remaining_posts, embeddings):
+    import asyncio as _async_yield
+    for _idx, (post, emb) in enumerate(zip(remaining_posts, embeddings)):
+        # Yield every 50 posts so the API event loop stays responsive
+        # — see clustering._match_to_existing_stories for the full
+        # rationale. Cosine sim × story_centroids × story_articles
+        # is N×M×K sync work that otherwise blocks /health.
+        if _idx and _idx % 50 == 0:
+            await _async_yield.sleep(0)
         if not emb or all(v == 0 for v in emb) or any(v is None for v in emb):
             continue
 
@@ -1053,9 +1060,13 @@ async def reassign_posts_by_embedding(
         _ms = None
     total_posts = len(posts)
 
+    import asyncio as _async_yield
     for idx, (post, emb) in enumerate(zip(posts, embeddings)):
         if _ms is not None and idx % 50 == 0:
             _ms.update_step_progress(idx, total_posts, label="cosine + reassign decisions")
+            # Yield to the event loop on the same cadence — see
+            # clustering._match_to_existing_stories for the rationale.
+            await _async_yield.sleep(0)
         if not emb or all(v == 0 for v in emb) or any(v is None for v in emb):
             continue
 
