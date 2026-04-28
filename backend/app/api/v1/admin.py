@@ -394,6 +394,63 @@ async def get_dashboard(db: AsyncSession = Depends(get_db)):
                         ),
                     })
 
+    # H7 — run-over-run regression. Flag any step whose latest elapsed is
+    # >2× the median of the last 5 successful runs (or top-level result
+    # counter dropped below half). Catches "ingest only fetched 4 articles
+    # vs typical 280" and "bias scoring took 4× as long as usual" without
+    # operator polling. Limited to the most significant regression in each
+    # category so the Attention list doesn't flood.
+    try:
+        recent = (await db.execute(_sa_text(
+            "SELECT results, steps FROM maintenance_logs "
+            "WHERE status = 'success' ORDER BY run_at DESC LIMIT 6"
+        ))).all()
+    except Exception:
+        recent = []
+    if len(recent) >= 3:
+        import json as _hj7
+        from statistics import median as _median
+        def _safe_load(raw, default):
+            if not raw:
+                return default
+            try:
+                v = _hj7.loads(raw) if isinstance(raw, str) else raw
+                return v if isinstance(v, type(default)) else default
+            except Exception:
+                return default
+        cur_steps_list = _safe_load(recent[0][1], [])
+        prior_step_elapsed: dict = {}
+        for r in recent[1:]:
+            for s in _safe_load(r[1], []):
+                if isinstance(s, dict) and isinstance(s.get("elapsed_s"), (int, float)):
+                    prior_step_elapsed.setdefault(s.get("name", ""), []).append(float(s["elapsed_s"]))
+        worst = None
+        for cs in cur_steps_list:
+            if not isinstance(cs, dict):
+                continue
+            name = cs.get("name") or ""
+            cur_e = cs.get("elapsed_s")
+            if not isinstance(cur_e, (int, float)) or cur_e < 30:
+                continue
+            priors = prior_step_elapsed.get(name, [])
+            if len(priors) < 2:
+                continue
+            med = _median(priors)
+            if med < 30:
+                continue
+            ratio = cur_e / med
+            if ratio >= 2.0 and (worst is None or ratio > worst[1]):
+                worst = (name, ratio, cur_e, med)
+        if worst:
+            name, ratio, cur_e, med = worst
+            issues.append({
+                "severity": "warning",
+                "message": (
+                    f"Step '{name}' took {round(cur_e)}s — {ratio:.1f}× the recent "
+                    f"median of {round(med)}s. Investigate if it persists."
+                ),
+            })
+
     # H6 — DB connection pressure. Cheap pg_stat_activity probe so we can
     # see if Neon is close to its connection cap during a maintenance run.
     # Wrapped because pg_stat_activity is restricted on some hosted setups.
