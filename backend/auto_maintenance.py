@@ -3250,15 +3250,52 @@ async def step_prune_stagnant():
     re-process these rows. Idempotent — a second run is a no-op once the
     small-stagnant set is empty.
     """
-    from sqlalchemy import select, update, delete
+    from sqlalchemy import select, update, delete, text as _sql
     from app.database import async_session
     from app.models.story import Story
     from app.models.article import Article
 
-    stats = {"singles_pruned": 0, "smalls_pruned": 0}
+    stats = {"singles_pruned": 0, "smalls_pruned": 0, "skipped_with_dependents": 0}
     now = datetime.now(timezone.utc)
     singles_cutoff = now - timedelta(hours=48)
     smalls_cutoff = now - timedelta(days=14)
+
+    async def _delete_stories_safe(db, story_ids: list) -> int:
+        """Delete stories after clearing nullable references and skipping any
+        that have non-nullable dependents (social_sentiment_snapshots,
+        story_events). Mirrors the prune-noise guard pattern.
+        """
+        if not story_ids:
+            return 0
+        # Null nullable FKs first — articles, telegram_posts, rater_feedback,
+        # analyst_takes all have nullable story_id and represent data we want
+        # to keep even if the host story goes away.
+        await db.execute(_sql(
+            "UPDATE articles        SET story_id = NULL WHERE story_id = ANY(:ids)"
+        ), {"ids": story_ids})
+        await db.execute(_sql(
+            "UPDATE telegram_posts  SET story_id = NULL WHERE story_id = ANY(:ids)"
+        ), {"ids": story_ids})
+        await db.execute(_sql(
+            "UPDATE rater_feedback  SET story_id = NULL WHERE story_id = ANY(:ids)"
+        ), {"ids": story_ids})
+        await db.execute(_sql(
+            "UPDATE analyst_takes   SET story_id = NULL WHERE story_id = ANY(:ids)"
+        ), {"ids": story_ids})
+        # Self-FK cleanup — a child story may point back via split_from_id.
+        await db.execute(_sql(
+            "UPDATE stories         SET split_from_id = NULL WHERE split_from_id = ANY(:ids)"
+        ), {"ids": story_ids})
+        # NOT NULL FKs — skip any story still referenced from the audit log
+        # (story_events) or sentiment snapshots. We never delete those rows
+        # because they're history we want to preserve.
+        result = await db.execute(_sql("""
+            DELETE FROM stories
+            WHERE id = ANY(:ids)
+              AND NOT EXISTS (SELECT 1 FROM story_events                WHERE story_id = stories.id)
+              AND NOT EXISTS (SELECT 1 FROM social_sentiment_snapshots  WHERE story_id = stories.id)
+        """), {"ids": story_ids})
+        return getattr(result, "rowcount", 0) or 0
 
     async with async_session() as db:
         # Tier 1 — 1-article stories >48h
@@ -3269,10 +3306,9 @@ async def step_prune_stagnant():
                 Story.is_edited.is_(False),
             )
         )).scalars().all()
-        if singles:
-            await db.execute(update(Article).where(Article.story_id.in_(singles)).values(story_id=None))
-            await db.execute(delete(Story).where(Story.id.in_(singles)))
-            stats["singles_pruned"] = len(singles)
+        deleted = await _delete_stories_safe(db, list(singles))
+        stats["singles_pruned"] = deleted
+        stats["skipped_with_dependents"] += len(singles) - deleted
 
         # Tier 2 — 2-4 article stories >14 days with no recent updates
         smalls = (await db.execute(
@@ -3282,10 +3318,9 @@ async def step_prune_stagnant():
                 Story.is_edited.is_(False),
             )
         )).scalars().all()
-        if smalls:
-            await db.execute(update(Article).where(Article.story_id.in_(smalls)).values(story_id=None))
-            await db.execute(delete(Story).where(Story.id.in_(smalls)))
-            stats["smalls_pruned"] = len(smalls)
+        deleted = await _delete_stories_safe(db, list(smalls))
+        stats["smalls_pruned"] = deleted
+        stats["skipped_with_dependents"] += len(smalls) - deleted
 
         await db.commit()
 
@@ -3385,6 +3420,7 @@ async def step_archive_stale():
     from app.database import async_session
     from app.models.story import Story
     from app.models.article import Article
+    from app.services.events import log_event as _log_event
 
     stats = {"auto_frozen": 0, "soft_archived": 0, "hard_deleted": 0, "recounted": 0}
     now = datetime.now(timezone.utc)
@@ -4437,7 +4473,7 @@ async def step_flag_unrelated_articles():
 
         await db.commit()
 
-    if stats["flagged"] > 0:
+    if stats["detached"] > 0:
         logger.info(f"Auto-flag: {stats}")
     return stats
 

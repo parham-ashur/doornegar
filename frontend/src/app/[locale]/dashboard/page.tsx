@@ -130,11 +130,14 @@ function summaryMetrics(result: Record<string, unknown> | null): Array<{
   return out;
 }
 
-/** Format an elapsed-seconds count as a compact "Xm Ys" or "Ys". */
+/** Format an elapsed-seconds count as a compact "Xm Ys" or "Ys".
+ * Round to whole seconds because the modulo of a float second total
+ * was leaking artifacts like "24.199999999999818s". */
 function fmtDuration(sec: number): string {
-  if (sec < 60) return `${sec}s`;
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
+  const total = Math.round(sec);
+  if (total < 60) return `${total}s`;
+  const m = Math.floor(total / 60);
+  const s = total - m * 60;
   return s === 0 ? `${m}m` : `${m}m ${s}s`;
 }
 
