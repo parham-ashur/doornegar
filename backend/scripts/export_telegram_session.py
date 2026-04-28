@@ -21,15 +21,19 @@ import asyncio
 import os
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 
+from app.config import settings
+
 
 async def main() -> int:
-    api_id = int(os.environ.get("TELEGRAM_API_ID") or 0)
-    api_hash = os.environ.get("TELEGRAM_API_HASH") or ""
+    api_id = int(settings.telegram_api_id or 0)
+    api_hash = settings.telegram_api_hash or ""
     if not api_id or not api_hash:
-        print("ERROR: set TELEGRAM_API_ID and TELEGRAM_API_HASH env vars first", file=sys.stderr)
+        print("ERROR: TELEGRAM_API_ID / TELEGRAM_API_HASH missing from .env", file=sys.stderr)
         return 1
 
     # Load the existing file-based session. This doesn't create a new one —

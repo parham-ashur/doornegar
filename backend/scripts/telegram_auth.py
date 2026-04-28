@@ -1,18 +1,21 @@
 """One-time Telegram authentication script.
 
 Usage:
-  Step 1: python scripts/telegram_auth.py --phone +33XXXXXXXXX
-          (sends SMS code to your phone)
+    python scripts/telegram_auth.py
 
-  Step 2: python scripts/telegram_auth.py --phone +33XXXXXXXXX --code 12345
-          (completes authentication, creates session file)
+Interactive: the script prompts for phone number, SMS code, and 2FA
+password (if enabled). All in one process so Telethon can hold the
+phone_code_hash in memory between send_code_request and sign_in —
+the previous two-step CLI flow lost that hash between invocations.
 
-After this, the session file persists and Telethon can connect automatically.
+After this completes, doornegar_session.session is written to the
+current directory. Then run scripts/export_telegram_session.py to
+turn it into a StringSession to paste into Railway.
 """
 
 import asyncio
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -20,13 +23,6 @@ from app.config import settings
 
 
 async def main():
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--phone", required=True, help="Phone number with country code, e.g. +33612345678")
-    parser.add_argument("--code", help="SMS verification code (step 2)")
-    parser.add_argument("--password", help="2FA password if enabled")
-    args = parser.parse_args()
-
     from telethon import TelegramClient
 
     client = TelegramClient(
@@ -34,35 +30,17 @@ async def main():
         settings.telegram_api_id,
         settings.telegram_api_hash,
     )
-    await client.connect()
 
-    if not args.code:
-        # Step 1: send code
-        result = await client.send_code_request(args.phone)
-        print(f"Code sent to {args.phone}")
-        print(f"Phone code hash: {result.phone_code_hash}")
-        print(f"\nNow run again with: --code <YOUR_CODE>")
-    else:
-        # Step 2: sign in with code
-        try:
-            await client.sign_in(args.phone, args.code)
-            print("Authentication successful!")
-            print(f"Session file created: doornegar_session.session")
-        except Exception as e:
-            if "Two-step" in str(e) or "password" in str(e).lower():
-                if args.password:
-                    await client.sign_in(password=args.password)
-                    print("Authentication successful (with 2FA)!")
-                else:
-                    print(f"2FA is enabled. Run again with --password YOUR_PASSWORD")
-                    await client.disconnect()
-                    return
-            else:
-                raise
+    # client.start() handles connect → phone prompt → send code → code
+    # prompt → 2FA prompt (if any) in a single interactive flow.
+    await client.start()
 
     if await client.is_user_authorized():
         me = await client.get_me()
+        print(f"\nAuthentication successful!")
         print(f"Logged in as: {me.first_name} (ID: {me.id})")
+        print(f"Session file: doornegar_session.session")
+        print(f"\nNext: python scripts/export_telegram_session.py")
 
     await client.disconnect()
 
