@@ -681,7 +681,7 @@ async def _flush_telegram_post_links(
     return total
 
 
-async def link_posts_by_embedding(db: AsyncSession, threshold: float = 0.35) -> dict:
+async def link_posts_by_embedding(threshold: float = 0.35) -> dict:
     """Link unlinked Telegram posts to stories via URL match + embeddings.
 
     Two-pass:
@@ -695,35 +695,102 @@ async def link_posts_by_embedding(db: AsyncSession, threshold: float = 0.35) -> 
          taking the MAX. Broad umbrella stories have diluted centroids
          (100+ articles averaged produces a blurry vector); per-article
          rescue finds posts that match one specific article sharply.
+
+    Manages its own DB session: a short read-only session for the inputs,
+    closed before the multi-minute embedding + cosine work, then
+    fresh-session UPDATEs via _flush_telegram_post_links. Earlier
+    versions accepted the caller's session and held it across the
+    entire body — Neon's idle reaper killed the connection during the
+    embedding phase, and the session-cleanup raised InterfaceError on
+    every full-mode run.
     """
     import re
     from datetime import datetime, timezone
     from urllib.parse import urlparse
 
+    from app.database import async_session
     from app.models.article import Article
     from app.nlp.embeddings import generate_embeddings_batch, cosine_similarity
-    from sqlalchemy import update
 
-    # ── Pass 1: URL extraction ──
-    # Build an index of article_url → story_id so we can lookup in O(1).
-    # Only include articles in stories we'd consider anyway (≥3 articles,
-    # matching the centroid query below). ~3K articles, cheap.
-    art_index_result = await db.execute(
-        select(Article.url, Article.story_id)
-        .where(Article.story_id.isnot(None), Article.url.isnot(None))
-    )
+    def _clean_vec(v) -> list[float] | None:
+        """Validate centroids — some rows have dicts, lists with None values,
+        or partially-initialized vectors from older code. Skip anything that
+        isn't a clean list of finite numbers so cosine_similarity can't raise.
+        """
+        if not isinstance(v, list) or len(v) == 0:
+            return None
+        if any(x is None or not isinstance(x, (int, float)) for x in v):
+            return None
+        return v
+
+    # ── Read every input we need into plain Python structures, then close
+    #    the session before the multi-minute compute phase below. ──
     url_to_story: dict[str, str] = {}
-    for art_url, sid in art_index_result.all():
-        if art_url and sid:
-            url_to_story[art_url] = str(sid)
-            # Also index by (host, path) so paywall redirects and query
-            # strings don't block matches on the same article
-            try:
-                u = urlparse(art_url)
-                key = f"{u.hostname}{u.path}".lower().rstrip("/")
-                url_to_story.setdefault(key, str(sid))
-            except Exception:
-                pass
+    story_centroids: dict[str, list[float]] = {}
+    story_last_updated: dict[str, datetime] = {}
+    story_article_embs: dict[str, list[list[float]]] = {}
+    # post tuples: (id, text) — pull primitives so the ORM session can close
+    post_tuples: list[tuple] = []
+
+    async with async_session() as db:
+        # Pass-1 input: article URL → story_id index
+        art_index_result = await db.execute(
+            select(Article.url, Article.story_id)
+            .where(Article.story_id.isnot(None), Article.url.isnot(None))
+        )
+        for art_url, sid in art_index_result.all():
+            if art_url and sid:
+                url_to_story[art_url] = str(sid)
+                try:
+                    u = urlparse(art_url)
+                    key = f"{u.hostname}{u.path}".lower().rstrip("/")
+                    url_to_story.setdefault(key, str(sid))
+                except Exception:
+                    pass
+
+        # Pass-2 input: stories + centroids + last_updated_at
+        story_result = await db.execute(
+            select(Story).where(
+                Story.centroid_embedding.isnot(None),
+                Story.article_count >= 3,
+            )
+        )
+        for s in story_result.scalars().all():
+            c = _clean_vec(s.centroid_embedding)
+            if c is not None:
+                story_centroids[str(s.id)] = c
+                if s.last_updated_at is not None:
+                    story_last_updated[str(s.id)] = s.last_updated_at
+
+        if not story_centroids:
+            return {"linked": 0, "reason": "no stories with centroids"}
+
+        # Per-article embeddings (rescues broad clusters with diluted centroids)
+        article_result = await db.execute(
+            select(Article.story_id, Article.embedding)
+            .where(
+                Article.story_id.in_(list(story_centroids.keys())),
+                Article.embedding.isnot(None),
+            )
+        )
+        for sid, emb in article_result.all():
+            cleaned = _clean_vec(emb)
+            if cleaned is None:
+                continue
+            story_article_embs.setdefault(str(sid), []).append(cleaned)
+
+        # Unlinked posts — pull only the columns we'll touch downstream
+        post_result = await db.execute(
+            select(TelegramPost.id, TelegramPost.text).where(
+                TelegramPost.story_id.is_(None),
+                TelegramPost.text.isnot(None),
+                TelegramPost.text != "",
+            )
+        )
+        post_tuples = [(pid, txt) for pid, txt in post_result.all()]
+
+    if not post_tuples:
+        return {"linked": 0, "reason": "no unlinked posts"}
 
     # Match http(s) URLs only; ignore tg:// and bare mentions.
     URL_RE = re.compile(r"https?://[^\s<>\"\)]+", re.I)
@@ -735,7 +802,6 @@ async def link_posts_by_embedding(db: AsyncSession, threshold: float = 0.35) -> 
         if not text:
             return None
         for raw in URL_RE.findall(text):
-            # Strip trailing punctuation Telegram captures sometimes glue on
             clean = raw.rstrip(".,;:!؟،؛")
             if clean in url_to_story:
                 return url_to_story[clean]
@@ -748,99 +814,34 @@ async def link_posts_by_embedding(db: AsyncSession, threshold: float = 0.35) -> 
                 continue
         return None
 
-    # ── Pass 2 prep: centroids + per-article embeddings ──
-    result = await db.execute(
-        select(Story).where(
-            Story.centroid_embedding.isnot(None),
-            Story.article_count >= 3,
-        )
-    )
-    stories = list(result.scalars().all())
-
-    # Validate centroids — some rows have dicts, lists with None values, or
-    # partially-initialized vectors from older code. Skip anything that
-    # isn't a clean list of finite numbers so cosine_similarity can't raise.
-    def _clean_vec(v) -> list[float] | None:
-        if not isinstance(v, list) or len(v) == 0:
-            return None
-        if any(x is None or not isinstance(x, (int, float)) for x in v):
-            return None
-        return v
-
-    story_centroids: dict[str, list[float]] = {}
-    # last_updated_at per story so we can raise the link threshold for
-    # candidates older than 2 days — same friction model as the article
-    # clustering's aged-candidate bump in app/services/clustering.py.
-    story_last_updated: dict[str, datetime] = {}
-    for s in stories:
-        c = _clean_vec(s.centroid_embedding)
-        if c is not None:
-            story_centroids[str(s.id)] = c
-            if s.last_updated_at is not None:
-                story_last_updated[str(s.id)] = s.last_updated_at
-
-    if not story_centroids:
-        return {"linked": 0, "reason": "no stories with centroids"}
-
-    # Pull article embeddings for every story we're considering.
-    # 200 stories × ~6 articles average = ~1200 vectors, cheap.
-    eligible_ids = list(story_centroids.keys())
-    article_result = await db.execute(
-        select(Article.story_id, Article.embedding)
-        .where(
-            Article.story_id.in_(eligible_ids),
-            Article.embedding.isnot(None),
-        )
-    )
-    story_article_embs: dict[str, list[list[float]]] = {}
-    for sid, emb in article_result.all():
-        cleaned = _clean_vec(emb)
-        if cleaned is None:
-            continue
-        story_article_embs.setdefault(str(sid), []).append(cleaned)
-
-    # Get unlinked posts
-    result = await db.execute(
-        select(TelegramPost).where(
-            TelegramPost.story_id.is_(None),
-            TelegramPost.text.isnot(None),
-            TelegramPost.text != "",
-        )
-    )
-    posts = list(result.scalars().all())
-
-    if not posts:
-        return {"linked": 0, "reason": "no unlinked posts"}
-
     # ── Pass 1: URL extraction (high-precision, zero LLM) ──
-    # Accumulate all writes in memory, flush in fresh-session chunks at the
-    # end. Holding the passed-in db session across hundreds of UPDATEs let
-    # Neon's idle reaper drop the connection mid-loop in the 2026-04-27
-    # incident — InterfaceError "the underlying connection is closed".
+    # All DB writes go through _flush_telegram_post_links which uses fresh
+    # short-lived sessions per chunk; the original session that read the
+    # inputs is already closed.
     pending_updates: list[tuple] = []  # (post_id, story_id)
     linked_by_url = 0
-    remaining_posts = []
-    for post in posts:
-        sid = _find_story_via_url(post.text or "")
+    remaining: list[tuple] = []  # (post_id, text)
+    for post_id, post_text in post_tuples:
+        sid = _find_story_via_url(post_text or "")
         if sid:
-            pending_updates.append((post.id, sid))
+            pending_updates.append((post_id, sid))
             linked_by_url += 1
         else:
-            remaining_posts.append(post)
+            remaining.append((post_id, post_text))
 
     # ── Pass 2: Embedding similarity on whatever URL didn't catch ──
-    if not remaining_posts:
+    if not remaining:
         await _flush_telegram_post_links(pending_updates)
         logger.info(f"URL-linked {linked_by_url} posts, no residual for embedding pass")
         return {
             "linked": linked_by_url,
-            "total_posts": len(posts),
+            "total_posts": len(post_tuples),
             "via_url": linked_by_url,
             "via_embedding": 0,
             "threshold": threshold,
         }
 
-    post_texts = [(p.text or "")[:500] for p in remaining_posts]
+    post_texts = [(t or "")[:500] for _, t in remaining]
     import asyncio as _asyncio
     embeddings = await _asyncio.to_thread(
         generate_embeddings_batch, post_texts, 100
@@ -849,7 +850,7 @@ async def link_posts_by_embedding(db: AsyncSession, threshold: float = 0.35) -> 
     linked_by_embedding = 0
     via_article_rescue = 0
     import asyncio as _async_yield
-    for _idx, (post, emb) in enumerate(zip(remaining_posts, embeddings)):
+    for _idx, ((post_id, _post_text), emb) in enumerate(zip(remaining, embeddings)):
         # Yield every 50 posts so the API event loop stays responsive
         # — see clustering._match_to_existing_stories for the full
         # rationale. Cosine sim × story_centroids × story_articles
@@ -906,15 +907,12 @@ async def link_posts_by_embedding(db: AsyncSession, threshold: float = 0.35) -> 
                 if age_days > AGED_TG_DAYS:
                     effective_threshold = threshold + AGED_TG_THRESHOLD_BUMP
         if best_score >= effective_threshold and best_story_id:
-            pending_updates.append((post.id, best_story_id))
+            pending_updates.append((post_id, best_story_id))
             linked_by_embedding += 1
             if best_via_article:
                 via_article_rescue += 1
 
-    # Apply ALL accumulated updates in fresh-session chunks. The passed-in
-    # `db` session may already be stale (we've been holding it across the
-    # blocking embedding batch + heavy cosine loop). Fresh sessions per
-    # chunk keep each connection short-lived enough to dodge Neon's reaper.
+    # Flush UPDATEs in fresh-session chunks of 100.
     await _flush_telegram_post_links(pending_updates)
     total_linked = linked_by_url + linked_by_embedding
     logger.info(
@@ -924,7 +922,7 @@ async def link_posts_by_embedding(db: AsyncSession, threshold: float = 0.35) -> 
     )
     return {
         "linked": total_linked,
-        "total_posts": len(posts),
+        "total_posts": len(post_tuples),
         "via_url": linked_by_url,
         "via_embedding": linked_by_embedding,
         "via_article_rescue": via_article_rescue,
@@ -933,7 +931,6 @@ async def link_posts_by_embedding(db: AsyncSession, threshold: float = 0.35) -> 
 
 
 async def reassign_posts_by_embedding(
-    db: AsyncSession,
     *,
     sample_limit: int = 3000,
     drift_gap: float = 0.08,
@@ -959,14 +956,22 @@ async def reassign_posts_by_embedding(
         timeout; orders by most recently posted first so freshest
         discourse corrects first.
 
+    Manages its own DB session — same close-before-compute pattern as
+    link_posts_by_embedding. Holding the caller's session across the
+    embedding + cosine work let Neon's idle reaper kill the connection
+    and the eventual session cleanup raised InterfaceError on every
+    full-mode run.
+
     Returns per-run stats including the story IDs whose post count
     shifted — caller can invalidate their telegram_analysis cache so
     the next read regenerates.
     """
     from sqlalchemy import desc, update
 
+    from app.database import async_session
     from app.models.article import Article
     from app.nlp.embeddings import cosine_similarity
+    from datetime import datetime, timedelta, timezone
 
     def _clean_vec(v) -> list[float] | None:
         if not isinstance(v, list) or len(v) == 0:
@@ -975,66 +980,67 @@ async def reassign_posts_by_embedding(
             return None
         return v
 
-    # Load stories with valid centroids (same guard as the linker)
-    result = await db.execute(
-        select(Story).where(
-            Story.centroid_embedding.isnot(None),
-            Story.article_count >= 3,
-        )
-    )
-    stories = list(result.scalars().all())
-    story_data: dict[str, list[float]] = {}
-    for s in stories:
-        c = _clean_vec(s.centroid_embedding)
-        if c is not None:
-            story_data[str(s.id)] = c
-
-    if not story_data:
-        return {"reassigned": 0, "reason": "no stories with centroids"}
-
-    # Per-article embeddings give reassignment the same rescue path as
-    # initial linking: a post that matches one specific article in a
-    # broad cluster stays (or moves) where that article lives, not
-    # where a diluted centroid accidentally wins.
-    art_result = await db.execute(
-        select(Article.story_id, Article.embedding)
-        .where(
-            Article.story_id.in_(list(story_data.keys())),
-            Article.embedding.isnot(None),
-        )
-    )
-    story_article_embs: dict[str, list[list[float]]] = {}
-    for sid, emb in art_result.all():
-        cleaned = _clean_vec(emb)
-        if cleaned is None:
-            continue
-        story_article_embs.setdefault(str(sid), []).append(cleaned)
-
-    # Pull a recent sample of linked posts. Posts older than ~60 days
-    # rarely benefit from reassignment (their topic has moved on) and
-    # walking the full table takes minutes, so window by recency.
-    from datetime import datetime, timedelta, timezone
     cutoff = datetime.now(timezone.utc) - timedelta(days=60)
 
-    result = await db.execute(
-        select(TelegramPost)
-        .where(
-            TelegramPost.story_id.isnot(None),
-            TelegramPost.text.isnot(None),
-            TelegramPost.text != "",
-            TelegramPost.date >= cutoff,
+    story_data: dict[str, list[float]] = {}
+    story_article_embs: dict[str, list[list[float]]] = {}
+    # post tuples: (id, text, current_story_id) — pull primitives so the ORM
+    # session can close before the multi-minute embedding + cosine phase.
+    post_tuples: list[tuple] = []
+
+    async with async_session() as db:
+        # Stories with valid centroids
+        result = await db.execute(
+            select(Story).where(
+                Story.centroid_embedding.isnot(None),
+                Story.article_count >= 3,
+            )
         )
-        .order_by(desc(TelegramPost.date))
-        .limit(sample_limit)
-    )
-    posts = list(result.scalars().all())
-    if not posts:
+        for s in result.scalars().all():
+            c = _clean_vec(s.centroid_embedding)
+            if c is not None:
+                story_data[str(s.id)] = c
+
+        if not story_data:
+            return {"reassigned": 0, "reason": "no stories with centroids"}
+
+        # Per-article embeddings (rescues posts that match one specific
+        # article in an otherwise broad cluster).
+        art_result = await db.execute(
+            select(Article.story_id, Article.embedding)
+            .where(
+                Article.story_id.in_(list(story_data.keys())),
+                Article.embedding.isnot(None),
+            )
+        )
+        for sid, emb in art_result.all():
+            cleaned = _clean_vec(emb)
+            if cleaned is None:
+                continue
+            story_article_embs.setdefault(str(sid), []).append(cleaned)
+
+        # Recent linked posts — orders by most recent first so freshest
+        # discourse gets the reassignment chance first.
+        post_result = await db.execute(
+            select(TelegramPost.id, TelegramPost.text, TelegramPost.story_id)
+            .where(
+                TelegramPost.story_id.isnot(None),
+                TelegramPost.text.isnot(None),
+                TelegramPost.text != "",
+                TelegramPost.date >= cutoff,
+            )
+            .order_by(desc(TelegramPost.date))
+            .limit(sample_limit)
+        )
+        post_tuples = [(pid, txt, str(sid)) for pid, txt, sid in post_result.all()]
+
+    if not post_tuples:
         return {"reassigned": 0, "examined": 0}
 
     # Re-embed post texts. Using the same batched embedder the linker
     # uses so the vector space matches story centroids exactly.
     from app.nlp.embeddings import generate_embeddings_batch
-    post_texts = [(p.text or "")[:500] for p in posts]
+    post_texts = [(t or "")[:500] for _, t, _ in post_tuples]
     import asyncio as _asyncio
     embeddings = await _asyncio.to_thread(
         generate_embeddings_batch, post_texts, 100
@@ -1044,13 +1050,6 @@ async def reassign_posts_by_embedding(
     reassigned = 0
     below_gap = 0
     unchanged = 0
-
-    # Accumulate (post_id, new_story_id) updates and flush in fresh-session
-    # chunks at the end. Holding `db` across 3000 posts × embeddings batch
-    # + cosine loop has the same shape as the bug we fixed in
-    # `link_posts_by_embedding` — Neon kills the idle connection mid-loop
-    # (17 min in the 2026-04-27 run) and the next UPDATE raises
-    # InterfaceError "connection is closed".
     pending_reassign: list[tuple] = []  # (post_id, new_story_id)
 
     # Wire per-post progress for the dashboard's running-step banner.
@@ -1058,10 +1057,10 @@ async def reassign_posts_by_embedding(
         from app.services import maintenance_state as _ms
     except Exception:
         _ms = None
-    total_posts = len(posts)
+    total_posts = len(post_tuples)
 
     import asyncio as _async_yield
-    for idx, (post, emb) in enumerate(zip(posts, embeddings)):
+    for idx, ((post_id, _post_text, current_story), emb) in enumerate(zip(post_tuples, embeddings)):
         if _ms is not None and idx % 50 == 0:
             await _ms.update_step_progress(idx, total_posts, label="cosine + reassign decisions")
             # Yield to the event loop on the same cadence — see
@@ -1070,7 +1069,6 @@ async def reassign_posts_by_embedding(
         if not emb or all(v == 0 for v in emb) or any(v is None for v in emb):
             continue
 
-        current_story = str(post.story_id)
         current_score = 0.0
         best_story_id = current_story
         best_score = 0.0
@@ -1108,7 +1106,7 @@ async def reassign_posts_by_embedding(
             below_gap += 1
             continue
 
-        pending_reassign.append((post.id, best_story_id))
+        pending_reassign.append((post_id, best_story_id))
         reassigned += 1
         moves[current_story] = moves.get(current_story, 0) - 1
         moves[best_story_id] = moves.get(best_story_id, 0) + 1
@@ -1125,8 +1123,7 @@ async def reassign_posts_by_embedding(
     # corrected post set instead of returning stale predictions.
     affected_story_ids = {sid for sid, delta in moves.items() if delta != 0}
     if affected_story_ids:
-        from app.database import async_session as _ses_inv
-        async with _ses_inv() as db_inv:
+        async with async_session() as db_inv:
             await db_inv.execute(
                 update(Story)
                 .where(Story.id.in_(affected_story_ids))
@@ -1135,12 +1132,12 @@ async def reassign_posts_by_embedding(
             await db_inv.commit()
     logger.info(
         f"Reassigned {reassigned} telegram posts across {len(affected_story_ids)} "
-        f"stories (examined={len(posts)}, unchanged={unchanged}, below_gap={below_gap}, "
+        f"stories (examined={total_posts}, unchanged={unchanged}, below_gap={below_gap}, "
         f"drift_gap={drift_gap}, min_score={min_score})"
     )
     return {
         "reassigned": reassigned,
-        "examined": len(posts),
+        "examined": total_posts,
         "unchanged": unchanged,
         "below_gap": below_gap,
         "stories_touched": len(affected_story_ids),

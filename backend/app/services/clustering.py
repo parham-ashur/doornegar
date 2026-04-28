@@ -2072,7 +2072,6 @@ async def cluster_articles(db: AsyncSession, *, deadline_ts: float | None = None
     # pipeline run, paying the LLM tax indefinitely.
     result = await db.execute(
         select(Article)
-        .options(joinedload(Article.source))
         .where(
             Article.story_id.is_(None),
             Article.ingested_at >= cutoff,
@@ -2120,13 +2119,30 @@ async def cluster_articles(db: AsyncSession, *, deadline_ts: float | None = None
         )
     articles = kept
 
-    # Pre-extract source info while in session context (avoid lazy loading later)
+    # Build source lookup from a separate explicit query rather than the
+    # ORM relationship attribute. The earlier joinedload(Article.source)
+    # pattern occasionally surfaced as
+    # `greenlet_spawn has not been called; can't call await_only() here`
+    # in production hourly runs (2026-04-28 15:23 / 16:23) — likely an
+    # ORM lazy-load fired after the SQLAlchemy session went into a state
+    # where relationship I/O wasn't allowed. A plain SELECT into a dict
+    # cannot trigger lazy loading.
+    source_id_set = {a.source_id for a in articles if a.source_id is not None}
+    source_lookup: dict = {}
+    if source_id_set:
+        src_q = await db.execute(
+            select(Source.id, Source.name_en, Source.state_alignment)
+            .where(Source.id.in_(source_id_set))
+        )
+        source_lookup = {sid: (name, alignment) for sid, name, alignment in src_q.all()}
+
     source_names: dict[str, str] = {}
     source_alignments_map: dict[str, str | None] = {}
     for a in articles:
         aid = str(a.id)
-        source_names[aid] = a.source.name_en if a.source else "Unknown"
-        source_alignments_map[aid] = a.source.state_alignment if a.source else None
+        info = source_lookup.get(a.source_id) if a.source_id else None
+        source_names[aid] = info[0] if info else "Unknown"
+        source_alignments_map[aid] = info[1] if info else None
 
     if not articles:
         logger.info("No unclustered articles found — nothing to do")

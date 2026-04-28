@@ -3696,26 +3696,23 @@ async def step_recalculate_trending():
 
 
 async def step_telegram_link_posts():
-    """Link unlinked Telegram posts to stories via embedding similarity."""
-    from app.database import async_session
+    """Link unlinked Telegram posts to stories via embedding similarity.
+
+    `link_posts_by_embedding` manages its own DB session — it reads in a
+    short session, closes it, then runs the embedding + cosine work and
+    flushes UPDATEs in fresh-session chunks. We don't open a session
+    here so nothing gets held idle across the multi-minute compute.
+    """
     from app.services.telegram_analysis import link_posts_by_embedding
-
-    async with async_session() as db:
-        stats = await link_posts_by_embedding(db, threshold=0.35)
-
-    return stats
+    return await link_posts_by_embedding(threshold=0.35)
 
 
 async def step_telegram_reassign_posts():
     """Revisit already-linked posts and move any whose best-match story
-    has drifted since they were first attached."""
-    from app.database import async_session
+    has drifted since they were first attached. Same self-managed
+    session pattern as step_telegram_link_posts."""
     from app.services.telegram_analysis import reassign_posts_by_embedding
-
-    async with async_session() as db:
-        stats = await reassign_posts_by_embedding(db)
-
-    return stats
+    return await reassign_posts_by_embedding()
 
 
 async def step_niloofar_image_rescue():
