@@ -1457,9 +1457,13 @@ async def step_fix_images():
     now_ts = datetime.now(timezone.utc)
 
     pending: list[tuple] = []  # (article_id, new_image_url_or_None)
+    from app.services import maintenance_state as _ms
+    total_n = len(rows)
     async with httpx.AsyncClient(timeout=5, follow_redirects=True) as client:
-        for art_id, art_url in rows:
+        for idx, (art_id, art_url) in enumerate(rows):
             stats["checked"] += 1
+            if idx % 10 == 0:
+                _ms.update_step_progress(idx, total_n, label="HEAD-checking images")
             if art_url and art_url.startswith("http://localhost"):
                 pending.append((art_id, None))
                 stats["nulled"] += 1
@@ -1475,6 +1479,7 @@ async def step_fix_images():
             except Exception:
                 pending.append((art_id, None))
                 stats["nulled"] += 1
+    _ms.update_step_progress(total_n, total_n, label="HEAD-check done")
 
     # Flush updates in chunks of 100 with a fresh session per chunk. Each
     # chunk's connection is short-lived enough to escape the idle reaper.
@@ -1557,9 +1562,16 @@ async def step_fix_images():
 
 
 async def step_story_quality():
-    """Step 4c: Story quality — merge duplicates, regenerate stale summaries, score quality."""
+    """Step 4c: Story quality — merge duplicates, regenerate stale summaries, score quality.
+
+    Each LLM-driven summary regeneration runs in its own fresh DB session
+    so the prior 50s+ of OpenAI calls (5 stories × ~10s each) doesn't
+    leave the connection idle long enough for Neon's reaper to kill it
+    mid-run. The 2026-04-27 incident hit this exact path with
+    `InterfaceError: connection is closed` on UPDATE stories.
+    """
     import json as _json
-    from sqlalchemy import select, update
+    from sqlalchemy import select, update as _upd
     from sqlalchemy.orm import selectinload
 
     from app.database import async_session
@@ -1569,10 +1581,9 @@ async def step_story_quality():
 
     stats = {"summaries_regenerated": 0, "duplicates_flagged": 0, "stale_cleared": 0}
 
+    # Phase 1 — mark stale stories that have grown ≥3 articles since the
+    # last summary. ORM scan, single-session, single commit at the end.
     async with async_session() as db:
-        # 1. Regenerate summaries for stories that got 3+ new articles since last summary.
-        #    Skip is_edited stories — their content is curated by hand and the nightly
-        #    pipeline must never clobber it.
         result = await db.execute(
             select(Story)
             .options(selectinload(Story.articles).selectinload(Article.source))
@@ -1585,15 +1596,22 @@ async def step_story_quality():
         for story in result.scalars().all():
             actual_count = len(story.articles)
             if actual_count >= story.article_count + 3:
-                # Story has grown significantly — regenerate
                 story.summary_fa = None
                 story.summary_en = None
                 story.article_count = actual_count
                 stats["stale_cleared"] += 1
-
         await db.commit()
 
-        # Now generate summaries for cleared ones
+    # Phase 2 — pull the stories that still need a summary. Read into a
+    # plain list, close the read session, then loop without holding it
+    # across LLM calls.
+    from app.config import settings
+    if not settings.openai_api_key:
+        if stats["stale_cleared"] > 0 or stats["summaries_regenerated"] > 0:
+            logger.info(f"Story quality: {stats}")
+        return stats
+
+    async with async_session() as db:
         result = await db.execute(
             select(Story)
             .options(selectinload(Story.articles).selectinload(Article.source))
@@ -1601,11 +1619,17 @@ async def step_story_quality():
             .order_by(Story.article_count.desc())
             .limit(5)  # Max 5 per run to control costs
         )
-        from app.config import settings
-        if settings.openai_api_key:
-            for story in result.scalars().all():
-                from app.services.narrative_groups import narrative_group as _ng2
-                articles_info = [
+        targets = list(result.scalars().all())
+        # Snapshot every field we need so we can detach from the session.
+        from app.services.narrative_groups import narrative_group as _ng2
+        snapshots = []
+        for story in targets:
+            snapshots.append({
+                "id": story.id,
+                "title_fa": story.title_fa,
+                "summary_en_old": story.summary_en,
+                "story_obj": story,  # needed by generate_story_analysis
+                "articles_info": [
                     {
                         "id": str(a.id),
                         "source_slug": a.source.slug if a.source else None,
@@ -1619,38 +1643,52 @@ async def step_story_quality():
                         "published_at": a.published_at.isoformat() if a.published_at else "",
                     }
                     for a in story.articles
-                ]
-                try:
-                    analysis = await generate_story_analysis(story, articles_info)
-                    story.summary_fa = analysis.get("summary_fa")
-                    if analysis.get("title_fa"):
-                        story.title_fa = analysis["title_fa"].strip()
-                    if analysis.get("title_en"):
-                        story.title_en = analysis["title_en"].strip()
-                    try:
-                        _old = _json.loads(story.summary_en) if story.summary_en else {}
-                    except Exception:
-                        _old = {}
-                    _new = {
-                        "state_summary_fa": analysis.get("state_summary_fa"),
-                        "diaspora_summary_fa": analysis.get("diaspora_summary_fa"),
-                        "independent_summary_fa": analysis.get("independent_summary_fa"),
-                        "bias_explanation_fa": analysis.get("bias_explanation_fa"),
-                        "scores": analysis.get("scores"),
-                        "article_evidence": analysis.get("article_evidence"),
-                        "dispute_score": analysis.get("dispute_score"),
-                        "loaded_words": analysis.get("loaded_words"),
-                    }
-                    for k in ("source_neutrality", "article_neutrality", "neutrality_source", "neutrality_scored_at"):
-                        if isinstance(_old, dict) and _old.get(k) is not None:
-                            _new[k] = _old[k]
-                    story.summary_en = _json.dumps(_new, ensure_ascii=False)
-                    stats["summaries_regenerated"] += 1
-                    logger.info(f"  Regenerated summary: {story.title_fa[:40]}")
-                except Exception as e:
-                    logger.warning(f"  Failed: {story.title_fa[:40]}: {e}")
+                ],
+            })
+    # `db` released — no DB session held during the LLM phase below.
 
-            await db.commit()
+    for snap in snapshots:
+        try:
+            analysis = await generate_story_analysis(snap["story_obj"], snap["articles_info"])
+            try:
+                _old = _json.loads(snap["summary_en_old"]) if snap["summary_en_old"] else {}
+            except Exception:
+                _old = {}
+            _new = {
+                "state_summary_fa": analysis.get("state_summary_fa"),
+                "diaspora_summary_fa": analysis.get("diaspora_summary_fa"),
+                "independent_summary_fa": analysis.get("independent_summary_fa"),
+                "bias_explanation_fa": analysis.get("bias_explanation_fa"),
+                "scores": analysis.get("scores"),
+                "article_evidence": analysis.get("article_evidence"),
+                "dispute_score": analysis.get("dispute_score"),
+                "loaded_words": analysis.get("loaded_words"),
+            }
+            for k in ("source_neutrality", "article_neutrality", "neutrality_source", "neutrality_scored_at"):
+                if isinstance(_old, dict) and _old.get(k) is not None:
+                    _new[k] = _old[k]
+            new_summary_en = _json.dumps(_new, ensure_ascii=False)
+
+            updates = {
+                "summary_fa": analysis.get("summary_fa"),
+                "summary_en": new_summary_en,
+            }
+            if analysis.get("title_fa"):
+                updates["title_fa"] = analysis["title_fa"].strip()
+            if analysis.get("title_en"):
+                updates["title_en"] = analysis["title_en"].strip()
+
+            # Fresh session per write — bounds the connection's idle wall-
+            # clock to a single UPDATE, well under any reaper threshold.
+            async with async_session() as db_w:
+                await db_w.execute(
+                    _upd(Story).where(Story.id == snap["id"]).values(**updates)
+                )
+                await db_w.commit()
+            stats["summaries_regenerated"] += 1
+            logger.info(f"  Regenerated summary: {(snap['title_fa'] or '')[:40]}")
+        except Exception as e:
+            logger.warning(f"  Failed: {(snap['title_fa'] or '')[:40]}: {e}")
 
     if stats["stale_cleared"] > 0 or stats["summaries_regenerated"] > 0:
         logger.info(f"Story quality: {stats}")
@@ -4309,9 +4347,12 @@ async def step_quality_postprocess():
 
 
 async def step_weekly_digest():
-    """Generate a weekly digest (runs only on Mondays)."""
-    from pathlib import Path
-    from sqlalchemy import select, func
+    """Generate a weekly digest (Mondays only). Writes the markdown body
+    into a maintenance_logs row with status='weekly_digest' so the
+    /weekly-digest endpoint can render it directly. Previously wrote to
+    a gitignored on-disk path (`<repo>/project-management/digests/`)
+    that didn't exist on Railway, so this step errored every week."""
+    from sqlalchemy import select, func, text as _t
 
     now = datetime.now()
     if now.weekday() != 0:  # Monday = 0
@@ -4342,13 +4383,8 @@ async def step_weekly_digest():
         total_articles = (await db.execute(select(func.count(Article.id)))).scalar()
         total_stories = (await db.execute(select(func.count(Story.id)))).scalar()
 
-    digest_dir = Path(__file__).parent.parent / "project-management" / "digests"
-    digest_dir.mkdir(exist_ok=True)
-
     week_str = now.strftime("%Y-W%W")
-    digest_file = digest_dir / f"digest_{week_str}.md"
-
-    content = f"""# Weekly Digest — {now.strftime('%B %d, %Y')}
+    content = f"""# Weekly Digest — {now.strftime('%B %d, %Y')} ({week_str})
 
 ## This Week's Numbers
 - **New articles**: {new_articles}
@@ -4364,18 +4400,29 @@ async def step_weekly_digest():
     if not top_stories:
         content += "- No new stories with 5+ articles this week\n"
 
-    content += f"""
+    content += """
 ## System Health
-- Auto-maintenance running every 4 hours
+- Auto-maintenance running per the cron schedule
 - Check dashboard for detailed metrics: /dashboard
 
 ---
 *Auto-generated by Doornegar maintenance system*
 """
 
-    digest_file.write_text(content, encoding="utf-8")
-    logger.info(f"Weekly digest generated: {digest_file.name}")
-    return {"file": str(digest_file), "new_articles": new_articles, "new_stories": new_stories}
+    # Store the markdown body directly in `results` (Text). The
+    # /weekly-digest endpoint reads the most recent row with
+    # status='weekly_digest' and returns log.results as the content
+    # field, so storing plain markdown matches the reader contract.
+    import uuid as _uuid
+    async with async_session() as db:
+        await db.execute(_t(
+            "INSERT INTO maintenance_logs (id, run_at, status, elapsed_s, results) "
+            "VALUES (:id, NOW(), 'weekly_digest', 0, :results)"
+        ), {"id": _uuid.uuid4(), "results": content})
+        await db.commit()
+
+    logger.info(f"Weekly digest written to maintenance_logs (week={week_str})")
+    return {"week": week_str, "new_articles": new_articles, "new_stories": new_stories}
 
 
 async def step_worldview_digests():

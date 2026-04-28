@@ -47,6 +47,20 @@ def begin_step(name: str) -> None:
     """Mark a step as starting."""
     STATE["current_step"] = name
     STATE["current_step_started"] = time.time()
+    STATE["current_step_progress"] = None
+
+
+def update_step_progress(done: int, total: int, label: str | None = None) -> None:
+    """Long-running steps call this from their inner loop so the dashboard
+    can show a fraction (e.g., "Migrate images: 47/300"). Pure in-memory
+    update on the same Python process that runs the step — never touches
+    the DB or Redis. Safe to call frequently.
+    """
+    STATE["current_step_progress"] = {
+        "done": int(done),
+        "total": int(total),
+        "label": label,
+    }
 
 
 def end_step(name: str, status: str, stats: Any = None) -> None:
@@ -61,6 +75,7 @@ def end_step(name: str, status: str, stats: Any = None) -> None:
     })
     STATE["current_step"] = None
     STATE["current_step_started"] = None
+    STATE["current_step_progress"] = None
 
 
 def finish_run(status: str, results: Any = None, error: str | None = None, total_elapsed_s: float | None = None) -> None:

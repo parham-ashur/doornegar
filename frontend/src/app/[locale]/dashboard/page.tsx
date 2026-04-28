@@ -931,13 +931,35 @@ export default function DashboardPage() {
               </div>
 
               {maintLive.current_step && (
-                <div className="flex items-center gap-2 text-xs text-slate-900 dark:text-white py-2 px-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900/50">
-                  <RefreshCw className="h-3.5 w-3.5 animate-spin text-blue-600 dark:text-blue-400 shrink-0" />
-                  <span className="font-semibold flex-1">{maintLive.current_step}</span>
-                  {maintLive.current_step_elapsed_s !== undefined && (
-                    <span className="font-mono text-[10px] text-slate-500">
-                      {fmtDuration(maintLive.current_step_elapsed_s)}
-                    </span>
+                <div className="text-xs text-slate-900 dark:text-white py-2 px-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900/50">
+                  <div className="flex items-center gap-2">
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin text-blue-600 dark:text-blue-400 shrink-0" />
+                    <span className="font-semibold flex-1">{maintLive.current_step}</span>
+                    {maintLive.current_step_elapsed_s !== undefined && (
+                      <span className="font-mono text-[10px] text-slate-500">
+                        {fmtDuration(maintLive.current_step_elapsed_s)}
+                      </span>
+                    )}
+                  </div>
+                  {maintLive.current_step_progress?.total > 0 && (
+                    <div className="mt-1.5 flex items-center gap-2">
+                      <div className="h-1 flex-1 bg-blue-200 dark:bg-blue-900/40 overflow-hidden">
+                        <div
+                          className="h-full bg-blue-500 transition-all duration-300"
+                          style={{
+                            width: `${Math.min(100, Math.round(
+                              (maintLive.current_step_progress.done / maintLive.current_step_progress.total) * 100
+                            ))}%`,
+                          }}
+                        />
+                      </div>
+                      <span className="text-[10px] font-mono text-slate-500 shrink-0">
+                        {maintLive.current_step_progress.done}/{maintLive.current_step_progress.total}
+                        {maintLive.current_step_progress.label
+                          ? ` · ${maintLive.current_step_progress.label}`
+                          : ""}
+                      </span>
+                    </div>
                   )}
                 </div>
               )}
