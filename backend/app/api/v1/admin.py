@@ -310,10 +310,16 @@ async def get_dashboard(db: AsyncSession = Depends(get_db)):
     # holder). The lock auto-overrides at 4h, so a >5h read here means the DB
     # row exists but something keeps reinserting it — investigate before the
     # next scheduled cron silently skips.
-    lock_row = (await db.execute(_sa_text(
-        "SELECT label, acquired_at, EXTRACT(EPOCH FROM (NOW() - acquired_at)) AS age_s "
-        "FROM maintenance_lock WHERE id = 7263482917"
-    ))).first()
+    # Wrapped in try/except because the table is created by the main.py
+    # self-heal on startup, and the dashboard endpoint can be hit before
+    # that completes (or during a deploy that pre-dates the table).
+    try:
+        lock_row = (await db.execute(_sa_text(
+            "SELECT label, acquired_at, EXTRACT(EPOCH FROM (NOW() - acquired_at)) AS age_s "
+            "FROM maintenance_lock WHERE id = 7263482917"
+        ))).first()
+    except Exception:
+        lock_row = None
     if lock_row:
         age_h = (lock_row.age_s or 0) / 3600
         if age_h >= 5:
