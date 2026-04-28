@@ -84,36 +84,64 @@ STEP_TIMEOUTS_SEC = {
 # Any new cron MUST avoid these 4 slots or the three existing ones will
 # need to be restaggered.
 #
-# Secondary defense: Redis lock below. Fails open if Redis is
-# unreachable, so it's a belt-and-braces layer, not the primary. As of
-# 2026-04-17 no Redis service exists in the Railway project — the lock
-# warns and proceeds. Schedule deconfliction is doing all the real work.
-LOCK_KEY = "doornegar:maintenance:lock"
-LOCK_TTL_SEC = 4 * 3600  # 4 hours — longer than any realistic run
-
-
-def _redis():
-    import redis as _redis_mod
-
-    from app.config import settings
-    return _redis_mod.Redis.from_url(settings.redis_url)
+# Concurrency guard: postgres-table lock (Redis isn't deployed in this
+# project, so the previous Redis-based lock failed open and let two
+# maintenance runs race each other — confirmed by the 2026-04-27 incident
+# where a manual dashboard run overlapped a scheduled cron and produced a
+# 10h+ run with connection-drop and FK errors). Self-heals via a stale
+# threshold so a crashed holder can't lock the system out forever.
+LOCK_KEY_INT = 7263482917      # arbitrary unique key for this lock row
+LOCK_STALE_SEC = 4 * 3600      # 4 hours — any older than this and we override
 
 
 def try_acquire_lock(label: str) -> bool:
-    """Set the maintenance lock to `label` if absent. Returns True on success."""
+    """Try to acquire the maintenance lock. Returns True on success.
+    The lock is a single row in `maintenance_lock`; INSERT...ON CONFLICT
+    DO NOTHING gives us atomic test-and-set semantics in one round trip.
+    A stale lock (older than LOCK_STALE_SEC) is forced-overridden so a
+    process that died mid-run doesn't permanently block the system.
+    """
+    import psycopg2  # noqa: F401  (sync driver — fine for this small probe)
+    from app.config import settings as _settings
+    from sqlalchemy import create_engine, text as _t
+
+    sync_url = (_settings.database_url or "").replace("+asyncpg", "")
+    if not sync_url:
+        logger.warning("DATABASE_URL unset — proceeding without lock")
+        return True
     try:
-        return bool(_redis().set(LOCK_KEY, label, nx=True, ex=LOCK_TTL_SEC))
+        eng = create_engine(sync_url, pool_pre_ping=True)
+        with eng.begin() as conn:
+            # Self-heal: clear stale locks before we try to take ours.
+            conn.execute(_t(
+                "DELETE FROM maintenance_lock "
+                "WHERE id = :k AND acquired_at < NOW() - (:s || ' seconds')::interval"
+            ), {"k": LOCK_KEY_INT, "s": LOCK_STALE_SEC})
+            result = conn.execute(_t(
+                "INSERT INTO maintenance_lock (id, label, acquired_at) "
+                "VALUES (:k, :label, NOW()) ON CONFLICT (id) DO NOTHING"
+            ), {"k": LOCK_KEY_INT, "label": label})
+            return (result.rowcount or 0) > 0
     except Exception as e:
-        # If Redis is unreachable, fail OPEN (let the run proceed) — logging
-        # the concern rather than silently blocking all maintenance when
-        # Redis has an outage. Double-runs are a smaller cost than no runs.
-        logger.warning("Could not reach Redis for maintenance lock: %s — proceeding without lock", e)
+        logger.warning(
+            "Could not check maintenance lock: %s — proceeding without lock", e
+        )
         return True
 
 
 def release_lock() -> None:
+    """Drop the maintenance lock row. Safe if it's already gone."""
+    from app.config import settings as _settings
+    from sqlalchemy import create_engine, text as _t
+
+    sync_url = (_settings.database_url or "").replace("+asyncpg", "")
+    if not sync_url:
+        return
     try:
-        _redis().delete(LOCK_KEY)
+        eng = create_engine(sync_url, pool_pre_ping=True)
+        with eng.begin() as conn:
+            conn.execute(_t("DELETE FROM maintenance_lock WHERE id = :k"),
+                         {"k": LOCK_KEY_INT})
     except Exception as e:
         logger.warning("Could not release maintenance lock: %s", e)
 
@@ -1395,7 +1423,7 @@ async def step_fix_images():
     automatically tracks changes to article.image_url.
     """
     import httpx
-    from sqlalchemy import select
+    from sqlalchemy import select, update as _upd
     from sqlalchemy.orm import selectinload
 
     from app.database import async_session
@@ -1409,52 +1437,71 @@ async def step_fix_images():
         "stories_without_image": 0,
     }
 
+    # --- Pass 1: HEAD-check up to 300 article images ---
+    # Read-only session for the SELECT, then close it so we don't hold a
+    # connection across ~300 HTTP HEADs (which is what let Neon kill the
+    # connection mid-loop in the 2026-04-27 incident — InterfaceError
+    # "connection is closed"). Updates flushed in fresh-session chunks below.
+    check_cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
     async with async_session() as db:
-        # --- Pass 1: HEAD-check up to 300 article images, null out broken ones ---
-        # Skip articles checked within the last 24h (stable URLs don't need
-        # re-checking every run — saves ~5-10 min of HTTP HEAD waste).
-        check_cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
         result = await db.execute(
-            select(Article)
+            select(Article.id, Article.image_url)
             .where(
                 Article.image_url.isnot(None),
                 (Article.image_checked_at.is_(None)) | (Article.image_checked_at < check_cutoff),
             )
             .limit(300)
         )
-        articles = list(result.scalars().all())
-        stats["skipped_recent"] = 0  # will be set when we know how many we skipped
-        now_ts = datetime.now(timezone.utc)
+        rows = result.all()
+    stats["skipped_recent"] = 0  # will be set when we know how many we skipped
+    now_ts = datetime.now(timezone.utc)
 
-        async with httpx.AsyncClient(timeout=5, follow_redirects=True) as client:
-            for a in articles:
-                stats["checked"] += 1
-                # localhost URLs are definitely broken on production; null fast
-                if a.image_url and a.image_url.startswith("http://localhost"):
-                    a.image_url = None
-                    a.image_checked_at = now_ts  # don't re-check NULL either
+    pending: list[tuple] = []  # (article_id, new_image_url_or_None)
+    async with httpx.AsyncClient(timeout=5, follow_redirects=True) as client:
+        for art_id, art_url in rows:
+            stats["checked"] += 1
+            if art_url and art_url.startswith("http://localhost"):
+                pending.append((art_id, None))
+                stats["nulled"] += 1
+                continue
+            try:
+                r = await client.head(art_url)
+                if r.status_code != 200:
+                    pending.append((art_id, None))
                     stats["nulled"] += 1
-                    continue
-                try:
-                    r = await client.head(a.image_url)
-                    if r.status_code != 200:
-                        a.image_url = None
-                        stats["nulled"] += 1
-                    a.image_checked_at = now_ts
-                except Exception:
-                    a.image_url = None
-                    a.image_checked_at = now_ts
-                    stats["nulled"] += 1
+                else:
+                    # URL is healthy — only update image_checked_at, not URL.
+                    pending.append((art_id, art_url))  # leave URL unchanged
+            except Exception:
+                pending.append((art_id, None))
+                stats["nulled"] += 1
 
-        await db.commit()
+    # Flush updates in chunks of 100 with a fresh session per chunk. Each
+    # chunk's connection is short-lived enough to escape the idle reaper.
+    BATCH = 100
+    for i in range(0, len(pending), BATCH):
+        chunk = pending[i:i + BATCH]
+        async with async_session() as db_chunk:
+            for art_id, new_url in chunk:
+                await db_chunk.execute(
+                    _upd(Article)
+                    .where(Article.id == art_id)
+                    .values(image_url=new_url, image_checked_at=now_ts)
+                )
+            await db_chunk.commit()
 
-        # --- Pass 2: For visible stories WITHOUT any working image,
-        # try to fetch an og:image from one of their article URLs.
-        # Note: Story has no image_url column — image selection happens
-        # at response time in _story_brief_with_extras() using a
-        # title-overlap heuristic across story.articles. We don't set
-        # story.image_url here because the attribute doesn't exist on
-        # the Story model.
+    # --- Pass 2: For visible stories WITHOUT any working image,
+    # try to fetch an og:image from one of their article URLs.
+    # Note: Story has no image_url column — image selection happens
+    # at response time in _story_brief_with_extras() using a
+    # title-overlap heuristic across story.articles. We don't set
+    # story.image_url here because the attribute doesn't exist on
+    # the Story model.
+    # Pass 2 owns its own httpx client; the Pass 1 client closed before
+    # the chunked write phase. Story-walk uses ORM mutations + a single
+    # commit at the end (200-row cap means each session is short-lived,
+    # so the same Neon-reaper risk doesn't apply here).
+    async with async_session() as db, httpx.AsyncClient(timeout=5, follow_redirects=True) as client:
         result = await db.execute(
             select(Story).options(selectinload(Story.articles))
             .where(Story.article_count >= 5)

@@ -650,6 +650,37 @@ async def analyze_story_telegram(
         return None
 
 
+async def _flush_telegram_post_links(
+    updates: list[tuple], chunk_size: int = 100
+) -> int:
+    """Apply (post_id, story_id) UPDATEs in fresh-session chunks.
+
+    Holding one DB session across thousands of sequential UPDATEs lets
+    Neon's idle-connection reaper kill the underlying connection mid-loop,
+    surfacing as `asyncpg.InterfaceError: the underlying connection is
+    closed`. Fresh sessions per chunk keep each connection's wall-clock
+    short enough to dodge that. One commit per chunk so a transient drop
+    on chunk N doesn't undo chunks 0..N-1.
+    """
+    if not updates:
+        return 0
+    from sqlalchemy import update as _upd
+    from app.database import async_session as _ses
+    total = 0
+    for i in range(0, len(updates), chunk_size):
+        chunk = updates[i:i + chunk_size]
+        async with _ses() as fresh:
+            for post_id, sid in chunk:
+                await fresh.execute(
+                    _upd(TelegramPost)
+                    .where(TelegramPost.id == post_id)
+                    .values(story_id=sid)
+                )
+            await fresh.commit()
+        total += len(chunk)
+    return total
+
+
 async def link_posts_by_embedding(db: AsyncSession, threshold: float = 0.35) -> dict:
     """Link unlinked Telegram posts to stories via URL match + embeddings.
 
@@ -782,23 +813,24 @@ async def link_posts_by_embedding(db: AsyncSession, threshold: float = 0.35) -> 
         return {"linked": 0, "reason": "no unlinked posts"}
 
     # ── Pass 1: URL extraction (high-precision, zero LLM) ──
+    # Accumulate all writes in memory, flush in fresh-session chunks at the
+    # end. Holding the passed-in db session across hundreds of UPDATEs let
+    # Neon's idle reaper drop the connection mid-loop in the 2026-04-27
+    # incident — InterfaceError "the underlying connection is closed".
+    pending_updates: list[tuple] = []  # (post_id, story_id)
     linked_by_url = 0
     remaining_posts = []
     for post in posts:
         sid = _find_story_via_url(post.text or "")
         if sid:
-            await db.execute(
-                update(TelegramPost)
-                .where(TelegramPost.id == post.id)
-                .values(story_id=sid)
-            )
+            pending_updates.append((post.id, sid))
             linked_by_url += 1
         else:
             remaining_posts.append(post)
 
     # ── Pass 2: Embedding similarity on whatever URL didn't catch ──
     if not remaining_posts:
-        await db.commit()
+        await _flush_telegram_post_links(pending_updates)
         logger.info(f"URL-linked {linked_by_url} posts, no residual for embedding pass")
         return {
             "linked": linked_by_url,
@@ -867,16 +899,16 @@ async def link_posts_by_embedding(db: AsyncSession, threshold: float = 0.35) -> 
                 if age_days > AGED_TG_DAYS:
                     effective_threshold = threshold + AGED_TG_THRESHOLD_BUMP
         if best_score >= effective_threshold and best_story_id:
-            await db.execute(
-                update(TelegramPost)
-                .where(TelegramPost.id == post.id)
-                .values(story_id=best_story_id)
-            )
+            pending_updates.append((post.id, best_story_id))
             linked_by_embedding += 1
             if best_via_article:
                 via_article_rescue += 1
 
-    await db.commit()
+    # Apply ALL accumulated updates in fresh-session chunks. The passed-in
+    # `db` session may already be stale (we've been holding it across the
+    # blocking embedding batch + heavy cosine loop). Fresh sessions per
+    # chunk keep each connection short-lived enough to dodge Neon's reaper.
+    await _flush_telegram_post_links(pending_updates)
     total_linked = linked_by_url + linked_by_embedding
     logger.info(
         f"Linked {total_linked} telegram posts "

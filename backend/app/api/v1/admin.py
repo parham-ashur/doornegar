@@ -305,6 +305,33 @@ async def get_dashboard(db: AsyncSession = Depends(get_db)):
             ),
         })
 
+    # H4 — stuck maintenance lock. Surfaces whenever the cross-run mutex has
+    # been held >2h (long-but-still-plausible) or >5h (definitely stuck/dead
+    # holder). The lock auto-overrides at 4h, so a >5h read here means the DB
+    # row exists but something keeps reinserting it — investigate before the
+    # next scheduled cron silently skips.
+    lock_row = (await db.execute(_sa_text(
+        "SELECT label, acquired_at, EXTRACT(EPOCH FROM (NOW() - acquired_at)) AS age_s "
+        "FROM maintenance_lock WHERE id = 7263482917"
+    ))).first()
+    if lock_row:
+        age_h = (lock_row.age_s or 0) / 3600
+        if age_h >= 5:
+            issues.append({
+                "severity": "error",
+                "message": (
+                    f"Maintenance lock held for {age_h:.1f}h by '{lock_row.label}'. "
+                    "Past the 4h auto-stale threshold — investigate before next cron."
+                ),
+            })
+        elif age_h >= 2:
+            issues.append({
+                "severity": "warning",
+                "message": (
+                    f"Maintenance currently running ({age_h:.1f}h, holder '{lock_row.label}')."
+                ),
+            })
+
     # H3 — last maintenance run had failed steps. Surface the count + names so
     # the operator sees errored steps without scrolling through Railway logs.
     last_run = (await db.execute(_sa_text(

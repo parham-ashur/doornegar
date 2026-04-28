@@ -123,6 +123,14 @@ async def lifespan(app: FastAPI):
                 "ALTER TABLE sources ADD COLUMN IF NOT EXISTS content_filters JSONB",
                 "UPDATE sources SET content_filters = '{\"allowed\": [\"news\"]}'::jsonb WHERE content_filters IS NULL",
                 "UPDATE articles SET content_type = 'news', content_type_confidence = 1.0 WHERE content_type IS NULL",
+                # Maintenance lock — single-row table used by auto_maintenance.try_acquire_lock
+                # to serialize runs (replaces the no-longer-deployed Redis lock).
+                # Stale rows are reaped by the lock-acquire path itself.
+                """CREATE TABLE IF NOT EXISTS maintenance_lock (
+                    id BIGINT PRIMARY KEY,
+                    label TEXT,
+                    acquired_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )""",
                 # LLM usage / cost ledger — every OpenAI call logged here.
                 """CREATE TABLE IF NOT EXISTS llm_usage_logs (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
