@@ -131,6 +131,21 @@ async def lifespan(app: FastAPI):
                     label TEXT,
                     acquired_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )""",
+                # Live cross-process maintenance state. Single-row table
+                # (id=1). Updated by the running maintenance process on
+                # every begin_step / end_step transition (and throttled
+                # update_step_progress). Read by the dashboard's
+                # /admin/maintenance/status endpoint so progress is
+                # visible even when maintenance runs in a separate
+                # process or container from the API.
+                """CREATE TABLE IF NOT EXISTS maintenance_run_status (
+                    id SMALLINT PRIMARY KEY DEFAULT 1,
+                    state JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    CHECK (id = 1)
+                )""",
+                # Seed the row so updates can use UPSERT cheaply.
+                "INSERT INTO maintenance_run_status (id, state) VALUES (1, '{}'::jsonb) ON CONFLICT (id) DO NOTHING",
                 # LLM usage / cost ledger — every OpenAI call logged here.
                 """CREATE TABLE IF NOT EXISTS llm_usage_logs (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

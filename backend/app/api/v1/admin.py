@@ -1233,10 +1233,10 @@ async def maintenance_status():
     from app.services import maintenance_state as _ms
     import time as _time
 
-    persisted = _ms.read_persisted()
-    if persisted is not None:
+    persisted = await _ms.read_persisted()
+    if persisted is not None and persisted.get("status") in ("running", "success", "error"):
         state = dict(persisted)
-        state["source"] = "file"
+        state["source"] = "db"
     else:
         state = dict(_ms.STATE)
         state["source"] = "memory"
@@ -1246,7 +1246,11 @@ async def maintenance_status():
         state["current_step_elapsed_s"] = round(
             _time.time() - state["current_step_started"], 1
         )
-    state["total_steps"] = state.get("total_steps", 14)
+    # Don't synthesize a misleading total_steps. If the running pipeline
+    # set it (full=54, ingest=12, hourly=7), pass it through; otherwise
+    # leave None so the frontend hides the "of N" suffix.
+    if "total_steps" not in state:
+        state["total_steps"] = None
     return state
 
 

@@ -1,38 +1,34 @@
-"""Cross-process maintenance status, mirrored to a tmpfile.
+"""Cross-process maintenance status, mirrored to a DB row.
 
 Both auto_maintenance.py (which runs the steps) and app/api/v1/admin.py
-(which exposes the status endpoint) import from this module. The 2026-04-28
-incident showed why in-memory STATE alone is insufficient: the dashboard
-"Run now" path was changed to spawn a detached subprocess so it doesn't
-starve the API event loop, and the subprocess's STATE dict is invisible
-to the API process. The API's /admin/maintenance/status used to be a
-read-only mirror of the live STATE; now it reads from `_STATUS_PATH` so
-both processes converge on the same source of truth.
+(which exposes the status endpoint) import from this module. The
+dashboard's "Run now" path spawns maintenance as a subprocess so it
+doesn't starve the API event loop. The subprocess's STATE dict is
+invisible to the API process, so we mirror to a single-row
+`maintenance_run_status` table.
 
-We mirror to /tmp because the API container and the maintenance
-subprocess share the same filesystem (they run on the same Railway
-container). For Railway-managed restarts the file is wiped, which is
-fine — the dashboard already falls back to maintenance_logs for
-historical context, and the live state is only relevant during a run.
+Earlier (2026-04-28 morning) we tried mirroring to /tmp; that didn't
+surface to the API on Railway — likely a private-tmp namespace between
+subprocess and the API process. DB-backed mirror works regardless of
+process or container boundaries.
 
-The file is JSON, written atomically via a tmpfile + os.replace. The
-read side accepts a missing/corrupt file as "idle".
+The mirror runs `asyncio.run(...)` to open a fresh asyncpg connection
+per write — the maintenance_state functions are sync (begin_step,
+end_step, update_step_progress) and called from various async contexts,
+so we can't trivially make them async without changing every call site.
+A short-lived connection per flush is fine; the writes are throttled
+to 1s for high-frequency progress callbacks. Begin/end transitions
+flush immediately.
 """
 
+import asyncio
 import json
 import os
-import tempfile
 import time
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 
-_STATUS_PATH = Path(os.environ.get("DOORNEGAR_MAINT_STATUS_PATH",
-                                   "/tmp/doornegar_maintenance_status.json"))
-
-# Throttle file writes to avoid spamming on tight progress callbacks.
-# Begin/end transitions always flush; only fine-grained progress is throttled.
 _LAST_WRITE_TS = 0.0
 _WRITE_THROTTLE_SEC = 1.0
 
@@ -52,46 +48,73 @@ STATE: dict = {
 }
 
 
-def _flush(force: bool = False) -> None:
-    """Write the current STATE to `_STATUS_PATH` atomically.
+async def _write_state(snapshot: dict) -> None:
+    """Write the snapshot to the maintenance_run_status row."""
+    from sqlalchemy import text as _t
+    from app.database import async_session
+    payload = json.dumps(snapshot, ensure_ascii=False, default=str)
+    async with async_session() as db:
+        await db.execute(_t(
+            "INSERT INTO maintenance_run_status (id, state, updated_at) "
+            "VALUES (1, CAST(:state AS jsonb), NOW()) "
+            "ON CONFLICT (id) DO UPDATE SET state = EXCLUDED.state, updated_at = NOW()"
+        ), {"state": payload})
+        await db.commit()
 
-    `force=True` bypasses the 1s throttle — used for begin/end transitions
-    where the caller cares about timeliness more than frequency.
+
+def _flush(force: bool = False) -> None:
+    """Mirror STATE to the DB. Throttled to 1s unless force=True.
+
+    Best-effort — a failed mirror just means the dashboard sees stale
+    state for a tick. The run itself isn't affected.
     """
     global _LAST_WRITE_TS
     now = time.time()
     if not force and (now - _LAST_WRITE_TS) < _WRITE_THROTTLE_SEC:
         return
     _LAST_WRITE_TS = now
+    snapshot = dict(STATE)
     try:
-        _STATUS_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(
-            mode="w", delete=False, dir=str(_STATUS_PATH.parent),
-            prefix=".doornegar_maint_", suffix=".tmp", encoding="utf-8",
-        ) as f:
-            json.dump(STATE, f, ensure_ascii=False, default=str)
-            tmp_path = f.name
-        os.replace(tmp_path, _STATUS_PATH)
+        # Use asyncio.run when called from a sync context (no running loop).
+        # When called from inside an event loop (the maintenance subprocess
+        # IS async), schedule the write as a task instead so we don't try
+        # to nest asyncio.run.
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop is None:
+            asyncio.run(_write_state(snapshot))
+        else:
+            # Fire-and-forget within the running loop; the write completes
+            # asynchronously without blocking the caller. Errors land in
+            # the task and are silently dropped (best-effort mirror).
+            loop.create_task(_write_state(snapshot))
     except Exception:
-        # Best-effort. A failed mirror just means the dashboard sees
-        # stale or no live state; the run itself isn't affected.
         pass
 
 
-def read_persisted() -> dict | None:
-    """Return the STATE dict from the tmpfile, or None if unavailable.
+async def read_persisted() -> dict | None:
+    """Return the state from the DB row, or None if unavailable.
 
-    Used by the API process to see what the maintenance subprocess (on
-    the same container, different PID) is doing. Returns None on read
-    error so the caller can fall back to the in-memory STATE (e.g.,
-    when the cron service runs on a different container and writes
-    nothing locally).
+    Used by the API process to see what a maintenance subprocess (or
+    the cron container) is doing. Returns None on read error so the
+    caller can fall back to the in-memory STATE.
     """
     try:
-        if not _STATUS_PATH.is_file():
+        from sqlalchemy import text as _t
+        from app.database import async_session
+        async with async_session() as db:
+            row = (await db.execute(_t(
+                "SELECT state, updated_at FROM maintenance_run_status WHERE id = 1"
+            ))).first()
+        if not row or not row.state:
             return None
-        with _STATUS_PATH.open("r", encoding="utf-8") as f:
-            return json.load(f)
+        # state column is JSONB — asyncpg returns it as a dict already.
+        s = row.state if isinstance(row.state, dict) else json.loads(row.state)
+        if isinstance(s, dict):
+            s["_status_updated_at"] = row.updated_at.isoformat() if row.updated_at else None
+        return s
     except Exception:
         return None
 
@@ -125,19 +148,16 @@ def begin_step(name: str) -> None:
 
 def update_step_progress(done: int, total: int, label: str | None = None) -> None:
     """Long-running steps call this from their inner loop so the dashboard
-    can show a fraction (e.g., "Migrate images: 47/300"). Pure in-memory
-    update on the same Python process that runs the step — never touches
-    the DB or Redis. Safe to call frequently.
-
-    The mirror to `_STATUS_PATH` is throttled to 1s so high-frequency
-    progress callbacks don't thrash the disk.
+    can show a fraction (e.g., "Migrate images: 47/300"). The mirror to
+    the DB is throttled to 1s so high-frequency progress callbacks don't
+    spam the database.
     """
     STATE["current_step_progress"] = {
         "done": int(done),
         "total": int(total),
         "label": label,
     }
-    _flush(force=False)  # throttled — progress can fire many times/second
+    _flush(force=False)
 
 
 def end_step(name: str, status: str, stats: Any = None) -> None:
@@ -173,9 +193,8 @@ def finish_run(status: str, results: Any = None, error: str | None = None, total
 
 def _is_jsonable(obj: Any) -> bool:
     """Best-effort check that obj survives JSON serialization."""
-    import json
     try:
-        json.dumps(obj)
+        json.dumps(obj, default=str)
         return True
     except Exception:
         return False
