@@ -1011,6 +1011,36 @@ async def run_maintenance_endpoint(mode: str = Query("full", pattern="^(full|ing
                    "Check Railway logs for the doornegar service.",
         )
 
+    # Wait a couple more seconds and inspect the lock state. If a lock
+    # row exists with this subprocess's PID label or any current row,
+    # we know the subprocess at least reached try_acquire_lock. If no
+    # lock row appears within 3s, the subprocess crashed silently
+    # before reaching the lock check (import error, missing module).
+    await asyncio.sleep(3)
+    lock_diagnostic: dict = {}
+    try:
+        from sqlalchemy import text as _t_diag
+        from app.database import async_session as _ses_diag
+        async with _ses_diag() as db_diag:
+            row = (await db_diag.execute(_t_diag(
+                "SELECT label, acquired_at, "
+                "EXTRACT(EPOCH FROM (NOW() - acquired_at)) AS age_s "
+                "FROM maintenance_lock WHERE id = 7263482917"
+            ))).first()
+        if row:
+            lock_diagnostic = {
+                "label": row.label,
+                "acquired_at": row.acquired_at.isoformat() if row.acquired_at else None,
+                "age_s": float(row.age_s or 0),
+            }
+        else:
+            lock_diagnostic = {"label": None, "note": "no lock row exists"}
+    except Exception as e:
+        lock_diagnostic = {"error": str(e)[:200]}
+
+    early_rc = proc.poll()
+    proc_alive = early_rc is None
+
     # Write an initial "starting" placeholder to the status row so the
     # dashboard shows something within seconds even if the subprocess
     # hasn't reached start_run yet. This also surfaces a missing table
@@ -1047,15 +1077,40 @@ async def run_maintenance_endpoint(mode: str = Query("full", pattern="^(full|ing
     return {
         "status": "started",
         "pid": proc.pid,
+        "proc_alive_after_3s": proc_alive,
+        "early_exit_code": early_rc,
         "mode": mode,
-        "db_write": db_write_status,  # "ok" if seed write to maintenance_run_status worked
+        "db_write": db_write_status,
+        "lock": lock_diagnostic,  # what does maintenance_lock look like 3s in?
         "message": (
             "Maintenance running in a detached subprocess on the API container. "
-            "The subprocess writes a row to maintenance_logs on completion. "
-            "Watch Railway logs for the doornegar service for live progress. "
-            "If another run already holds the maintenance_lock, this subprocess "
-            "will log a warning and exit immediately."
+            "If `proc_alive_after_3s` is False, the subprocess crashed; check "
+            "Railway logs for the doornegar service. If `lock.label` doesn't "
+            "match this PID's mode/timestamp, an older run is holding the lock — "
+            "POST /admin/maintenance/force-release-lock to clear it."
         ),
+    }
+
+
+@router.post("/maintenance/force-release-lock", dependencies=[Depends(require_admin)])
+async def force_release_maintenance_lock(db: AsyncSession = Depends(get_db)):
+    """Force-clear the maintenance_lock row. Use when a previous run
+    crashed without releasing the lock and the 4h auto-stale threshold
+    hasn't fired yet (so new runs can't start).
+
+    Returns the previous lock holder for the audit trail.
+    """
+    prior = (await db.execute(_sa_text(
+        "SELECT label, acquired_at FROM maintenance_lock WHERE id = 7263482917"
+    ))).first()
+    await db.execute(_sa_text(
+        "DELETE FROM maintenance_lock WHERE id = 7263482917"
+    ))
+    await db.commit()
+    return {
+        "released": True,
+        "prior_holder": prior.label if prior else None,
+        "prior_acquired_at": prior.acquired_at.isoformat() if (prior and prior.acquired_at) else None,
     }
 
 
