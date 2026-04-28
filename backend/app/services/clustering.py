@@ -1359,6 +1359,8 @@ async def _cluster_new_articles(
     articles: list[Article],
     source_names: dict[str, str],
     source_alignments_map: dict[str, str | None],
+    *,
+    deadline_ts: float | None = None,
 ) -> tuple[int, int]:
     """Cluster unmatched articles into new stories via LLM.
 
@@ -1371,8 +1373,16 @@ async def _cluster_new_articles(
     4. Articles that reach MAX_CLUSTER_ATTEMPTS are no longer returned
        by the step 1 query, so they won't be sent here again.
 
+    `deadline_ts` (monotonic time.time()) is checked before each LLM
+    batch — if we're past the deadline we stop dispatching new batches
+    and let the caller commit whatever groups landed so far. This keeps
+    `asyncio.wait_for` from having to cancel a stuck batch (which it
+    can't do cleanly when the OpenAI client is mid-request and not
+    yielding).
+
     Returns (new_stories_published, new_stories_hidden).
     """
+    import time as _time
     if len(articles) < CLUSTER_NEW_GROUP_FLOOR:
         logger.info(
             f"Only {len(articles)} unmatched articles "
@@ -1400,7 +1410,19 @@ async def _cluster_new_articles(
 
     all_groups: list[dict] = []
 
+    deadline_skipped_batches = 0
     for batch_start in range(0, len(representatives), BATCH_SIZE):
+        # Deadline check — if the caller passed a deadline and we're past
+        # it, stop dispatching. Whatever already landed in `all_groups`
+        # is preserved and committed by the caller.
+        if deadline_ts is not None and _time.time() >= deadline_ts:
+            remaining = (len(representatives) - batch_start + BATCH_SIZE - 1) // BATCH_SIZE
+            deadline_skipped_batches = remaining
+            logger.warning(
+                f"Cluster deadline hit — stopping after {batch_start // BATCH_SIZE} batches, "
+                f"skipping {remaining} remaining batches"
+            )
+            break
         batch = representatives[batch_start: batch_start + BATCH_SIZE]
         logger.info(
             f"Sending batch {batch_start // BATCH_SIZE + 1} "
@@ -1991,7 +2013,7 @@ async def _create_story(
 # ---------------------------------------------------------------------------
 
 
-async def cluster_articles(db: AsyncSession) -> dict:
+async def cluster_articles(db: AsyncSession, *, deadline_ts: float | None = None) -> dict:
     """Main incremental clustering pipeline.
 
     Steps:
@@ -2107,7 +2129,8 @@ async def cluster_articles(db: AsyncSession) -> dict:
 
     # ── Step 3: Cluster unmatched articles into new stories ──
     new_published, new_hidden = await _cluster_new_articles(
-        db, unmatched, source_names, source_alignments_map
+        db, unmatched, source_names, source_alignments_map,
+        deadline_ts=deadline_ts,
     )
 
     # ── Step 4: Promote hidden stories that now have 5+ articles ──

@@ -342,8 +342,10 @@ async def get_dashboard(db: AsyncSession = Depends(get_db)):
     # the operator sees errored steps without scrolling through Railway logs.
     last_run = (await db.execute(_sa_text(
         "SELECT run_at, steps FROM maintenance_logs "
+        "WHERE status IN ('success', 'error') "
         "ORDER BY run_at DESC LIMIT 1"
     ))).first()
+    last_failed_names: set = set()
     if last_run and last_run.steps:
         import json as _hjson
         try:
@@ -352,6 +354,7 @@ async def get_dashboard(db: AsyncSession = Depends(get_db)):
             steps = None
         if isinstance(steps, list):
             failed = [s for s in steps if isinstance(s, dict) and s.get("status") == "error"]
+            last_failed_names = {s.get("name", "") for s in failed}
             if failed:
                 names = ", ".join(s.get("name", "?")[:40] for s in failed[:3])
                 more = f" (+{len(failed) - 3} more)" if len(failed) > 3 else ""
@@ -359,6 +362,58 @@ async def get_dashboard(db: AsyncSession = Depends(get_db)):
                     "severity": "error" if len(failed) >= 3 else "warning",
                     "message": f"Last maintenance had {len(failed)} failed step(s): {names}{more}",
                 })
+
+    # H5 — repeat-failure detection. Steps that failed in BOTH the last run
+    # and the second-to-last run signal a structural problem rather than a
+    # one-off transient, so they get a stronger error severity. Skips if
+    # only one prior run exists.
+    if last_failed_names:
+        prev_run = (await db.execute(_sa_text(
+            "SELECT steps FROM maintenance_logs "
+            "WHERE status IN ('success', 'error') "
+            "ORDER BY run_at DESC OFFSET 1 LIMIT 1"
+        ))).first()
+        if prev_run and prev_run.steps:
+            import json as _hj2
+            try:
+                prev_steps = _hj2.loads(prev_run.steps) if isinstance(prev_run.steps, str) else prev_run.steps
+            except Exception:
+                prev_steps = None
+            if isinstance(prev_steps, list):
+                prev_failed = {s.get("name", "") for s in prev_steps
+                               if isinstance(s, dict) and s.get("status") == "error"}
+                repeat = last_failed_names & prev_failed
+                if repeat:
+                    names = ", ".join(sorted(repeat)[:3])
+                    more = f" (+{len(repeat) - 3} more)" if len(repeat) > 3 else ""
+                    issues.append({
+                        "severity": "error",
+                        "message": (
+                            f"Step(s) failing across consecutive runs (structural, not transient): "
+                            f"{names}{more}"
+                        ),
+                    })
+
+    # H6 — DB connection pressure. Cheap pg_stat_activity probe so we can
+    # see if Neon is close to its connection cap during a maintenance run.
+    # Wrapped because pg_stat_activity is restricted on some hosted setups.
+    db_active = None
+    db_total = None
+    try:
+        pg_row = (await db.execute(_sa_text(
+            "SELECT count(*) FILTER (WHERE state = 'active') AS active, count(*) AS total "
+            "FROM pg_stat_activity WHERE datname = current_database()"
+        ))).first()
+        if pg_row:
+            db_active = int(pg_row.active or 0)
+            db_total = int(pg_row.total or 0)
+            if db_active >= 30:
+                issues.append({
+                    "severity": "warning",
+                    "message": f"DB has {db_active} active connections (total {db_total}) — heavy pressure.",
+                })
+    except Exception:
+        pass
 
     response = {
         "data": {

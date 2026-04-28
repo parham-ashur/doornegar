@@ -698,8 +698,12 @@ async def step_bias_score():
     MAX_PER_RUN = 100  # reduced from 150 — priority scoring saves cost
     BATCH = 30
     total = {"scored": 0, "failed": 0, "skipped": 0, "skipped_visible_only": 0}
+    from app.services import maintenance_state as _ms
     async with async_session() as db:
-        for _ in range(MAX_PER_RUN // BATCH):
+        for batch_idx in range(MAX_PER_RUN // BATCH):
+            _ms.update_step_progress(
+                total["scored"], MAX_PER_RUN, label=f"batch {batch_idx + 1}"
+            )
             stats = await score_unscored_articles(
                 db, batch_size=BATCH, visible_stories_only=True,
             )
@@ -762,12 +766,22 @@ async def step_recount_stories():
 
 
 async def step_cluster():
-    """Step 3: Cluster articles into stories."""
+    """Step 3: Cluster articles into stories.
+
+    Passes a deadline 60s before the harness timeout so the inner LLM
+    batch loop can stop dispatching cleanly instead of relying on
+    `asyncio.wait_for` to cancel a stuck OpenAI request — the latter
+    overshot to 39m on the 2026-04-27 run because the underlying
+    coroutine was blocking and didn't honor cancellation.
+    """
+    import time as _time
     from app.database import async_session
     from app.services.clustering import cluster_articles
 
+    timeout = STEP_TIMEOUTS_SEC.get("cluster", DEFAULT_STEP_TIMEOUT_SEC)
+    deadline_ts = _time.time() + max(60, timeout - 60)
     async with async_session() as db:
-        stats = await cluster_articles(db)
+        stats = await cluster_articles(db, deadline_ts=deadline_ts)
     logger.info(f"Clustering: {stats}")
     return stats
 
@@ -1155,7 +1169,10 @@ async def step_summarize():
         failed = 0
         premium_used = 0
         baseline_used = 0
-        for story in stories:
+        from app.services import maintenance_state as _ms
+        _stories_total = len(stories)
+        for _idx, story in enumerate(stories):
+            _ms.update_step_progress(_idx, _stories_total, label="story analysis")
             # Smart article selection: pick diverse articles (one per source,
             # balanced across alignments) instead of just most recent.
             art_result = await db.execute(
@@ -6031,7 +6048,11 @@ async def step_migrate_images_to_r2():
             await db.commit()
         pending.clear()
 
-    for article_id, old_url in work:
+    from app.services import maintenance_state as _ms
+    total_n = len(work)
+    for idx, (article_id, old_url) in enumerate(work):
+        if idx % 5 == 0:
+            _ms.update_step_progress(idx, total_n, label="downloading + uploading to R2")
         stored = await download_image(old_url)
         if stored and stored != old_url:
             pending.append((article_id, stored))
@@ -6044,6 +6065,7 @@ async def step_migrate_images_to_r2():
             stats["failed"] += 1
 
     await _flush()
+    _ms.update_step_progress(total_n, total_n, label="R2 migration done")
 
     logger.info(f"Migrate images R2: {stats}")
     return stats
