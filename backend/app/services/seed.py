@@ -85,7 +85,8 @@ INITIAL_SOURCES = [
         "name_fa": "خبرگزاری تسنیم",
         "slug": "tasnim",
         "website_url": "https://www.tasnimnews.com",
-        "rss_urls": ["https://www.tasnimnews.com/fa/rss/most-visited/"],
+        # RSS geo-blocked from Railway; coverage comes from Telegram channel @Tasnimnews.
+        "rss_urls": [],
         "state_alignment": "state",
         "irgc_affiliated": True,
         "production_location": "inside_iran",
@@ -113,7 +114,8 @@ INITIAL_SOURCES = [
         "name_fa": "خبرگزاری مهر",
         "slug": "mehr-news",
         "website_url": "https://www.mehrnews.com",
-        "rss_urls": ["https://www.mehrnews.com/rss"],
+        # RSS geo-blocked from Railway; coverage comes from Telegram channel @mehrnews.
+        "rss_urls": [],
         "state_alignment": "semi_state",
         "irgc_affiliated": False,
         "production_location": "inside_iran",
@@ -226,7 +228,8 @@ INITIAL_SOURCES = [
         "name_fa": "خبرآنلاین",
         "slug": "khabar-online",
         "website_url": "https://www.khabaronline.ir",
-        "rss_urls": ["https://www.khabaronline.ir/rss"],
+        # RSS geo-blocked from Railway; coverage comes from Telegram channel @khabaronline_ir.
+        "rss_urls": [],
         "state_alignment": "semi_state",
         "irgc_affiliated": False,
         "production_location": "inside_iran",
@@ -287,7 +290,8 @@ INITIAL_SOURCES = [
         # Deactivate the old `etemad` row in the Fetch Stats dashboard.
         "slug": "etemad-online",
         "website_url": "https://www.etemadonline.com",
-        "rss_urls": ["https://www.etemadonline.com/feeds/"],
+        # RSS geo-blocked from Railway; coverage comes from Telegram channel @EtemadOnline.
+        "rss_urls": [],
         "state_alignment": "independent",
         "irgc_affiliated": False,
         "production_location": "inside_iran",

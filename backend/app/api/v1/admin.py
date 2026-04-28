@@ -2156,6 +2156,9 @@ async def patch_source(
 
     Editable fields:
       - is_active: skip source in next ingest run (for dead/geo-blocked feeds)
+      - rss_urls: list of feed URLs (set to [] to stop RSS fetches while
+        keeping the source row; useful when a feed is geo-blocked from
+        Railway but the matching Telegram channel still works)
       - logo_url, name_fa, name_en: display metadata
       - state_alignment: one of state/semi_state/independent/diaspora
       - production_location: inside_iran / outside_iran
@@ -2174,7 +2177,7 @@ async def patch_source(
     FACTION_VALUES = {"hardline", "principlist", "reformist", "opposition", "monarchist", "radical", None, ""}
 
     allowed = {
-        "logo_url", "name_fa", "name_en", "is_active",
+        "logo_url", "name_fa", "name_en", "is_active", "rss_urls",
         "state_alignment", "production_location", "factional_alignment",
         "irgc_affiliated",
     }
@@ -2192,6 +2195,9 @@ async def patch_source(
                 raise HTTPException(status_code=400, detail=f"factional_alignment must be one of {sorted(v for v in FACTION_VALUES if v)} or null")
             if value == "":
                 value = None
+        if key == "rss_urls":
+            if not isinstance(value, list) or not all(isinstance(u, str) for u in value):
+                raise HTTPException(status_code=400, detail="rss_urls must be a list of strings")
         setattr(source, key, value)
         changed.append(key)
     if not changed:
