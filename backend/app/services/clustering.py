@@ -89,11 +89,22 @@ async def _keepalive(db: AsyncSession) -> None:
     clustering (many LLM calls per session) would otherwise kill the
     held connection mid-work. Call this before every long-running LLM
     batch so the session's underlying connection stays warm.
+
+    On ping failure we explicitly rollback. Without that, the session
+    sits in an aborted-transaction state and every subsequent
+    `db.execute` raises `Can't reconnect until invalid transaction is
+    rolled back` — observed on the 2026-04-28 19m cluster run when the
+    cluster_attempts UPDATE near the end of `_cluster_new_articles`
+    inherited the broken session from a failed mid-loop ping.
     """
     try:
         await db.execute(text("SELECT 1"))
     except Exception as e:
-        logger.warning(f"Keepalive ping failed: {e}")
+        logger.warning(f"Keepalive ping failed: {e} — rolling back session")
+        try:
+            await db.rollback()
+        except Exception as e2:
+            logger.warning(f"Session rollback after failed keepalive also failed: {e2}")
 
 from app.config import settings
 from app.models.article import Article

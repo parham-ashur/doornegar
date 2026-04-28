@@ -965,10 +965,19 @@ async def step_summarize():
     from app.services.story_analysis import generate_story_analysis
 
     async def _keepalive(db):
+        # On ping failure, rollback so the session isn't left in an
+        # aborted-transaction state — same trap as `clustering._keepalive`
+        # before its 2026-04-28 fix. Silent swallow + reuse = "Can't
+        # reconnect until invalid transaction is rolled back" on the
+        # next write.
         try:
             await db.execute(text("SELECT 1"))
         except Exception as e:
-            logger.warning(f"Summarize keepalive ping failed: {e}")
+            logger.warning(f"Summarize keepalive ping failed: {e} — rolling back")
+            try:
+                await db.rollback()
+            except Exception as e2:
+                logger.warning(f"Rollback after failed keepalive also failed: {e2}")
 
     MAX_ARTICLES_PER_STORY = 10  # cap memory + prompt cost
 
