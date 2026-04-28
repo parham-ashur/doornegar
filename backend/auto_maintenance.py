@@ -4299,10 +4299,19 @@ async def step_quality_postprocess():
         stories = list(result.scalars().all())
 
         async def _keepalive(db):
+            # Rollback on ping failure so the session isn't left in
+            # aborted-transaction state. The previous bare `pass`
+            # silently masked broken connections, leading to "Can't
+            # reconnect until invalid transaction is rolled back" on
+            # the next write — same trap as clustering._keepalive
+            # before its 2026-04-28 fix.
             try:
                 await db.execute(text("SELECT 1"))
             except Exception:
-                pass
+                try:
+                    await db.rollback()
+                except Exception:
+                    pass
 
         for story in stories:
             stats["checked"] += 1

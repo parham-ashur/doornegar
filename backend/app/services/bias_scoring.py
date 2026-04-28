@@ -288,12 +288,20 @@ async def _keepalive(db: AsyncSession) -> None:
     articles with a ~5-10s LLM call per article — if the loop is long
     enough, the session's underlying connection dies. Calling this before
     each LLM call keeps the gap between DB touches far under 5 min.
+
+    Rollback on ping failure so the session isn't left in
+    aborted-transaction state — same trap as `clustering._keepalive`
+    before its 2026-04-28 fix.
     """
     from sqlalchemy import text
     try:
         await db.execute(text("SELECT 1"))
     except Exception as e:
-        logger.warning(f"Bias scoring keepalive ping failed: {e}")
+        logger.warning(f"Bias scoring keepalive ping failed: {e} — rolling back")
+        try:
+            await db.rollback()
+        except Exception as e2:
+            logger.warning(f"Rollback after failed keepalive also failed: {e2}")
 
 
 async def score_unscored_articles(
