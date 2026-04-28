@@ -94,28 +94,17 @@ LOCK_KEY_INT = 7263482917      # arbitrary unique key for this lock row
 LOCK_STALE_SEC = 4 * 3600      # 4 hours — any older than this and we override
 
 
-def try_acquire_lock(label: str) -> bool:
-    """Try to acquire the maintenance lock. Returns True on success.
-    The lock is a single row in `maintenance_lock`; INSERT...ON CONFLICT
-    DO NOTHING gives us atomic test-and-set semantics in one round trip.
-    A stale lock (older than LOCK_STALE_SEC) is forced-overridden so a
-    process that died mid-run doesn't permanently block the system.
-
-    Uses the existing async_session (asyncpg under the hood) via a
-    short-lived asyncio.run(). The earlier sync-driver implementation
-    silently fail-opened in production because psycopg2 isn't installed
-    in the Railway image — only asyncpg is.
+async def _try_acquire_lock_async(label: str) -> bool:
+    """Acquire the maintenance lock. Single row in `maintenance_lock`;
+    INSERT...ON CONFLICT DO NOTHING is atomic test-and-set in one round trip.
+    A row older than LOCK_STALE_SEC is force-overridden so a crashed holder
+    can't lock the system out forever.
     """
-    async def _acquire() -> bool:
-        from app.database import async_session
-        from sqlalchemy import text as _t
-        # Compute the stale cutoff in Python so we don't rely on
-        # `int || ' seconds'::interval` working through asyncpg's type
-        # binding — that concat fails on Postgres because asyncpg binds
-        # integers as int4 and `int4 || text` has no operator.
-        stale_cutoff = datetime.now(timezone.utc) - timedelta(seconds=LOCK_STALE_SEC)
+    from app.database import async_session
+    from sqlalchemy import text as _t
+    stale_cutoff = datetime.now(timezone.utc) - timedelta(seconds=LOCK_STALE_SEC)
+    try:
         async with async_session() as db:
-            # Self-heal: clear stale locks before we try to take ours.
             await db.execute(_t(
                 "DELETE FROM maintenance_lock "
                 "WHERE id = :k AND acquired_at < :cutoff"
@@ -126,9 +115,6 @@ def try_acquire_lock(label: str) -> bool:
             ), {"k": LOCK_KEY_INT, "label": label})
             await db.commit()
             return (result.rowcount or 0) > 0
-
-    try:
-        return asyncio.run(_acquire())
     except Exception as e:
         logger.warning(
             "Could not check maintenance lock: %s — proceeding without lock", e
@@ -136,18 +122,15 @@ def try_acquire_lock(label: str) -> bool:
         return True
 
 
-def release_lock() -> None:
+async def _release_lock_async() -> None:
     """Drop the maintenance lock row. Safe if it's already gone."""
-    async def _release() -> None:
-        from app.database import async_session
-        from sqlalchemy import text as _t
+    from app.database import async_session
+    from sqlalchemy import text as _t
+    try:
         async with async_session() as db:
             await db.execute(_t("DELETE FROM maintenance_lock WHERE id = :k"),
                              {"k": LOCK_KEY_INT})
             await db.commit()
-
-    try:
-        asyncio.run(_release())
     except Exception as e:
         logger.warning("Could not release maintenance lock: %s", e)
 
@@ -6436,18 +6419,31 @@ async def run_maintenance(mode: str = "full"):
 
 def _run_once(mode: str) -> None:
     """One maintenance invocation with lock semantics — both runtime paths
-    (single-shot CLI and --loop) go through this."""
+    (single-shot CLI and --loop) go through this.
+
+    Uses a SINGLE asyncio.run() for the entire acquire→run→release lifecycle
+    so the SQLAlchemy/asyncpg pool is bound to one event loop. Earlier
+    versions called asyncio.run() three times (one per phase). Each call
+    closed its loop, leaving the module-level pool with connections bound
+    to a dead loop. The next call's first DB use raised "got Future ...
+    attached to a different loop" — that's why the maintenance_state
+    mirror write never reached the DB on cold-start runs.
+    """
     label = f"{mode}@{datetime.now().strftime('%H:%M:%S')}"
-    if not try_acquire_lock(label):
-        logger.warning(
-            "Another maintenance run holds the lock — skipping this firing (mode=%s)",
-            mode,
-        )
-        return
-    try:
-        asyncio.run(run_maintenance(mode=mode))
-    finally:
-        release_lock()
+
+    async def _run() -> None:
+        if not await _try_acquire_lock_async(label):
+            logger.warning(
+                "Another maintenance run holds the lock — skipping this firing (mode=%s)",
+                mode,
+            )
+            return
+        try:
+            await run_maintenance(mode=mode)
+        finally:
+            await _release_lock_async()
+
+    asyncio.run(_run())
 
 
 def main():
