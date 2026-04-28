@@ -984,6 +984,33 @@ async def run_maintenance_endpoint(mode: str = Query("full", pattern="^(full|ing
             detail=f"auto_maintenance.py not found at {script}",
         )
 
+    # Refuse to spawn if a non-stale lock already exists. Without this
+    # check, every redundant click writes a fresh "Subprocess starting…"
+    # seed to maintenance_run_status, clobbering the live progress that
+    # the running run was producing. The redundant subprocess would also
+    # see the lock held and exit cleanly — wasted work either way.
+    # Stale locks (>4h) are left alone here; auto_maintenance.py self-heals
+    # those when the next legitimate run starts.
+    from sqlalchemy import text as _t_lock
+    from app.database import async_session as _ses_lock
+    async with _ses_lock() as db_lock:
+        existing = (await db_lock.execute(_t_lock(
+            "SELECT label, acquired_at, "
+            "EXTRACT(EPOCH FROM (NOW() - acquired_at)) AS age_s "
+            "FROM maintenance_lock WHERE id = 7263482917"
+        ))).first()
+    if existing and existing.age_s is not None and existing.age_s < 4 * 3600:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Another maintenance run is already in progress.",
+                "holder": existing.label,
+                "acquired_at": existing.acquired_at.isoformat() if existing.acquired_at else None,
+                "age_s": float(existing.age_s),
+                "hint": "Wait for it to finish, or POST /admin/maintenance/force-release-lock if you're sure it's stuck.",
+            },
+        )
+
     # Spawn detached. start_new_session=True puts the subprocess in its
     # own process group so it survives if the API process is restarted
     # (subject to container-level lifecycle — Railway will SIGTERM
