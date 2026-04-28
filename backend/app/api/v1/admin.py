@@ -1011,10 +1011,44 @@ async def run_maintenance_endpoint(mode: str = Query("full", pattern="^(full|ing
                    "Check Railway logs for the doornegar service.",
         )
 
+    # Write an initial "starting" placeholder to the status row so the
+    # dashboard shows something within seconds even if the subprocess
+    # hasn't reached start_run yet. This also surfaces a missing table
+    # at the API call site instead of failing silently inside the
+    # subprocess's _flush helper. The subprocess overwrites this with
+    # real state as soon as it calls start_run.
+    from sqlalchemy import text as _t
+    from app.database import async_session
+    import json as _json
+    import time as _time_mod
+    seed_state = {
+        "status": "running",
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "current_step": "Subprocess starting…",
+        "current_step_started": _time_mod.time(),
+        "steps": [],
+        "pid": proc.pid,
+        "mode": mode,
+        "source_hint": "seeded by /admin/maintenance/run",
+    }
+    db_write_status = "ok"
+    try:
+        async with async_session() as db:
+            await db.execute(_t(
+                "INSERT INTO maintenance_run_status (id, state, updated_at) "
+                "VALUES (1, CAST(:state AS jsonb), NOW()) "
+                "ON CONFLICT (id) DO UPDATE SET state = EXCLUDED.state, updated_at = NOW()"
+            ), {"state": _json.dumps(seed_state, default=str)})
+            await db.commit()
+    except Exception as e:
+        db_write_status = f"failed: {type(e).__name__}: {str(e)[:200]}"
+        logger.warning(f"Could not seed maintenance_run_status: {e}")
+
     return {
         "status": "started",
         "pid": proc.pid,
         "mode": mode,
+        "db_write": db_write_status,  # "ok" if seed write to maintenance_run_status worked
         "message": (
             "Maintenance running in a detached subprocess on the API container. "
             "The subprocess writes a row to maintenance_logs on completion. "
