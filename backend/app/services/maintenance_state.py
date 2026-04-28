@@ -32,6 +32,16 @@ from typing import Any
 _LAST_WRITE_TS = 0.0
 _WRITE_THROTTLE_SEC = 1.0
 
+# Strong references to in-flight write tasks. Without this, tasks
+# created via `loop.create_task(...)` can be garbage-collected before
+# they run — asyncio only keeps weak references to tasks, per the docs:
+# > Save a reference to the result of this function, to avoid a task
+# > disappearing mid-execution.
+# The 2026-04-28 incident: subprocess was doing real ingest work but
+# the dashboard saw stale "Subprocess starting…" because the _flush
+# tasks were being GC'd before they could run.
+_PENDING_WRITES: set = set()
+
 
 # Global state dict for the current or most-recent maintenance run
 STATE: dict = {
@@ -62,6 +72,22 @@ async def _write_state(snapshot: dict) -> None:
         await db.commit()
 
 
+async def _write_state_logged(snapshot: dict) -> None:
+    """Wrapper that logs write failures so they don't disappear silently.
+
+    The 2026-04-28 incident hid behind a bare `except: pass` — write
+    failures (e.g., DB connection issues) were invisible. We log them
+    at warning level instead.
+    """
+    import logging as _log
+    try:
+        await _write_state(snapshot)
+    except Exception as e:
+        _log.getLogger(__name__).warning(
+            "maintenance_state mirror write failed: %s", e
+        )
+
+
 def _flush(force: bool = False) -> None:
     """Mirror STATE to the DB. Throttled to 1s unless force=True.
 
@@ -84,12 +110,17 @@ def _flush(force: bool = False) -> None:
         except RuntimeError:
             loop = None
         if loop is None:
-            asyncio.run(_write_state(snapshot))
+            asyncio.run(_write_state_logged(snapshot))
         else:
-            # Fire-and-forget within the running loop; the write completes
-            # asynchronously without blocking the caller. Errors land in
-            # the task and are silently dropped (best-effort mirror).
-            loop.create_task(_write_state(snapshot))
+            # Schedule write on the running loop. Critical: keep a strong
+            # reference to the task so Python's GC doesn't collect it
+            # before it runs. Without this, the dashboard sees stale
+            # "Subprocess starting…" because every transition's write
+            # task gets GC'd before the event loop yields enough for
+            # it to execute.
+            task = loop.create_task(_write_state_logged(snapshot))
+            _PENDING_WRITES.add(task)
+            task.add_done_callback(_PENDING_WRITES.discard)
     except Exception:
         pass
 
