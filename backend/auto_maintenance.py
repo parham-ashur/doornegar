@@ -50,18 +50,19 @@ STEP_TIMEOUTS_SEC = {
     "detect_hourly_updates": 120,  # pure SQL aggregate, no LLM
     "audit_clusters": 300,         # sample + cosine, no LLM
     "process": 1800,               # embeddings + translation over many articles
-    "cluster": 1200,               # LLM clustering batch
+    "cluster": 2400,               # LLM matching + new-story clustering. Bumped from 1200s
+                                   # 2026-04-29: backlog catchup needs more room; deadline_ts
+                                   # threading lets the LLM loops break gracefully.
     "centroids": 600,
     "merge_similar": 600,
     "summarize": 1800,
     "bias_score": 3600,            # per-article LLM calls, heaviest step
     "fix_images": 1200,
     "diaspora_ogimages": 1200,   # HTTP GET per article, capped 200/run
-    "migrate_images_r2": 1800,   # download + upload per article, capped 300/run
+    "migrate_images_r2": 2400,   # download + upload per article, capped 150/run (was 300)
     "telegram_analysis": 3600,     # per-story LLM analysis
     "telegram_link": 1800,         # embed N unlinked posts × cosine vs ~200 stories
     "telegram_reassign": 1200,     # re-embed 3K posts, pure math, no LLM
-    "migrate_images_r2": 2400,     # download + upload per article, hit 1800 timeout 2026-04-29
     "niloofar_image_rescue": 300,  # no LLM — scans article images, picks fallback
     "backfill_analyst_counts": 300,  # no LLM — just resolves supporter names
     "editorial": 1200,
@@ -6020,11 +6021,14 @@ async def step_migrate_images_to_r2():
     — the frontend always loads from our own CDN.
 
     Idempotent via the existing `_object_exists_in_r2` short-circuit in
-    `download_image`. Capped at 300 articles per run so a single
-    maintenance pass stays under the step timeout; most-recent articles
+    `download_image`. Capped at 150 articles per run (was 300; reduced
+    2026-04-29 after consistent timeouts at 1800s). Most-recent articles
     go first so new content lands on R2 before it surfaces on the
     homepage. Articles whose source download fails are left alone
     (SafeImage's per-source geoblock bypass remains the fallback).
+    With 3 maintenance-cron firings per day at 150/run, full backlog
+    drains in ~2× the time vs the old 300/run cap, but each run
+    completes within budget and partial progress survives.
     """
     from sqlalchemy import select, not_, update
     from app.config import settings
@@ -6055,7 +6059,7 @@ async def step_migrate_images_to_r2():
                 not_(Article.image_url.like(f"{LOCAL_IMAGE_BASE}%")),
             )
             .order_by(Article.ingested_at.desc())
-            .limit(300)
+            .limit(150)
         )
         work = [(row.id, row.image_url) for row in result.all()]
 
@@ -6191,7 +6195,7 @@ FULL_PIPELINE = [
     # migrate_images_r2 so the newly-fetched URLs get uploaded to R2
     # in the same maintenance pass.
     ("diaspora_ogimages", "Backfill diaspora article og:images", "step_backfill_diaspora_ogimages"),
-    ("migrate_images_r2", "Migrate source-CDN images to R2 (up to 300/run)", "step_migrate_images_to_r2"),
+    ("migrate_images_r2", "Migrate source-CDN images to R2 (up to 150/run)", "step_migrate_images_to_r2"),
     # Rescue stories whose auto-picked image resolves to null/icon/broken —
     # writes a manual_image_url pointing at the best valid article image.
     ("niloofar_image_rescue", "Niloofar rescues stories with bad cover images", "step_niloofar_image_rescue"),
@@ -6251,7 +6255,7 @@ INGEST_ONLY_PIPELINE = [
     ("telegram_link", "Link Telegram posts to stories (embeddings)", "step_telegram_link_posts"),
     # Keeps newly-ingested images on R2 so the homepage never depends on
     # the origin CDN being reachable from Vercel. Idempotent, capped 300/run.
-    ("migrate_images_r2", "Migrate source-CDN images to R2 (up to 300/run)", "step_migrate_images_to_r2"),
+    ("migrate_images_r2", "Migrate source-CDN images to R2 (up to 150/run)", "step_migrate_images_to_r2"),
     # Same hourly update detection the rss-cron runs. Keeping it here too
     # means the signal refreshes on the 4 hours rss-cron skips by design
     # (00/06/12/18 UTC — the ingest-cron collision slots).

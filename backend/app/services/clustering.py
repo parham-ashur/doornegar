@@ -565,6 +565,8 @@ async def _match_to_existing_stories(
     db: AsyncSession,
     articles: list[Article],
     source_names: dict[str, str],
+    *,
+    deadline_ts: float | None = None,
 ) -> list[Article]:
     """Try to match new articles to existing visible stories.
 
@@ -1006,7 +1008,20 @@ async def _match_to_existing_stories(
         f"Sending {len(articles_to_check)} articles × {len(filtered_stories)} candidate stories to LLM"
     )
 
+    import time as _time_match
     for story_batch_start in range(0, len(filtered_stories), STORY_BATCH_SIZE):
+        # Deadline check — same pattern as _cluster_new_articles. If the
+        # caller gave us a budget and we're past it, stop dispatching new
+        # LLM batches; whatever already matched is preserved by the
+        # intermediate commit in cluster_articles.
+        if deadline_ts is not None and _time_match.time() >= deadline_ts:
+            remaining_batches = (len(filtered_stories) - story_batch_start + STORY_BATCH_SIZE - 1) // STORY_BATCH_SIZE
+            logger.warning(
+                f"Match-existing deadline hit — stopping after "
+                f"{story_batch_start // STORY_BATCH_SIZE} batches, "
+                f"skipping {remaining_batches} remaining"
+            )
+            break
         story_batch = filtered_stories[story_batch_start: story_batch_start + STORY_BATCH_SIZE]
 
         # Phase-2 richer story block: title + top-3 recent article titles
@@ -2166,7 +2181,9 @@ async def cluster_articles(db: AsyncSession, *, deadline_ts: float | None = None
     # articles before the much-longer cluster_new phase runs, so a
     # later-phase failure doesn't roll back the matches.
     try:
-        unmatched = await _match_to_existing_stories(db, articles, source_names)
+        unmatched = await _match_to_existing_stories(
+            db, articles, source_names, deadline_ts=deadline_ts,
+        )
         await db.commit()
     except Exception as _e:
         raise RuntimeError(f"cluster_phase=match_existing: {type(_e).__name__}: {_e}") from _e
