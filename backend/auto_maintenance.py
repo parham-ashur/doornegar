@@ -6321,10 +6321,20 @@ async def run_maintenance(mode: str = "full"):
                 # line number, not just str(e). For the recurring cluster
                 # `greenlet_spawn` error the message alone tells us nothing
                 # about WHERE the lazy load fired.
+                #
+                # IMPORTANT: keep BOTH ends of the traceback. With phase
+                # wrappers that re-raise via `from`, the inner cause's
+                # stack lives at the TOP of format_exc() (preceded by
+                # "The above exception was the direct cause of the
+                # following exception:"). Truncating to the last 2KB lost
+                # exactly the frames we need — observed 2026-04-29.
                 import traceback as _tb
                 tb_str = _tb.format_exc()
                 logger.error(f"{display} failed: {e}\n{tb_str}")
-                err = {"error": str(e), "traceback": tb_str[-2000:]}
+                # Cap at 8KB so the JSON column doesn't grow unbounded but
+                # we keep the full chain in the typical case (a chained
+                # cluster_phase failure runs ~3-5KB).
+                err = {"error": str(e), "traceback": tb_str[:8000]}
                 results[key] = err
                 await maintenance_state.end_step(display, "error", err)
 
