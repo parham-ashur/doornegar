@@ -59,7 +59,9 @@ STEP_TIMEOUTS_SEC = {
     "diaspora_ogimages": 1200,   # HTTP GET per article, capped 200/run
     "migrate_images_r2": 1800,   # download + upload per article, capped 300/run
     "telegram_analysis": 3600,     # per-story LLM analysis
+    "telegram_link": 1800,         # embed N unlinked posts × cosine vs ~200 stories
     "telegram_reassign": 1200,     # re-embed 3K posts, pure math, no LLM
+    "migrate_images_r2": 2400,     # download + upload per article, hit 1800 timeout 2026-04-29
     "niloofar_image_rescue": 300,  # no LLM — scans article images, picks fallback
     "backfill_analyst_counts": 300,  # no LLM — just resolves supporter names
     "editorial": 1200,
@@ -6315,8 +6317,14 @@ async def run_maintenance(mode: str = "full"):
                 results[key] = err
                 await maintenance_state.end_step(display, "error", err)
             except Exception as e:
-                logger.error(f"{display} failed: {e}")
-                err = {"error": str(e)}
+                # Capture the traceback so /admin/maintenance/logs surfaces a
+                # line number, not just str(e). For the recurring cluster
+                # `greenlet_spawn` error the message alone tells us nothing
+                # about WHERE the lazy load fired.
+                import traceback as _tb
+                tb_str = _tb.format_exc()
+                logger.error(f"{display} failed: {e}\n{tb_str}")
+                err = {"error": str(e), "traceback": tb_str[-2000:]}
                 results[key] = err
                 await maintenance_state.end_step(display, "error", err)
 

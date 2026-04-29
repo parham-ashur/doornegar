@@ -2158,7 +2158,18 @@ async def cluster_articles(db: AsyncSession, *, deadline_ts: float | None = None
     logger.info(f"Found {total_articles} unclustered articles from the last 30 days")
 
     # ── Step 2: Match new articles to existing stories ──
-    unmatched = await _match_to_existing_stories(db, articles, source_names)
+    # Each phase below wraps its own try/except with a phase tag so the
+    # harness's persisted error makes clear *which* phase the failure
+    # came from, not just the SQLAlchemy message at top level. The
+    # 2026-04-29 cluster `greenlet_spawn` errors had no stack-trace
+    # locality — adding intermediate commits also persists matched
+    # articles before the much-longer cluster_new phase runs, so a
+    # later-phase failure doesn't roll back the matches.
+    try:
+        unmatched = await _match_to_existing_stories(db, articles, source_names)
+        await db.commit()
+    except Exception as _e:
+        raise RuntimeError(f"cluster_phase=match_existing: {type(_e).__name__}: {_e}") from _e
     matched_count = total_articles - len(unmatched)
     logger.info(
         f"Step 2 complete: {matched_count} matched to existing, "
@@ -2166,10 +2177,14 @@ async def cluster_articles(db: AsyncSession, *, deadline_ts: float | None = None
     )
 
     # ── Step 3: Cluster unmatched articles into new stories ──
-    new_published, new_hidden = await _cluster_new_articles(
-        db, unmatched, source_names, source_alignments_map,
-        deadline_ts=deadline_ts,
-    )
+    try:
+        new_published, new_hidden = await _cluster_new_articles(
+            db, unmatched, source_names, source_alignments_map,
+            deadline_ts=deadline_ts,
+        )
+        await db.commit()
+    except Exception as _e:
+        raise RuntimeError(f"cluster_phase=cluster_new: {type(_e).__name__}: {_e}") from _e
 
     # ── Step 4: Promote hidden stories that now have 5+ articles ──
     # (No is_published column — the API filters by article_count >= 5.
@@ -2184,10 +2199,18 @@ async def cluster_articles(db: AsyncSession, *, deadline_ts: float | None = None
     # This runs before the LLM merge so the candidate pool handed to
     # the LLM is smaller (and the obvious dupes are already handled
     # for free).
-    pre_merged = await _merge_tiny_by_cosine(db)
+    try:
+        pre_merged = await _merge_tiny_by_cosine(db)
+        await db.commit()
+    except Exception as _e:
+        raise RuntimeError(f"cluster_phase=merge_tiny: {type(_e).__name__}: {_e}") from _e
 
     # ── Step 5b: LLM-based merge of surviving hidden stories ──
-    merged_count = pre_merged + await _merge_hidden_stories(db)
+    try:
+        merged_count = pre_merged + await _merge_hidden_stories(db)
+        await db.commit()
+    except Exception as _e:
+        raise RuntimeError(f"cluster_phase=merge_hidden: {type(_e).__name__}: {_e}") from _e
 
     # Count remaining unclustered after all steps
     unclustered_result = await db.execute(
