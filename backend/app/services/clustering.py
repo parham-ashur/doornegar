@@ -604,6 +604,19 @@ async def _match_to_existing_stories(
     from datetime import timedelta as _timedelta
     from app.nlp.embeddings import cosine_similarity as _cosine_sim
 
+    # Capture article identities eagerly into plain Python tuples BEFORE
+    # any DB operation that could expire the in-session ORM objects.
+    # Background (2026-04-29 incident): `_keepalive` rolls back the session
+    # on Neon-killed-connection. SQLAlchemy 2's rollback expires ALL
+    # in-session ORM objects per spec. Then any subsequent attribute
+    # access (including `a.id` in our final list comprehension) triggers
+    # a lazy refresh — but we're in a sync code path, so it raises
+    # `MissingGreenlet: greenlet_spawn has not been called`. The full
+    # traceback is in maintenance_logs run_at=2026-04-29 17:36:30 UTC.
+    # By caching ids upfront, the final filter uses primitives only and
+    # never touches ORM state.
+    article_ids_eager: list = [a.id for a in articles]
+
     # Pre-filter to LLM. Was 0.30 — too loose: articles with cosine
     # 0.30-0.40 to a candidate were sending the LLM to read pairs that
     # almost never matched, polluting cost and occasionally producing
@@ -967,11 +980,18 @@ async def _match_to_existing_stories(
         )
 
     matched_article_ids: set[uuid.UUID] = set()
+    # Track (article_id, story_id) pairs to drive metadata refresh later,
+    # WITHOUT having to read article.story_id from the ORM at the end of
+    # this function. After a mid-function keepalive rollback, ORM
+    # attribute reads on expired objects raise greenlet_spawn — see the
+    # comment block at the top of this function.
+    matched_pairs: list[tuple] = []  # (article_id, story_id)
     for article, story_id in auto_match_pairs:
         if article.story_id is not None:
             continue
         article.story_id = story_id
         matched_article_ids.add(article.id)
+        matched_pairs.append((article.id, story_id))
         await _log_event(
             db,
             event_type="match_accept",
@@ -1104,6 +1124,7 @@ async def _match_to_existing_stories(
             # Assign article to story
             article.story_id = story_id
             matched_article_ids.add(article.id)
+            matched_pairs.append((article.id, story_id))
             await _log_event(
                 db,
                 event_type="match_accept",
@@ -1112,29 +1133,30 @@ async def _match_to_existing_stories(
                 article_id=article.id,
                 signals={"path": "llm_confirm"},
             )
-            logger.debug(
-                f"Matched article '{article.title_original or article.title_fa}' "
-                f"to story {story_id}"
-            )
+            logger.debug(f"Matched article {article.id} to story {story_id}")
 
     # Flush article assignments
     if matched_article_ids:
         await db.flush()
 
-        # Collect affected story IDs and batch-refresh their metadata
-        # in just a few aggregated queries instead of 4 per story.
-        affected_story_ids = set()
-        for a in articles:
-            if a.id in matched_article_ids and a.story_id:
-                affected_story_ids.add(a.story_id)
+        # Collect affected story IDs from the matched_pairs we tracked
+        # during the loops — never read article.story_id from the ORM
+        # at this point. If a mid-function keepalive rollback expired
+        # the in-session articles, that read raises greenlet_spawn.
+        affected_story_ids = {sid for _, sid in matched_pairs}
 
         if affected_story_ids:
             await _refresh_stories_metadata_batch(db, affected_story_ids)
 
     logger.info(f"Matched {len(matched_article_ids)} articles to existing stories")
 
-    # Return unmatched articles
-    return [a for a in articles if a.id not in matched_article_ids]
+    # Return unmatched articles, filtered using the eagerly-captured
+    # article_ids list (zip-aligned with the input `articles` list).
+    # Same defense as above — never touch ORM attributes at the end.
+    return [
+        a for a, aid in zip(articles, article_ids_eager)
+        if aid not in matched_article_ids
+    ]
 
 
 async def _refresh_story_metadata(db: AsyncSession, story_id: uuid.UUID) -> None:
