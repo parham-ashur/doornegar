@@ -60,33 +60,47 @@ async def log_event(
 
     actor conventions: `pipeline`, `niloofar`, `admin`, `bot`
     """
+    # Wrap the INSERT in a SAVEPOINT so a failure here can't poison the
+    # caller's outer transaction. Without the nested transaction, a
+    # failed INSERT (connection drop, FK violation, etc.) leaves the
+    # session in aborted-transaction state and every subsequent
+    # `db.execute(...)` raises until an explicit rollback. The cluster
+    # step's match_existing phase calls log_event hundreds of times in
+    # a loop — one mid-loop failure used to brick the rest of the loop
+    # and surface later as `greenlet_spawn has not been called` on the
+    # next autoflush. With begin_nested, only the event INSERT rolls
+    # back; the article assignments and audit-trail neighbors survive.
     try:
-        await db.execute(
-            text(
-                """
-                INSERT INTO story_events
-                  (story_id, article_id, event_type, actor, field,
-                   old_value, new_value, confidence, signals)
-                VALUES
-                  (:story_id, :article_id, :event_type, :actor, :field,
-                   :old_value, :new_value, :confidence,
-                   CAST(:signals AS jsonb))
-                """
-            ),
-            {
-                "story_id": story_id,
-                "article_id": article_id,
-                "event_type": event_type,
-                "actor": actor,
-                "field": field,
-                "old_value": _clip(old_value),
-                "new_value": _clip(new_value),
-                "confidence": confidence,
-                "signals": json.dumps(signals, ensure_ascii=False) if signals else None,
-            },
-        )
+        async with db.begin_nested():
+            await db.execute(
+                text(
+                    """
+                    INSERT INTO story_events
+                      (story_id, article_id, event_type, actor, field,
+                       old_value, new_value, confidence, signals)
+                    VALUES
+                      (:story_id, :article_id, :event_type, :actor, :field,
+                       :old_value, :new_value, :confidence,
+                       CAST(:signals AS jsonb))
+                    """
+                ),
+                {
+                    "story_id": story_id,
+                    "article_id": article_id,
+                    "event_type": event_type,
+                    "actor": actor,
+                    "field": field,
+                    "old_value": _clip(old_value),
+                    "new_value": _clip(new_value),
+                    "confidence": confidence,
+                    "signals": json.dumps(signals, ensure_ascii=False) if signals else None,
+                },
+            )
         if commit:
             await db.commit()
     except Exception as exc:  # noqa: BLE001
-        # Event logging is advisory — never block the caller.
+        # Event logging is advisory — never block the caller. The
+        # SAVEPOINT released-on-success / rolled-back-on-failure
+        # semantics mean the caller's transaction is still healthy
+        # whether or not we got here.
         logger.warning("story_events insert failed (non-fatal): %s", exc)
