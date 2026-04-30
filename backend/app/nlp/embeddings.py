@@ -34,11 +34,16 @@ logger = logging.getLogger(__name__)
 EMBEDDING_MODEL = "text-embedding-3-small"
 EMBEDDING_DIMENSIONS = 384  # reduced from the model's native 1536
 
-# Retry knobs — tuned for OpenAI's transient 5xx / rate-limit profile.
-# 3 tries with 1s/2s/4s backoff covers most hiccups without blocking
-# the pipeline for more than ~7s per failed batch.
-_RETRY_ATTEMPTS = 3
+# Retry knobs — tuned for OpenAI's transient 5xx + rate-limit profile.
+# 5 tries with 1/2/4/8/16s backoff = 31s total worst case. Bumped from
+# 3 attempts (7s total) on 2026-04-30 after observing a 31% NULL rate
+# over 24h vs 8% over 7d — most failures looked retry-shaped.
+# RateLimitError specifically gets a flat 60s wait (no exponential)
+# because OpenAI's 429s often come with a 60s reset window that
+# 1/2/4/8/16 backoffs never cleanly clear.
+_RETRY_ATTEMPTS = 5
 _RETRY_BASE_DELAY_SEC = 1.0
+_RATE_LIMIT_WAIT_SEC = 60.0
 
 
 def _openai_client():
@@ -53,6 +58,10 @@ def _call_with_retry(client, inputs, *, attempts: int = _RETRY_ATTEMPTS):
     on failure after `attempts` tries. Keep the retry inside this
     helper so higher-level code doesn't need to know the policy.
     """
+    try:
+        from openai import RateLimitError as _RLE
+    except Exception:
+        _RLE = None
     last_exc: Exception | None = None
     for i in range(attempts):
         try:
@@ -64,13 +73,22 @@ def _call_with_retry(client, inputs, *, attempts: int = _RETRY_ATTEMPTS):
         except Exception as e:
             last_exc = e
             if i < attempts - 1:
-                delay = _RETRY_BASE_DELAY_SEC * (2 ** i)
+                # 60s flat wait for explicit rate limits, otherwise
+                # exponential 1/2/4/8/16s.
+                if _RLE is not None and isinstance(e, _RLE):
+                    delay = _RATE_LIMIT_WAIT_SEC
+                else:
+                    delay = _RETRY_BASE_DELAY_SEC * (2 ** i)
                 logger.warning(
-                    f"OpenAI embeddings attempt {i + 1}/{attempts} failed: {e} — retrying in {delay}s"
+                    f"OpenAI embeddings attempt {i + 1}/{attempts} failed "
+                    f"({type(e).__name__}): {str(e)[:200]} — retrying in {delay}s"
                 )
                 time.sleep(delay)
             else:
-                logger.error(f"OpenAI embeddings attempt {i + 1}/{attempts} failed: {e}")
+                logger.error(
+                    f"OpenAI embeddings attempt {i + 1}/{attempts} failed "
+                    f"({type(e).__name__}): {str(e)[:200]}"
+                )
     raise last_exc  # type: ignore[misc]
 
 
