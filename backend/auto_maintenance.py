@@ -4030,7 +4030,38 @@ async def step_telegram_deep_analysis():
 
 
 async def step_telegram_health():
-    """Check Telegram session health and channel accessibility."""
+    """Check Telegram session health and channel accessibility.
+
+    Only the Telethon authority service performs the live connect. Other
+    services run a DB-based freshness check instead — looking at how recent
+    the most-recent telegram_post is — so we still notice if the authority
+    has stopped ingesting, without ourselves grabbing the session.
+    """
+    from app.services.telegram_service import is_telegram_authority
+
+    if not is_telegram_authority():
+        from sqlalchemy import select, func
+        from app.database import async_session
+        from app.models.social import TelegramPost
+        async with async_session() as db:
+            most_recent = (await db.execute(
+                select(func.max(TelegramPost.fetched_at))
+            )).scalar()
+        if most_recent is None:
+            return {"skipped": True, "reason": "not_telegram_authority", "session_ok": None,
+                    "most_recent_post_age_min": None}
+        from datetime import datetime, timezone
+        if most_recent.tzinfo is None:
+            most_recent = most_recent.replace(tzinfo=timezone.utc)
+        age_min = (datetime.now(timezone.utc) - most_recent).total_seconds() / 60
+        return {
+            "skipped": True,
+            "reason": "not_telegram_authority",
+            "session_ok": None,
+            "most_recent_post_age_min": round(age_min, 1),
+            "ingest_alive": age_min < 12 * 60,
+        }
+
     stats = {"session_ok": False, "channels_checked": 0, "channels_failing": []}
 
     try:

@@ -154,6 +154,9 @@ async def post_to_telegram(story_id: str, text: str) -> dict:
     """Post to Doornegar's Telegram channel."""
     if not settings.telegram_channel_username:
         return {"error": "TELEGRAM_CHANNEL_USERNAME not set"}
+    from app.services.telegram_service import is_telegram_authority
+    if not is_telegram_authority():
+        return {"error": "Telegram disabled on this container — post via the ingest-cron service or set TELEGRAM_AUTHORITY=true here (only one service at a time)"}
     try:
         from telethon import TelegramClient
         from telethon.sessions import StringSession

@@ -31,9 +31,34 @@ logger = logging.getLogger(__name__)
 _client = None
 
 
+class TelegramNotAuthority(RuntimeError):
+    """Raised when Telethon connect is attempted from a service that is not
+    the designated Telegram authority. Handled cleanly upstream — never
+    bubble out as an error, treat as a soft skip.
+
+    Why: Telegram invalidates a session that connects from two IPs at once.
+    Doornegar runs as 4 Railway services (doornegar/ingest-cron/maintenance-cron/
+    rss-cron) and any pair of them with the same session string would race.
+    The authority flag forces all Telethon I/O onto exactly one service.
+    """
+    pass
+
+
+def is_telegram_authority() -> bool:
+    """True iff this container is allowed to open a Telethon connection.
+
+    Both flags must be set: the session string (the credential) and the
+    authority bit (the lease). The authority bit defaults False so a fresh
+    Railway service never starts colliding with the existing authority.
+    """
+    return bool(settings.telegram_session_string and settings.telegram_authority)
+
+
 async def _get_telegram_client():
     """Get or create the Telethon client.
 
+    Raises TelegramNotAuthority on services that are not the designated
+    authority — callers must catch and treat as a soft skip, not an error.
     Prefers a serialized session from settings.telegram_session_string (used on
     Railway where filesystem is ephemeral). Falls back to the local
     doornegar_session.session file for dev.
@@ -41,6 +66,13 @@ async def _get_telegram_client():
     global _client
     if _client is not None and _client.is_connected():
         return _client
+
+    if not is_telegram_authority():
+        raise TelegramNotAuthority(
+            "Telethon disabled on this container "
+            "(TELEGRAM_AUTHORITY != true or TELEGRAM_SESSION_STRING unset). "
+            "Telegram I/O is centralized on the ingest-cron service."
+        )
 
     try:
         from telethon import TelegramClient
@@ -234,7 +266,15 @@ async def ingest_channel(channel: TelegramChannel, db: AsyncSession) -> dict:
 
 
 async def ingest_all_channels(db: AsyncSession) -> dict:
-    """Fetch posts from all active Telegram channels."""
+    """Fetch posts from all active Telegram channels.
+
+    Soft-skips on services without authority — see TelegramNotAuthority docstring.
+    """
+    if not is_telegram_authority():
+        logger.info("ingest_all_channels: skipping (not Telegram authority)")
+        return {"channels": 0, "found": 0, "new": 0, "linked": 0, "skipped": True,
+                "reason": "not_telegram_authority"}
+
     result = await db.execute(
         select(TelegramChannel).where(TelegramChannel.is_active.is_(True))
     )

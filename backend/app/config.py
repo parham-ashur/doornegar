@@ -79,6 +79,13 @@ class Settings(BaseSettings):
     # locally once with `python scripts/export_telegram_session.py` and set it
     # as the TELEGRAM_SESSION_STRING env var in Railway.
     telegram_session_string: str = ""
+    # Telegram requires that a given session connects from at most one IP at
+    # a time. Two services connecting concurrently → AuthKeyDuplicatedError
+    # and a hard re-auth. Set TELEGRAM_AUTHORITY=true on EXACTLY ONE Railway
+    # service (currently: ingest-cron). All other services skip Telethon
+    # connect calls cleanly. The session string can stay set elsewhere
+    # without causing collisions, since the gating happens here.
+    telegram_authority: bool = False
 
     # Twitter/X
     twitter_api_key: str = ""
