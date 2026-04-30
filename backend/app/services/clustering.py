@@ -2238,6 +2238,14 @@ async def cluster_articles(db: AsyncSession, *, deadline_ts: float | None = None
         f"Step 2 complete: {matched_count} matched to existing, "
         f"{len(unmatched_ids)} still unmatched"
     )
+    # Keep the outer `db` session warm. It sat idle while the
+    # match_existing phase ran with its own fresh session — Neon's 5-min
+    # idle reaper is happy to kill it. Without this, the outer session's
+    # cleanup at end-of-step raises InterfaceError ("cannot call
+    # Transaction.rollback(): the underlying connection is closed") and
+    # masks whatever else might have actually failed. Observed in the
+    # 2026-04-30 08:33 UTC run.
+    await _keepalive(db)
 
     # ── Step 3: Cluster unmatched articles into new stories ──
     # Fresh session — re-fetch unmatched articles by ID. The match phase
@@ -2267,6 +2275,9 @@ async def cluster_articles(db: AsyncSession, *, deadline_ts: float | None = None
             new_published, new_hidden = 0, 0
     except Exception as _e:
         raise RuntimeError(f"cluster_phase=cluster_new: {type(_e).__name__}: {_e}") from _e
+    # Keep the outer `db` warm again — same rationale as above. The
+    # cluster_new phase can run for many minutes when there's a backlog.
+    await _keepalive(db)
 
     # ── Step 4: Promote hidden stories that now have 5+ articles ──
     # (No is_published column — the API filters by article_count >= 5.

@@ -765,6 +765,15 @@ async def step_cluster():
     `asyncio.wait_for` to cancel a stuck OpenAI request — the latter
     overshot to 39m on the 2026-04-27 run because the underlying
     coroutine was blocking and didn't honor cancellation.
+
+    Manual session lifecycle (vs `async with`) so cleanup failures don't
+    mask real cluster errors. The outer `db` sits idle while
+    cluster_articles runs its phase blocks (each with their own fresh
+    sessions). Neon's 5-min idle reaper kills the outer connection.
+    When cluster_articles raises, the with-block's auto-rollback raises
+    InterfaceError ("cannot call rollback(): the underlying connection
+    is closed") and overwrites the original cluster error in
+    maintenance_logs. Observed 2026-04-30 08:33 UTC.
     """
     import time as _time
     from app.database import async_session
@@ -772,8 +781,32 @@ async def step_cluster():
 
     timeout = STEP_TIMEOUTS_SEC.get("cluster", DEFAULT_STEP_TIMEOUT_SEC)
     deadline_ts = _time.time() + max(60, timeout - 60)
-    async with async_session() as db:
+
+    db_ctx = async_session()
+    db = await db_ctx.__aenter__()
+    try:
         stats = await cluster_articles(db, deadline_ts=deadline_ts)
+    except Exception:
+        # Surface the original cluster error. Try to clean up the outer
+        # session but swallow any cleanup-time failures (Neon-killed
+        # connection raises InterfaceError on rollback).
+        import sys as _sys
+        try:
+            await db_ctx.__aexit__(*_sys.exc_info())
+        except Exception as cleanup_err:
+            logger.warning(
+                f"step_cluster outer-session cleanup failed "
+                f"(ignored — original error propagates): {cleanup_err}"
+            )
+        raise
+    # Success path
+    try:
+        await db_ctx.__aexit__(None, None, None)
+    except Exception as cleanup_err:
+        logger.warning(
+            f"step_cluster outer-session cleanup after success failed "
+            f"(ignored — work committed via fresh phase sessions): {cleanup_err}"
+        )
     logger.info(f"Clustering: {stats}")
     return stats
 
