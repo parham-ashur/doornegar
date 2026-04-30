@@ -90,23 +90,21 @@ async def _keepalive(db: AsyncSession) -> None:
     held connection mid-work. Call this before every long-running LLM
     batch so the session's underlying connection stays warm.
 
-    On ping failure we LOG ONLY — earlier versions called `db.rollback()`
-    here to recover from "current transaction is aborted" errors, but
-    that cure was worse than the disease. SQLAlchemy 2's rollback expires
-    every in-session ORM object per spec, and any subsequent attribute
-    access (e.g. `article.id`, `article.title_fa`) on those objects
-    triggers a sync lazy-refresh from inside an async context →
-    `MissingGreenlet: greenlet_spawn has not been called`. That bug
-    cascaded across ALL of cluster's match_existing and cluster_new
-    phases between 2026-04-28 and 2026-04-30. Without the rollback the
-    next db.execute will raise "transaction aborted" cleanly, which the
-    cluster_articles phase wrappers catch and surface with a clear
-    traceback — much better than expired-ORM-object lazy-load surprises.
+    Rolls back on ping failure to clear the aborted-transaction state
+    that asyncpg leaves behind. SQLAlchemy 2's rollback expires
+    in-session ORM objects, but that's now safe because cluster_articles
+    uses a FRESH async_session() for each phase via _phase_session() —
+    the expired objects from a previous phase never cross into the next.
+    See _phase_session below for the structural fix.
     """
     try:
         await db.execute(text("SELECT 1"))
     except Exception as e:
-        logger.warning(f"Keepalive ping failed (no rollback — see comment): {e}")
+        logger.warning(f"Keepalive ping failed: {e} — rolling back session")
+        try:
+            await db.rollback()
+        except Exception as e2:
+            logger.warning(f"Session rollback after failed keepalive also failed: {e2}")
 
 from app.config import settings
 from app.models.article import Article
@@ -2208,11 +2206,31 @@ async def cluster_articles(db: AsyncSession, *, deadline_ts: float | None = None
     # locality — adding intermediate commits also persists matched
     # articles before the much-longer cluster_new phase runs, so a
     # later-phase failure doesn't roll back the matches.
+    # Each phase below opens its OWN fresh async_session via
+    # async_session() so a session that goes bad inside phase N (Neon
+    # killed connection during an LLM call → keepalive rollback →
+    # ORM objects expired) doesn't poison phase N+1. Inputs cross phase
+    # boundaries as primitive UUIDs only — never ORM objects.
+    from app.database import async_session as _phase_session
     try:
-        unmatched_ids = await _match_to_existing_stories(
-            db, articles, source_names, deadline_ts=deadline_ts,
-        )
-        await db.commit()
+        async with _phase_session() as match_db:
+            unmatched_ids = await _match_to_existing_stories(
+                match_db, articles, source_names, deadline_ts=deadline_ts,
+            )
+            try:
+                await match_db.commit()
+            except Exception:
+                # Session may already be in aborted state from a
+                # mid-LLM keepalive failure. Rollback so the with-block
+                # exits cleanly; the matched-so-far state is lost but
+                # the captured `matched_article_ids` from inside the
+                # function never persisted (no flush completed). Next
+                # run will re-attempt the matches.
+                try:
+                    await match_db.rollback()
+                except Exception:
+                    pass
+                raise
     except Exception as _e:
         raise RuntimeError(f"cluster_phase=match_existing: {type(_e).__name__}: {_e}") from _e
     matched_count = total_articles - len(unmatched_ids)
@@ -2222,25 +2240,31 @@ async def cluster_articles(db: AsyncSession, *, deadline_ts: float | None = None
     )
 
     # ── Step 3: Cluster unmatched articles into new stories ──
-    # Re-fetch unmatched articles fresh from the DB. The input `articles`
-    # list may now contain expired ORM objects from a keepalive rollback
-    # inside the match phase — passing them to _cluster_new_articles
-    # causes greenlet_spawn at the first attribute access (observed in
-    # _dedup_signature on 2026-04-30 runs). Fresh fetch sidesteps the
-    # whole expiration issue.
+    # Fresh session — re-fetch unmatched articles by ID. The match phase
+    # session is already closed by its `async with` block above; the
+    # input `articles` list may contain expired ORM objects from that
+    # phase's keepalive rollback, so we never use them downstream.
     try:
         if unmatched_ids:
-            unmatched_result = await db.execute(
-                select(Article).where(Article.id.in_(unmatched_ids))
-            )
-            unmatched = list(unmatched_result.scalars().all())
+            async with _phase_session() as cn_db:
+                unmatched_result = await cn_db.execute(
+                    select(Article).where(Article.id.in_(unmatched_ids))
+                )
+                unmatched = list(unmatched_result.scalars().all())
+                new_published, new_hidden = await _cluster_new_articles(
+                    cn_db, unmatched, source_names, source_alignments_map,
+                    deadline_ts=deadline_ts,
+                )
+                try:
+                    await cn_db.commit()
+                except Exception:
+                    try:
+                        await cn_db.rollback()
+                    except Exception:
+                        pass
+                    raise
         else:
-            unmatched = []
-        new_published, new_hidden = await _cluster_new_articles(
-            db, unmatched, source_names, source_alignments_map,
-            deadline_ts=deadline_ts,
-        )
-        await db.commit()
+            new_published, new_hidden = 0, 0
     except Exception as _e:
         raise RuntimeError(f"cluster_phase=cluster_new: {type(_e).__name__}: {_e}") from _e
 
