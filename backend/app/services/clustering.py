@@ -339,20 +339,29 @@ def _parse_llm_response(response_text: str) -> dict:
 def _build_articles_block(articles: list, source_names: dict[str, str] | None = None) -> str:
     """Build the numbered article list for the clustering prompt.
 
+    Accepts either ORM Article objects OR primitive dicts (with keys
+    matching Article column names). _cluster_new_articles passes dicts
+    captured eagerly to dodge ORM expiration; _match_to_existing_stories
+    passes ORM objects.
+
     Title + first ~150 chars of content is enough for the LLM to group
     by specific event. 400 chars was overkill for a grouping task and
     doubled token cost with no measurable quality win.
 
     source_names: optional pre-extracted mapping of article.id -> source name
     """
+    def _g(obj, key):
+        # Field accessor that works for both dict and ORM object.
+        return obj.get(key) if isinstance(obj, dict) else getattr(obj, key, None)
+
     lines = []
     for i, article in enumerate(articles, 1):
-        title = article.title_original or article.title_fa or article.title_en or "(no title)"
+        title = _g(article, "title_original") or _g(article, "title_fa") or _g(article, "title_en") or "(no title)"
         if source_names:
-            sname = source_names.get(str(article.id), "Unknown")
+            sname = source_names.get(str(_g(article, "id")), "Unknown")
         else:
             sname = "Unknown"
-        body = (article.content_text or article.summary or "").strip()
+        body = (_g(article, "content_text") or _g(article, "summary") or "").strip()
         # Collapse whitespace so token usage is predictable
         body = " ".join(body.split())[:150]
         if body:
@@ -1396,6 +1405,25 @@ CLUSTER_NEW_GROUP_FLOOR = 5
 MAX_CLUSTER_ATTEMPTS = 3
 
 
+def _content_signature(
+    title_original: str | None,
+    title_fa: str | None,
+    title_en: str | None,
+    content_text: str | None,
+    summary: str | None,
+) -> str:
+    """Hash a content fingerprint. Splits the ORM dependency out of
+    `_dedup_signature` so callers with primitive fields (dicts captured
+    eagerly to dodge ORM expiration) can compute the same signature."""
+    import hashlib
+    title = (title_original or title_fa or title_en or "").strip()
+    title_norm = " ".join(title.lower().split())[:80]
+    body = (content_text or summary or "").strip()
+    body_norm = " ".join(body.split())[:400]
+    raw = f"{title_norm}||{body_norm}"
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
+
 def _dedup_signature(article: Article) -> str:
     """Compute a content signature for dedup bucketing.
 
@@ -1405,16 +1433,10 @@ def _dedup_signature(article: Article) -> str:
     representative per bucket; sibling articles attach to whichever
     story the representative lands in.
     """
-    import hashlib
-
-    title = (article.title_original or article.title_fa or article.title_en or "").strip()
-    title_norm = " ".join(title.lower().split())[:80]
-
-    body = (article.content_text or article.summary or "").strip()
-    body_norm = " ".join(body.split())[:400]
-
-    raw = f"{title_norm}||{body_norm}"
-    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+    return _content_signature(
+        article.title_original, article.title_fa, article.title_en,
+        article.content_text, article.summary,
+    )
 
 
 async def _cluster_new_articles(
@@ -1453,13 +1475,40 @@ async def _cluster_new_articles(
         )
         return 0, 0
 
-    # --- Dedup: bucket articles by content signature ---
-    buckets: dict[str, list[Article]] = {}
+    # Capture every article field this function and _create_story_from_dicts
+    # need into plain Python dicts BEFORE any operation that could expire
+    # the ORM objects. Background: _keepalive's rollback inside the LLM
+    # batch loop expires every in-session ORM article, then any
+    # subsequent attribute access (in _dedup_signature, _build_articles_
+    # block, or _create_story) triggers sync lazy-load → greenlet_spawn.
+    # Repeatedly observed across 2026-04-29..30 cluster runs; finally
+    # fixed by working entirely with primitives below.
+    article_data: list[dict] = []
     for a in articles:
-        sig = _dedup_signature(a)
-        buckets.setdefault(sig, []).append(a)
+        article_data.append({
+            "id": a.id,
+            "source_id": a.source_id,
+            "title_original": a.title_original,
+            "title_fa": a.title_fa,
+            "title_en": a.title_en,
+            "content_text": a.content_text,
+            "summary": a.summary,
+            "embedding": a.embedding,
+            "published_at": a.published_at,
+            "ingested_at": a.ingested_at,
+        })
 
-    representatives: list[Article] = [bucket[0] for bucket in buckets.values()]
+    # --- Dedup: bucket articles by content signature (using dicts) ---
+    buckets: dict[str, list[dict]] = {}
+    for d in article_data:
+        sig = _content_signature(
+            d["title_original"], d["title_fa"], d["title_en"],
+            d["content_text"], d["summary"],
+        )
+        d["_sig"] = sig
+        buckets.setdefault(sig, []).append(d)
+
+    representatives: list[dict] = [bucket[0] for bucket in buckets.values()]
     dupes_saved = len(articles) - len(representatives)
     if dupes_saved > 0:
         logger.info(
@@ -1498,13 +1547,14 @@ async def _cluster_new_articles(
 
         for group in result_json.get("groups", []):
             article_ids_in_prompt = group.get("article_ids", [])
-            group_articles: list[Article] = []
+            group_articles: list[dict] = []
             for idx in article_ids_in_prompt:
                 actual_index = idx - 1
                 if 0 <= actual_index < len(batch):
                     rep = batch[actual_index]
-                    # Expand the representative back to all its dupe siblings
-                    rep_sig = _dedup_signature(rep)
+                    # Use the cached signature stored on the dict — same value
+                    # _content_signature would compute, but no recomputation.
+                    rep_sig = rep["_sig"]
                     group_articles.extend(buckets.get(rep_sig, [rep]))
                 else:
                     logger.warning(f"LLM returned out-of-range article ID: {idx}")
@@ -1517,16 +1567,16 @@ async def _cluster_new_articles(
                     "topics": group.get("topics", []),
                 })
 
-    # Collect IDs of articles that made it into a viable group
+    # Collect IDs of articles that made it into a viable group (dicts)
     grouped_ids: set = set()
     for g in all_groups:
         for a in g["articles"]:
-            grouped_ids.add(a.id)
+            grouped_ids.add(a["id"])
 
     # Everything we sent to the LLM that didn't end up in a viable group
     # gets its attempt counter bumped. Next run, articles at
     # MAX_CLUSTER_ATTEMPTS are filtered out of the unmatched pool.
-    ungrouped_ids = [a.id for a in articles if a.id not in grouped_ids]
+    ungrouped_ids = [d["id"] for d in article_data if d["id"] not in grouped_ids]
     if ungrouped_ids:
         # Commit the bump immediately in its own transaction so it
         # survives any later failure in step 5 (merge_tiny_by_cosine
@@ -1552,17 +1602,40 @@ async def _cluster_new_articles(
 
     logger.info(f"LLM returned {len(all_groups)} viable groups (≥{CLUSTER_NEW_GROUP_FLOOR} articles)")
 
+    # Build a primitive source lookup for _create_story_from_dicts: one
+    # SELECT against the FRESH cn_db so the data is current.
+    src_id_set = {d.get("source_id") for d in article_data if d.get("source_id")}
+    source_lookup: dict = {}
+    if src_id_set:
+        from app.models.source import Source as _SourceModel
+        src_q = await db.execute(
+            select(
+                _SourceModel.id,
+                _SourceModel.name_en,
+                _SourceModel.state_alignment,
+                _SourceModel.production_location,
+                _SourceModel.factional_alignment,
+            ).where(_SourceModel.id.in_(src_id_set))
+        )
+        for sid, name_en, st_align, prod_loc, fa_align in src_q.all():
+            source_lookup[sid] = {
+                "name_en": name_en,
+                "state_alignment": st_align,
+                "production_location": prod_loc,
+                "factional_alignment": fa_align,
+            }
+
     published = 0
     hidden = 0
 
     for group in all_groups:
-        story = await _create_story(
+        story = await _create_story_from_dicts(
             db,
             group["articles"],
+            source_lookup=source_lookup,
             title_fa=group["title_fa"],
             title_en=group["title_en"],
             topics=group["topics"],
-            source_alignments_map=source_alignments_map,
         )
         if story.article_count >= 5:
             published += 1
@@ -1965,6 +2038,114 @@ async def merge_similar_visible_stories(db: AsyncSession) -> int:
 # ---------------------------------------------------------------------------
 # Story creation helper
 # ---------------------------------------------------------------------------
+
+
+async def _create_story_from_dicts(
+    db: AsyncSession,
+    article_dicts: list[dict],
+    source_lookup: dict,  # source_id → (name_en, state_alignment, production_location, factional_alignment)
+    title_fa: str,
+    title_en: str,
+    topics: list[str],
+) -> Story:
+    """Primitive-only variant of _create_story. Takes article dicts +
+    a source lookup; never reads ORM attributes that could trigger
+    lazy-loads after a keepalive rollback. Use this from cluster_new.
+    """
+    # Fallback titles if LLM didn't provide them
+    if not title_fa:
+        primary = sorted(article_dicts, key=lambda d: d.get("published_at") or d.get("ingested_at"))[-1]
+        title_fa = primary.get("title_original") or primary.get("title_fa") or "بدون عنوان"
+    if not title_en:
+        primary = sorted(article_dicts, key=lambda d: d.get("published_at") or d.get("ingested_at"))[-1]
+        title_en = primary.get("title_en") or title_fa
+
+    # Partition articles by the 4-subgroup narrative taxonomy via the
+    # source_lookup primitive dict (no ORM relationship access).
+    from app.services.narrative_groups import narrative_group as _ng_c, side_of as _side_of_c
+    groups_present: set[str] = set()
+    state_n = 0
+    diaspora_n = 0
+    for d in article_dicts:
+        info = source_lookup.get(d.get("source_id"))
+        if info is None:
+            diaspora_n += 1
+            groups_present.add("moderate_diaspora")
+            continue
+        # info: dict with production_location, factional_alignment, state_alignment
+        shim = type("S", (), {
+            "production_location": info.get("production_location"),
+            "factional_alignment": info.get("factional_alignment"),
+            "state_alignment": info.get("state_alignment"),
+        })()
+        grp = _ng_c(shim)
+        groups_present.add(grp)
+        if _side_of_c(grp) == "inside":
+            state_n += 1
+        else:
+            diaspora_n += 1
+
+    covered_by_state = state_n > 0
+    covered_by_diaspora = diaspora_n > 0
+
+    is_blindspot, blindspot_type = _compute_blindspot(
+        state_count=state_n,
+        diaspora_count=diaspora_n,
+        covered_by_state=covered_by_state,
+        covered_by_diaspora=covered_by_diaspora,
+    )
+
+    coverage_diversity = len(groups_present) / 4.0
+
+    published_dates = [d["published_at"] for d in article_dicts if d.get("published_at")]
+    first_published = min(published_dates) if published_dates else None
+
+    source_ids = {d.get("source_id") for d in article_dicts if d.get("source_id")}
+
+    centroid = _compute_centroid([d["embedding"] for d in article_dicts if d.get("embedding")])
+
+    story = Story(
+        title_en=title_en,
+        title_fa=title_fa,
+        slug=generate_slug(title_en),
+        article_count=len(article_dicts),
+        source_count=len(source_ids),
+        covered_by_state=covered_by_state,
+        covered_by_diaspora=covered_by_diaspora,
+        is_blindspot=is_blindspot,
+        blindspot_type=blindspot_type,
+        coverage_diversity_score=coverage_diversity,
+        topics=topics,
+        first_published_at=first_published,
+        last_updated_at=datetime.now(timezone.utc),
+        trending_score=_compute_trending_score(len(article_dicts), first_published, len(source_ids)),
+        centroid_embedding=centroid,
+    )
+    db.add(story)
+    await db.flush()  # get story.id
+
+    # Link articles to the new story (bulk UPDATE keyed by captured ids)
+    article_ids = [d["id"] for d in article_dicts]
+    await db.execute(
+        update(Article)
+        .where(Article.id.in_(article_ids))
+        .values(story_id=story.id)
+    )
+
+    from app.services.events import log_event as _log_event
+    await _log_event(
+        db,
+        event_type="cluster_new",
+        actor="pipeline",
+        story_id=story.id,
+        signals={
+            "article_count": len(article_dicts),
+            "source_count": story.source_count,
+            "title_fa": (story.title_fa or "")[:120],
+        },
+    )
+
+    return story
 
 
 async def _create_story(
