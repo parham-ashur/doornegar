@@ -950,7 +950,7 @@ export default async function HomeBody({
         <div className="col-span-3 py-4 pr-6 border-r border-slate-200 dark:border-slate-800 space-y-4 flex flex-col justify-center">
           <div className="flex items-center gap-3 mb-2">
             <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
-            <span className="text-[15px] font-black text-slate-900 dark:text-white shrink-0">نگاه یک‌جانبه</span>
+            <h2 className="text-[15px] font-black text-slate-900 dark:text-white shrink-0">نگاه یک‌جانبه</h2>
             <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
           </div>
           {conservativeBlind && wrapStory({ storyId: conservativeBlind.id, title: conservativeBlind.title_fa, imageUrl: conservativeBlind.image_url }, (
@@ -1468,7 +1468,7 @@ function MobileHome({
         <div className="px-4 py-5 border-b border-slate-200 dark:border-slate-800">
           <div className="flex items-center gap-3 mb-4">
             <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
-            <span className="text-[15px] font-black text-slate-900 dark:text-white shrink-0">نگاه یک‌جانبه</span>
+            <h2 className="text-[15px] font-black text-slate-900 dark:text-white shrink-0">نگاه یک‌جانبه</h2>
             <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
           </div>
           <div className="space-y-4">

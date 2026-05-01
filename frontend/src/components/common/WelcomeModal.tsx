@@ -139,7 +139,10 @@ export default function WelcomeModal() {
           animation: welcome-fade-in 0.4s ease-out forwards;
         }
         .welcome-slide {
-          animation: welcome-slide-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+          /* DESIGN.md standard easing: cubic-bezier(0.4, 0, 0.2, 1).
+             Previous (0.16, 1, 0.3, 1) had a near-spring overshoot
+             feel that read as marketing, not editorial. */
+          animation: welcome-slide-up 0.32s cubic-bezier(0.4, 0, 0.2, 1) forwards;
           opacity: 0;
         }
         @keyframes welcome-fade-in {

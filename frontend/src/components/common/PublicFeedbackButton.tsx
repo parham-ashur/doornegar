@@ -100,7 +100,7 @@ export default function PublicFeedbackButton({ pagePath, storyId }: Props) {
                 onChange={(e) => setText(e.target.value)}
                 rows={4}
                 placeholder="بازخورد خود را اینجا بنویسید…"
-                className="w-full border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-[13px] px-3 py-2 resize-none"
+                className="w-full border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-[13px] px-3 py-2 resize-none disabled:opacity-60 disabled:cursor-not-allowed"
                 disabled={status === "sending" || status === "sent"}
               />
               {status === "sent" && (
@@ -121,7 +121,7 @@ export default function PublicFeedbackButton({ pagePath, storyId }: Props) {
                   type="button"
                   onClick={submit}
                   disabled={!text.trim() || status === "sending" || status === "sent"}
-                  className="text-[13px] font-bold px-3 py-1.5 bg-slate-900 dark:bg-white text-white dark:text-slate-900 disabled:opacity-40"
+                  className="text-[13px] font-bold px-3 py-1.5 bg-slate-900 dark:bg-white text-white dark:text-slate-900 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   {status === "sending" ? "…" : "ارسال"}
                 </button>
