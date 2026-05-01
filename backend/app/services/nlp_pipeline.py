@@ -35,6 +35,17 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
     """Process articles that haven't been through the NLP pipeline yet.
 
     Returns stats: {processed, failed, skipped}.
+
+    Session lifecycle: this function does several minutes of HTTP fetches
+    + LLM calls between the initial SELECT and the final write. Without
+    intermediate commits, Neon's 5-min idle reaper kills the connection
+    mid-run, surfacing as InterfaceError on the final commit and
+    leaving 30%+ of articles with NULL embeddings (root cause of the
+    "318/911 articles in last 24h have NULL embedding" dashboard issue
+    on 2026-05-01). We now commit between phases — and inside the
+    long Step 1 HTTP-fetch loop every 10 articles — so each commit
+    works as a connection heartbeat AND saves partial work, making
+    runs idempotent across container restarts.
     """
     # Gate: only articles whose content_type is in the source's
     # allowed whitelist reach NLP. Unclassified rows (content_type
@@ -60,8 +71,11 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
     logger.info(f"Processing {len(articles)} articles through NLP pipeline")
     stats = {"processed": 0, "failed": 0, "skipped": 0}
 
-    # Step 1: Extract full content for articles that only have summaries
-    for article in articles:
+    # Step 1: Extract full content for articles that only have summaries.
+    # HTTP fetches with 10s timeouts can cumulatively exceed Neon's 5-min
+    # idle reaper window on a 50-article batch — commit every 10 articles
+    # as a heartbeat AND to persist partial work.
+    for i, article in enumerate(articles):
         if not article.content_text and article.url:
             try:
                 content = await _fetch_and_extract(article.url)
@@ -69,31 +83,43 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
                     article.content_text = content
             except Exception as e:
                 logger.warning(f"Content extraction failed for {article.url}: {e}")
+        if (i + 1) % 10 == 0:
+            await db.commit()
+    await db.commit()
 
     # Step 1b: Fetch og:image for articles missing images
-    for article in articles:
+    for i, article in enumerate(articles):
         if not article.image_url and article.url:
             try:
                 article.image_url = await _fetch_og_image(article.url)
             except Exception as e:
                 logger.debug(f"og:image fetch failed for {article.url}: {e}")
+        if (i + 1) % 10 == 0:
+            await db.commit()
+    await db.commit()
 
     # Step 1c: Validate existing image URLs and fix broken ones
-    for article in articles:
+    for i, article in enumerate(articles):
         if article.image_url:
             valid = await _validate_image_url(article.image_url)
             if not valid:
                 logger.info(f"Broken image URL for article {article.id}, searching free alternative")
                 article.image_url = None  # Clear broken URL
+        if (i + 1) % 10 == 0:
+            await db.commit()
+    await db.commit()
 
     # Step 1d: Search free images for articles still missing images
-    for article in articles:
+    for i, article in enumerate(articles):
         if not article.image_url:
             try:
                 query = article.title_original or article.title_fa or ""
                 article.image_url = await _search_free_image(query)
             except Exception as e:
                 logger.debug(f"Free image search failed: {e}")
+        if (i + 1) % 10 == 0:
+            await db.commit()
+    await db.commit()
 
     # Step 2: Normalize text and extract keywords
     for article in articles:
@@ -167,6 +193,9 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
     except Exception as e:
         logger.error(f"Embedding generation failed: {e}")
 
+    # Heartbeat after the multi-minute embedding phase.
+    await db.commit()
+
     # Step 4: Translate titles
     try:
         fa_articles = [a for a in articles if a.language == "fa" and not a.title_en]
@@ -191,6 +220,9 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
 
     except Exception as e:
         logger.warning(f"Translation step failed (non-critical): {e}")
+
+    # Heartbeat after Step 4 LLM-translation calls.
+    await db.commit()
 
     # Step 4b: Use OpenAI to translate remaining English titles to Farsi
     try:
@@ -228,6 +260,9 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
                             logger.info(f"Translated: {article.title_original[:40]} -> {translated[:40]}")
     except Exception as e:
         logger.warning(f"OpenAI translation failed (non-critical): {e}")
+
+    # Heartbeat after Step 4b OpenAI-translation batch.
+    await db.commit()
 
     # Step 4c: Embedding-based dedup — kill near-duplicates before clustering
     # If a new article's embedding is > 0.92 similar to a recent article,
