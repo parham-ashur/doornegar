@@ -1049,13 +1049,20 @@ async def step_summarize():
         # anchor's tone/vocabulary. Stories with is_edited=True AND
         # no anchor still skip (legacy behavior — protects manual
         # work that hasn't been migrated).
-        # Order by trending_score so the candidate scan prioritizes the
-        # stories visible on the homepage hero / blindspot / trending
-        # sections (which all sort by trending_score). 2026-05-01 switch
-        # from article_count.desc() — a 200-article-old decayed story
-        # was eating slots away from a fresh 8-article hot story that
-        # users were actually seeing on the homepage. Homepage coverage
-        # > canonical-coverage when summary slots are scarce.
+        # Cap the candidate pool to the top 30 by trending_score —
+        # roughly "the stories that appear on the homepage" (hero +
+        # blindspots + briefing top-10 + trending grid). Anything below
+        # that doesn't get a summary even if it's missing one. Per
+        # Parham 2026-05-01 (afternoon revision): summarizing 600+
+        # off-homepage stories isn't worth the LLM cost; a visitor
+        # never sees them. If we ever surface ranked feeds beyond
+        # trending (e.g. /sources/{slug} pages), bump this cap to match.
+        HOMEPAGE_POOL_SIZE = 30
+
+        # Within that pool, hash-skip handles the "already summarized
+        # and unchanged" case downstream — so on a stable day this scan
+        # might produce 1-3 actual summaries (just the new arrivals)
+        # rather than burning all 15 slots.
         result = await db.execute(
             select(Story)
             .options(selectinload(Story.articles))
@@ -1067,6 +1074,7 @@ async def step_summarize():
                 (Story.is_edited.is_(False)) | (Story.summary_anchor.isnot(None)),
             )
             .order_by(Story.trending_score.desc().nullslast())
+            .limit(HOMEPAGE_POOL_SIZE)
         )
         scan_candidates = list(result.scalars().all())
 

@@ -598,6 +598,15 @@ async def get_related_stories(
     picked_ids: list[uuid.UUID] = []
     seen: set[uuid.UUID] = {story_id}
 
+    # Both queries below filter for `summary_fa IS NOT NULL`. Without
+    # a summary, the related-stories card lands on a story page that
+    # shows the empty bias panel — a dead-end click for a journalist
+    # already evaluating the source story. Per Parham 2026-05-01
+    # (afternoon): "in related news only show the ones that have
+    # summaries." Stories without summaries become eligible for this
+    # slider as soon as the next step_summarize run gives them one.
+    SUMMARY_GATE = Story.summary_fa.isnot(None)
+
     # ── Arc siblings first (curated grouping) ──
     if source.arc_id:
         arc_result = await db.execute(
@@ -606,6 +615,7 @@ async def get_related_stories(
                 Story.arc_id == source.arc_id,
                 Story.id != story_id,
                 Story.article_count >= 5,
+                SUMMARY_GATE,
             )
             .order_by(Story.arc_order.asc().nullslast(), Story.first_published_at.desc().nullslast())
             .limit(limit)
@@ -626,6 +636,7 @@ async def get_related_stories(
                 Story.id != story_id,
                 Story.article_count >= 5,
                 Story.centroid_embedding.isnot(None),
+                SUMMARY_GATE,
             )
             .order_by(Story.first_published_at.desc().nullslast())
             .limit(500)
