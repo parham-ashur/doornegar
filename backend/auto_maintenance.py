@@ -492,13 +492,17 @@ async def step_prune_noise():
         stats["articles_deleted"] = deleted_n
         stats["articles_skipped_fk"] = len(art_to_delete) - deleted_n
 
-        # Second pass — RSS-origin orphans with content_text < 200 chars.
+        # Second pass — RSS-origin orphans with content_text < 400 chars.
         # These are usually feed stubs (nav fragments, "click to read",
-        # empty bodies). Running after NLP has had a chance (ingested
-        # >1h ago) so we don't prune articles still mid-extraction.
-        # Restrict to story_id IS NULL so we never touch something that
-        # made it into a cluster — there's a reason it landed there.
-        SHORT_THRESHOLD = 200
+        # empty bodies) OR teaser-only items the source publishes
+        # without filling out the body. Running after NLP has had a
+        # chance (ingested >1h ago) so we don't prune articles still
+        # mid-extraction. Restrict to story_id IS NULL so we never
+        # touch something that made it into a cluster — there's a
+        # reason it landed there. Threshold raised 200→400 per Parham
+        # 2026-05-01 (evening, $30/mo budget): most sub-400-char
+        # articles are weak stubs that shouldn't have reached NLP.
+        SHORT_THRESHOLD = 400
         rss_short_rows = (await db.execute(
             _text("""
                 SELECT id
