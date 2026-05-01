@@ -681,7 +681,10 @@ async def _flush_telegram_post_links(
     return total
 
 
-async def link_posts_by_embedding(threshold: float = 0.35) -> dict:
+async def link_posts_by_embedding(
+    threshold: float = 0.35,
+    batch_limit: int = 1500,
+) -> dict:
     """Link unlinked Telegram posts to stories via URL match + embeddings.
 
     Two-pass:
@@ -703,6 +706,16 @@ async def link_posts_by_embedding(threshold: float = 0.35) -> dict:
     entire body — Neon's idle reaper killed the connection during the
     embedding phase, and the session-cleanup raised InterfaceError on
     every full-mode run.
+
+    `batch_limit` caps work per call so the step stays inside its
+    1800s timeout even when the unlinked-post backlog grows. Newest
+    posts are linked first (ORDER BY created_at DESC); older unlinked
+    posts get retried on subsequent runs and eventually reach
+    reassign_posts_by_embedding for second-chance attachment. Without
+    this cap, the function scaled O(unlinked_count × story_count ×
+    articles_per_story) and timed out as soon as the backlog crossed
+    a few thousand — exactly what happened during the Telegram outage
+    when ingestion paused for days then resumed.
     """
     import re
     from datetime import datetime, timezone
@@ -779,15 +792,33 @@ async def link_posts_by_embedding(threshold: float = 0.35) -> dict:
                 continue
             story_article_embs.setdefault(str(sid), []).append(cleaned)
 
-        # Unlinked posts — pull only the columns we'll touch downstream
+        # Unlinked posts — pull only the columns we'll touch downstream.
+        # Newest first + capped at batch_limit so the function returns
+        # inside its 1800s step timeout when the backlog is large.
+        # Older unlinked posts get retried on the next run; very old
+        # ones eventually reach reassign_posts_by_embedding for a
+        # second attachment pass.
         post_result = await db.execute(
-            select(TelegramPost.id, TelegramPost.text).where(
+            select(TelegramPost.id, TelegramPost.text)
+            .where(
+                TelegramPost.story_id.is_(None),
+                TelegramPost.text.isnot(None),
+                TelegramPost.text != "",
+            )
+            .order_by(TelegramPost.created_at.desc())
+            .limit(batch_limit)
+        )
+        post_tuples = [(pid, txt) for pid, txt in post_result.all()]
+        # Also count the total unlinked backlog so the caller can see
+        # whether we're catching up or falling behind.
+        unlinked_total_result = await db.execute(
+            select(func.count(TelegramPost.id)).where(
                 TelegramPost.story_id.is_(None),
                 TelegramPost.text.isnot(None),
                 TelegramPost.text != "",
             )
         )
-        post_tuples = [(pid, txt) for pid, txt in post_result.all()]
+        unlinked_total = int(unlinked_total_result.scalar() or 0)
 
     if not post_tuples:
         return {"linked": 0, "reason": "no unlinked posts"}
@@ -832,13 +863,18 @@ async def link_posts_by_embedding(threshold: float = 0.35) -> dict:
     # ── Pass 2: Embedding similarity on whatever URL didn't catch ──
     if not remaining:
         await _flush_telegram_post_links(pending_updates)
-        logger.info(f"URL-linked {linked_by_url} posts, no residual for embedding pass")
+        logger.info(
+            f"URL-linked {linked_by_url} posts, no residual for embedding pass "
+            f"(backlog_remaining={unlinked_total - linked_by_url})"
+        )
         return {
             "linked": linked_by_url,
             "total_posts": len(post_tuples),
             "via_url": linked_by_url,
             "via_embedding": 0,
             "threshold": threshold,
+            "unlinked_backlog": unlinked_total - linked_by_url,
+            "batch_limit": batch_limit,
         }
 
     post_texts = [(t or "")[:500] for _, t in remaining]
@@ -918,7 +954,8 @@ async def link_posts_by_embedding(threshold: float = 0.35) -> dict:
     logger.info(
         f"Linked {total_linked} telegram posts "
         f"(url={linked_by_url}, embedding={linked_by_embedding}, "
-        f"via_article_rescue={via_article_rescue}, threshold={threshold})"
+        f"via_article_rescue={via_article_rescue}, threshold={threshold}, "
+        f"backlog_remaining={unlinked_total - total_linked})"
     )
     return {
         "linked": total_linked,
@@ -927,6 +964,8 @@ async def link_posts_by_embedding(threshold: float = 0.35) -> dict:
         "via_embedding": linked_by_embedding,
         "via_article_rescue": via_article_rescue,
         "threshold": threshold,
+        "unlinked_backlog": unlinked_total - total_linked,
+        "batch_limit": batch_limit,
     }
 
 
