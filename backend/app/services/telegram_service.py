@@ -269,6 +269,12 @@ async def ingest_all_channels(db: AsyncSession) -> dict:
     """Fetch posts from all active Telegram channels.
 
     Soft-skips on services without authority — see TelegramNotAuthority docstring.
+
+    Per-channel failures used to be swallowed silently with only a logger.error,
+    leaving the caller to see {"new": 0} regardless of whether channels were
+    quiet or the session was dead. We now classify failures: if every channel
+    fails with the same auth-class error, surface "session_dead" so the
+    return dict matches reality and maintenance_logs makes the cause obvious.
     """
     if not is_telegram_authority():
         logger.info("ingest_all_channels: skipping (not Telegram authority)")
@@ -280,7 +286,13 @@ async def ingest_all_channels(db: AsyncSession) -> dict:
     )
     channels = result.scalars().all()
 
-    total_stats = {"channels": len(channels), "found": 0, "new": 0, "linked": 0}
+    total_stats = {
+        "channels": len(channels), "found": 0, "new": 0, "linked": 0,
+        "channels_succeeded": 0, "channels_failed": 0, "auth_failures": 0,
+    }
+
+    auth_error_keywords = ("auth_key", "authkey", "authorization key", "unauthorized",
+                           "not authorized", "session", "phone_number_invalid")
 
     for channel in channels:
         try:
@@ -288,8 +300,23 @@ async def ingest_all_channels(db: AsyncSession) -> dict:
             total_stats["found"] += channel_stats["found"]
             total_stats["new"] += channel_stats["new"]
             total_stats["linked"] += channel_stats["linked"]
+            total_stats["channels_succeeded"] += 1
         except Exception as e:
-            logger.error(f"Failed to ingest @{channel.username}: {e}")
+            total_stats["channels_failed"] += 1
+            msg = str(e).lower()
+            if any(k in msg for k in auth_error_keywords):
+                total_stats["auth_failures"] += 1
+            logger.error(f"Failed to ingest @{channel.username}: {type(e).__name__}: {e}")
+
+    if (total_stats["channels"] > 0
+            and total_stats["channels_succeeded"] == 0
+            and total_stats["auth_failures"] >= max(1, total_stats["channels"] // 2)):
+        total_stats["session_dead"] = True
+        total_stats["reason"] = (
+            f"all {total_stats['channels']} channels failed, "
+            f"{total_stats['auth_failures']} with auth-class errors — "
+            f"session string is invalid; re-auth required"
+        )
 
     logger.info(f"Telegram ingestion complete: {total_stats}")
     return total_stats

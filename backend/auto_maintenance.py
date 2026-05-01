@@ -4044,8 +4044,13 @@ async def step_telegram_health():
         from app.database import async_session
         from app.models.social import TelegramPost
         async with async_session() as db:
+            # TelegramPost.created_at is the row-insert timestamp
+            # (when ingest-cron's authority captured the post). The .date
+            # column is the original Telegram message time, which can be
+            # back-dated when channels repost old material — created_at is
+            # the right "is ingestion alive?" signal.
             most_recent = (await db.execute(
-                select(func.max(TelegramPost.fetched_at))
+                select(func.max(TelegramPost.created_at))
             )).scalar()
         if most_recent is None:
             return {"skipped": True, "reason": "not_telegram_authority", "session_ok": None,
