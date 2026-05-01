@@ -24,21 +24,21 @@ export default function SocialPanel({ sentiment, totalPosts }: SocialPanelProps)
 
       {/* Key metrics */}
       <div className="grid grid-cols-3 gap-3">
-        <div className="rounded-lg bg-slate-50 p-3 text-center dark:bg-slate-800">
+        <div className="rounded-none bg-slate-50 p-3 text-center dark:bg-slate-800">
           <MessageCircle className="mx-auto mb-1 h-4 w-4 text-slate-400" />
           <p className="text-lg font-bold text-slate-900 dark:text-white">
             {s?.total_posts || totalPosts}
           </p>
           <p className="text-[10px] text-slate-500">{t("social.posts")}</p>
         </div>
-        <div className="rounded-lg bg-slate-50 p-3 text-center dark:bg-slate-800">
+        <div className="rounded-none bg-slate-50 p-3 text-center dark:bg-slate-800">
           <Eye className="mx-auto mb-1 h-4 w-4 text-slate-400" />
           <p className="text-lg font-bold text-slate-900 dark:text-white">
             {s?.total_views ? formatNumber(s.total_views) : "—"}
           </p>
           <p className="text-[10px] text-slate-500">{t("social.views")}</p>
         </div>
-        <div className="rounded-lg bg-slate-50 p-3 text-center dark:bg-slate-800">
+        <div className="rounded-none bg-slate-50 p-3 text-center dark:bg-slate-800">
           <Share2 className="mx-auto mb-1 h-4 w-4 text-slate-400" />
           <p className="text-lg font-bold text-slate-900 dark:text-white">
             {s?.total_forwards ? formatNumber(s.total_forwards) : "—"}
@@ -55,7 +55,7 @@ export default function SocialPanel({ sentiment, totalPosts }: SocialPanelProps)
           <p className="mb-2 text-xs font-medium text-slate-600 dark:text-slate-400">
             {t("social.sentiment")}
           </p>
-          <div className="flex h-3 overflow-hidden rounded-full">
+          <div className="flex h-3 overflow-hidden">
             {s.positive_count > 0 && (
               <div
                 className="bg-emerald-500"

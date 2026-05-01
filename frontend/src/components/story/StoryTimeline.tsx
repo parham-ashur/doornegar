@@ -109,12 +109,12 @@ export default function StoryTimeline({ articles }: Props) {
       {/* Column headers */}
       <div className="grid grid-cols-2 gap-3 mb-3">
         <div className="flex items-center gap-1.5">
-          <span className="inline-block w-[3px] h-3 bg-[#1e3a5f]" />
-          <span className="text-[13px] font-bold text-[#1e3a5f] dark:text-blue-300">درون‌مرزی</span>
+          <span className="inline-block w-[3px] h-3 bg-inside-border" />
+          <span className="text-[13px] font-bold text-inside-border dark:text-inside-border-dark">درون‌مرزی</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <span className="inline-block w-[3px] h-3 bg-[#ea580c]" />
-          <span className="text-[13px] font-bold text-[#ea580c] dark:text-orange-400">برون‌مرزی</span>
+          <span className="inline-block w-[3px] h-3 bg-outside-border" />
+          <span className="text-[13px] font-bold text-outside-border dark:text-outside-border-dark">برون‌مرزی</span>
         </div>
       </div>
 
@@ -131,10 +131,10 @@ export default function StoryTimeline({ articles }: Props) {
 
             {/* Two columns */}
             <div className="grid grid-cols-2 gap-3">
-              <div className="border-r-[3px] border-[#1e3a5f] pr-2 space-y-0.5">
+              <div className="border-r-2 border-inside-border pr-2 space-y-0.5">
                 {renderSide(group.conservative, "#1e3a5f")}
               </div>
-              <div className="border-r-[3px] border-[#ea580c] pr-2 space-y-0.5">
+              <div className="border-r-2 border-outside-border pr-2 space-y-0.5">
                 {renderSide(group.opposition, "#ea580c")}
               </div>
             </div>

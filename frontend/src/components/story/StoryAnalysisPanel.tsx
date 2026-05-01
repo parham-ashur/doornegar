@@ -103,15 +103,15 @@ export default function StoryAnalysisPanel({ analysis }: { analysis: StoryAnalys
   return (
     <div dir="rtl">
       {/* Tab bar */}
-      <div className="flex gap-0 border-b border-slate-200 dark:border-slate-800">
-        <button type="button" onClick={() => setActive("bias")} className={`${TAB_BASE} ${active === "bias" ? TAB_ACTIVE : TAB_INACTIVE}`}>مقایسه روایت‌ها</button>
-        <button type="button" onClick={() => setActive("inside")} className={`${TAB_BASE} ${active === "inside" ? TAB_ACTIVE : TAB_INACTIVE}`}>روایت درون‌مرزی</button>
-        <button type="button" onClick={() => setActive("outside")} className={`${TAB_BASE} ${active === "outside" ? TAB_ACTIVE : TAB_INACTIVE}`}>روایت برون‌مرزی</button>
+      <div role="tablist" aria-label="مقایسه روایت‌ها" className="flex gap-0 border-b border-slate-200 dark:border-slate-800">
+        <button type="button" role="tab" id="tab-bias" aria-selected={active === "bias"} aria-controls="panel-bias" onClick={() => setActive("bias")} className={`${TAB_BASE} ${active === "bias" ? TAB_ACTIVE : TAB_INACTIVE}`}>مقایسه روایت‌ها</button>
+        <button type="button" role="tab" id="tab-inside" aria-selected={active === "inside"} aria-controls="panel-inside" onClick={() => setActive("inside")} className={`${TAB_BASE} ${active === "inside" ? TAB_ACTIVE : TAB_INACTIVE}`}>روایت درون‌مرزی</button>
+        <button type="button" role="tab" id="tab-outside" aria-selected={active === "outside"} aria-controls="panel-outside" onClick={() => setActive("outside")} className={`${TAB_BASE} ${active === "outside" ? TAB_ACTIVE : TAB_INACTIVE}`}>روایت برون‌مرزی</button>
       </div>
 
       {/* Tab content */}
       <div className="py-5 border-b border-slate-200 dark:border-slate-800">
-        <div className={active === "bias" ? "block" : "hidden"}>
+        <div role="tabpanel" id="panel-bias" aria-labelledby="tab-bias" hidden={active !== "bias"} className={active === "bias" ? "block" : "hidden"}>
             {/* Per-subgroup BIAS framing (how each subgroup slants the
                 story — word choices, emphasis, framing) — distinct from
                 the narrative bullets in the inside/outside tabs (which
@@ -136,8 +136,8 @@ export default function StoryAnalysisPanel({ analysis }: { analysis: StoryAnalys
               return (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {/* Inside Iran column */}
-                  <div className="border-r-2 border-[#1e3a5f] pr-4 space-y-5">
-                    <h4 className="text-[14px] font-black text-[#1e3a5f] dark:text-blue-300">
+                  <div className="border-r-2 border-inside-border pr-4 space-y-5">
+                    <h4 className="text-[14px] font-black text-inside-border dark:text-inside-border-dark">
                       روایت درون‌مرزی
                     </h4>
                     {bs.principlist && (
@@ -147,7 +147,7 @@ export default function StoryAnalysisPanel({ analysis }: { analysis: StoryAnalys
                             className="inline-block h-2.5 w-2.5"
                             style={{ backgroundColor: GROUP_COLORS.principlist }}
                           />
-                          <h5 className="text-[13px] font-bold text-[#1e3a5f] dark:text-blue-300">
+                          <h5 className="text-[13px] font-bold text-inside-border dark:text-inside-border-dark">
                             {GROUP_LABELS_FA.principlist}
                           </h5>
                         </div>
@@ -174,8 +174,8 @@ export default function StoryAnalysisPanel({ analysis }: { analysis: StoryAnalys
                     )}
                   </div>
                   {/* Outside Iran column */}
-                  <div className="border-r-2 border-[#c2410c] pr-4 space-y-5">
-                    <h4 className="text-[14px] font-black text-[#c2410c] dark:text-orange-400">
+                  <div className="border-r-2 border-outside-border pr-4 space-y-5">
+                    <h4 className="text-[14px] font-black text-outside-border dark:text-outside-border-dark">
                       روایت برون‌مرزی
                     </h4>
                     {bs.moderate_diaspora && (
@@ -201,7 +201,7 @@ export default function StoryAnalysisPanel({ analysis }: { analysis: StoryAnalys
                             className="inline-block h-2.5 w-2.5"
                             style={{ backgroundColor: GROUP_COLORS.radical_diaspora }}
                           />
-                          <h5 className="text-[13px] font-bold text-[#c2410c] dark:text-red-400">
+                          <h5 className="text-[13px] font-bold text-outside-border dark:text-outside-border-dark">
                             {GROUP_LABELS_FA.radical_diaspora}
                           </h5>
                         </div>
@@ -216,7 +216,7 @@ export default function StoryAnalysisPanel({ analysis }: { analysis: StoryAnalys
             })()}
         </div>
 
-        <div className={active === "inside" ? "block" : "hidden"}>
+        <div role="tabpanel" id="panel-inside" aria-labelledby="tab-inside" hidden={active !== "inside"} className={active === "inside" ? "block" : "hidden"}>
             {analysis.narrative?.inside &&
              ((analysis.narrative.inside.principlist?.length || 0) +
               (analysis.narrative.inside.reformist?.length || 0) > 0) ? (
@@ -241,7 +241,7 @@ export default function StoryAnalysisPanel({ analysis }: { analysis: StoryAnalys
             )}
         </div>
 
-        <div className={active === "outside" ? "block" : "hidden"}>
+        <div role="tabpanel" id="panel-outside" aria-labelledby="tab-outside" hidden={active !== "outside"} className={active === "outside" ? "block" : "hidden"}>
             {analysis.narrative?.outside &&
              ((analysis.narrative.outside.moderate?.length || 0) +
               (analysis.narrative.outside.radical?.length || 0) > 0) ? (

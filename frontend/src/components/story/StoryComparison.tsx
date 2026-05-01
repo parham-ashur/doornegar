@@ -96,7 +96,7 @@ export default function StoryComparison({ articles }: StoryComparisonProps) {
                 {biasScore.framing_labels.map((label) => (
                   <span
                     key={label}
-                    className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-400"
+                    className="bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-400"
                   >
                     {label}
                   </span>

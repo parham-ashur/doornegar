@@ -64,7 +64,7 @@ export default function TopicSpectrumView({ articles }: TopicSpectrumViewProps) 
       {categories.map((cat) => (
         <div
           key={cat}
-          className={`rounded-xl border-t-4 p-4 ${getCategoryColor(cat)}`}
+          className={`rounded-none border-t-4 p-4 ${getCategoryColor(cat)}`}
         >
           {/* Category header */}
           <h3 className={`mb-3 text-sm font-bold ${getCategoryHeaderColor(cat)}`}>

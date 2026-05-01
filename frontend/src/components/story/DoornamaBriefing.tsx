@@ -15,7 +15,7 @@ export default function DoornamaBriefing({ briefing }: { briefing: string | null
   return (
     <div
       dir="rtl"
-      className="mb-4 border-r-[3px] border-slate-900 dark:border-slate-100 bg-slate-50 dark:bg-slate-900/40 px-5 py-4"
+      className="mb-4 border-r-2 border-slate-900 dark:border-slate-100 bg-slate-50 dark:bg-slate-900/40 px-5 py-4"
     >
       <h3 className="text-[13px] font-black tracking-wide text-slate-700 dark:text-slate-300 mb-2">
         دورنما

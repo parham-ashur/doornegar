@@ -51,9 +51,9 @@ function getAlignmentBadge(alignment: string | null) {
   // 4-subgroup narrative) lives on the sources spectrum and narrative
   // panel — it over-loaded the article list with classifier labels.
   const map: Record<string, { label: string; color: string }> = {
-    state: { label: "درون‌مرزی", color: "text-[#1e3a5f] dark:text-blue-300" },
-    semi_state: { label: "درون‌مرزی", color: "text-[#1e3a5f] dark:text-blue-300" },
-    diaspora: { label: "برون‌مرزی", color: "text-[#ea580c] dark:text-orange-400" },
+    state: { label: "درون‌مرزی", color: "text-inside-border dark:text-inside-border-dark" },
+    semi_state: { label: "درون‌مرزی", color: "text-inside-border dark:text-inside-border-dark" },
+    diaspora: { label: "برون‌مرزی", color: "text-outside-border dark:text-outside-border-dark" },
   };
   if (!alignment || !map[alignment]) return null;
   return map[alignment];
@@ -147,14 +147,16 @@ export default function ArticleFilterList({ articles, storyId, sidebarSync }: Ar
   return (
     <div dir="rtl">
       {/* Filter buttons */}
-      <div className="flex flex-wrap gap-2 mb-6">
+      <div role="group" aria-label="فیلتر مقالات بر اساس نوع رسانه" className="flex flex-wrap gap-2 mb-6">
         {filters.map((f) => {
           const count = filterCounts[f.key];
 
           return (
             <button
               key={f.key}
+              type="button"
               onClick={() => setActiveFilter(f.key)}
+              aria-pressed={activeFilter === f.key}
               className={`px-4 py-1.5 text-sm font-medium border transition-colors ${
                 activeFilter === f.key
                   ? "bg-slate-900 text-white border-slate-900 dark:bg-white dark:text-slate-900 dark:border-white"
@@ -265,7 +267,7 @@ export default function ArticleFilterList({ articles, storyId, sidebarSync }: Ar
             })}
           </div>
           {groups.length > 5 && (
-            <div className="sticky bottom-0 h-8 bg-gradient-to-t from-white dark:from-[#0a0e1a] to-transparent pointer-events-none" />
+            <div className="sticky bottom-0 h-8 bg-gradient-to-t from-white dark:from-anthracite to-transparent pointer-events-none" />
           )}
         </div>
       )}

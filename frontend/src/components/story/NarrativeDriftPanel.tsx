@@ -117,8 +117,12 @@ export default function NarrativeDriftPanel({
         روایت در حال تغییر
       </p>
       <div className="space-y-2">
+        {/* Inline hex matches the inside-border / outside-border tokens
+            in tailwind.config.ts. Inline style is unavoidable here —
+            the alpha-blend on selected words (e.g. `${color}1A`) needs
+            a literal hex, not a Tailwind class. */}
         {renderRow("درون‌مرزی:", "#1e3a5f", (c) => c.inside_word)}
-        {renderRow("برون‌مرزی:", "#c2410c", (c) => c.outside_word)}
+        {renderRow("برون‌مرزی:", "#ea580c", (c) => c.outside_word)}
       </div>
       <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-3 leading-5">
         واژهٔ بارگذاری‌شدهٔ غالب هر طرف در چپترهای قوس. ✨ چپتر فعلی را نشان می‌دهد.
