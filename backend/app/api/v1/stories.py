@@ -6,7 +6,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, R
 from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import defer, selectinload
 
 from app.api.v1.admin import require_admin
 from app.config import settings
@@ -38,6 +38,46 @@ _stories_cache: dict[str, dict] = {}
 _STORIES_CACHE_TTL = 120  # 2 minutes
 
 
+# ── Egress-saving load options ──
+# selectinload(Story.articles) by default pulls every Article column,
+# including the JSONB embedding (~7-8 KB) and content_text (~5-30 KB).
+# The story API responses never read those — so we defer them. Cuts
+# trending/blindspot payloads ~20× and was the dominant Neon egress
+# cost driver before 2026-05-01 ($31/mo on a $41 bill).
+def _articles_load_brief():
+    """selectinload(Story.articles) → Source, with heavy article columns
+    deferred. Use on listing endpoints whose response uses ArticleBrief
+    (no content_text, keywords, or named_entities)."""
+    return selectinload(Story.articles).options(
+        defer(Article.embedding),
+        defer(Article.content_text),
+        defer(Article.keywords),
+        defer(Article.named_entities),
+        selectinload(Article.source),
+    )
+
+
+def _story_listing_defers():
+    """Story columns the listing endpoints (trending/blindspots/list)
+    never read. centroid_embedding alone is ~7-8 KB per row."""
+    return [
+        defer(Story.centroid_embedding),
+        defer(Story.summary_anchor),
+        defer(Story.telegram_analysis),
+        defer(Story.editorial_context_fa),
+    ]
+
+
+def _story_detail_defers():
+    """Story columns the detail endpoint never reads. editorial_context_fa
+    IS rendered in StoryDetail, so keep it loaded."""
+    return [
+        defer(Story.centroid_embedding),
+        defer(Story.summary_anchor),
+        defer(Story.telegram_analysis),
+    ]
+
+
 @router.get("", response_model=StoryListResponse)
 async def list_stories(
     topic: str | None = None,
@@ -47,7 +87,8 @@ async def list_stories(
     db: AsyncSession = Depends(get_db),
 ):
     query = select(Story).options(
-        selectinload(Story.articles).selectinload(Article.source),
+        _articles_load_brief(),
+        *_story_listing_defers(),
     )
     count_query = select(func.count(Story.id))
 
@@ -93,7 +134,7 @@ async def trending_stories(
     fetch_limit = min(limit * 3, 100)
     result = await db.execute(
         select(Story)
-        .options(selectinload(Story.articles).selectinload(Article.source))
+        .options(_articles_load_brief(), *_story_listing_defers())
         .where(
             Story.article_count >= min_articles,
             # Exclude stale tiny stories — F2 trending decay (0.85^days)
@@ -158,7 +199,7 @@ async def blindspot_stories(
     cutoff_soft = _dt.now(_tz.utc) - _td(days=14)
     base = (
         select(Story)
-        .options(selectinload(Story.articles).selectinload(Article.source))
+        .options(_articles_load_brief(), *_story_listing_defers())
         .where(
             Story.is_blindspot.is_(True),
             Story.article_count >= min_articles,
@@ -180,7 +221,11 @@ async def blindspot_stories(
 async def get_story_analysis(request: Request, story_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     """Return the saved analysis instantly. Full JSON is stored in summary_en."""
     import json as _json
-    result = await db.execute(select(Story).where(Story.id == story_id))
+    result = await db.execute(
+        select(Story)
+        .options(*_story_listing_defers())
+        .where(Story.id == story_id)
+    )
     story = result.scalar_one_or_none()
     if not story:
         raise HTTPException(status_code=404, detail="Story not found")
@@ -252,7 +297,11 @@ async def get_story_analyses_batch(
     # Cap to something reasonable so a crafted URL can't DoS the endpoint.
     id_list = id_list[:60]
 
-    result = await db.execute(select(Story).where(Story.id.in_(id_list)))
+    result = await db.execute(
+        select(Story)
+        .options(*_story_listing_defers())
+        .where(Story.id.in_(id_list))
+    )
     stories = result.scalars().all()
 
     out: dict[str, dict] = {}
@@ -591,7 +640,16 @@ async def get_related_stories(
     """
     from app.nlp.embeddings import cosine_similarity
 
-    source = (await db.execute(select(Story).where(Story.id == story_id))).scalar_one_or_none()
+    source = (await db.execute(
+        select(Story)
+        .options(
+            defer(Story.summary_anchor),
+            defer(Story.telegram_analysis),
+            defer(Story.editorial_context_fa),
+            defer(Story.analysis_snapshot_24h),
+        )
+        .where(Story.id == story_id)
+    )).scalar_one_or_none()
     if not source:
         raise HTTPException(status_code=404, detail="Story not found")
 
@@ -632,6 +690,14 @@ async def get_related_stories(
         # rarely exceed that and the loop is O(N) cosine.
         cand_result = await db.execute(
             select(Story)
+            .options(
+                defer(Story.summary_anchor),
+                defer(Story.telegram_analysis),
+                defer(Story.editorial_context_fa),
+                defer(Story.analysis_snapshot_24h),
+                defer(Story.summary_en),
+                defer(Story.summary_fa),
+            )
             .where(
                 Story.id != story_id,
                 Story.article_count >= 5,
@@ -667,7 +733,7 @@ async def get_related_stories(
     # pick a representative image per card without extra round trips.
     detail_result = await db.execute(
         select(Story)
-        .options(selectinload(Story.articles).selectinload(Article.source))
+        .options(_articles_load_brief(), *_story_listing_defers())
         .where(Story.id.in_(picked_ids))
     )
     by_id = {s.id: s for s in detail_result.scalars().all()}
@@ -727,10 +793,15 @@ async def get_story(
     result = await db.execute(
         select(Story)
         .options(
-            selectinload(Story.articles)
-            .selectinload(Article.source),
-            selectinload(Story.articles)
-            .selectinload(Article.bias_scores),
+            selectinload(Story.articles).options(
+                defer(Article.embedding),
+                defer(Article.content_text),
+                defer(Article.keywords),
+                defer(Article.named_entities),
+                selectinload(Article.source),
+                selectinload(Article.bias_scores),
+            ),
+            *_story_detail_defers(),
         )
         .where(Story.id == story_id)
     )
