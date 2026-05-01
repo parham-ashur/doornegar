@@ -39,6 +39,21 @@ const config: Config = {
         reformist: "#eab308",
         neutral: "#6b7280",
         opposition: "#2563eb",
+        // Geographic axis (where the outlet operates from). Distinct from
+        // the political-alignment axis above. Keep these named so HomeBody
+        // doesn't reach for arbitrary `text-[#1e3a5f]` / `text-[#ea580c]`.
+        "inside-border": {
+          DEFAULT: "#1e3a5f",
+          light: "#dbeafe",
+          dark: "#93c5fd",
+        },
+        "outside-border": {
+          DEFAULT: "#ea580c",
+          light: "#fed7aa",
+          dark: "#fdba74",
+        },
+        // Editorial neutrals from DESIGN.md.
+        anthracite: "#0a0e1a", // dark-mode page background (deliberately not pure black)
       },
     },
   },

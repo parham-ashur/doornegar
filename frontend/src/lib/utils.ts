@@ -27,9 +27,23 @@ export const alignmentLabels: Record<StateAlignment, { en: string; fa: string }>
   diaspora: { en: "Diaspora", fa: "برون‌مرزی" },
 };
 
-/** Convert English digits to Farsi digits */
+/** Convert English digits to Farsi digits.
+ *
+ *  Use for prose-embedded numbers ("۱۰ دقیقه پیش", "۲۰۲۴ سال").
+ *  Do NOT use for tabular data (counts, percentages, rankings) —
+ *  per DESIGN.md's Persian Equal-Craft Rule, tabular numbers stay
+ *  Arabic 0-9 even on /fa for cross-language comparability. Use
+ *  `tabularNum` (or just render the number directly) for those. */
 export function toFa(n: number | string): string {
   return String(n).replace(/[0-9]/g, (d) => "۰۱۲۳۴۵۶۷۸۹"[parseInt(d)]);
+}
+
+/** Stringify a number for tabular contexts (counts, percentages,
+ *  rankings). Always returns Arabic 0-9 — does NOT convert to Persian
+ *  digits, even on /fa. Identity function over String() with an explicit
+ *  name so the intent is visible at the call site. */
+export function tabularNum(n: number | string): string {
+  return String(n);
 }
 
 /** Split a Farsi bias_explanation into its sentence-level points.

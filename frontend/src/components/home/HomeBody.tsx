@@ -9,7 +9,7 @@ import TelegramDiscussions from "@/components/home/TelegramDiscussions";
 import WeeklyDigest from "@/components/home/WeeklyDigest";
 import RotatingWord from "@/components/home/RotatingWord";
 import { StoryFeedback } from "@/components/home/FeedbackOverlay";
-import { formatRelativeTime, splitBiasPoints, toFa } from "@/lib/utils";
+import { formatRelativeTime, splitBiasPoints, tabularNum } from "@/lib/utils";
 import {
   claimText,
   displayClaims,
@@ -141,18 +141,18 @@ function Meta({ story }: { story: StoryBrief }) {
     <div className="mt-1.5" dir="rtl">
       <div className="flex items-center justify-between text-[15px] leading-6">
         <p className="text-slate-400 dark:text-slate-500">
-          {toFa(story.source_count)} رسانه · {toFa(story.article_count)} مقاله
+          {tabularNum(story.source_count)} رسانه · {tabularNum(story.article_count)} مقاله
           {published && <span>{" · "}نشر {published}</span>}
           {showUpdated && <span>{" · "}به‌روز {updated}</span>}
         </p>
         {hasSides && (
           <p className="shrink-0">
-            {insidePct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300">درون‌مرزی {toFa(insidePct)}٪</span>}
+            {insidePct > 0 && <span className="text-inside-border dark:text-inside-border-dark">درون‌مرزی {tabularNum(insidePct)}٪</span>}
             {insidePct > 0 && outsidePct > 0 && <span className="text-slate-300 dark:text-slate-600"> · </span>}
-            {outsidePct > 0 && <span className="text-[#ea580c] dark:text-orange-400">برون‌مرزی {toFa(outsidePct)}٪</span>}
+            {outsidePct > 0 && <span className="text-outside-border dark:text-outside-border-dark">برون‌مرزی {tabularNum(outsidePct)}٪</span>}
             {indepPct >= 5 && (
               <span className="text-slate-400 dark:text-slate-500">
-                {" · "}مستقل {toFa(indepPct)}٪
+                {" · "}مستقل {tabularNum(indepPct)}٪
               </span>
             )}
           </p>
@@ -846,7 +846,7 @@ export default async function HomeBody({
               const heroReason = formatUpdateReason(hero.update_signal!);
               return (
                 <div className="mt-2 inline-flex items-center gap-2 border border-orange-300 dark:border-orange-700 bg-orange-50 dark:bg-orange-900/20 px-2 py-1">
-                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-orange-500" />
+                  <span className="inline-block h-1.5 w-1.5 bg-orange-500" />
                   <span className="text-[12px] font-bold text-orange-700 dark:text-orange-300">بروزرسانی</span>
                   {heroReason && (
                     <span className="text-[12px] text-orange-700/80 dark:text-orange-300/80">
@@ -859,7 +859,7 @@ export default async function HomeBody({
               hero.last_updated_at &&
               Date.now() - new Date(hero.last_updated_at).getTime() < 2 * 3600 * 1000 && (
                 <div className="mt-2 inline-flex items-center gap-2 border border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/20 px-2 py-1">
-                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                  <span className="inline-block h-1.5 w-1.5 bg-emerald-500" />
                   <span className="text-[12px] font-bold text-emerald-700 dark:text-emerald-300">مقالهٔ جدید</span>
                   <span className="text-[12px] text-emerald-700/80 dark:text-emerald-300/80">
                     {formatRelativeTime(hero.last_updated_at, "fa")}
@@ -899,15 +899,15 @@ export default async function HomeBody({
                   )}
                   <div className="grid grid-cols-2 gap-3">
                     {stateSummary && (
-                      <div className="border-r-2 border-[#1e3a5f] pr-3">
-                        <p className="text-[15px] font-bold text-[#1e3a5f] dark:text-blue-300 mb-1">روایت درون‌مرزی</p>
+                      <div className="border-r-2 border-inside-border pr-3">
+                        <p className="text-[15px] font-bold text-inside-border dark:text-inside-border-dark mb-1">روایت درون‌مرزی</p>
                         <UpdateDeltaCallout story={hero} field="state" className="mb-1.5" />
                         <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-3">{stateSummary}</p>
                       </div>
                     )}
                     {diasporaSummary && (
-                      <div className="border-r-2 border-[#ea580c] pr-3">
-                        <p className="text-[15px] font-bold text-[#ea580c] dark:text-orange-400 mb-1">روایت برون‌مرزی</p>
+                      <div className="border-r-2 border-outside-border pr-3">
+                        <p className="text-[15px] font-bold text-outside-border dark:text-outside-border-dark mb-1">روایت برون‌مرزی</p>
                         <UpdateDeltaCallout story={hero} field="diaspora" className="mb-1.5" />
                         <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-3">{diasporaSummary}</p>
                       </div>
@@ -946,9 +946,13 @@ export default async function HomeBody({
             <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
           </div>
           {conservativeBlind && wrapStory({ storyId: conservativeBlind.id, title: conservativeBlind.title_fa, imageUrl: conservativeBlind.image_url }, (
-            <Link href={storyHref(conservativeBlind.id)} className="group block border-[3px] border-[#1e3a5f] shadow-[0_0_12px_rgba(30,58,95,0.4)] hover:shadow-[0_0_20px_rgba(30,58,95,0.6)] transition-shadow animate-pulse-glow-blue">
+            <Link
+              href={storyHref(conservativeBlind.id)}
+              aria-label={`نگاه یک‌جانبهٔ درون‌مرزی: ${conservativeBlind.title_fa}`}
+              className="group block border border-inside-border transition-shadow hover:shadow-md"
+            >
               <div className="relative aspect-[4/3] overflow-hidden bg-slate-100 dark:bg-slate-800">
-                <SafeImageStatic src={conservativeBlind.image_url} className="h-full w-full object-cover" />
+                <SafeImageStatic src={conservativeBlind.image_url} alt={conservativeBlind.title_fa} className="h-full w-full object-cover" />
                 {isUpdateBadgeFresh(conservativeBlind.update_signal) && (
                   <span className="absolute bottom-2 right-2 border border-orange-300 dark:border-orange-700 bg-orange-50/95 dark:bg-orange-900/80 px-1.5 py-0.5 text-[10px] font-bold text-orange-700 dark:text-orange-200 backdrop-blur-sm">
                     بروزرسانی{formatUpdateReason(conservativeBlind.update_signal!) ? ` · ${formatUpdateReason(conservativeBlind.update_signal!)}` : ""}
@@ -966,9 +970,13 @@ export default async function HomeBody({
             </Link>
           ))}
           {oppositionBlind && wrapStory({ storyId: oppositionBlind.id, title: oppositionBlind.title_fa, imageUrl: oppositionBlind.image_url }, (
-            <Link href={storyHref(oppositionBlind.id)} className="group block border-[3px] border-[#ea580c] shadow-[0_0_12px_rgba(234,88,12,0.4)] hover:shadow-[0_0_20px_rgba(234,88,12,0.6)] transition-shadow animate-pulse-glow-orange">
+            <Link
+              href={storyHref(oppositionBlind.id)}
+              aria-label={`نگاه یک‌جانبهٔ برون‌مرزی: ${oppositionBlind.title_fa}`}
+              className="group block border border-outside-border transition-shadow hover:shadow-md"
+            >
               <div className="relative aspect-[4/3] overflow-hidden bg-slate-100 dark:bg-slate-800">
-                <SafeImageStatic src={oppositionBlind.image_url} className="h-full w-full object-cover" />
+                <SafeImageStatic src={oppositionBlind.image_url} alt={oppositionBlind.title_fa} className="h-full w-full object-cover" />
                 {isUpdateBadgeFresh(oppositionBlind.update_signal) && (
                   <span className="absolute bottom-2 right-2 border border-orange-300 dark:border-orange-700 bg-orange-50/95 dark:bg-orange-900/80 px-1.5 py-0.5 text-[10px] font-bold text-orange-700 dark:text-orange-200 backdrop-blur-sm">
                     بروزرسانی{formatUpdateReason(oppositionBlind.update_signal!) ? ` · ${formatUpdateReason(oppositionBlind.update_signal!)}` : ""}
@@ -1018,15 +1026,15 @@ export default async function HomeBody({
                         <UpdateDeltaCallout story={s} field="bias" />
                         <div className="grid grid-cols-2 gap-3">
                           {stateSummary && (
-                            <div className="border-r-2 border-[#1e3a5f] pr-3">
-                              <p className="text-[15px] font-bold text-[#1e3a5f] dark:text-blue-300 mb-1">روایت درون‌مرزی</p>
+                            <div className="border-r-2 border-inside-border pr-3">
+                              <p className="text-[15px] font-bold text-inside-border dark:text-inside-border-dark mb-1">روایت درون‌مرزی</p>
                               <UpdateDeltaCallout story={s} field="state" className="mb-1.5" />
                               <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-4">{stateSummary}</p>
                             </div>
                           )}
                           {diasporaSummary && (
-                            <div className="border-r-2 border-[#ea580c] pr-3">
-                              <p className="text-[15px] font-bold text-[#ea580c] dark:text-orange-400 mb-1">روایت برون‌مرزی</p>
+                            <div className="border-r-2 border-outside-border pr-3">
+                              <p className="text-[15px] font-bold text-outside-border dark:text-outside-border-dark mb-1">روایت برون‌مرزی</p>
                               <UpdateDeltaCallout story={s} field="diaspora" className="mb-1.5" />
                               <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-4">{diasporaSummary}</p>
                             </div>
@@ -1078,7 +1086,7 @@ export default async function HomeBody({
                   aligns exactly with the border line (top: 0 +
                   -translate-y-1/2). Content area below gets generous
                   pt to breathe after the overlay. */}
-              <span className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10 text-[15px] font-black text-slate-900 dark:text-white px-3 bg-white dark:bg-[#0a0e1a] whitespace-nowrap">
+              <span className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10 text-[15px] font-black text-slate-900 dark:text-white px-3 bg-white dark:bg-anthracite whitespace-nowrap">
                 تقابل روایت‌ها
               </span>
               <div className="px-4 pb-6 pt-8 flex-1 flex flex-col gap-4 overflow-hidden">
@@ -1108,17 +1116,17 @@ export default async function HomeBody({
                             quotes. Same size, same weight, line-clamp-1
                             truncates anything that doesn't fit. */}
                         <div className="flex gap-0 text-center">
-                          <div className="flex-1 py-3 bg-[#1e3a5f]/10 dark:bg-blue-900/20 border-t-[3px] border-[#1e3a5f]">
-                            <p className="text-[15px] font-black text-[#1e3a5f] dark:text-blue-300 line-clamp-1 px-2">
+                          <div className="flex-1 py-3 bg-inside-border/10 dark:bg-inside-border/20 border-t-[3px] border-inside-border">
+                            <p className="text-[15px] font-black text-inside-border dark:text-inside-border-dark line-clamp-1 px-2">
                               <RotatingWord words={item.conservativeWords} />
                             </p>
-                            <p className="text-[15px] text-[#1e3a5f] dark:text-blue-300 font-medium mt-1">درون‌مرزی</p>
+                            <p className="text-[15px] text-inside-border dark:text-inside-border-dark font-medium mt-1">درون‌مرزی</p>
                           </div>
-                          <div className="flex-1 py-3 bg-[#ea580c]/10 dark:bg-orange-900/20 border-t-[3px] border-[#ea580c]">
-                            <p className="text-[15px] font-black text-[#ea580c] dark:text-orange-400 line-clamp-1 px-2">
+                          <div className="flex-1 py-3 bg-outside-border/10 dark:bg-outside-border/20 border-t-[3px] border-outside-border">
+                            <p className="text-[15px] font-black text-outside-border dark:text-outside-border-dark line-clamp-1 px-2">
                               <RotatingWord words={item.oppositionWords} />
                             </p>
-                            <p className="text-[15px] text-[#ea580c] dark:text-orange-400 font-medium mt-1">برون‌مرزی</p>
+                            <p className="text-[15px] text-outside-border dark:text-outside-border-dark font-medium mt-1">برون‌مرزی</p>
                           </div>
                         </div>
                         {/* Replace the generic context sentence with
@@ -1130,12 +1138,12 @@ export default async function HomeBody({
                           <div className="mt-3 space-y-1">
                             {item.stateSummary && (
                               <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-2">
-                                <span className="text-[#1e3a5f] dark:text-blue-300 font-bold">(درون‌مرزی) </span>{item.stateSummary}
+                                <span className="text-inside-border dark:text-inside-border-dark font-bold">(درون‌مرزی) </span>{item.stateSummary}
                               </p>
                             )}
                             {item.diasporaSummary && (
                               <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-2">
-                                <span className="text-[#ea580c] dark:text-orange-400 font-bold">(برون‌مرزی) </span>{item.diasporaSummary}
+                                <span className="text-outside-border dark:text-outside-border-dark font-bold">(برون‌مرزی) </span>{item.diasporaSummary}
                               </p>
                             )}
                           </div>
@@ -1204,9 +1212,9 @@ export default async function HomeBody({
                       renders visually as [number][image][text] from
                       right to left, so the rank number sits to the
                       right of the image (Parham's ask). */}
-                  <span className="text-[64px] font-black text-slate-200 dark:text-slate-700 shrink-0 leading-none -mt-1 w-[72px] text-right self-start">{toFa(i + 1)}</span>
+                  <span className="text-[64px] font-black text-slate-200 dark:text-slate-700 shrink-0 leading-none -mt-1 w-[72px] text-right self-start">{tabularNum(i + 1)}</span>
                   <div className="w-48 shrink-0 overflow-hidden bg-slate-100 dark:bg-slate-800 self-stretch">
-                    <SafeImageStatic src={s.image_url} className="w-full h-full object-cover" />
+                    <SafeImageStatic src={s.image_url} alt={s.title_fa || ""} className="w-full h-full object-cover" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <h3 className="text-[22px] font-black leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
@@ -1214,9 +1222,9 @@ export default async function HomeBody({
                     </h3>
                     <UpdateBadge story={s} className="mt-1" />
                     <p className="text-[15px] text-slate-400 mt-1">
-                      {toFa(s.article_count)} مقاله · {toFa(s.source_count)} رسانه
-                      {s.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300"> · درون‌مرزی {toFa(s.state_pct)}٪</span>}
-                      {s.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400"> · برون‌مرزی {toFa(s.diaspora_pct)}٪</span>}
+                      {tabularNum(s.article_count)} مقاله · {tabularNum(s.source_count)} رسانه
+                      {s.state_pct > 0 && <span className="text-inside-border dark:text-inside-border-dark"> · درون‌مرزی {tabularNum(s.state_pct)}٪</span>}
+                      {s.diaspora_pct > 0 && <span className="text-outside-border dark:text-outside-border-dark"> · برون‌مرزی {tabularNum(s.diaspora_pct)}٪</span>}
                     </p>
                     {(s.first_published_at || s.last_updated_at) && (
                       <p className="text-[12px] text-slate-400 dark:text-slate-500 mt-1">
@@ -1231,12 +1239,12 @@ export default async function HomeBody({
                     )}
                     {stateS && (
                       <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 mt-1.5 line-clamp-2">
-                        <span className="text-[#1e3a5f] dark:text-blue-300 font-bold">• </span>{stateS}
+                        <span className="text-inside-border dark:text-inside-border-dark font-bold">• </span>{stateS}
                       </p>
                     )}
                     {diasporaS && (
                       <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-2">
-                        <span className="text-[#ea580c] dark:text-orange-400 font-bold">• </span>{diasporaS}
+                        <span className="text-outside-border dark:text-outside-border-dark font-bold">• </span>{diasporaS}
                       </p>
                     )}
                     {!stateS && !diasporaS && fallbackBullets.map((b, j) => (
@@ -1369,13 +1377,13 @@ function MobileHome({
                 {hero.title_fa}
               </h1>
               <p className="mt-2 text-[15px] text-slate-400 dark:text-slate-500">
-                {toFa(hero.source_count)} رسانه · {toFa(hero.article_count)} مقاله
+                {tabularNum(hero.source_count)} رسانه · {tabularNum(hero.article_count)} مقاله
               </p>
               {(hero.state_pct > 0 || hero.diaspora_pct > 0) && (
                 <p className="text-[15px] mt-0.5">
-                  {hero.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300">درون‌مرزی {toFa(hero.state_pct)}٪</span>}
+                  {hero.state_pct > 0 && <span className="text-inside-border dark:text-inside-border-dark">درون‌مرزی {tabularNum(hero.state_pct)}٪</span>}
                   {hero.state_pct > 0 && hero.diaspora_pct > 0 && <span className="text-slate-300 dark:text-slate-600"> · </span>}
-                  {hero.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400">برون‌مرزی {toFa(hero.diaspora_pct)}٪</span>}
+                  {hero.diaspora_pct > 0 && <span className="text-outside-border dark:text-outside-border-dark">برون‌مرزی {tabularNum(hero.diaspora_pct)}٪</span>}
                 </p>
               )}
             </div>
@@ -1395,14 +1403,14 @@ function MobileHome({
               )}
               <div className="grid grid-cols-2 gap-3">
                 {heroStateSummary && (
-                  <div className="border-r-2 border-[#1e3a5f] pr-3">
-                    <p className="text-[12px] font-bold text-[#1e3a5f] dark:text-blue-300 mb-1">روایت درون‌مرزی</p>
+                  <div className="border-r-2 border-inside-border pr-3">
+                    <p className="text-[12px] font-bold text-inside-border dark:text-inside-border-dark mb-1">روایت درون‌مرزی</p>
                     <p className="text-[15px] leading-6 text-slate-600 dark:text-slate-400 line-clamp-5">{heroStateSummary}</p>
                   </div>
                 )}
                 {heroDiasporaSummary && (
-                  <div className="border-r-2 border-[#ea580c] pr-3">
-                    <p className="text-[12px] font-bold text-[#ea580c] dark:text-orange-400 mb-1">روایت برون‌مرزی</p>
+                  <div className="border-r-2 border-outside-border pr-3">
+                    <p className="text-[12px] font-bold text-outside-border dark:text-outside-border-dark mb-1">روایت برون‌مرزی</p>
                     <p className="text-[15px] leading-6 text-slate-600 dark:text-slate-400 line-clamp-5">{heroDiasporaSummary}</p>
                   </div>
                 )}
@@ -1457,11 +1465,14 @@ function MobileHome({
           </div>
           <div className="space-y-4">
             {conservativeBlind && wrapStory({ storyId: conservativeBlind.id, title: conservativeBlind.title_fa, imageUrl: conservativeBlind.image_url }, (
-              <Link href={storyHref(conservativeBlind.id)}
-                className="group block border-[3px] border-[#1e3a5f] shadow-[0_0_12px_rgba(30,58,95,0.4)] animate-pulse-glow-blue">
+              <Link
+                href={storyHref(conservativeBlind.id)}
+                aria-label={`نگاه یک‌جانبهٔ درون‌مرزی: ${conservativeBlind.title_fa}`}
+                className="group block border border-inside-border transition-shadow hover:shadow-md"
+              >
                 <div className="flex gap-3 p-3">
                   <div className="relative w-20 h-20 shrink-0 overflow-hidden bg-slate-100 dark:bg-slate-800">
-                    <SafeImageStatic src={conservativeBlind.image_url} className="h-full w-full object-cover" />
+                    <SafeImageStatic src={conservativeBlind.image_url} alt={conservativeBlind.title_fa} className="h-full w-full object-cover" />
                     {isUpdateBadgeFresh(conservativeBlind.update_signal) && (
                       <span className="absolute bottom-0 inset-x-0 bg-orange-500/95 text-white text-center text-[9px] font-bold py-0.5">
                         بروزرسانی
@@ -1480,11 +1491,14 @@ function MobileHome({
               </Link>
             ))}
             {oppositionBlind && wrapStory({ storyId: oppositionBlind.id, title: oppositionBlind.title_fa, imageUrl: oppositionBlind.image_url }, (
-              <Link href={storyHref(oppositionBlind.id)}
-                className="group block border-[3px] border-[#ea580c] shadow-[0_0_12px_rgba(234,88,12,0.4)] animate-pulse-glow-orange">
+              <Link
+                href={storyHref(oppositionBlind.id)}
+                aria-label={`نگاه یک‌جانبهٔ برون‌مرزی: ${oppositionBlind.title_fa}`}
+                className="group block border border-outside-border transition-shadow hover:shadow-md"
+              >
                 <div className="flex gap-3 p-3">
                   <div className="relative w-20 h-20 shrink-0 overflow-hidden bg-slate-100 dark:bg-slate-800">
-                    <SafeImageStatic src={oppositionBlind.image_url} className="h-full w-full object-cover" />
+                    <SafeImageStatic src={oppositionBlind.image_url} alt={oppositionBlind.title_fa} className="h-full w-full object-cover" />
                     {isUpdateBadgeFresh(oppositionBlind.update_signal) && (
                       <span className="absolute bottom-0 inset-x-0 bg-orange-500/95 text-white text-center text-[9px] font-bold py-0.5">
                         بروزرسانی
@@ -1519,16 +1533,16 @@ function MobileHome({
               { storyId: s.id, title: s.title_fa, imageUrl: s.image_url },
               (
                 <Link href={storyHref(s.id)} className="group flex items-start gap-3 py-3">
-                  <span className="text-[44px] font-black text-slate-200 dark:text-slate-700 shrink-0 w-12 text-center leading-none -mt-1">{toFa(i + 1)}</span>
+                  <span className="text-[44px] font-black text-slate-200 dark:text-slate-700 shrink-0 w-12 text-center leading-none -mt-1">{tabularNum(i + 1)}</span>
                   <div className="flex-1 min-w-0">
                     <h3 className="text-[18px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
                       {s.title_fa}
                     </h3>
                     <UpdateBadge story={s} className="mt-0.5" />
                     <p className="text-[15px] text-slate-400 mt-0.5">
-                      {toFa(s.article_count)} مقاله · {toFa(s.source_count)} رسانه
-                      {s.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300"> · درون‌مرزی {toFa(s.state_pct)}٪</span>}
-                      {s.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400"> · برون‌مرزی {toFa(s.diaspora_pct)}٪</span>}
+                      {tabularNum(s.article_count)} مقاله · {tabularNum(s.source_count)} رسانه
+                      {s.state_pct > 0 && <span className="text-inside-border dark:text-inside-border-dark"> · درون‌مرزی {tabularNum(s.state_pct)}٪</span>}
+                      {s.diaspora_pct > 0 && <span className="text-outside-border dark:text-outside-border-dark"> · برون‌مرزی {tabularNum(s.diaspora_pct)}٪</span>}
                     </p>
                   </div>
                 </Link>
@@ -1555,29 +1569,29 @@ function MobileHome({
                     {item.title}
                   </h4>
                   <div className="flex gap-0 text-center">
-                    <div className="flex-1 py-2 bg-[#1e3a5f]/10 dark:bg-blue-900/20 border-t-[3px] border-[#1e3a5f]">
-                      <p className="text-[15px] font-black text-[#1e3a5f] dark:text-blue-300 line-clamp-1 px-2">
+                    <div className="flex-1 py-2 bg-inside-border/10 dark:bg-inside-border/20 border-t-[3px] border-inside-border">
+                      <p className="text-[15px] font-black text-inside-border dark:text-inside-border-dark line-clamp-1 px-2">
                         <RotatingWord words={item.conservativeWords} />
                       </p>
-                      <p className="text-[12px] text-[#1e3a5f] dark:text-blue-300 font-medium mt-1">درون‌مرزی</p>
+                      <p className="text-[12px] text-inside-border dark:text-inside-border-dark font-medium mt-1">درون‌مرزی</p>
                     </div>
-                    <div className="flex-1 py-2 bg-[#ea580c]/10 dark:bg-orange-900/20 border-t-[3px] border-[#ea580c]">
-                      <p className="text-[15px] font-black text-[#ea580c] dark:text-orange-400 line-clamp-1 px-2">
+                    <div className="flex-1 py-2 bg-outside-border/10 dark:bg-outside-border/20 border-t-[3px] border-outside-border">
+                      <p className="text-[15px] font-black text-outside-border dark:text-outside-border-dark line-clamp-1 px-2">
                         <RotatingWord words={item.oppositionWords} />
                       </p>
-                      <p className="text-[12px] text-[#ea580c] dark:text-orange-400 font-medium mt-1">برون‌مرزی</p>
+                      <p className="text-[12px] text-outside-border dark:text-outside-border-dark font-medium mt-1">برون‌مرزی</p>
                     </div>
                   </div>
                   {(item.stateSummary || item.diasporaSummary) && (
                     <div className="mt-2.5 space-y-1">
                       {item.stateSummary && (
                         <p className="text-[12px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-2">
-                          <span className="text-[#1e3a5f] dark:text-blue-300 font-bold">(درون‌مرزی) </span>{item.stateSummary}
+                          <span className="text-inside-border dark:text-inside-border-dark font-bold">(درون‌مرزی) </span>{item.stateSummary}
                         </p>
                       )}
                       {item.diasporaSummary && (
                         <p className="text-[12px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-2">
-                          <span className="text-[#ea580c] dark:text-orange-400 font-bold">(برون‌مرزی) </span>{item.diasporaSummary}
+                          <span className="text-outside-border dark:text-outside-border-dark font-bold">(برون‌مرزی) </span>{item.diasporaSummary}
                         </p>
                       )}
                     </div>
@@ -1617,9 +1631,9 @@ function MobileHome({
                     </h3>
                     <UpdateBadge story={s} className="mt-1" />
                     <p className="mt-1 text-[15px] text-slate-400 dark:text-slate-500">
-                      {toFa(s.source_count)} رسانه · {toFa(s.article_count)} مقاله
-                      {s.state_pct > 0 && <span className="text-[#1e3a5f] dark:text-blue-300"> · درون‌مرزی {toFa(s.state_pct)}٪</span>}
-                      {s.diaspora_pct > 0 && <span className="text-[#ea580c] dark:text-orange-400"> · برون‌مرزی {toFa(s.diaspora_pct)}٪</span>}
+                      {tabularNum(s.source_count)} رسانه · {tabularNum(s.article_count)} مقاله
+                      {s.state_pct > 0 && <span className="text-inside-border dark:text-inside-border-dark"> · درون‌مرزی {tabularNum(s.state_pct)}٪</span>}
+                      {s.diaspora_pct > 0 && <span className="text-outside-border dark:text-outside-border-dark"> · برون‌مرزی {tabularNum(s.diaspora_pct)}٪</span>}
                     </p>
                     {firstPoint && (
                       <p className="mt-1.5 text-[15px] leading-6 text-slate-400 dark:text-slate-500 line-clamp-1">• {firstPoint}</p>

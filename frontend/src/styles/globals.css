@@ -67,6 +67,21 @@
     @apply bg-white text-slate-900;
   }
 
+  /* Square focus ring per DESIGN.md — never rounded, contrast-strong in
+     both modes. Browsers default to a 2px webkit-blue rounded outline,
+     which clashes with the editorial-square language and is hard to see
+     against bg-white. */
+  *:focus-visible {
+    outline: 2px solid #0f172a;
+    outline-offset: 2px;
+    border-radius: 0;
+  }
+  @media (prefers-color-scheme: dark) {
+    *:focus-visible {
+      outline-color: #f1f5f9;
+    }
+  }
+
   /* Widow/orphan avoidance on headings. `text-wrap: pretty` is a
      purpose-built browser rule for headings: it rebalances line
      breaks so a single word doesn't dangle on the last line. Falls
