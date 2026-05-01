@@ -1035,7 +1035,12 @@ async def step_summarize():
         #        citing outlets no longer in the cluster.
         #    is_edited stories are ALWAYS skipped so Niloofar's
         #    hand-edits aren't clobbered.
-        MAX_STORIES_PER_RUN = 15  # quality over quantity — deep analysis on top 15 only
+        # Bumped 15 → 25 on 2026-05-01 after dashboard showed only 142/669
+        # visible stories had summaries (21% coverage). At 15/day the
+        # backlog grew faster than it cleared. 25/run = ~5 premium
+        # (gpt-5-mini) + ~20 standard (gpt-4o-mini), ~$1.30/run, ~$40/month
+        # against a daily-LLM budget that was already $1-2/day total.
+        MAX_STORIES_PER_RUN = 25
         retry_cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
         # #6 — is_edited stories are NO LONGER skipped if they have a
         # summary_anchor. Anchored stories refresh on the normal
