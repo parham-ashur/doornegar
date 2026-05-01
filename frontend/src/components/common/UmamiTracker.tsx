@@ -26,13 +26,31 @@ export default function UmamiTracker() {
   if (!src || !websiteId) return null;
 
   return (
-    <Script
-      src={src}
-      data-website-id={websiteId}
-      strategy="afterInteractive"
-      // Tell Umami to respect Do-Not-Track, not that there's anything
-      // privacy-sensitive being sent anyway.
-      data-do-not-track="true"
-    />
+    <>
+      {/* Operator opt-out: visit any page with ?umami=off to disable
+          tracking on this browser, ?umami=on to re-enable. Reads the
+          flag Umami's own tracker checks on every event. Runs before
+          the tracker so a fresh ?umami=off visit isn't counted. */}
+      <Script id="umami-opt-out" strategy="beforeInteractive">{`
+(function(){try{
+  var p=new URLSearchParams(window.location.search);
+  var v=p.get('umami');
+  if(v==='off'){localStorage.setItem('umami.disabled','1');}
+  else if(v==='on'){localStorage.removeItem('umami.disabled');}
+  else{return;}
+  p.delete('umami');
+  var q=p.toString();
+  history.replaceState(null,'',window.location.pathname+(q?'?'+q:'')+window.location.hash);
+}catch(e){}})();
+      `}</Script>
+      <Script
+        src={src}
+        data-website-id={websiteId}
+        strategy="afterInteractive"
+        // Tell Umami to respect Do-Not-Track, not that there's anything
+        // privacy-sensitive being sent anyway.
+        data-do-not-track="true"
+      />
+    </>
   );
 }
