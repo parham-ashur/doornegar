@@ -81,3 +81,10 @@ backend/scripts/embed_comparison_*.json
 DEVLOG.md
 docs/
 project-management/
+
+# Local-only design + agent skill artifacts (never on GitHub)
+PRODUCT.md
+DESIGN.md
+DESIGN.json
+.claude/skills/
+.claude/worktrees/
