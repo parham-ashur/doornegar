@@ -126,7 +126,7 @@ export default async function LocaleLayout({
             the hero starts loading directly from R2 (skip-optimizer for
             already-WebP-encoded source), add the preconnect back here. */}
       </head>
-      <body className={`min-h-screen bg-white text-slate-900 dark:bg-[#0a0e1a] dark:text-slate-100 ${isRtl ? "font-persian" : "font-latin"}`}>
+      <body className={`min-h-screen bg-white text-slate-900 dark:bg-anthracite dark:text-slate-100 ${isRtl ? "font-persian" : "font-latin"}`}>
         <NextIntlClientProvider locale={locale} messages={messages}>
           <div className="flex min-h-screen flex-col">
             <ChromeGate>

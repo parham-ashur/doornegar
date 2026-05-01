@@ -61,7 +61,7 @@ export default function PublicFeedbackButton({ pagePath, storyId }: Props) {
         type="button"
         onClick={() => setOpen(true)}
         aria-label="ارسال بازخورد"
-        className="fixed bottom-5 left-5 z-40 flex items-center gap-2 bg-slate-900 dark:bg-white text-white dark:text-slate-900 px-3 py-2 text-[13px] font-bold shadow-lg hover:bg-slate-700 dark:hover:bg-slate-200 transition-colors"
+        className="fixed bottom-5 left-5 z-40 flex items-center gap-2 bg-slate-900 dark:bg-white text-white dark:text-slate-900 px-4 min-h-[44px] text-[13px] font-bold shadow-lg hover:bg-slate-700 dark:hover:bg-slate-200 transition-colors"
       >
         <MessageSquare className="h-4 w-4" />
         بازخورد
@@ -74,7 +74,7 @@ export default function PublicFeedbackButton({ pagePath, storyId }: Props) {
           dir="rtl"
         >
           <div
-            className="w-full max-w-md bg-white dark:bg-[#0a0e1a] border border-slate-200 dark:border-slate-800 shadow-xl"
+            className="w-full max-w-md bg-white dark:bg-anthracite border border-slate-200 dark:border-slate-800 shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-800">
@@ -85,7 +85,7 @@ export default function PublicFeedbackButton({ pagePath, storyId }: Props) {
                 type="button"
                 onClick={() => setOpen(false)}
                 aria-label="بستن"
-                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] -mr-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
               >
                 <X className="h-4 w-4" />
               </button>

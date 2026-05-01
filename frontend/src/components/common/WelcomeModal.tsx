@@ -60,13 +60,13 @@ export default function WelcomeModal() {
       <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm welcome-fade" />
 
       <div
-        className="relative w-full max-w-2xl bg-white dark:bg-[#0a0e1a] border border-slate-200 dark:border-slate-800 shadow-2xl welcome-slide"
+        className="relative w-full max-w-2xl bg-white dark:bg-anthracite border border-slate-200 dark:border-slate-800 shadow-2xl welcome-slide"
         onClick={(e) => e.stopPropagation()}
       >
         <button
           onClick={close}
           aria-label="بستن"
-          className="absolute top-3 left-3 p-2 text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors z-10"
+          className="absolute top-1 left-1 inline-flex items-center justify-center min-h-[44px] min-w-[44px] text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors z-10"
         >
           <X className="h-5 w-5" />
         </button>
@@ -126,7 +126,7 @@ export default function WelcomeModal() {
             {/* CTA */}
             <button
               onClick={close}
-              className="px-6 py-2.5 text-sm font-bold text-white bg-slate-900 dark:bg-white dark:text-slate-900 hover:bg-slate-700 dark:hover:bg-slate-200 transition-colors whitespace-nowrap"
+              className="px-6 min-h-[44px] text-sm font-bold text-white bg-slate-900 dark:bg-white dark:text-slate-900 hover:bg-slate-700 dark:hover:bg-slate-200 transition-colors whitespace-nowrap"
             >
               متوجه شدم
             </button>

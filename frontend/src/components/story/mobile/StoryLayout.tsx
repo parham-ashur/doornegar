@@ -63,7 +63,7 @@ export default function StoryLayout({
           )}
         </div>
       </section>
-      {children && <div className="relative z-0 bg-white text-slate-900 dark:bg-[#0a0e1a] dark:text-slate-100">{children}</div>}
+      {children && <div className="relative z-0 bg-white text-slate-900 dark:bg-anthracite dark:text-slate-100">{children}</div>}
     </div>
   );
 }

@@ -28,7 +28,7 @@ export default function TelegramLayout({ slot, isRtl = true, onOpen }: TelegramL
 
   return (
     <div
-      className="relative h-full w-full overflow-y-auto bg-[#0a0e1a] px-6 py-10 text-slate-100"
+      className="relative h-full w-full overflow-y-auto bg-anthracite px-6 py-10 text-slate-100"
       dir={isRtl ? "rtl" : "ltr"}
       onClick={onOpen}
       role={onOpen ? "button" : undefined}

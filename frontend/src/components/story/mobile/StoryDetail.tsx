@@ -28,7 +28,7 @@ export default function StoryDetail({ slot, isRtl = true, onClose, onPrev, onNex
   const summary = isRtl ? slot.summary_fa : slot.summary_en;
 
   return (
-    <div className="fixed inset-0 z-50 bg-white dark:bg-[#0a0e1a]">
+    <div className="fixed inset-0 z-50 bg-white dark:bg-anthracite">
       <button
         onClick={onClose}
         className="absolute end-4 top-4 z-50 flex h-10 w-10 items-center justify-center rounded-full bg-black/70 text-white backdrop-blur-md"

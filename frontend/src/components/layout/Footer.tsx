@@ -2,7 +2,7 @@ import DoornegarAnimation from "@/components/common/DoornegarAnimation";
 
 export default function Footer() {
   return (
-    <footer className="border-t border-slate-200 bg-white dark:border-slate-800 dark:bg-[#0a0e1a]" dir="rtl">
+    <footer className="border-t border-slate-200 bg-white dark:border-slate-800 dark:bg-anthracite" dir="rtl">
       <div className="mx-auto max-w-7xl px-4 py-8">
         <div className="flex flex-col-reverse md:flex-row items-center justify-between gap-6 md:gap-8">
           {/* Right (RTL): Animation + name */}

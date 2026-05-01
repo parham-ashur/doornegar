@@ -809,7 +809,7 @@ export default function DashboardPage() {
   const minimizedPill = isMaintVisible && maintMinimized && (
     <button
       onClick={() => setMaintMinimized(false)}
-      className="fixed bottom-4 right-4 z-[100] inline-flex items-center gap-3 bg-white dark:bg-[#0a0e1a] border border-slate-300 dark:border-slate-700 shadow-lg px-4 py-2.5 hover:border-blue-500"
+      className="fixed bottom-4 right-4 z-[100] inline-flex items-center gap-3 bg-white dark:bg-anthracite border border-slate-300 dark:border-slate-700 shadow-lg px-4 py-2.5 hover:border-blue-500"
       title="Expand maintenance progress"
     >
       {running === "maintenance" ? (
@@ -833,7 +833,7 @@ export default function DashboardPage() {
 
   const maintModal = isMaintVisible && !maintMinimized && (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm">
-      <div className="w-full max-w-2xl bg-white dark:bg-[#0a0e1a] border border-slate-200 dark:border-slate-800 shadow-2xl max-h-[90vh] flex flex-col">
+      <div className="w-full max-w-2xl bg-white dark:bg-anthracite border border-slate-200 dark:border-slate-800 shadow-2xl max-h-[90vh] flex flex-col">
         {/* Header */}
         <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-start justify-between gap-3">
           <div className="flex-1 min-w-0">

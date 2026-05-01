@@ -99,7 +99,7 @@ export default function RaterOnboarding() {
         >
           <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm" />
           <div
-            className="relative w-full max-w-lg bg-white dark:bg-[#0a0e1a] border border-slate-200 dark:border-slate-800 shadow-2xl"
+            className="relative w-full max-w-lg bg-white dark:bg-anthracite border border-slate-200 dark:border-slate-800 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <button

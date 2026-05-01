@@ -70,7 +70,7 @@ export default function Header() {
           animation: header-fade-in 3.2s ease forwards;
         }
       `}</style>
-    <header className="sticky top-0 z-50 border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-[#0a0e1a] overflow-hidden">
+    <header className="sticky top-0 z-50 border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-anthracite overflow-hidden">
       <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4" dir="rtl">
         {/* Logo + tagline */}
         <div className="flex items-center gap-3">
