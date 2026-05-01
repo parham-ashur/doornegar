@@ -52,8 +52,11 @@ class Settings(BaseSettings):
     # Top-N trending stories that get a دورنما briefing (gpt-5-mini prose
     # synthesis on top of the structured analysis). Independent of
     # premium_story_top_n so we can broaden the briefing tier without
-    # also broadening the premium-analysis tier.
-    doornama_top_n: int = 10
+    # also broadening the premium-analysis tier. Scoped to the single hero
+    # story per Parham 2026-05-01 (evening) — was 10, but the briefing's
+    # ~$1-2/mo cost lands almost entirely on the hero card so the rest
+    # was wasted spend on stories users never saw at the top.
+    doornama_top_n: int = 1
     doornama_model: str = "gpt-5-mini"
 
     # NLP

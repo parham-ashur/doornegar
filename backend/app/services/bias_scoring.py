@@ -305,13 +305,21 @@ async def _keepalive(db: AsyncSession) -> None:
 
 
 async def score_unscored_articles(
-    db: AsyncSession, batch_size: int = 20, visible_stories_only: bool = False,
+    db: AsyncSession,
+    batch_size: int = 20,
+    visible_stories_only: bool = False,
+    homepage_only_top_n: int | None = None,
 ) -> dict:
     """Score articles that don't have bias scores yet.
 
-    Cost optimization: when visible_stories_only=True, only scores articles
-    in stories with article_count >= 5 (visible on homepage). This avoids
-    spending LLM tokens on articles in tiny clusters nobody sees.
+    Cost optimization tiers (strictest first):
+    - homepage_only_top_n=N: only score articles in the top-N stories by
+      trending_score (plus any blindspots, since the homepage blindspot
+      section also surfaces full bias panels). Cuts ~80% of bias-scoring
+      spend vs visible_stories_only since most ingested articles never
+      reach the homepage.
+    - visible_stories_only=True: score articles in any story with
+      article_count >= 5. Older, less aggressive gate.
 
     Returns stats: {scored, failed, skipped}.
     """
@@ -347,8 +355,30 @@ async def score_unscored_articles(
         ).exists(),
     )
 
-    # Only score articles in visible stories (saves ~60% of bias scoring cost)
-    if visible_stories_only:
+    # Strictest gate: homepage-only — top-N trending plus blindspots.
+    # Saves ~80% of bias scoring cost vs visible_stories_only since most
+    # ingested articles end up in stories that never reach the homepage.
+    if homepage_only_top_n is not None:
+        homepage_ids = (
+            select(Story.id)
+            .where(
+                Story.article_count >= 5,
+                Story.archived_at.is_(None),
+            )
+            .order_by(Story.trending_score.desc().nullslast())
+            .limit(homepage_only_top_n)
+        ).union(
+            # Blindspots get scored too — the homepage blindspot
+            # section needs full bias panels even when their
+            # trending_score is below the top-N cut.
+            select(Story.id).where(
+                Story.is_blindspot.is_(True),
+                Story.article_count >= 5,
+                Story.archived_at.is_(None),
+            )
+        )
+        query = query.where(Article.story_id.in_(homepage_ids))
+    elif visible_stories_only:
         visible_story_ids = select(Story.id).where(Story.article_count >= 5)
         query = query.where(Article.story_id.in_(visible_story_ids))
 

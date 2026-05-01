@@ -673,11 +673,15 @@ async def step_backfill_farsi_titles():
 async def step_bias_score():
     """Score articles that don't yet have a bias score.
 
-    Cost optimization: only score articles in VISIBLE stories (article_count >= 5).
-    Also limits to one article per source per story (we don't need 5 Fars articles
-    scored when 1 tells us their framing).
+    Cost optimization (per Parham 2026-05-01 evening, $30/mo budget):
+    only score articles in HOMEPAGE stories — top 20 by trending_score
+    plus any blindspots. Drops ~80% of bias scoring spend vs the prior
+    visible_stories_only gate. Articles in long-tail clusters are not
+    scored; their bias panels show "تحلیل در حال آماده‌سازی است" until
+    the story trends.
 
-    Runs multiple batches per maintenance cycle so coverage catches up over time.
+    Also limits to one article per source per story (we don't need 5
+    Fars articles scored when 1 tells us their framing).
     """
     from app.config import settings
     from app.database import async_session
@@ -687,9 +691,10 @@ async def step_bias_score():
         logger.warning("No LLM API key set — skipping bias scoring")
         return {"skipped": "no_llm_key"}
 
-    MAX_PER_RUN = 100  # reduced from 150 — priority scoring saves cost
+    HOMEPAGE_TOP_N = 20  # captures hero (top 5) + trending tail + blindspots union
+    MAX_PER_RUN = 60  # reduced from 100 since the homepage gate cuts the queue
     BATCH = 30
-    total = {"scored": 0, "failed": 0, "skipped": 0, "skipped_visible_only": 0}
+    total = {"scored": 0, "failed": 0, "skipped": 0}
     from app.services import maintenance_state as _ms
     async with async_session() as db:
         for batch_idx in range(MAX_PER_RUN // BATCH):
@@ -697,7 +702,7 @@ async def step_bias_score():
                 total["scored"], MAX_PER_RUN, label=f"batch {batch_idx + 1}"
             )
             stats = await score_unscored_articles(
-                db, batch_size=BATCH, visible_stories_only=True,
+                db, batch_size=BATCH, homepage_only_top_n=HOMEPAGE_TOP_N,
             )
             total["scored"] += stats.get("scored", 0)
             total["failed"] += stats.get("failed", 0)
@@ -1035,29 +1040,17 @@ async def step_summarize():
         #        citing outlets no longer in the cluster.
         #    is_edited stories are ALWAYS skipped so Niloofar's
         #    hand-edits aren't clobbered.
-        # 2026-05-01 (afternoon): downsized 25 → 15 AND dropped the
-        # premium tier. Per Parham, the priority is "homepage stories
-        # have summaries," not "top-5 hero get the best model." All 15
-        # now use gpt-4o-mini at ~$0.04/run each = ~$0.60/run × 3 daily
-        # full runs = ~$54/month. With trending_score ordering (below)
-        # the picked stories match what a visitor sees above the fold.
-        MAX_STORIES_PER_RUN = 15
+        # 2026-05-01 (evening, $30/mo budget): downsized 15 → 10 and
+        # candidate pool 30 → 10. Per Parham, only stories that actually
+        # appear on the homepage get summarized — sometimes that's just
+        # 2-3 rows. The pool cap matches the visible band exactly so we
+        # never burn LLM budget on rank-30 stories that no visitor sees.
+        # is_edited stories with a summary_anchor still refresh on the
+        # normal cadence; without an anchor they skip (preserves manual
+        # work that pre-dates the anchor pattern).
+        MAX_STORIES_PER_RUN = 10
         retry_cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
-        # #6 — is_edited stories are NO LONGER skipped if they have a
-        # summary_anchor. Anchored stories refresh on the normal
-        # cadence, but the LLM is constrained to preserve the
-        # anchor's tone/vocabulary. Stories with is_edited=True AND
-        # no anchor still skip (legacy behavior — protects manual
-        # work that hasn't been migrated).
-        # Cap the candidate pool to the top 30 by trending_score —
-        # roughly "the stories that appear on the homepage" (hero +
-        # blindspots + briefing top-10 + trending grid). Anything below
-        # that doesn't get a summary even if it's missing one. Per
-        # Parham 2026-05-01 (afternoon revision): summarizing 600+
-        # off-homepage stories isn't worth the LLM cost; a visitor
-        # never sees them. If we ever surface ranked feeds beyond
-        # trending (e.g. /sources/{slug} pages), bump this cap to match.
-        HOMEPAGE_POOL_SIZE = 30
+        HOMEPAGE_POOL_SIZE = 10
 
         # Within that pool, hash-skip handles the "already summarized
         # and unchanged" case downstream — so on a stable day this scan
