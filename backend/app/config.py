@@ -43,11 +43,12 @@ class Settings(BaseSettings):
     story_analysis_premium_model: str = "gpt-5-mini"  # premium (top-N)
     translation_model: str = "gpt-4.1-nano"         # economy
     content_type_model: str = "gpt-4.1-nano"        # economy — drop-noise classifier
-    # Only the top-N trending stories get gpt-5-mini for story analysis;
-    # the rest use gpt-4o-mini. Kept at 5 to mirror the telegram Pass 2
-    # tiering — together they keep premium-tier spend tight on the hero
-    # band while still giving cheaper analysis to the long tail.
-    premium_story_top_n: int = 5
+    # Premium gpt-5-mini tier for story analysis is OFF (set to 0) per
+    # Parham 2026-05-01: homepage coverage is the priority, not premium
+    # quality on five hero stories. Every story now gets gpt-4o-mini.
+    # Set back to 5 (or higher) if the hero band needs deeper analysis
+    # again — code path is intact, just gated by this number.
+    premium_story_top_n: int = 0
     # Top-N trending stories that get a دورنما briefing (gpt-5-mini prose
     # synthesis on top of the structured analysis). Independent of
     # premium_story_top_n so we can broaden the briefing tier without

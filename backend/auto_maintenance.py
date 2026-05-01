@@ -1035,12 +1035,13 @@ async def step_summarize():
         #        citing outlets no longer in the cluster.
         #    is_edited stories are ALWAYS skipped so Niloofar's
         #    hand-edits aren't clobbered.
-        # Bumped 15 → 25 on 2026-05-01 after dashboard showed only 142/669
-        # visible stories had summaries (21% coverage). At 15/day the
-        # backlog grew faster than it cleared. 25/run = ~5 premium
-        # (gpt-5-mini) + ~20 standard (gpt-4o-mini), ~$1.30/run, ~$40/month
-        # against a daily-LLM budget that was already $1-2/day total.
-        MAX_STORIES_PER_RUN = 25
+        # 2026-05-01 (afternoon): downsized 25 → 15 AND dropped the
+        # premium tier. Per Parham, the priority is "homepage stories
+        # have summaries," not "top-5 hero get the best model." All 15
+        # now use gpt-4o-mini at ~$0.04/run each = ~$0.60/run × 3 daily
+        # full runs = ~$54/month. With trending_score ordering (below)
+        # the picked stories match what a visitor sees above the fold.
+        MAX_STORIES_PER_RUN = 15
         retry_cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
         # #6 — is_edited stories are NO LONGER skipped if they have a
         # summary_anchor. Anchored stories refresh on the normal
@@ -1048,6 +1049,13 @@ async def step_summarize():
         # anchor's tone/vocabulary. Stories with is_edited=True AND
         # no anchor still skip (legacy behavior — protects manual
         # work that hasn't been migrated).
+        # Order by trending_score so the candidate scan prioritizes the
+        # stories visible on the homepage hero / blindspot / trending
+        # sections (which all sort by trending_score). 2026-05-01 switch
+        # from article_count.desc() — a 200-article-old decayed story
+        # was eating slots away from a fresh 8-article hot story that
+        # users were actually seeing on the homepage. Homepage coverage
+        # > canonical-coverage when summary slots are scarce.
         result = await db.execute(
             select(Story)
             .options(selectinload(Story.articles))
@@ -1058,7 +1066,7 @@ async def step_summarize():
                 # untouched manual edits, lets anchored ones refresh.
                 (Story.is_edited.is_(False)) | (Story.summary_anchor.isnot(None)),
             )
-            .order_by(Story.article_count.desc())
+            .order_by(Story.trending_score.desc().nullslast())
         )
         scan_candidates = list(result.scalars().all())
 
