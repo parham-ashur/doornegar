@@ -134,7 +134,7 @@ export default async function LocaleLayout({
             </ChromeGate>
             <main className="flex-1">{children}</main>
             <ChromeGate>
-              <Footer locale={locale} />
+              <Footer />
             </ChromeGate>
             <ChromeGate>
               <PageAtmosphere />
