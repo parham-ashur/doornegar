@@ -370,8 +370,16 @@ export default async function HomeBody({
     noStore();
     return (
       <div dir="rtl" className="mx-auto max-w-7xl px-4 py-24 text-center">
-        <h2 className="text-xl font-bold text-slate-900 dark:text-white">هنوز موضوعی ایجاد نشده</h2>
-        <p className="mt-2 text-sm text-slate-500">پس از اجرای خط‌لوله داده، موضوعات خبری اینجا نمایش داده می‌شوند</p>
+        <h2 className="text-xl font-bold text-slate-900 dark:text-white">پوشش خبری در حال بروزرسانی است</h2>
+        <p className="mt-2 text-sm text-slate-500">
+          خط‌لولهٔ گردآوری در حال اجراست. این صفحه به‌طور خودکار هر چند دقیقه تازه می‌شود؛
+          {" "}
+          <Link href={`/${locale}/sources`} className="underline decoration-slate-300 dark:decoration-slate-600 underline-offset-2 hover:text-slate-700 dark:hover:text-slate-300">
+            فهرست رسانه‌ها و روش‌شناسی
+          </Link>
+          {" "}
+          را در همین حال ببینید.
+        </p>
       </div>
     );
   }
