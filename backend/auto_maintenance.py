@@ -833,12 +833,21 @@ async def step_recluster_orphans():
     looser threshold (0.40). Pure math, no LLM — cheap. Attaches the
     orphan if it finds any story whose centroid is close enough.
 
-    Intentionally conservative: only matches against stories with
-    article_count >= 2 (already multi-source, so a match is meaningful)
-    and skips stories with a Niloofar is_edited flag so human-curated
-    arcs don't pick up misfit articles.
+    Eligibility filters mirror the main matcher (clustering.py
+    `_match_existing_stories`) per Parham 2026-05-02: previously this
+    step had no umbrella / frozen / archived / size-cap gates, so
+    orphans were attaching to 18-25 day old umbrella stories and
+    bumping their last_updated_at — defeating the auto-freeze and
+    archive logic. Stories appeared on the homepage as "updated
+    yesterday" despite being 25 days old. Filters added:
+      - article_count < max_cluster_size (don't extend over-cap stories)
+      - frozen_at IS NULL (freeze means "no more accretion")
+      - archived_at IS NULL (30d archive — never resurrect)
+      - first_published_at >= umbrella_cutoff (14d, matches matcher)
+    Plus the existing article_count >= 2 and is_edited=False guards.
     """
     from sqlalchemy import select, update
+    from app.config import settings
     from app.database import async_session
     from app.models.article import Article
     from app.models.story import Story
@@ -847,9 +856,12 @@ async def step_recluster_orphans():
     RETRY_THRESHOLD = 0.40
     MIN_ORPHAN_AGE_HOURS = 6
     MAX_PER_RUN = 500
+    UMBRELLA_FIRST_PUB_CAP_DAYS = 14  # mirrors clustering.py
 
     stats = {"checked": 0, "attached": 0}
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=MIN_ORPHAN_AGE_HOURS)
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(hours=MIN_ORPHAN_AGE_HOURS)
+    umbrella_cutoff = now - timedelta(days=UMBRELLA_FIRST_PUB_CAP_DAYS)
 
     async with async_session() as db:
         # Candidates: orphan articles with embeddings, old enough
@@ -868,8 +880,13 @@ async def step_recluster_orphans():
         stories = (await db.execute(
             select(Story.id, Story.centroid_embedding).where(
                 Story.article_count >= 2,
+                Story.article_count < settings.max_cluster_size,
                 Story.centroid_embedding.isnot(None),
                 Story.is_edited.is_(False),
+                Story.frozen_at.is_(None),
+                Story.archived_at.is_(None),
+                (Story.first_published_at.is_(None))
+                    | (Story.first_published_at >= umbrella_cutoff),
             )
         )).all()
 
@@ -3486,7 +3503,7 @@ async def step_prune_stagnant():
 async def step_demote_umbrella_stories():
     """Auto-demote stories that grew into umbrellas.
 
-    Pattern: first_published_at >21d ago, article_count >100, and
+    Pattern: first_published_at >14d ago, article_count >= 15, and
     last_updated_at recent (the cluster keeps absorbing adjacent
     topics every day so it never appears stale by F2/F3 metrics).
     These stories dominate the homepage with month-old context
@@ -3494,15 +3511,24 @@ async def step_demote_umbrella_stories():
     prevent but couldn't catch because the wall-clock signals all
     say "current."
 
+    Thresholds tightened 2026-05-02 after Parham observed all top-5
+    trending stories were 18-25 days old:
+      - first_published_at < now - 14 days (was 21d; aligned with
+        clustering.py UMBRELLA_FIRST_PUB_CAP_DAYS so the demote
+        triggers on the same line that the matcher refuses to extend)
+      - article_count >= 15 (was >100; max_cluster_size is 30 so the
+        old threshold was effectively unreachable — this step was
+        dead code at our scale)
+
     Action: set priority = -50 so trending pushes them off the
     homepage; clustering's umbrella-cap (clustering.py
-    UMBRELLA_FIRST_PUB_CAP_DAYS) prevents further growth. Emits
+    UMBRELLA_FIRST_PUB_CAP_DAYS) prevents further growth via the
+    matcher; step_recluster_orphans's matching umbrella gate (added
+    same date) prevents growth via the orphan rescue path. Emits
     `story_umbrella_demoted` event.
 
-    Conservative thresholds:
-      - first_published_at < now - 21 days
-      - article_count > 100
-      - priority > -10  (skip already-demoted)
+    The 30d archive step still handles eventual removal — demote is
+    just the homepage-visibility gate; archived_at is the death.
     """
     from sqlalchemy import select, update
     from app.database import async_session
@@ -3510,13 +3536,13 @@ async def step_demote_umbrella_stories():
     from app.services.events import log_event as _log_event
 
     stats = {"checked": 0, "demoted": 0}
-    cutoff = datetime.now(timezone.utc) - timedelta(days=21)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=14)
 
     async with async_session() as db:
         rows = (await db.execute(
             select(Story).where(
                 Story.first_published_at < cutoff,
-                Story.article_count > 100,
+                Story.article_count >= 15,
                 Story.priority > -10,
                 Story.archived_at.is_(None),
             )
