@@ -148,6 +148,12 @@ async def trending_stories(
             Story.is_blindspot.is_(False),
             # F3 — archived stories are dead content; never show in trending.
             Story.archived_at.is_(None),
+            # 7d freeze-by-creation rule (Parham 2026-05-02): frozen
+            # stories represent closed narrative chapters; new articles
+            # in the same topic seed a fresh cluster. Keeping them off
+            # trending prevents the homepage from cycling 18-25 day-old
+            # umbrellas as "fresh" content.
+            Story.frozen_at.is_(None),
         )
         .order_by(Story.priority.desc(), Story.trending_score.desc())
         .limit(fetch_limit)
@@ -204,6 +210,10 @@ async def blindspot_stories(
             Story.is_blindspot.is_(True),
             Story.article_count >= min_articles,
             Story.archived_at.is_(None),
+            # 7d freeze rule — same as trending. A blindspot from a
+            # frozen story is by definition not a "this week" gap; it
+            # was a one-sided coverage moment from a closed chapter.
+            Story.frozen_at.is_(None),
         )
         .order_by(Story.first_published_at.desc().nullslast())
         .limit(limit)
@@ -379,7 +389,12 @@ async def loaded_words_insights(request: Request, db: AsyncSession = Depends(get
 
     result = await db.execute(
         select(Story)
-        .where(Story.article_count >= 5)
+        .options(*_story_listing_defers())
+        .where(
+            Story.article_count >= 5,
+            Story.archived_at.is_(None),
+            Story.frozen_at.is_(None),
+        )
         .order_by(Story.trending_score.desc())
         .limit(20)
     )

@@ -673,7 +673,13 @@ async def _match_to_existing_stories(
     # that started 30 days ago and has absorbed 200+ articles by
     # being the obvious cosine match for every adjacent topic. New
     # articles should seed a fresh sub-story instead.
-    UMBRELLA_FIRST_PUB_CAP_DAYS = 14
+    # Aligned 2026-05-02 with the 7d freeze-by-creation rule. Frozen
+    # stories already get filtered via Story.frozen_at.is_(None) in the
+    # query below, but we also gate on first_published_at directly so
+    # the matcher refuses old stories even during the brief window
+    # between maintenance runs (when a story has crossed 7d but
+    # step_archive_stale hasn't fired yet to set frozen_at).
+    UMBRELLA_FIRST_PUB_CAP_DAYS = 7
     umbrella_cutoff = datetime.now(timezone.utc) - _timedelta(days=UMBRELLA_FIRST_PUB_CAP_DAYS)
 
     # Get existing visible stories with their centroid embeddings +

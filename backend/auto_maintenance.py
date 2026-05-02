@@ -856,7 +856,7 @@ async def step_recluster_orphans():
     RETRY_THRESHOLD = 0.40
     MIN_ORPHAN_AGE_HOURS = 6
     MAX_PER_RUN = 500
-    UMBRELLA_FIRST_PUB_CAP_DAYS = 14  # mirrors clustering.py
+    UMBRELLA_FIRST_PUB_CAP_DAYS = 7  # mirrors clustering.py + freeze rule
 
     stats = {"checked": 0, "attached": 0}
     now = datetime.now(timezone.utc)
@@ -3503,29 +3503,23 @@ async def step_prune_stagnant():
 async def step_demote_umbrella_stories():
     """Auto-demote stories that grew into umbrellas.
 
-    Pattern: first_published_at >14d ago, article_count >= 15, and
-    last_updated_at recent (the cluster keeps absorbing adjacent
-    topics every day so it never appears stale by F2/F3 metrics).
-    These stories dominate the homepage with month-old context
-    re-stamped as fresh — exactly what F1/F2/F3/F4 were meant to
-    prevent but couldn't catch because the wall-clock signals all
-    say "current."
+    Pattern: first_published_at >7d ago AND article_count >= 10 (i.e.
+    a story past its narrative shelf life that's still big enough to
+    crowd the homepage). Most of these will already be frozen by
+    step_archive_stale's date-based freeze; this step is a
+    belt-and-suspenders demote so they drop off trending immediately
+    (priority=-50) without waiting for the homepage's frozen_at
+    filter to take effect.
 
-    Thresholds tightened 2026-05-02 after Parham observed all top-5
-    trending stories were 18-25 days old:
-      - first_published_at < now - 14 days (was 21d; aligned with
-        clustering.py UMBRELLA_FIRST_PUB_CAP_DAYS so the demote
-        triggers on the same line that the matcher refuses to extend)
-      - article_count >= 15 (was >100; max_cluster_size is 30 so the
-        old threshold was effectively unreachable — this step was
-        dead code at our scale)
+    Thresholds tightened 2026-05-02 evening (re-tightened from the
+    morning's 14d/>=15 to 7d/>=10) to align with the new freeze-by-
+    creation rule. With the 7d freeze + frozen_at filter on trending,
+    most stories never reach this step's threshold because they get
+    frozen first; this step's purpose is to catch stragglers that
+    crossed the 7d line between maintenance runs.
 
-    Action: set priority = -50 so trending pushes them off the
-    homepage; clustering's umbrella-cap (clustering.py
-    UMBRELLA_FIRST_PUB_CAP_DAYS) prevents further growth via the
-    matcher; step_recluster_orphans's matching umbrella gate (added
-    same date) prevents growth via the orphan rescue path. Emits
-    `story_umbrella_demoted` event.
+    Action: set priority = -50 so trending sorts them last (homepage
+    will rarely run out of younger stories to fill the slots).
 
     The 30d archive step still handles eventual removal — demote is
     just the homepage-visibility gate; archived_at is the death.
@@ -3536,13 +3530,13 @@ async def step_demote_umbrella_stories():
     from app.services.events import log_event as _log_event
 
     stats = {"checked": 0, "demoted": 0}
-    cutoff = datetime.now(timezone.utc) - timedelta(days=14)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=7)
 
     async with async_session() as db:
         rows = (await db.execute(
             select(Story).where(
                 Story.first_published_at < cutoff,
-                Story.article_count >= 15,
+                Story.article_count >= 10,
                 Story.priority > -10,
                 Story.archived_at.is_(None),
             )
@@ -3574,11 +3568,17 @@ async def step_demote_umbrella_stories():
 async def step_archive_stale():
     """Three-tier story aging.
 
-    0) **Auto-freeze at 7d** — any story whose last_updated_at is
-       older than 7 days gets `frozen_at` set. Frozen stories no
-       longer accept new articles via clustering and are skipped by
-       guardrail/edit flows that respect frozen_at. Story stays
-       visible; archive (tier 1) handles homepage filtering.
+    0) **Auto-freeze at 7d-by-creation** — any story whose
+       first_published_at is older than 7 days gets `frozen_at` set.
+       This is a CREATION-date freeze, not an idle-date freeze: a
+       story that's 7+ days old is treated as a closed narrative
+       chapter regardless of whether new articles are still arriving.
+       New articles in the same topic seed a fresh cluster instead.
+       Per Parham 2026-05-02: prior rule (idle 7d on last_updated_at)
+       let umbrella stories accumulate 50+ articles over weeks while
+       perpetually appearing "fresh"; the date-based rule cleanly
+       chapters narratives so the homepage shows time-bounded
+       stories. NULL first_published_at falls back to created_at.
 
     1) **Soft-archive at 30d** — any story whose last_updated_at is
        outside the 30-day relevance window gets `archived_at` set.
@@ -3595,7 +3595,7 @@ async def step_archive_stale():
     Also recounts article_count / source_count for non-archived
     stories so the homepage reflects reality after merges/splits.
     """
-    from sqlalchemy import select, update, func, delete
+    from sqlalchemy import select, update, func, delete, or_
 
     from app.database import async_session
     from app.models.story import Story
@@ -3609,13 +3609,18 @@ async def step_archive_stale():
     hard_cutoff = now - timedelta(days=60)
 
     async with async_session() as db:
-        # Tier 0 — auto-freeze stories idle for >7 days. Stops further
-        # article accretion and HITL guardrail churn on stories that
-        # are effectively over.
+        # Tier 0 — auto-freeze stories whose narrative chapter is >7d
+        # old by CREATION date. Date-based, not activity-based:
+        # a 10-day-old story freezes even if articles arrived today.
+        # NULL first_published_at falls back to created_at (always set).
         freeze_result = await db.execute(
             select(Story).where(
                 Story.frozen_at.is_(None),
-                Story.last_updated_at < freeze_cutoff,
+                or_(
+                    Story.first_published_at < freeze_cutoff,
+                    (Story.first_published_at.is_(None))
+                        & (Story.created_at < freeze_cutoff),
+                ),
             )
         )
         for story in freeze_result.scalars().all():
@@ -3626,10 +3631,11 @@ async def step_archive_stale():
                 actor="maintenance",
                 story_id=story.id,
                 signals={
+                    "first_published_at": story.first_published_at.isoformat() if story.first_published_at else None,
                     "last_updated_at": story.last_updated_at.isoformat() if story.last_updated_at else None,
                     "article_count": int(story.article_count or 0),
                     "title_fa": (story.title_fa or "")[:120],
-                    "reason": "idle_7d",
+                    "reason": "age_7d",
                 },
             )
             stats["auto_frozen"] += 1
