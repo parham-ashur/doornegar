@@ -3,7 +3,13 @@
 import { BarChart3, MessageCircle, VolumeX, Radio, TrendingUp, Eye, Info } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
-import type { StoryAnalysis } from "@/lib/types";
+import type { NarrativeGroup, Source, StoryAnalysis } from "@/lib/types";
+import {
+  GROUP_COLORS,
+  GROUP_LABELS_FA,
+  NARRATIVE_GROUP_ORDER,
+  narrativeGroupOfSource,
+} from "@/lib/narrativeGroups";
 import { toFa } from "@/lib/utils";
 import StoryTelegramSection from "./StoryTelegramSection";
 
@@ -12,6 +18,7 @@ export default function StatsPanel({
   storyId,
   articleCount,
   sourceCount,
+  coveringSources,
   containerId = "telegram",
   initialTab: initialTabProp = null,
   highlightText: highlightTextProp = null,
@@ -20,6 +27,7 @@ export default function StatsPanel({
   storyId?: string;
   articleCount?: number;
   sourceCount?: number;
+  coveringSources?: Source[];
   containerId?: string;
   initialTab?: string | null;
   highlightText?: string | null;
@@ -53,6 +61,18 @@ export default function StatsPanel({
   const avgNeutrality = neutralityValues.length > 0
     ? neutralityValues.reduce((a, b) => a + b, 0) / neutralityValues.length
     : null;
+
+  const sourcesByGroup: Record<NarrativeGroup, Source[]> = {
+    principlist: [],
+    reformist: [],
+    moderate_diaspora: [],
+    radical_diaspora: [],
+  };
+  for (const s of coveringSources ?? []) {
+    sourcesByGroup[narrativeGroupOfSource(s)].push(s);
+  }
+  const hasAnyGroupedSource =
+    NARRATIVE_GROUP_ORDER.some((g) => sourcesByGroup[g].length > 0);
 
   const silenceAnalysis = (analysis as any)?.silence_analysis;
   const coordination = (analysis as any)?.coordinated_messaging;
@@ -264,6 +284,34 @@ export default function StatsPanel({
             <p className="text-[15px] text-slate-400">آمار پس از اجرای تحلیل در دسترس خواهد بود</p>
           )}
         </div>
+
+        {hasAnyGroupedSource && (
+          <div className="mt-5 pt-4 border-t border-slate-100 dark:border-slate-800/60 space-y-3">
+            {NARRATIVE_GROUP_ORDER.map((group) => {
+              const sources = sourcesByGroup[group];
+              if (sources.length === 0) return null;
+              return (
+                <div key={group}>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span
+                      className="inline-block h-2 w-2"
+                      style={{ backgroundColor: GROUP_COLORS[group] }}
+                    />
+                    <h5 className="text-[13px] font-bold text-slate-700 dark:text-slate-300">
+                      {GROUP_LABELS_FA[group]}
+                    </h5>
+                    <span className="text-[12px] text-slate-400">
+                      {toFa(sources.length)}
+                    </span>
+                  </div>
+                  <p className="text-[13px] leading-6 text-slate-500 dark:text-slate-400 pr-4">
+                    {sources.map((s) => s.name_fa || s.name_en).join("، ")}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

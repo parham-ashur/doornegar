@@ -100,32 +100,8 @@ export default function StoryAnalysisPanel({ analysis }: { analysis: StoryAnalys
     );
   }
 
-  /* Editorial-credibility caption: when was this analysis written, and
-     where can a journalist read the methodology? Both questions are
-     blockers for the citing-researcher persona. analysis_locked_at is
-     the canonical "frozen at" timestamp; null on still-evolving stories. */
-  const lockedAt = analysis.analysis_locked_at;
-  const lockedDate = lockedAt
-    ? new Date(lockedAt).toLocaleDateString("fa-IR", { year: "numeric", month: "long", day: "numeric" })
-    : null;
-
   return (
     <div dir="rtl">
-      {/* Editorial byline above the tabs */}
-      <div className="flex items-center justify-between gap-3 mb-2 text-[12px] text-slate-400 dark:text-slate-500">
-        <span>
-          {lockedDate
-            ? `تحلیل ${lockedDate} · مدل زبانی`
-            : "تحلیل در حال بروزرسانی · مدل زبانی"}
-        </span>
-        <a
-          href="/fa/sources"
-          className="underline decoration-slate-300 dark:decoration-slate-700 underline-offset-2 hover:text-slate-700 dark:hover:text-slate-300"
-        >
-          روش‌شناسی و فهرست رسانه‌ها
-        </a>
-      </div>
-
       {/* Tab bar */}
       <div role="tablist" aria-label="مقایسه روایت‌ها" className="flex gap-0 border-b border-slate-200 dark:border-slate-800">
         <button type="button" role="tab" id="tab-bias" aria-selected={active === "bias"} aria-controls="panel-bias" onClick={() => setActive("bias")} className={`${TAB_BASE} ${active === "bias" ? TAB_ACTIVE : TAB_INACTIVE}`}>مقایسه روایت‌ها</button>

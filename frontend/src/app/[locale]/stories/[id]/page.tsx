@@ -275,6 +275,7 @@ export default async function StoryDetailPage({
               storyId={id}
               articleCount={story.article_count}
               sourceCount={story.source_count}
+              coveringSources={coveringSources}
               containerId="telegram-mobile"
             />
           </div>
@@ -315,6 +316,7 @@ export default async function StoryDetailPage({
             storyId={id}
             articleCount={story.article_count}
             sourceCount={story.source_count}
+            coveringSources={coveringSources}
           />
 
           {/* Political spectrum — temporarily hidden per Parham
