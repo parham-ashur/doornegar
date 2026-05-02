@@ -3619,11 +3619,14 @@ async def step_archive_stale():
     soft_cutoff = now - timedelta(days=30)
     hard_cutoff = now - timedelta(days=60)
 
+    # Tier 0 — auto-freeze stories whose narrative chapter is >7d old
+    # by CREATION date. Own session+commit so the freeze persists even
+    # if a later phase (especially the long recount loop) stalls and
+    # rolls back. CLAUDE.md: long-held sessions get killed by Neon's
+    # idle reaper; before this split, auto_frozen=60 was reported but
+    # the DB never persisted the writes (verified 2026-05-02 — top
+    # trending still showed 25-36d umbrella stories despite the stat).
     async with async_session() as db:
-        # Tier 0 — auto-freeze stories whose narrative chapter is >7d
-        # old by CREATION date. Date-based, not activity-based:
-        # a 10-day-old story freezes even if articles arrived today.
-        # NULL first_published_at falls back to created_at (always set).
         freeze_result = await db.execute(
             select(Story).where(
                 Story.frozen_at.is_(None),
@@ -3650,11 +3653,12 @@ async def step_archive_stale():
                 },
             )
             stats["auto_frozen"] += 1
+        await db.commit()
 
-        # Tier 1 — soft-archive everything older than 30d that isn't
-        # already archived. last_updated_at is the anchor (matches the
-        # F2 trending decay), with a fall-through to first_published_at
-        # for stories that somehow lack last_updated_at.
+    # Tier 1 — soft-archive everything older than 30d that isn't
+    # already archived. last_updated_at is the anchor (matches the
+    # F2 trending decay).
+    async with async_session() as db:
         soft_result = await db.execute(
             select(Story).where(
                 Story.archived_at.is_(None),
@@ -3664,14 +3668,16 @@ async def step_archive_stale():
         for story in soft_result.scalars().all():
             story.archived_at = now
             stats["soft_archived"] += 1
+        await db.commit()
 
-        # Tier 2 — delete tiny stale stories. Mirror the FK-safe pattern
-        # from step_prune_stagnant: clear all nullable references first,
-        # then delete only stories with no audit/snapshot rows still
-        # pointing at them. Without this guard the DELETE raises
-        # ForeignKeyViolationError exactly like prune-stagnant did
-        # before the 2026-04-28 fix.
-        from sqlalchemy import text as _safe_t
+    # Tier 2 — delete tiny stale stories. Mirror the FK-safe pattern
+    # from step_prune_stagnant: clear all nullable references first,
+    # then delete only stories with no audit/snapshot rows still
+    # pointing at them. Without this guard the DELETE raises
+    # ForeignKeyViolationError exactly like prune-stagnant did
+    # before the 2026-04-28 fix.
+    from sqlalchemy import text as _safe_t
+    async with async_session() as db:
         result = await db.execute(
             select(Story.id).where(
                 Story.last_updated_at < hard_cutoff,
@@ -3698,22 +3704,38 @@ async def step_archive_stale():
             """), {"ids": stale_ids})
             stats["hard_deleted"] = del_result.rowcount or 0
             stats["hard_skipped_with_history"] = len(stale_ids) - stats["hard_deleted"]
-
-        # Recount article_count for ALL stories (in case articles were added/removed)
-        result = await db.execute(select(Story).where(Story.article_count >= 1))
-        for story in result.scalars().all():
-            actual = (await db.execute(
-                select(func.count(Article.id)).where(Article.story_id == story.id)
-            )).scalar() or 0
-            if actual != story.article_count:
-                story.article_count = actual
-                source_count = (await db.execute(
-                    select(func.count(func.distinct(Article.source_id))).where(Article.story_id == story.id)
-                )).scalar() or 0
-                story.source_count = source_count
-                stats["recounted"] += 1
-
         await db.commit()
+
+    # Recount in batches of 500 with a fresh session per batch. Reading
+    # all 4000+ stories then issuing 2× per-story COUNT queries inside
+    # a single transaction was the original cause of the silent freeze
+    # rollback — by the time it finished the session was past Neon's
+    # 5-min idle threshold. Batching keeps each transaction short and
+    # localizes any failure to a single batch instead of losing the
+    # whole step.
+    BATCH = 500
+    async with async_session() as db:
+        all_ids = [row[0] for row in (await db.execute(
+            select(Story.id).where(Story.article_count >= 1)
+        )).all()]
+    for i in range(0, len(all_ids), BATCH):
+        batch_ids = all_ids[i:i + BATCH]
+        async with async_session() as db:
+            stories = (await db.execute(
+                select(Story).where(Story.id.in_(batch_ids))
+            )).scalars().all()
+            for story in stories:
+                actual = (await db.execute(
+                    select(func.count(Article.id)).where(Article.story_id == story.id)
+                )).scalar() or 0
+                if actual != story.article_count:
+                    story.article_count = actual
+                    source_count = (await db.execute(
+                        select(func.count(func.distinct(Article.source_id))).where(Article.story_id == story.id)
+                    )).scalar() or 0
+                    story.source_count = source_count
+                    stats["recounted"] += 1
+            await db.commit()
 
     if stats["auto_frozen"] > 0 or stats["soft_archived"] > 0 or stats["hard_deleted"] > 0 or stats["recounted"] > 0:
         logger.info(f"Archive/recount: {stats}")
