@@ -359,11 +359,15 @@ async def score_unscored_articles(
     # Saves ~80% of bias scoring cost vs visible_stories_only since most
     # ingested articles end up in stories that never reach the homepage.
     if homepage_only_top_n is not None:
+        # frozen_at filter added 2026-05-02: 7d-by-creation freeze
+        # rule means frozen stories never reach the homepage, so
+        # scoring their articles burns LLM budget for nothing.
         homepage_ids = (
             select(Story.id)
             .where(
                 Story.article_count >= 5,
                 Story.archived_at.is_(None),
+                Story.frozen_at.is_(None),
             )
             .order_by(Story.trending_score.desc().nullslast())
             .limit(homepage_only_top_n)
@@ -375,6 +379,7 @@ async def score_unscored_articles(
                 Story.is_blindspot.is_(True),
                 Story.article_count >= 5,
                 Story.archived_at.is_(None),
+                Story.frozen_at.is_(None),
             )
         )
         query = query.where(Article.story_id.in_(homepage_ids))

@@ -1033,10 +1033,21 @@ async def step_summarize():
     MAX_ARTICLES_PER_STORY = 10  # cap memory + prompt cost
 
     async with async_session() as db:
+        # Homepage-eligibility filters — must match the trending API
+        # (stories.py /trending and /blindspots) so we never spend LLM
+        # budget on a story that won't appear on the homepage.
+        # archived_at: 30d retired, never homepage. frozen_at: 7d-by-
+        # creation chapter close, never homepage (Parham 2026-05-02).
+        homepage_eligible = (
+            (Story.article_count >= 5),
+            Story.archived_at.is_(None),
+            Story.frozen_at.is_(None),
+        )
+
         # 1. Pre-compute top-N trending story IDs (homepage tier)
         top_result = await db.execute(
             select(Story.id)
-            .where(Story.article_count >= 5)
+            .where(*homepage_eligible)
             .order_by(Story.priority.desc(), Story.trending_score.desc())
             .limit(settings.premium_story_top_n)
         )
@@ -1045,7 +1056,7 @@ async def step_summarize():
         # structured analysis. Independent of premium_story_top_n.
         doornama_result = await db.execute(
             select(Story.id)
-            .where(Story.article_count >= 5)
+            .where(*homepage_eligible)
             .order_by(Story.priority.desc(), Story.trending_score.desc())
             .limit(settings.doornama_top_n)
         )
@@ -1081,7 +1092,7 @@ async def step_summarize():
             select(Story)
             .options(selectinload(Story.articles))
             .where(
-                Story.article_count >= 5,
+                *homepage_eligible,
                 (Story.llm_failed_at.is_(None)) | (Story.llm_failed_at < retry_cutoff),
                 # Skip ONLY when is_edited and no anchor — preserves
                 # untouched manual edits, lets anchored ones refresh.
@@ -4834,12 +4845,21 @@ async def step_detect_silences():
     OUTSIDE = "outside"
 
     async with async_session() as db:
+        # Homepage-eligible only (Parham 2026-05-02). Was top 200 →
+        # tightened to top 50 since detect_silences only matters for
+        # stories that could surface on the homepage as blindspots or
+        # coverage gaps. Frozen / archived stories are closed
+        # narratives — no point flagging silences nobody will see.
         result = await db.execute(
             select(Story)
             .options(selectinload(Story.articles).selectinload(Article.source))
-            .where(Story.article_count >= 5)
+            .where(
+                Story.article_count >= 5,
+                Story.archived_at.is_(None),
+                Story.frozen_at.is_(None),
+            )
             .order_by(Story.trending_score.desc())
-            .limit(200)
+            .limit(50)
         )
         stories = list(result.scalars().all())
 
@@ -5636,14 +5656,21 @@ async def step_editorial():
         ))
         await db.commit()
 
-    # Fetch top trending stories
+    # Fetch top trending stories — filtered to homepage-eligible only
+    # (Parham 2026-05-02: scope all LLM-spending steps to what visitors
+    # actually see). Was top 30; tightened to top 15 to align with the
+    # post-freeze homepage band.
     async with async_session() as db:
         result = await db.execute(
             select(Story)
             .options(selectinload(Story.articles).selectinload(Article.source))
-            .where(Story.article_count >= 2)
+            .where(
+                Story.article_count >= 5,
+                Story.archived_at.is_(None),
+                Story.frozen_at.is_(None),
+            )
             .order_by(Story.trending_score.desc())
-            .limit(30)
+            .limit(15)
         )
         stories = list(result.scalars().all())
 
@@ -5775,11 +5802,19 @@ async def step_niloofar_polish_telegram():
     stats = {"polished": 0, "skipped": 0, "failed": 0, "no_analysis": 0}
 
     async with async_session() as db:
+        # Homepage-eligible only (Parham 2026-05-02). Was top 30; the
+        # polish output only ever appears on the homepage telegram
+        # sidebar, so polishing rank-30 rows that won't show is wasted
+        # spend. Top 15 covers the visible band with headroom.
         result = await db.execute(
             select(Story)
-            .where(Story.article_count >= 2)
+            .where(
+                Story.article_count >= 5,
+                Story.archived_at.is_(None),
+                Story.frozen_at.is_(None),
+            )
             .order_by(Story.trending_score.desc())
-            .limit(30)
+            .limit(15)
         )
         stories = list(result.scalars().all())
 
