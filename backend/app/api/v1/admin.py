@@ -3253,7 +3253,12 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
           COUNT(*) FILTER (WHERE frozen_at IS NULL AND archived_at IS NULL) AS active,
           COUNT(*) FILTER (WHERE frozen_at IS NOT NULL AND archived_at IS NULL) AS frozen,
           COUNT(*) FILTER (WHERE archived_at IS NOT NULL) AS archived,
-          COUNT(*) FILTER (WHERE article_count >= :max_size) AS oversized,
+          COUNT(*) FILTER (WHERE article_count >= :max_size) AS oversized_total,
+          COUNT(*) FILTER (
+            WHERE article_count >= :max_size
+              AND frozen_at IS NULL
+              AND archived_at IS NULL
+          ) AS oversized_active,
           COUNT(*) FILTER (WHERE first_published_at IS NULL) AS null_first_pub,
           COUNT(*) FILTER (WHERE centroid_embedding IS NULL AND article_count >= 2) AS null_centroid
         FROM stories
@@ -3266,12 +3271,15 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
         "SELECT COUNT(*) FROM articles WHERE embedding IS NULL"
     ))).scalar() or 0)
 
-    frozen_but_trending = int((await db.execute(_t("""
+    # Catches the 2026-05-02 regression: step_recluster_orphans bumped
+    # last_updated_at on frozen stories. With the fix in place, frozen
+    # stories should never have last_updated_at within the last hour.
+    frozen_recently_bumped = int((await db.execute(_t("""
         SELECT COUNT(*) FROM stories
         WHERE frozen_at IS NOT NULL
           AND archived_at IS NULL
-          AND article_count >= 5
-          AND last_updated_at >= NOW() - INTERVAL '7 days'
+          AND last_updated_at > frozen_at + INTERVAL '5 minutes'
+          AND last_updated_at >= NOW() - INTERVAL '1 hour'
     """))).scalar() or 0)
 
     # ── FRESHNESS ─────────────────────────────────────────────────────
@@ -3372,26 +3380,30 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
             "threshold": threshold, "status": status, "why": why,
         }
 
-    oversized = int(story_states["oversized"] or 0)
+    oversized_total = int(story_states["oversized_total"] or 0)
+    oversized_active = int(story_states["oversized_active"] or 0)
     null_first_pub = int(story_states["null_first_pub"] or 0)
     null_centroid = int(story_states["null_centroid"] or 0)
     last_run_fails = last_run_summary["fail_count"] if last_run_summary else 0
 
     canaries = [
         _canary(
-            "oversized_stories", "Oversized stories",
-            oversized, "= 0",
-            "error" if oversized > 0 else "ok",
-            f"Stories with article_count >= max_cluster_size ({settings.max_cluster_size}) mean "
-            "clustering attached past the cap, recreating umbrella stories. The 2026-05-02 fix "
-            "added per-story capacity to step_recluster_orphans. Any > 0 = regression.",
+            "oversized_active_stories", "Active oversized stories",
+            oversized_active, "= 0",
+            "error" if oversized_active > 0 else "ok",
+            f"Active (frozen_at IS NULL) stories with article_count >= max_cluster_size "
+            f"({settings.max_cluster_size}) mean clustering is currently attaching past the cap. "
+            f"The 2026-05-02 fix added per-story capacity to step_recluster_orphans. Any > 0 = "
+            f"regression. Note: {oversized_total} historical oversized stories exist in total "
+            "but most are frozen and harmless.",
         ),
         _canary(
-            "frozen_but_trending", "Frozen-but-trending stories",
-            frozen_but_trending, "= 0",
-            "error" if frozen_but_trending > 0 else "ok",
-            "Stories with frozen_at NOT NULL must never reach trending. If > 0, the homepage / "
-            "trending API filter is broken.",
+            "frozen_recently_bumped", "Frozen stories bumped after freeze",
+            frozen_recently_bumped, "= 0",
+            "error" if frozen_recently_bumped > 0 else "ok",
+            "Frozen stories whose last_updated_at advanced more than 5 minutes after frozen_at, "
+            "within the last hour. step_recluster_orphans must refuse frozen stories — if this "
+            "is > 0, the umbrella-accretion fix is broken (see 2026-05-02 incident).",
         ),
         _canary(
             "embedding_zero_rate_24h", "Embedding zero-rate (24h)",
@@ -3620,7 +3632,8 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
                 "active": int(story_states["active"] or 0),
                 "frozen": int(story_states["frozen"] or 0),
                 "archived": int(story_states["archived"] or 0),
-                "oversized": oversized,
+                "oversized_active": oversized_active,
+                "oversized_total": oversized_total,
                 "null_first_published": null_first_pub,
                 "null_centroid_multiarticle": null_centroid,
             },
@@ -3631,7 +3644,7 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
                 "no_title_fa": no_title_fa,
                 "no_title_en": no_title_en,
             },
-            "frozen_but_trending": frozen_but_trending,
+            "frozen_recently_bumped": frozen_recently_bumped,
             "max_cluster_size": settings.max_cluster_size,
         },
         "freshness": {

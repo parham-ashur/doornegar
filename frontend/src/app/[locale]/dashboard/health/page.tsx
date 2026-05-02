@@ -98,7 +98,8 @@ type HealthData = {
       active: number;
       frozen: number;
       archived: number;
-      oversized: number;
+      oversized_active: number;
+      oversized_total: number;
       null_first_published: number;
       null_centroid_multiarticle: number;
     };
@@ -109,7 +110,7 @@ type HealthData = {
       no_title_fa: number;
       no_title_en: number;
     };
-    frozen_but_trending: number;
+    frozen_recently_bumped: number;
     max_cluster_size: number;
   };
   freshness: {
@@ -673,9 +674,10 @@ export default function HealthPage() {
               <KV k="Frozen" v={fmtNum(data.data_integrity.stories.frozen)} />
               <KV k="Archived" v={fmtNum(data.data_integrity.stories.archived)} />
               <KV
-                k={`Oversized (≥${data.data_integrity.max_cluster_size} articles)`}
-                v={fmtNum(data.data_integrity.stories.oversized)}
-                status={data.data_integrity.stories.oversized > 0 ? "error" : "ok"}
+                k={`Active oversized (≥${data.data_integrity.max_cluster_size} articles, not frozen)`}
+                v={fmtNum(data.data_integrity.stories.oversized_active)}
+                sub={`${fmtNum(data.data_integrity.stories.oversized_total)} historical incl. frozen`}
+                status={data.data_integrity.stories.oversized_active > 0 ? "error" : "ok"}
               />
               <KV
                 k="NULL first_published_at"
@@ -688,9 +690,9 @@ export default function HealthPage() {
                 status={data.data_integrity.stories.null_centroid_multiarticle > 0 ? "warn" : "ok"}
               />
               <KV
-                k="Frozen but trending"
-                v={fmtNum(data.data_integrity.frozen_but_trending)}
-                status={data.data_integrity.frozen_but_trending > 0 ? "error" : "ok"}
+                k="Frozen bumped after freeze (1h)"
+                v={fmtNum(data.data_integrity.frozen_recently_bumped)}
+                status={data.data_integrity.frozen_recently_bumped > 0 ? "error" : "ok"}
               />
             </div>
           </div>
