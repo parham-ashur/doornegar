@@ -876,9 +876,19 @@ async def step_recluster_orphans():
         if not orphans:
             return stats
 
-        # Load all eligible stories once (cheaper than per-article query)
-        stories = (await db.execute(
-            select(Story.id, Story.centroid_embedding).where(
+        # Load all eligible stories once (cheaper than per-article query).
+        # Track per-story article_count so we can refuse to push a story
+        # past max_cluster_size during this run — without this, hundreds
+        # of orphans best-matching the same fresh story all attach in one
+        # pass and grow it from 25 → 200+ articles, defeating the cap.
+        # Verified 2026-05-02: story ba626fca grew to 196 articles in one
+        # recluster pass.
+        story_rows = (await db.execute(
+            select(
+                Story.id,
+                Story.centroid_embedding,
+                Story.article_count,
+            ).where(
                 Story.article_count >= 2,
                 Story.article_count < settings.max_cluster_size,
                 Story.centroid_embedding.isnot(None),
@@ -890,16 +900,27 @@ async def step_recluster_orphans():
             )
         )).all()
 
-        if not stories:
+        if not story_rows:
             return stats
+
+        stories = [(sid, cent) for sid, cent, _ in story_rows]
+        # Mutable in-run budget: how many more articles each story can
+        # accept before hitting max_cluster_size. Decrements on each attach.
+        capacity: dict[object, int] = {
+            sid: max(0, settings.max_cluster_size - (count or 0))
+            for sid, _, count in story_rows
+        }
 
         stats["checked"] = len(orphans)
         attached_ids: dict[str, object] = {}  # article_id -> story_id
+        skipped_full = 0
 
         for art_id, emb in orphans:
             best_sim = 0.0
             best_story = None
             for sid, cent in stories:
+                if capacity.get(sid, 0) <= 0:
+                    continue
                 try:
                     sim = _cs(emb, cent)
                 except Exception:
@@ -909,12 +930,16 @@ async def step_recluster_orphans():
                     best_story = sid
             if best_story and best_sim >= RETRY_THRESHOLD:
                 attached_ids[art_id] = best_story
+                capacity[best_story] -= 1
+            elif best_story is None:
+                skipped_full += 1
 
         for art_id, sid in attached_ids.items():
             await db.execute(
                 update(Article).where(Article.id == art_id).values(story_id=sid)
             )
         stats["attached"] = len(attached_ids)
+        stats["skipped_capacity_exhausted"] = skipped_full
         await db.commit()
 
     if stats["attached"]:
@@ -3618,6 +3643,32 @@ async def step_archive_stale():
     freeze_cutoff = now - timedelta(days=7)
     soft_cutoff = now - timedelta(days=30)
     hard_cutoff = now - timedelta(days=60)
+
+    # Pre-freeze backfill: rederive first_published_at from each story's
+    # actual articles BEFORE the freeze query reads it. Without this,
+    # step_recluster_orphans (which runs earlier in the pipeline) can
+    # attach old articles to a fresh-looking story and drag its
+    # first_published_at backwards — but the SQL backfill that captures
+    # that drag used to live in step_recalculate_trending which runs
+    # AFTER archive_stale, so the freeze missed it. Verified 2026-05-02:
+    # story ba626fca had first_published_at = 2026-04-03 (29d ago) and
+    # 196 articles, yet auto_frozen skipped it because at archive_stale
+    # time first_published_at was still recent.
+    from sqlalchemy import text as _backfill_t
+    async with async_session() as db:
+        await db.execute(_backfill_t("""
+            UPDATE stories s
+            SET first_published_at = sub.min_pub
+            FROM (
+                SELECT story_id, MIN(published_at) AS min_pub
+                FROM articles
+                WHERE published_at IS NOT NULL AND story_id IS NOT NULL
+                GROUP BY story_id
+            ) sub
+            WHERE s.id = sub.story_id
+              AND s.first_published_at IS DISTINCT FROM sub.min_pub
+        """))
+        await db.commit()
 
     # Tier 0 — auto-freeze stories whose narrative chapter is >7d old
     # by CREATION date. Own session+commit so the freeze persists even
