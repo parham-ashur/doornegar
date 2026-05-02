@@ -3019,3 +3019,647 @@ async def feedback_impact_source_trust(db: AsyncSession = Depends(get_db)):
             "flag_rate_30d": round(rate, 4),
         })
     return {"items": items, "count": len(items)}
+
+
+# ─────────────────────────────────────────────────────────────────────
+# /admin/health/overview — single-fetch health snapshot for /dashboard/health
+# Caches 60s (matches the page's auto-refresh cadence).
+# ─────────────────────────────────────────────────────────────────────
+
+_health_cache: dict = {"data": None, "expires": 0.0}
+_HEALTH_CACHE_TTL = 60
+
+
+@router.get("/health/overview")
+async def health_overview(db: AsyncSession = Depends(get_db)):
+    """Comprehensive health snapshot for the /dashboard/health page.
+
+    Aggregates cost, maintenance, pipeline, integrity, freshness,
+    external deps, plus canaries with WHY hints. Queries run sequentially
+    on one session — concurrent operations on a single AsyncSession are
+    not safe.
+    """
+    import json as _hj
+    import time as _time
+    from sqlalchemy import text as _t
+    from app.services import maintenance_state as _ms
+
+    now_ts = _time.time()
+    if _health_cache.get("expires", 0.0) > now_ts and _health_cache.get("data") is not None:
+        return _health_cache["data"]
+
+    now = datetime.now(timezone.utc)
+
+    # ── COST ──────────────────────────────────────────────────────────
+    cost_today = (await db.execute(_t("""
+        SELECT COALESCE(SUM(total_cost),0)::float AS cost, COUNT(*) AS calls
+        FROM llm_usage_logs WHERE timestamp >= DATE_TRUNC('day', NOW())
+    """))).mappings().one()
+    cost_yesterday = (await db.execute(_t("""
+        SELECT COALESCE(SUM(total_cost),0)::float AS cost, COUNT(*) AS calls
+        FROM llm_usage_logs
+        WHERE timestamp >= DATE_TRUNC('day', NOW() - INTERVAL '1 day')
+          AND timestamp <  DATE_TRUNC('day', NOW())
+    """))).mappings().one()
+    cost_7d_total = float((await db.execute(_t("""
+        SELECT COALESCE(SUM(total_cost),0)::float
+        FROM llm_usage_logs WHERE timestamp >= NOW() - INTERVAL '7 days'
+    """))).scalar() or 0.0)
+    cost_30d_total = float((await db.execute(_t("""
+        SELECT COALESCE(SUM(total_cost),0)::float
+        FROM llm_usage_logs WHERE timestamp >= NOW() - INTERVAL '30 days'
+    """))).scalar() or 0.0)
+    avg_per_day_30d = cost_30d_total / 30.0
+    monthly_projection = avg_per_day_30d * 30.0
+
+    avg_per_day_7d = float((await db.execute(_t("""
+        SELECT COALESCE(AVG(daily), 0)::float FROM (
+          SELECT DATE_TRUNC('day', timestamp) AS d, SUM(total_cost) AS daily
+          FROM llm_usage_logs
+          WHERE timestamp >= NOW() - INTERVAL '8 days'
+            AND timestamp <  DATE_TRUNC('day', NOW())
+          GROUP BY d
+        ) sub
+    """))).scalar() or 0.0)
+    today_vs_7d_pct = 0.0
+    if avg_per_day_7d > 0.0001:
+        today_vs_7d_pct = ((float(cost_today["cost"]) - avg_per_day_7d) / avg_per_day_7d) * 100.0
+
+    by_purpose_7d = (await db.execute(_t("""
+        SELECT purpose,
+               COUNT(*) AS calls,
+               COALESCE(SUM(total_cost),0)::float AS cost
+        FROM llm_usage_logs
+        WHERE timestamp >= NOW() - INTERVAL '7 days'
+        GROUP BY purpose ORDER BY cost DESC
+    """))).mappings().all()
+    by_model_7d = (await db.execute(_t("""
+        SELECT model,
+               COUNT(*) AS calls,
+               COALESCE(SUM(total_cost),0)::float AS cost
+        FROM llm_usage_logs
+        WHERE timestamp >= NOW() - INTERVAL '7 days'
+        GROUP BY model ORDER BY cost DESC
+    """))).mappings().all()
+    unpriced_7d = int((await db.execute(_t("""
+        SELECT COUNT(*) FROM llm_usage_logs
+        WHERE timestamp >= NOW() - INTERVAL '7 days' AND priced = FALSE
+    """))).scalar() or 0)
+
+    by_provider: dict[str, float] = {}
+    for r in by_model_7d:
+        m = (r["model"] or "").lower()
+        if "claude" in m:
+            prov = "anthropic"
+        elif "embed" in m:
+            prov = "openai_embeddings"
+        elif "gpt" in m or m.startswith("o1") or m.startswith("o3"):
+            prov = "openai"
+        else:
+            prov = "other"
+        by_provider[prov] = by_provider.get(prov, 0.0) + float(r["cost"] or 0.0)
+
+    # ── MAINTENANCE ───────────────────────────────────────────────────
+    in_mem_state = dict(_ms.STATE)
+
+    db_state_row = (await db.execute(_t(
+        "SELECT state, updated_at FROM maintenance_run_status WHERE id = 1"
+    ))).first()
+    db_state: dict | None = None
+    if db_state_row and db_state_row[0]:
+        try:
+            raw = db_state_row[0]
+            db_state = _hj.loads(raw) if isinstance(raw, str) else raw
+        except Exception as e:
+            logger.warning("health/overview: failed to parse maintenance_run_status: %s", e)
+            db_state = None
+
+    current = db_state if isinstance(db_state, dict) else in_mem_state
+    cur_status = current.get("status") or "idle"
+    started_raw = current.get("started_at")
+
+    lock_age_seconds: float | None = None
+    stuck_lock = False
+    if cur_status == "running" and started_raw:
+        try:
+            if isinstance(started_raw, str):
+                dt = datetime.fromisoformat(started_raw.replace("Z", "+00:00"))
+            else:
+                dt = started_raw
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            lock_age_seconds = (now - dt).total_seconds()
+            stuck_lock = lock_age_seconds > 7200
+        except Exception as e:
+            logger.warning("health/overview: failed to parse started_at %r: %s", started_raw, e)
+
+    recent_runs_rows = (await db.execute(_t(
+        "SELECT run_at, status, elapsed_s, steps, error "
+        "FROM maintenance_logs ORDER BY run_at DESC LIMIT 5"
+    ))).all()
+
+    recent_runs: list[dict] = []
+    last_run_summary: dict | None = None
+    for i, r in enumerate(recent_runs_rows):
+        try:
+            steps_data = _hj.loads(r[3]) if isinstance(r[3], str) else (r[3] or [])
+        except Exception as e:
+            logger.warning("health/overview: failed to parse maintenance_logs.steps row %d: %s", i, e)
+            steps_data = []
+        if not isinstance(steps_data, list):
+            steps_data = []
+        fails = [
+            s.get("name") for s in steps_data
+            if isinstance(s, dict) and s.get("status") not in (None, "ok")
+        ]
+        slowest = sorted(
+            [
+                (s.get("name"), float(s.get("elapsed_s") or 0.0))
+                for s in steps_data
+                if isinstance(s, dict) and s.get("name")
+            ],
+            key=lambda x: x[1],
+            reverse=True,
+        )[:5]
+        info = {
+            "run_at": r[0].isoformat() if r[0] else None,
+            "status": r[1],
+            "duration_s": float(r[2] or 0.0),
+            "step_count": len(steps_data),
+            "fail_count": len(fails),
+            "fails": fails,
+            "error": r[4],
+        }
+        if i == 0:
+            last_run_summary = {
+                **info,
+                "slowest_steps": [
+                    {"name": n, "elapsed_s": round(e, 1)} for n, e in slowest if n
+                ],
+            }
+        recent_runs.append(info)
+
+    # ── PIPELINE ──────────────────────────────────────────────────────
+    emb_24h = (await db.execute(_t("""
+        SELECT
+          count(*) FILTER (WHERE embedding IS NULL) AS null_emb,
+          count(*) FILTER (
+            WHERE embedding IS NOT NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM jsonb_array_elements_text(embedding) v
+                WHERE v::float <> 0
+              )
+          ) AS all_zero,
+          count(*) AS total
+        FROM articles WHERE ingested_at >= NOW() - INTERVAL '24 hours'
+    """))).one()
+    emb_total = int(emb_24h.total or 0)
+    emb_null = int(emb_24h.null_emb or 0)
+    emb_zero = int(emb_24h.all_zero or 0)
+    emb_null_pct = round(100 * emb_null / max(1, emb_total), 1)
+    emb_zero_pct = round(100 * emb_zero / max(1, emb_total), 1)
+
+    articles_24h = int((await db.execute(_t(
+        "SELECT COUNT(*) FROM articles WHERE ingested_at >= NOW() - INTERVAL '24 hours'"
+    ))).scalar() or 0)
+    new_stories_24h = int((await db.execute(_t(
+        "SELECT COUNT(*) FROM stories WHERE created_at >= NOW() - INTERVAL '24 hours'"
+    ))).scalar() or 0)
+
+    no_title_fa = int((await db.execute(
+        select(func.count(Article.id)).where(Article.title_fa.is_(None))
+    )).scalar() or 0)
+    no_title_en = int((await db.execute(
+        select(func.count(Article.id)).where(Article.title_en.is_(None))
+    )).scalar() or 0)
+    translatable_now = int((await db.execute(_t("""
+        SELECT COUNT(*) FROM articles
+        WHERE title_fa IS NULL AND title_original IS NOT NULL
+    """))).scalar() or 0)
+
+    total_arts = int((await db.execute(select(func.count(Article.id)))).scalar() or 0)
+    bias_eligible = int((await db.execute(_t("""
+        SELECT COUNT(*) FROM articles
+        WHERE story_id IS NOT NULL
+          AND (content_text IS NOT NULL OR summary IS NOT NULL)
+    """))).scalar() or 0)
+    bias_scored = int((await db.execute(_t("SELECT COUNT(*) FROM bias_scores"))).scalar() or 0)
+    bias_coverage_pct = int(round(100 * bias_scored / max(1, bias_eligible)))
+
+    # ── DATA INTEGRITY (single rollup query) ──────────────────────────
+    story_states = (await db.execute(_t("""
+        SELECT
+          COUNT(*) AS total,
+          COUNT(*) FILTER (WHERE frozen_at IS NULL AND archived_at IS NULL) AS active,
+          COUNT(*) FILTER (WHERE frozen_at IS NOT NULL AND archived_at IS NULL) AS frozen,
+          COUNT(*) FILTER (WHERE archived_at IS NOT NULL) AS archived,
+          COUNT(*) FILTER (WHERE article_count >= :max_size) AS oversized,
+          COUNT(*) FILTER (WHERE first_published_at IS NULL) AS null_first_pub,
+          COUNT(*) FILTER (WHERE centroid_embedding IS NULL AND article_count >= 2) AS null_centroid
+        FROM stories
+    """), {"max_size": settings.max_cluster_size})).mappings().one()
+
+    article_orphans = int((await db.execute(_t(
+        "SELECT COUNT(*) FROM articles WHERE story_id IS NULL"
+    ))).scalar() or 0)
+    article_no_emb = int((await db.execute(_t(
+        "SELECT COUNT(*) FROM articles WHERE embedding IS NULL"
+    ))).scalar() or 0)
+
+    frozen_but_trending = int((await db.execute(_t("""
+        SELECT COUNT(*) FROM stories
+        WHERE frozen_at IS NOT NULL
+          AND archived_at IS NULL
+          AND article_count >= 5
+          AND last_updated_at >= NOW() - INTERVAL '7 days'
+    """))).scalar() or 0)
+
+    # ── FRESHNESS ─────────────────────────────────────────────────────
+    last_article_dt = (await db.execute(_t(
+        "SELECT MAX(ingested_at) FROM articles"
+    ))).scalar()
+    last_article_min_ago: int | None = None
+    if last_article_dt:
+        last_article_min_ago = int((now - last_article_dt).total_seconds() / 60)
+
+    trending_rows = (await db.execute(_t("""
+        SELECT first_published_at, last_updated_at, article_count
+        FROM stories
+        WHERE frozen_at IS NULL AND archived_at IS NULL
+          AND article_count >= 5
+        ORDER BY (
+          article_count * POWER(
+            0.85,
+            GREATEST(0, EXTRACT(EPOCH FROM (NOW() - last_updated_at)) / 86400.0)
+          )
+        ) DESC
+        LIMIT 10
+    """))).all()
+    oldest_trending_age_days = 0.0
+    under_7d = 0
+    for tr in trending_rows:
+        pub = tr[0]
+        if pub:
+            age = (now - pub).total_seconds() / 86400.0
+            if age > oldest_trending_age_days:
+                oldest_trending_age_days = age
+            if age < 7.0:
+                under_7d += 1
+    trending_count = len(trending_rows)
+    trending_under_7d_pct = round(100 * under_7d / max(1, trending_count))
+
+    # ── EXTERNAL DEPS ─────────────────────────────────────────────────
+    tg_active = int((await db.execute(_t(
+        "SELECT COUNT(*) FROM telegram_channels WHERE is_active = TRUE"
+    ))).scalar() or 0)
+    tg_last_fetch = (await db.execute(_t(
+        "SELECT MAX(last_fetched_at) FROM telegram_channels"
+    ))).scalar()
+    tg_last_post = (await db.execute(_t(
+        "SELECT MAX(date) FROM telegram_posts"
+    ))).scalar()
+    tg_minutes_ago: int | None = None
+    tg_session_status = "unknown"
+    tg_anchor = tg_last_fetch or tg_last_post
+    if tg_anchor:
+        tg_minutes_ago = int((now - tg_anchor).total_seconds() / 60)
+        if tg_minutes_ago < 360:
+            tg_session_status = "ok"
+        elif tg_minutes_ago < 1440:
+            tg_session_status = "stale"
+        else:
+            tg_session_status = "broken"
+
+    silent_rows = (await db.execute(_t("""
+        SELECT s.slug, s.name_fa, s.name_en, MAX(a.ingested_at) AS last_art
+        FROM sources s
+        LEFT JOIN articles a ON a.source_id = s.id
+        WHERE s.is_active = TRUE
+        GROUP BY s.id, s.slug, s.name_fa, s.name_en
+        HAVING MAX(a.ingested_at) IS NULL
+            OR MAX(a.ingested_at) < NOW() - INTERVAL '1 day'
+        ORDER BY MAX(a.ingested_at) ASC NULLS FIRST
+        LIMIT 60
+    """))).all()
+
+    silent_24h: list[dict] = []
+    silent_7d: list[dict] = []
+    for slug, nfa, nen, last_art in silent_rows:
+        if last_art is None:
+            silent_7d.append({
+                "slug": slug, "name": nfa or nen,
+                "last_article": None, "days_silent": None,
+            })
+            continue
+        days = (now - last_art).total_seconds() / 86400.0
+        item = {
+            "slug": slug, "name": nfa or nen,
+            "last_article": last_art.isoformat(),
+            "days_silent": round(days, 1),
+        }
+        if days >= 7.0:
+            silent_7d.append(item)
+        else:
+            silent_24h.append(item)
+    active_sources_count = int((await db.execute(_t(
+        "SELECT COUNT(*) FROM sources WHERE is_active = TRUE"
+    ))).scalar() or 0)
+
+    # ── CANARIES ──────────────────────────────────────────────────────
+    def _canary(_id, name, value, threshold, status, why):
+        return {
+            "id": _id, "name": name, "value": value,
+            "threshold": threshold, "status": status, "why": why,
+        }
+
+    oversized = int(story_states["oversized"] or 0)
+    null_first_pub = int(story_states["null_first_pub"] or 0)
+    null_centroid = int(story_states["null_centroid"] or 0)
+    last_run_fails = last_run_summary["fail_count"] if last_run_summary else 0
+
+    canaries = [
+        _canary(
+            "oversized_stories", "Oversized stories",
+            oversized, "= 0",
+            "error" if oversized > 0 else "ok",
+            f"Stories with article_count >= max_cluster_size ({settings.max_cluster_size}) mean "
+            "clustering attached past the cap, recreating umbrella stories. The 2026-05-02 fix "
+            "added per-story capacity to step_recluster_orphans. Any > 0 = regression.",
+        ),
+        _canary(
+            "frozen_but_trending", "Frozen-but-trending stories",
+            frozen_but_trending, "= 0",
+            "error" if frozen_but_trending > 0 else "ok",
+            "Stories with frozen_at NOT NULL must never reach trending. If > 0, the homepage / "
+            "trending API filter is broken.",
+        ),
+        _canary(
+            "embedding_zero_rate_24h", "Embedding zero-rate (24h)",
+            f"{emb_zero_pct}%", "< 1%",
+            "error" if emb_zero_pct >= 10 else ("warn" if emb_zero_pct >= 1 else "ok"),
+            "Silent embedding failures cost 14 days of pipeline damage in April 2026. Wrappers "
+            "must return None on failure, never a zero vector.",
+        ),
+        _canary(
+            "embedding_null_rate_24h", "Embedding NULL-rate (24h)",
+            f"{emb_null_pct}%", "< 5%",
+            "error" if emb_null_pct >= 10 else ("warn" if emb_null_pct >= 5 else "ok"),
+            "Articles ingested in the last 24h with NULL embedding. step_process should fill these "
+            "on the next run; persistent NULLs mean the embedding API key or quota is broken.",
+        ),
+        _canary(
+            "clustering_halt", "Clustering halt (50+ articles, 0 stories in 24h)",
+            f"{articles_24h} articles → {new_stories_24h} new stories",
+            "either < 50 articles or > 0 new stories",
+            "error" if (articles_24h >= 50 and new_stories_24h == 0) else "ok",
+            "If articles flow in but no stories are created, clustering broke. Common causes: "
+            "zero embeddings (see canary above), threshold too high, all-matched-to-existing.",
+        ),
+        _canary(
+            "stuck_lock", "Stuck maintenance lock",
+            f"{round(lock_age_seconds, 0)}s" if lock_age_seconds is not None else "no active run",
+            "< 2h",
+            "error" if stuck_lock else "ok",
+            "Lock held >2h usually means a Railway redeploy SIGTERM-killed the run. Use "
+            "/admin/maintenance/force-release-lock to recover. Confirmed past incidents: PID 16 "
+            "(1h 20min lost), PID 532 (~5min lost).",
+        ),
+        _canary(
+            "cost_anomaly_today", "Today vs 7-day avg cost",
+            f"{round(today_vs_7d_pct, 1)}%", "< +50%",
+            "warn" if today_vs_7d_pct > 50 else "ok",
+            "Sudden cost spike vs recent average. Check by-purpose breakdown; the offender is "
+            "usually a per-story step that lost its homepage_eligible filter (see "
+            "project_homepage_scoping memory).",
+        ),
+        _canary(
+            "monthly_budget", "Monthly LLM projection vs $30 budget",
+            f"${round(monthly_projection, 2)}", "< $30",
+            "error" if monthly_projection > 30 else ("warn" if monthly_projection > 24 else "ok"),
+            "$30/mo hard cap set after April Neon $41 bill. If trending high, audit per-story "
+            "scoping in summarize / bias / دورنما / editorial / silences / telegram_deep — they "
+            "must all filter frozen_at + archived_at + article_count >= 5.",
+        ),
+        _canary(
+            "unpriced_calls_7d", "Unpriced LLM calls (7d)",
+            unpriced_7d, "= 0",
+            "warn" if unpriced_7d > 0 else "ok",
+            "Calls to models not in llm_pricing.py — cost shows $0.00 but real money was "
+            "spent. Add the model + token prices to llm_pricing.py to surface the real number.",
+        ),
+        _canary(
+            "ingest_silence", "Last article ingested",
+            f"{last_article_min_ago}m ago" if last_article_min_ago is not None else "never",
+            "< 6h during active hours",
+            "warn" if (last_article_min_ago is not None and last_article_min_ago > 360) else "ok",
+            "maintenance-cron runs at 03/09/15 UTC. Gaps >6h between runs are normal overnight; "
+            ">24h is a stuck pipeline.",
+        ),
+        _canary(
+            "telegram_session", "Telegram session status",
+            tg_session_status, "ok",
+            "error" if tg_session_status == "broken" else (
+                "warn" if tg_session_status in ("stale", "unknown") else "ok"
+            ),
+            "Telethon sessions expire occasionally. If 'broken', re-auth via Railway's phone-SMS "
+            "flow. NEVER run Telethon locally — that invalidates the prod session and forces "
+            "phone-SMS re-auth (see feedback_telegram_session_discipline memory).",
+        ),
+        _canary(
+            "rss_silent_7d", "RSS sources silent for 7+ days",
+            len(silent_7d), "= 0",
+            "warn" if len(silent_7d) > 0 else "ok",
+            "Source feeds may have moved, gone offline, or be geo-blocking Railway. Open "
+            "/dashboard/fetch-stats and either fix the URL or deactivate the source.",
+        ),
+        _canary(
+            "null_first_published", "Stories with NULL first_published_at",
+            null_first_pub, "low",
+            "warn" if null_first_pub > 50 else "ok",
+            "step_archive_stale backfills first_published_at from MIN(article.published_at) "
+            "before its freeze pass. Persistent high count = backfill skipped or articles missing "
+            "published_at.",
+        ),
+        _canary(
+            "null_centroid_multiarticle", "Multi-article stories with NULL centroid",
+            null_centroid, "= 0",
+            "warn" if null_centroid > 0 else "ok",
+            "Stories with article_count >= 2 should always have a centroid. NULL means "
+            "step_recompute_centroids skipped them — clustering will then fail to attach more "
+            "articles to that story.",
+        ),
+        _canary(
+            "maintenance_fails_last_run", "Maintenance step failures (last run)",
+            last_run_fails, "≤ prior runs (no regression)",
+            "warn" if last_run_fails > 0 else "ok",
+            "Per CLAUDE.md verification rule: a new run's fail count must be ≤ the prior run's. "
+            "Chronic failures (2026-04-28..29): cluster, telegram_link, telegram_reassign, "
+            "migrate_images_r2.",
+        ),
+        _canary(
+            "translation_stuck", "Articles translatable but un-translated",
+            translatable_now, "drains hourly",
+            "warn" if translatable_now > 200 else "ok",
+            "title_original is present but title_fa is NULL. step_translate should drain this. "
+            "Sustained high count = translation step throttled or LLM key missing.",
+        ),
+        _canary(
+            "trending_freshness", "Oldest trending story age (days)",
+            round(oldest_trending_age_days, 1), "< 7",
+            "error" if oldest_trending_age_days >= 7.0 else "ok",
+            "Per the freshness model, anything >7d should be frozen and excluded from trending. "
+            "If oldest_trending >= 7d, the freeze writes aren't persisting (see "
+            "feedback_stats_vs_persistence memory).",
+        ),
+    ]
+
+    alerts = [
+        {
+            "severity": c["status"],
+            "section": "canary",
+            "id": c["id"],
+            "title": c["name"],
+            "detail": f"{c['value']} (threshold: {c['threshold']})",
+        }
+        for c in canaries
+        if c["status"] in ("warn", "error")
+    ]
+    if any(a["severity"] == "error" for a in alerts):
+        overall_status = "error"
+    elif any(a["severity"] == "warn" for a in alerts):
+        overall_status = "warn"
+    else:
+        overall_status = "ok"
+
+    response = {
+        "generated_at": now.isoformat(),
+        "cache_ttl_seconds": _HEALTH_CACHE_TTL,
+        "overall_status": overall_status,
+        "alerts": alerts,
+        "cost": {
+            "today": {"cost": float(cost_today["cost"]), "calls": int(cost_today["calls"])},
+            "yesterday": {"cost": float(cost_yesterday["cost"]), "calls": int(cost_yesterday["calls"])},
+            "last_7d_total": round(cost_7d_total, 4),
+            "last_30d_total": round(cost_30d_total, 4),
+            "avg_per_day_30d": round(avg_per_day_30d, 4),
+            "avg_per_day_7d": round(avg_per_day_7d, 4),
+            "monthly_projection": round(monthly_projection, 2),
+            "monthly_budget": 30.0,
+            "today_vs_7d_avg_pct": round(today_vs_7d_pct, 1),
+            "by_purpose_7d": [
+                {"purpose": r["purpose"], "calls": int(r["calls"]), "cost": round(float(r["cost"]), 4)}
+                for r in by_purpose_7d
+            ],
+            "by_model_7d": [
+                {"model": r["model"], "calls": int(r["calls"]), "cost": round(float(r["cost"]), 4)}
+                for r in by_model_7d
+            ],
+            "by_provider_7d": [
+                {"provider": k, "cost": round(v, 4)}
+                for k, v in sorted(by_provider.items(), key=lambda x: -x[1])
+            ],
+            "unpriced_count_7d": unpriced_7d,
+            "hidden_costs": [
+                {"name": "Neon DB egress", "tracked": False, "where": "console.neon.tech",
+                 "note": "Largest non-LLM line. Watched after April 2026 $41 bill. Check monthly."},
+                {"name": "Railway compute (Hobby)", "tracked": False, "where": "railway.app dashboard",
+                 "note": "$5/mo flat. Sleep-when-idle reduces it. See reference_railway_cron memory."},
+                {"name": "Vercel bandwidth + builds", "tracked": False, "where": "vercel.com dashboard",
+                 "note": "Free tier 100 GB/mo. ISR regen counts as a serverless function invoke."},
+                {"name": "OpenAI embeddings (text-embedding-3-small)", "tracked": False,
+                 "where": "platform.openai.com/usage",
+                 "note": "NOT in llm_usage_logs (TODO: project_next_steps). Verify via OpenAI portal."},
+                {"name": "Cloudflare R2", "tracked": False, "where": "dash.cloudflare.com",
+                 "note": "Free tier 10 GB storage / 1M Class-A ops. Article images live here."},
+                {"name": "Cloudflare DNS / proxy", "tracked": False, "where": "dash.cloudflare.com",
+                 "note": "Free tier."},
+                {"name": "Domain (doornegar.org)", "tracked": False, "where": "registrar",
+                 "note": "Annual renewal cost. Set a calendar reminder."},
+                {"name": "Anthropic + OpenAI completions", "tracked": True, "where": "llm_usage_logs",
+                 "note": "Tracked in this dashboard."},
+            ],
+        },
+        "maintenance": {
+            "current_status": cur_status,
+            "current_step": current.get("current_step") if isinstance(current, dict) else None,
+            "started_at": started_raw if isinstance(started_raw, str) else (
+                started_raw.isoformat() if started_raw else None
+            ),
+            "lock_age_seconds": round(lock_age_seconds, 1) if lock_age_seconds is not None else None,
+            "stuck_lock": stuck_lock,
+            "last_run": last_run_summary,
+            "recent_runs": recent_runs,
+        },
+        "pipeline": {
+            "embedding": {
+                "null_pct_24h": emb_null_pct,
+                "zero_pct_24h": emb_zero_pct,
+                "total_24h": emb_total,
+                "alert_threshold_pct": 10,
+            },
+            "clustering": {
+                "articles_24h": articles_24h,
+                "new_stories_24h": new_stories_24h,
+                "halt_alert": (articles_24h >= 50 and new_stories_24h == 0),
+            },
+            "translation": {
+                "no_title_fa_total": no_title_fa,
+                "no_title_en_total": no_title_en,
+                "translatable_now": translatable_now,
+                "stuck_unrecoverable": max(0, no_title_fa - translatable_now),
+            },
+            "bias": {
+                "eligible": bias_eligible,
+                "scored": bias_scored,
+                "coverage_pct": bias_coverage_pct,
+            },
+        },
+        "data_integrity": {
+            "stories": {
+                "total": int(story_states["total"] or 0),
+                "active": int(story_states["active"] or 0),
+                "frozen": int(story_states["frozen"] or 0),
+                "archived": int(story_states["archived"] or 0),
+                "oversized": oversized,
+                "null_first_published": null_first_pub,
+                "null_centroid_multiarticle": null_centroid,
+            },
+            "articles": {
+                "total": total_arts,
+                "orphans": article_orphans,
+                "no_embedding": article_no_emb,
+                "no_title_fa": no_title_fa,
+                "no_title_en": no_title_en,
+            },
+            "frozen_but_trending": frozen_but_trending,
+            "max_cluster_size": settings.max_cluster_size,
+        },
+        "freshness": {
+            "trending_count": trending_count,
+            "oldest_trending_age_days": round(oldest_trending_age_days, 1),
+            "trending_under_7d_count": under_7d,
+            "trending_under_7d_pct": trending_under_7d_pct,
+            "last_article_minutes_ago": last_article_min_ago,
+        },
+        "external": {
+            "telegram": {
+                "active_channels": tg_active,
+                "session_status": tg_session_status,
+                "minutes_since_last_activity": tg_minutes_ago,
+                "last_fetch": tg_last_fetch.isoformat() if tg_last_fetch else None,
+                "last_post": tg_last_post.isoformat() if tg_last_post else None,
+            },
+            "rss": {
+                "active_sources": active_sources_count,
+                "silent_24h_count": len(silent_24h),
+                "silent_7d_count": len(silent_7d),
+                "silent_7d": silent_7d[:30],
+                "silent_24h": silent_24h[:30],
+            },
+        },
+        "canaries": canaries,
+    }
+
+    _health_cache["data"] = response
+    _health_cache["expires"] = now_ts + _HEALTH_CACHE_TTL
+    return response
