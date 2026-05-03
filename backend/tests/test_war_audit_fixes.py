@@ -726,6 +726,45 @@ class TestStoryAnalysisGpt5JsonMode:
         )
 
 
+class TestDoornamaGpt5TokenBudget:
+    """دورنما (the hero-card prose synthesis) uses gpt-5-mini per
+    settings.doornama_model. With the prior max_tokens=800 budget,
+    reasoning tokens consumed the entire allowance and the model
+    returned an empty completion every pass — the function logged
+    'doornama: empty completion' and returned None, so briefing_fa was
+    silently never populated for the hero card.
+
+    Bumped to 3000 for gpt-5 family. gpt-4 family kept at 800 since
+    those don't have reasoning tokens.
+    """
+
+    def test_doornama_bumps_max_tokens_for_gpt5(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "doornama.py"
+        ).read_text()
+
+        idx = src.find("def generate_doornama_briefing")
+        assert idx >= 0, "generate_doornama_briefing missing"
+        end = src.find("client.chat.completions.create", idx)
+        assert end >= 0
+        window = src[idx:end]
+        assert 'startswith("gpt-5")' in window or "startswith('gpt-5')" in window, (
+            "doornama must branch on doornama_model.startswith('gpt-5') "
+            "to bump max_tokens — the prior 800-token budget was eaten "
+            "by reasoning tokens, leaving zero room for the prose."
+        )
+        # Look for any number >= 2000 in the gpt-5 branch.
+        import re
+        nums = [int(m.group()) for m in re.finditer(r"\b\d{4}\b", window)]
+        assert any(n >= 2000 for n in nums), (
+            f"gpt-5 doornama branch must allocate >= 2000 max_tokens "
+            f"(found: {nums})."
+        )
+
+
 class TestEmbeddingNullCanaryEligibilityJoin:
     """The embedding_null_rate_24h canary must scope its denominator to
     articles the pipeline ACTUALLY tries to embed — content_type set AND

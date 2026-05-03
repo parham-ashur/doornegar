@@ -193,10 +193,18 @@ async def generate_doornama_briefing(
         from app.services.llm_usage import log_llm_usage
 
         client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
+        # gpt-5 family burns its max_completion_tokens budget on internal
+        # reasoning tokens before any visible output. With max_tokens=800
+        # the model returned empty completions on every hero-card pass
+        # (Parham 2026-05-03 evening: hero story briefing_fa was None for
+        # weeks; investigation showed the call ran but yielded zero
+        # visible characters). Bumping to 3000 leaves headroom for
+        # reasoning + the actual 4-8 sentence Persian paragraph.
+        is_gpt5 = (settings.doornama_model or "").startswith("gpt-5")
         params = build_openai_params(
             model=settings.doornama_model,
             prompt=prompt,
-            max_tokens=800,
+            max_tokens=3000 if is_gpt5 else 800,
         )
         response = await client.chat.completions.create(**params)
         text = (response.choices[0].message.content or "").strip()
