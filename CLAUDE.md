@@ -5,7 +5,9 @@
 Doornegar is a free, bilingual (Persian/English) media transparency platform for Iranian news — similar to Ground News but tailored for the Iranian media landscape. It aggregates articles from ~12 outlets (state, diaspora, independent), groups them by story, and reveals bias, framing differences, blind spots, and social media reactions using AI-assisted analysis and community validation.
 
 **Owner**: Parham (non-developer, relies on Claude for all technical implementation)
-**Stack**: Python 3.12 / FastAPI / SQLAlchemy 2 / Celery+Redis / PostgreSQL+pgvector / Next.js 14 / Tailwind CSS
+**Stack**: Python 3.12 / FastAPI / SQLAlchemy 2 / Celery+Redis / PostgreSQL (Neon) / Next.js 14 / Tailwind CSS
+
+Embeddings are stored as JSONB arrays, NOT pgvector. The pgvector extension is not installed on Neon for this project. See `reference_embedding_storage.md`.
 
 ## Directory Structure
 
@@ -34,7 +36,7 @@ doornegar/
 - **Bilingual fields**: Models use `title_fa` / `title_en`, `description_fa` / `description_en`
 - **UUID primary keys**: All models use UUID, not auto-increment integers
 - **JSONB for lists**: Keywords, framing labels, entities stored as PostgreSQL JSONB
-- **Embeddings**: 384-dim vectors from `paraphrase-multilingual-MiniLM-L12-v2`, stored in pgvector
+- **Embeddings**: 384-dim vectors from OpenAI `text-embedding-3-small` (with explicit dimension reduction from 1536 → 384), stored as JSONB. The `embedding_model` config setting points to a sentence-transformers name but it's vestigial — `app/nlp/embeddings.py` hardcodes the OpenAI call.
 - **Iranian media axes**: state_alignment (state/semi_state/independent/diaspora), irgc_affiliated, factional_alignment, production_location
 
 ## Running the Project
@@ -106,10 +108,35 @@ RSS Feeds → Ingest → NLP (normalize, embed, translate) → Cluster into Stor
 ## Important Notes for Claude
 
 - Parham is NOT a developer — provide simple instructions, explain what things do
-- Always run full pipeline after schema changes: `alembic revision --autogenerate && alembic upgrade head`
+- **Migrations**: commit alembic files to git BEFORE running `alembic upgrade head` against production. Workflow: edit model → `alembic revision --autogenerate` → review → `git add` + `git commit` → push → THEN `alembic upgrade head`. Production also self-heals via DDL in `app/main.py` lifespan, so most schema additions are idempotent on deploy.
 - Test RSS feeds before adding: some Iranian state sites geo-block or go offline
 - Persian text MUST be normalized before any comparison or storage
 - The project uses UTC timestamps; Jalali conversion is frontend/display only
+
+### Pipeline + cron (canonical, do not paraphrase as "daily")
+
+- **Only `FULL_PIPELINE` runs on a cron schedule**: `0 3,9,15 * * *` UTC (3× daily, 6h apart). Configured on Railway service `maintenance-cron`.
+- **`HOURLY_PIPELINE` was removed 2026-05-03**. `mode="hourly"` falls back to `INGEST_ONLY_PIPELINE` for safety. Any cron service still firing `mode=hourly` is leftover and must be disabled in the Railway dashboard. Detection: lock-holder names starting `hourly@` in `/admin/maintenance/force-release-lock` responses.
+- **`INGEST_ONLY_PIPELINE`** (12 steps) is for the dashboard "Run Now" path only — does NOT run on a cron.
+- Every push to `main` triggers Railway redeploy → SIGTERM-kills any in-progress maintenance run. **Never push during a maintenance run**; check `/admin/maintenance/status` first.
+
+### Single-source-of-truth rules
+
+- **Homepage scope**: every per-story LLM step calls `app.services.homepage_scope.homepage_story_ids(db)` BEFORE making LLM calls. Never inline a `homepage_eligible` predicate. The module mirrors trending + blindspot API filters exactly; drift is what caused April-May 2026 cost overruns.
+- **Frozen stays on the homepage**: `Story.frozen_at IS NULL` must NOT appear in `/api/v1/stories/trending` or `/api/v1/stories/blindspots` filter clauses. Freeze means "no new articles can join this cluster" — NOT "this story leaves the homepage." Tests in `tests/test_war_audit_fixes.py::TestFrozenStaysOnHomepage` block silent reverts.
+- **No silent fallbacks for external APIs**: embedding / LLM / scraping wrappers must return None on failure, never zero vectors / empty arrays / placeholder values. See `feedback_no_silent_fallbacks.md`.
+- **Sentinel-column trap**: any "did we already do this?" gate based on a sentinel column (`processed_at`, `analyzed_at`, etc.) MUST also check whether the work succeeded. Retry path: `(sentinel IS NULL) OR (sentinel IS NOT NULL AND output IS NULL AND ingested_at >= NOW() - 14d)`. See `feedback_processed_at_trap.md`.
+
+### Tests
+
+- Run: `cd backend && pytest tests/ -q` (full suite, ~1s, 107 tests as of 2026-05-03).
+- Critical regression suite is `backend/tests/test_war_audit_fixes.py` — 22 tests mapping 1:1 to the war-mode fixes. Each tripwires a specific bug class; if you add a new spend-gate or drift-fix, add a test here.
+
+### Monitoring
+
+- `/admin/health/overview` — single-stop "is anything broken?" with 20+ canaries. Cached 60s.
+- 3 cloud routines on claude.ai/code/routines auto-recover ghost locks + report regressions + send morning briefing.
+- `force-release-lock` endpoint clears both `maintenance_lock` AND `maintenance_run_status` so the dashboard reflects reality.
 
 ## Mobile Stories Experience
 
