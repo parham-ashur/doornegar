@@ -3285,25 +3285,34 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
         """
     ))).scalar() or 0)
 
-    # Breakdown of NULL-embedding articles — disambiguates the three
+    # Breakdown of NULL-embedding articles — disambiguates the four
     # distinct stuck-modes so the operator can tell at a glance whether
-    # the bottleneck is classification, content filtering, or the
-    # processed_at trap.
+    # the bottleneck is classification, content filtering (legit), the
+    # NLP pipeline missing eligible rows (bug), or the processed_at trap.
     no_emb_breakdown = (await db.execute(_t(
         """
         SELECT
-          COUNT(*) FILTER (WHERE content_type IS NULL) AS unclassified,
+          COUNT(*) FILTER (WHERE a.content_type IS NULL) AS unclassified,
           COUNT(*) FILTER (
-            WHERE content_type IS NOT NULL
-              AND processed_at IS NULL
-          ) AS classified_unprocessed,
+            WHERE a.content_type IS NOT NULL
+              AND a.processed_at IS NULL
+              AND NOT (
+                (s.content_filters -> 'allowed') @> to_jsonb(a.content_type)
+              )
+          ) AS filtered_by_source_allowed_list,
           COUNT(*) FILTER (
-            WHERE content_type IS NOT NULL
-              AND processed_at IS NOT NULL
+            WHERE a.content_type IS NOT NULL
+              AND a.processed_at IS NULL
+              AND (s.content_filters -> 'allowed') @> to_jsonb(a.content_type)
+          ) AS eligible_unprocessed_BUG,
+          COUNT(*) FILTER (
+            WHERE a.content_type IS NOT NULL
+              AND a.processed_at IS NOT NULL
           ) AS processed_no_embedding,
           COUNT(*) AS total
-        FROM articles
-        WHERE embedding IS NULL
+        FROM articles a
+        JOIN sources s ON s.id = a.source_id
+        WHERE a.embedding IS NULL
         """
     ))).mappings().one()
 
@@ -3691,7 +3700,8 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
                 "no_embedding": article_no_emb,
                 "no_embedding_breakdown": {
                     "unclassified": int(no_emb_breakdown["unclassified"] or 0),
-                    "classified_unprocessed": int(no_emb_breakdown["classified_unprocessed"] or 0),
+                    "filtered_by_source_allowed_list": int(no_emb_breakdown["filtered_by_source_allowed_list"] or 0),
+                    "eligible_unprocessed_BUG": int(no_emb_breakdown["eligible_unprocessed_BUG"] or 0),
                     "processed_no_embedding": int(no_emb_breakdown["processed_no_embedding"] or 0),
                 },
                 "stuck_null_emb_14d": article_stuck_null_emb,
