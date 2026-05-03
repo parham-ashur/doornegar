@@ -535,15 +535,38 @@ async def step_classify_content_type():
     aggregation / other before it reaches NLP. Only labels in each
     source's allowed-list (default ``["news"]``) get processed
     downstream — the rest of the row is preserved for audit.
+
+    Drain loop (Parham 2026-05-03): the prior single-batch invocation
+    capped at 400/run with a newest-first sort. If a previous run
+    failed to classify a few hundred rows, those rows would starve at
+    the back of the queue forever (newer articles always cut in front),
+    leaving NLP to permanently skip them. Now we loop until the batch
+    comes back smaller than batch_size — same pattern as step_process.
     """
     from app.database import async_session
     from app.services.content_type import classify_unclassified_articles
 
+    BATCH = 400
+    MAX_ITERS = 5  # cap at 2000 articles per maintenance run
+    total = {"total": 0, "by_label": {}, "llm_called": 0, "llm_returned": 0, "unresolved": 0}
     async with async_session() as db:
-        stats = await classify_unclassified_articles(db, batch_size=400)
+        for _ in range(MAX_ITERS):
+            stats = await classify_unclassified_articles(db, batch_size=BATCH)
+            n = stats.get("total", 0)
+            total["total"] += n
+            total["llm_called"] += stats.get("llm_called", 0)
+            total["llm_returned"] += stats.get("llm_returned", 0)
+            total["unresolved"] += stats.get("unresolved", 0)
+            for k, v in (stats.get("by_label") or {}).items():
+                total["by_label"][k] = total["by_label"].get(k, 0) + v
+            # Stop when the queue ran dry, or when this batch made no
+            # progress (everything unresolved — same items would come
+            # back next iteration; let the next maintenance run retry).
+            if n < BATCH or stats.get("unresolved", 0) == n:
+                break
 
-    logger.info(f"Content-type classifier: {stats}")
-    return stats
+    logger.info(f"Content-type classifier (drained): {total}")
+    return total
 
 
 async def step_process():
@@ -3604,28 +3627,28 @@ async def step_prune_stagnant():
 
 
 async def step_demote_umbrella_stories():
-    """Auto-demote stories that grew into umbrellas.
+    """Auto-demote frozen stories so fresh ones outrank them on the homepage.
 
-    Pattern: first_published_at >7d ago AND article_count >= 10 (i.e.
-    a story past its narrative shelf life that's still big enough to
-    crowd the homepage). Most of these will already be frozen by
-    step_archive_stale's date-based freeze; this step is a
-    belt-and-suspenders demote so they drop off trending immediately
-    (priority=-50) without waiting for the homepage's frozen_at
-    filter to take effect.
+    Semantic shift (Parham 2026-05-03): freeze means "no new articles
+    can join this cluster" — NOT "this story leaves the homepage."
+    Frozen stories stay eligible (the trending API no longer filters
+    `frozen_at IS NULL`); this step just sinks them in the sort order
+    so a fresher active story always wins the slot when one exists.
 
-    Thresholds tightened 2026-05-02 evening (re-tightened from the
-    morning's 14d/>=15 to 7d/>=10) to align with the new freeze-by-
-    creation rule. With the 7d freeze + frozen_at filter on trending,
-    most stories never reach this step's threshold because they get
-    frozen first; this step's purpose is to catch stragglers that
-    crossed the 7d line between maintenance runs.
+    Mechanism: priority=-50 puts frozen stories behind any priority=0
+    active story under the homepage's `priority DESC, trending_score
+    DESC` sort. Result:
+      • If 12 fresh active stories exist, the homepage shows them all
+        and frozen stories never appear.
+      • If only 3 fresh stories exist, slots 4-12 fill from the most
+        recently-frozen (highest residual trending_score) — homepage
+        never goes bare.
+      • Archive at 30d (separate step) is still the death.
 
-    Action: set priority = -50 so trending sorts them last (homepage
-    will rarely run out of younger stories to fill the slots).
-
-    The 30d archive step still handles eventual removal — demote is
-    just the homepage-visibility gate; archived_at is the death.
+    Coupling demote to freeze (rather than the prior age threshold)
+    means the demote rule is exactly as conservative as the freeze
+    rule: any story whose chapter has closed gets sunk, none that's
+    still actively narrating do.
     """
     from sqlalchemy import select, update
     from app.database import async_session
@@ -3633,15 +3656,13 @@ async def step_demote_umbrella_stories():
     from app.services.events import log_event as _log_event
 
     stats = {"checked": 0, "demoted": 0}
-    cutoff = datetime.now(timezone.utc) - timedelta(days=7)
 
     async with async_session() as db:
         rows = (await db.execute(
             select(Story).where(
-                Story.first_published_at < cutoff,
-                Story.article_count >= 10,
-                Story.priority > -10,
-                Story.archived_at.is_(None),
+                Story.frozen_at.isnot(None),
+                Story.priority > -10,        # not already demoted/hidden
+                Story.archived_at.is_(None),  # archived has its own removal
             )
         )).scalars().all()
         stats["checked"] = len(rows)
@@ -3656,15 +3677,16 @@ async def step_demote_umbrella_stories():
                 story_id=s.id,
                 signals={
                     "article_count": int(s.article_count or 0),
+                    "frozen_at": s.frozen_at.isoformat() if s.frozen_at else None,
                     "first_published_at": s.first_published_at.isoformat() if s.first_published_at else None,
                     "title_fa": (s.title_fa or "")[:120],
                 },
             )
             stats["demoted"] += 1
-            logger.info(f"  Umbrella demote: {s.title_fa[:60] if s.title_fa else s.id} ({s.article_count} articles)")
+            logger.info(f"  Frozen demote: {s.title_fa[:60] if s.title_fa else s.id} ({s.article_count} articles)")
         await db.commit()
     if stats["demoted"]:
-        logger.info(f"Umbrella demote: {stats}")
+        logger.info(f"Frozen demote: {stats}")
     return stats
 
 
@@ -3911,8 +3933,23 @@ async def step_recalculate_trending():
         now_utc = datetime.now(timezone.utc)
         for story in result.scalars().all():
             old_score = story.trending_score
-            anchor = story.last_updated_at or story.first_published_at
+            # Anchor selection (Parham 2026-05-03): for frozen stories
+            # the decay clock starts at `frozen_at`, not the prior
+            # `last_updated_at OR first_published_at` fallback. Without
+            # this, a 75d-old frozen umbrella whose last_updated_at
+            # happened yesterday (because step_recluster_orphans or any
+            # other touch bumped it) keeps a giant trending_score and
+            # outranks newly-frozen sibling stories on the homepage.
+            # With frozen_at as the anchor, a story's homepage shelf
+            # life is bounded by the freeze date — exactly what the
+            # "freeze closes the chapter" rule means.
+            if story.frozen_at:
+                anchor = story.frozen_at
+            else:
+                anchor = story.last_updated_at or story.first_published_at
             if anchor:
+                if anchor.tzinfo is None:
+                    anchor = anchor.replace(tzinfo=timezone.utc)
                 days_ago = (now_utc - anchor).total_seconds() / 86400.0
                 recency = 0.85 ** max(0.0, days_ago)
                 # Floor so a 30+ day story without an anchor doesn't

@@ -49,6 +49,14 @@ async def homepage_story_ids(
     Always returns a set — empty set is a valid answer (means: do not
     spend on any story this run).
     """
+    # Frozen-state semantics (Parham 2026-05-03): freeze means "no new
+    # articles can join this cluster" — NOT "this story leaves the
+    # homepage." Frozen stories remain eligible; the demote step sets
+    # them to priority=-50 on freeze so they sink behind fresher work
+    # via the priority DESC sort below. Result: frozen stories only
+    # show when nothing fresher is available, which prevents the
+    # homepage going bare on a quiet day. archived_at still excludes
+    # — a 30d-archived story is intentionally retired.
     trending_q = (
         select(Story.id)
         .where(
@@ -56,7 +64,6 @@ async def homepage_story_ids(
             Story.trending_score > TRENDING_MIN_SCORE,
             Story.is_blindspot.is_(False),
             Story.archived_at.is_(None),
-            Story.frozen_at.is_(None),
         )
         .order_by(Story.priority.desc(), Story.trending_score.desc())
         .limit(trending_top_n)
@@ -70,7 +77,6 @@ async def homepage_story_ids(
             Story.is_blindspot.is_(True),
             Story.article_count >= BLINDSPOT_MIN_ARTICLES,
             Story.archived_at.is_(None),
-            Story.frozen_at.is_(None),
             Story.last_updated_at >= cutoff,
         )
         .order_by(Story.first_published_at.desc().nullslast())
@@ -92,9 +98,12 @@ def homepage_eligible_filters():
     Always combine with an order-by `priority DESC, trending_score DESC`
     and a hard limit so you don't accidentally fan out to the whole
     eligible pool.
+
+    `frozen_at` is intentionally not filtered here (Parham 2026-05-03):
+    frozen stories remain on the homepage until something fresher
+    takes their slot.
     """
     return (
         Story.archived_at.is_(None),
-        Story.frozen_at.is_(None),
-        Story.priority > -10,  # excludes -50 demoted + -100 hidden
+        Story.priority > -100,  # excludes -100 hidden; -50 demoted still allowed but sorts last
     )

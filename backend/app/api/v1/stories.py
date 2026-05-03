@@ -148,12 +148,14 @@ async def trending_stories(
             Story.is_blindspot.is_(False),
             # F3 — archived stories are dead content; never show in trending.
             Story.archived_at.is_(None),
-            # 7d freeze-by-creation rule (Parham 2026-05-02): frozen
-            # stories represent closed narrative chapters; new articles
-            # in the same topic seed a fresh cluster. Keeping them off
-            # trending prevents the homepage from cycling 18-25 day-old
-            # umbrellas as "fresh" content.
-            Story.frozen_at.is_(None),
+            # Frozen-state semantics (Parham 2026-05-03): freeze means
+            # "no new articles can join this cluster" — NOT "this story
+            # leaves the homepage." Frozen stories stay eligible; they
+            # naturally sink behind fresher work via the demote step
+            # (which sets priority=-50 on freeze) plus the priority DESC
+            # sort below. So a frozen story only appears on the
+            # homepage when nothing fresher is available — which is the
+            # whole point: don't go bare just because today was quiet.
         )
         .order_by(Story.priority.desc(), Story.trending_score.desc())
         .limit(fetch_limit)
@@ -210,10 +212,13 @@ async def blindspot_stories(
             Story.is_blindspot.is_(True),
             Story.article_count >= min_articles,
             Story.archived_at.is_(None),
-            # 7d freeze rule — same as trending. A blindspot from a
-            # frozen story is by definition not a "this week" gap; it
-            # was a one-sided coverage moment from a closed chapter.
-            Story.frozen_at.is_(None),
+            # Frozen-state semantics (Parham 2026-05-03): freeze just
+            # closes the cluster to new articles; it doesn't pull the
+            # blindspot itself off the page. Blindspots from a closed
+            # chapter remain valid evidence of one-sided coverage
+            # during that chapter's lifetime; they sink naturally via
+            # the demote step + the strict 14d last_updated_at window
+            # below.
         )
         .order_by(Story.first_published_at.desc().nullslast())
         .limit(limit)
