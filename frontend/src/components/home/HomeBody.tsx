@@ -409,7 +409,9 @@ export default async function HomeBody({
   const DISPUTE_MAX_AGE_MS = 14 * 86400 * 1000;    // 14d — disputed slot
   const BRIEFING_MAX_AGE_MS = 14 * 86400 * 1000;   // 14d — weekly briefing
   const POPULAR_MAX_AGE_MS = 14 * 86400 * 1000;    // 14d — pop-score
-  const HARD_MAX_AGE_MS = 30 * 86400 * 1000;       // 30d — never surface
+  // HARD_MAX_AGE_MS removed 2026-05-03: was the silent filter that
+  // dropped frozen homepage stories. Per-slot windows below are the
+  // editorial intent; backend archived_at is the death.
   const FRESH_WINDOW_MS = 24 * 60 * 60 * 1000;     // legacy "fresh" signal kept for has_update gating
   const nowMs = Date.now();
   const ageMs = (s: StoryBrief): number => {
@@ -422,12 +424,14 @@ export default async function HomeBody({
   const withinAge = (limit: number) => (s: StoryBrief): boolean => ageMs(s) < limit;
   const hasUpdate = (s: StoryBrief): boolean => !!s.update_signal?.has_update;
 
-  // Drop anything older than HARD_MAX_AGE_MS from every list before
-  // we even start picking. Backend already excludes archived stories,
-  // but the API may still serve a 25-day-old story that hasn't been
-  // archived yet — this is the frontend safety net.
-  stories = stories.filter(withinAge(HARD_MAX_AGE_MS));
-  blindspots = blindspots.filter(withinAge(HARD_MAX_AGE_MS));
+  // Frontend age policy (Parham 2026-05-03): the prior unconditional
+  // HARD_MAX_AGE_MS=30d filter silently dropped frozen stories that
+  // the backend now intentionally serves on the homepage (frozen-stays-
+  // visible rule). Trust the backend ordering — archived_at and the
+  // demote-on-freeze sort already keep stale content from dominating.
+  // Hero/blindspot/disputed/popular/briefing slots STILL apply their
+  // tighter per-slot windows below; this just removes the global gate
+  // that was hiding the rotation tail.
 
   // Blind spots: prefer fresh + has_update (badge explains why it still
   // deserves the slot), then fresh without update (new blindspot), then

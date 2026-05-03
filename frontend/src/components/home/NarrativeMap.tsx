@@ -247,7 +247,10 @@ export default function NarrativeMap({ stories, prefetchedPositions }: { stories
           return nudgedDots.map((d) => (
             <div
               key={d.article_id}
-              className="absolute transition-all duration-500 z-10"
+              role="button"
+              tabIndex={0}
+              aria-label={d.title_fa ? `${d.source_name_fa || d.source_slug || "?"}: ${d.title_fa}` : (d.source_name_fa || d.source_slug || "نقطه")}
+              className="absolute transition-all duration-500 z-10 focus:outline focus:outline-2 focus:outline-blue-500"
               style={{
                 left: `${d.x}%`,
                 top: `${d.y}%`,
@@ -256,6 +259,18 @@ export default function NarrativeMap({ stories, prefetchedPositions }: { stories
               onMouseEnter={() => { if (d.title_fa) setHoveredDot(d.article_id); }}
               onMouseLeave={() => { if (clickedDot !== d.article_id) setHoveredDot(null); }}
               onClick={(e) => { e.stopPropagation(); setClickedDot(clickedDot === d.article_id ? null : d.article_id); }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setClickedDot(clickedDot === d.article_id ? null : d.article_id);
+                } else if (e.key === "Escape") {
+                  setClickedDot(null);
+                  setHoveredDot(null);
+                }
+              }}
+              onFocus={() => { if (d.title_fa) setHoveredDot(d.article_id); }}
+              onBlur={() => { if (clickedDot !== d.article_id) setHoveredDot(null); }}
             >
               {d.source_logo_url ? (
                 <div className={`w-6 h-6 rounded-full overflow-hidden bg-white dark:bg-slate-800 border ${borderColor[d.color]} shadow-sm hover:scale-150 transition-transform cursor-pointer`}>
