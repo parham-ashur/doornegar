@@ -2041,6 +2041,42 @@ async def seed_story_manually(
     first_pub = min(pub_dates) if pub_dates else None
     title_en = (request.title_en or request.title_fa).strip()
 
+    # Compute coverage flags + blindspot status the same way clustering
+    # does (Parham 2026-05-03): without these, seeded stories default
+    # to is_blindspot=False even when 100% one-sided. The homepage
+    # blindspot section then misses them; the hero/popular/dispute
+    # picker rejects them too (requires state_pct>=5 AND diaspora_pct>=5).
+    # By computing properly, one-sided seeded stories surface in the
+    # blindspot section (their natural slot) and multi-sided ones go
+    # to the regular picker.
+    from app.services.narrative_groups import (
+        narrative_group as _ng_seed,
+        side_of as _side_of_seed,
+    )
+    from app.services.clustering import _compute_blindspot as _bs
+
+    state_count = 0
+    diaspora_count = 0
+    for a in arts:
+        if not a.source:
+            continue
+        try:
+            grp = _ng_seed(a.source)
+        except Exception:
+            continue
+        if _side_of_seed(grp) == "inside":
+            state_count += 1
+        else:
+            diaspora_count += 1
+    covered_by_state = state_count > 0
+    covered_by_diaspora = diaspora_count > 0
+    is_blindspot, blindspot_type = _bs(
+        state_count=state_count,
+        diaspora_count=diaspora_count,
+        covered_by_state=covered_by_state,
+        covered_by_diaspora=covered_by_diaspora,
+    )
+
     new_story = _Sty(
         title_fa=request.title_fa.strip(),
         title_en=title_en,
@@ -2055,6 +2091,10 @@ async def seed_story_manually(
         priority=0,
         is_edited=True,  # protect from pipeline overwrite
         centroid_embedding=centroid,
+        covered_by_state=covered_by_state,
+        covered_by_diaspora=covered_by_diaspora,
+        is_blindspot=is_blindspot,
+        blindspot_type=blindspot_type,
     )
     db.add(new_story)
     await db.flush()  # so new_story.id is assigned
@@ -2089,6 +2129,20 @@ async def seed_story_manually(
             "source_count": new_story.source_count,
             "is_edited": True,
             "had_centroid": centroid is not None,
+            "covered_by_state": covered_by_state,
+            "covered_by_diaspora": covered_by_diaspora,
+            "is_blindspot": is_blindspot,
+            "blindspot_type": blindspot_type,
+            "_hint": (
+                "Story is one-sided — it'll surface in the homepage's "
+                "blindspot section, not the multi-sided trending picker. "
+                "To get into the hero/dispute/popular slots, the story "
+                "needs at least 5%/5% state/diaspora coverage."
+                if is_blindspot else
+                "Story has multi-sided coverage — eligible for hero/dispute/"
+                "popular homepage slots once bias_explanation_fa is computed "
+                "(next FULL run at 03/09/15 UTC, or trigger via /admin/bias/trigger)."
+            ),
         },
         "moved_from_other_stories": [
             {"article_id": str(aid), "previous_story_id": str(sid)}
