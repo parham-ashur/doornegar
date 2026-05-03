@@ -94,7 +94,15 @@ STEP_TIMEOUTS_SEC = {
 # 10h+ run with connection-drop and FK errors). Self-heals via a stale
 # threshold so a crashed holder can't lock the system out forever.
 LOCK_KEY_INT = 7263482917      # arbitrary unique key for this lock row
-LOCK_STALE_SEC = 4 * 3600      # 4 hours — any older than this and we override
+# Stale-lock threshold (Parham 2026-05-03): tightened from 4h → 1h.
+# A run that holds the lock past 1h is almost certainly dead — the
+# slowest historical FULL_PIPELINE ran for ~102 min total, but the
+# longest individual phase that actually progressed was 24 min
+# (ingest). 1h is enough headroom that a legitimate slow run won't
+# get force-overridden, but tight enough that a SIGTERM'd worker's
+# ghost lock self-clears within an hour instead of blocking the next
+# scheduled run for half a day.
+LOCK_STALE_SEC = 1 * 3600      # 1 hour
 
 
 async def _try_acquire_lock_async(label: str) -> bool:

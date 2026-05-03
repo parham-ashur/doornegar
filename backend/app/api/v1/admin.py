@@ -1137,11 +1137,20 @@ async def force_release_maintenance_lock(db: AsyncSession = Depends(get_db)):
     await db.execute(_sa_text(
         "DELETE FROM maintenance_lock WHERE id = 7263482917"
     ))
+    # Also clear the run_status row so /admin/maintenance/status stops
+    # reporting "running" for a worker that's gone (Parham 2026-05-03):
+    # otherwise the dashboard shows a stale "running" until the next
+    # legitimate run overwrites the row, confusing operators.
+    await db.execute(_sa_text(
+        "UPDATE maintenance_run_status SET state = '{\"status\": \"idle\"}'::jsonb, "
+        "updated_at = NOW() WHERE id = 1"
+    ))
     await db.commit()
     return {
         "released": True,
         "prior_holder": prior.label if prior else None,
         "prior_acquired_at": prior.acquired_at.isoformat() if (prior and prior.acquired_at) else None,
+        "status_reset": True,
     }
 
 
@@ -3156,6 +3165,7 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
 
     lock_age_seconds: float | None = None
     stuck_lock = False
+    ghost_lock = False
     if cur_status == "running" and started_raw:
         try:
             if isinstance(started_raw, str):
@@ -3165,7 +3175,30 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=timezone.utc)
             lock_age_seconds = (now - dt).total_seconds()
-            stuck_lock = lock_age_seconds > 7200
+            # Tightened 2026-05-03 (Parham): 2h → 30min. Operator should
+            # see stuck-lock signals before they block the next cron.
+            # The 1h LOCK_STALE_SEC override in auto_maintenance.py still
+            # auto-clears truly dead locks; this canary just surfaces them.
+            stuck_lock = lock_age_seconds > 1800
+            # Ghost-lock detector (Parham 2026-05-03): a "running" status
+            # whose worker stopped emitting heartbeats. Distinguished from
+            # a healthy long-running step by having NO updated_at on the
+            # run_status row in the recent past. The dashboard's Run Now
+            # path bumps updated_at every step transition; if the row has
+            # been stale for >5 min, no live process is updating it.
+            updated_raw = current.get("updated_at")
+            if updated_raw and lock_age_seconds > 300:
+                try:
+                    if isinstance(updated_raw, str):
+                        u_dt = datetime.fromisoformat(updated_raw.replace("Z", "+00:00"))
+                    else:
+                        u_dt = updated_raw
+                    if u_dt.tzinfo is None:
+                        u_dt = u_dt.replace(tzinfo=timezone.utc)
+                    if (now - u_dt).total_seconds() > 300:
+                        ghost_lock = True
+                except Exception:
+                    pass
         except Exception as e:
             logger.warning("health/overview: failed to parse started_at %r: %s", started_raw, e)
 
@@ -3538,11 +3571,23 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
         _canary(
             "stuck_lock", "Stuck maintenance lock",
             f"{round(lock_age_seconds, 0)}s" if lock_age_seconds is not None else "no active run",
-            "< 2h",
+            "< 30min",
             "error" if stuck_lock else "ok",
-            "Lock held >2h usually means a Railway redeploy SIGTERM-killed the run. Use "
-            "/admin/maintenance/force-release-lock to recover. Confirmed past incidents: PID 16 "
-            "(1h 20min lost), PID 532 (~5min lost).",
+            "Lock held >30min usually means a Railway redeploy SIGTERM-killed the run. The "
+            "1h LOCK_STALE_SEC override auto-releases at 1h, but operators should investigate "
+            "sooner. Use /admin/maintenance/force-release-lock to recover. Confirmed past "
+            "incidents: PID 16 (1h 20min lost), PID 532 (~5min lost).",
+        ),
+        _canary(
+            "ghost_lock", "Ghost lock — running status, no heartbeat",
+            "yes" if ghost_lock else "no",
+            "= no",
+            "error" if ghost_lock else "ok",
+            "Lock is held + status='running' + the run_status row hasn't been updated in 5+ "
+            "minutes — the worker died but no one cleared the lock. This is the pattern that "
+            "blocked the 09:00 UTC cron on 2026-05-03 ('hourly@07:47:48' from a leftover "
+            "Railway service). Auto-clears via LOCK_STALE_SEC at 1h, or release manually via "
+            "POST /admin/maintenance/force-release-lock.",
         ),
         _canary(
             "cost_anomaly_today", "Today vs 7-day avg cost",
@@ -3707,6 +3752,7 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
             ),
             "lock_age_seconds": round(lock_age_seconds, 1) if lock_age_seconds is not None else None,
             "stuck_lock": stuck_lock,
+            "ghost_lock": ghost_lock,
             "last_run": last_run_summary,
             "recent_runs": recent_runs,
         },
