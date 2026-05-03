@@ -502,7 +502,6 @@ async def generate_story_analysis(
     prompt = STORY_ANALYSIS_PROMPT.format(articles_block=articles_block)
     if include_analyst_factors:
         prompt += ANALYST_FACTORS_ADDENDUM
-    max_tokens = 6144 if include_analyst_factors else 4096
 
     try:
         from app.services.llm_helper import build_openai_params
@@ -510,12 +509,28 @@ async def generate_story_analysis(
 
         client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
         chosen_model = model or settings.story_analysis_model
+
+        # gpt-5 family burns its max_completion_tokens budget on internal
+        # reasoning tokens before the visible JSON output. With the prior
+        # 4096/6144 caps, ~90% of premium-tier story_analysis calls
+        # truncated mid-JSON and the parser raised "Failed to parse LLM
+        # response as JSON" (Parham 2026-05-03 evening: 9/10 failures on
+        # force-resummarize, including the top homepage card). Doubling
+        # the cap leaves enough headroom for reasoning + the actual JSON.
+        is_gpt5 = chosen_model.startswith("gpt-5")
+        max_tokens = (12288 if include_analyst_factors else 8192) if is_gpt5 \
+            else (6144 if include_analyst_factors else 4096)
         params = build_openai_params(
             model=chosen_model,
             prompt=prompt,
             max_tokens=max_tokens,
             temperature=0.3,
         )
+        # Force JSON mode — same pattern as telegram_analysis pass-0.
+        # The prompt already requests JSON output, but without this the
+        # model occasionally wraps in markdown fences without the ```json
+        # marker the parser expects, or emits a leading commentary line.
+        params["response_format"] = {"type": "json_object"}
         response = await client.chat.completions.create(**params)
         # Tier tag: premium vs baseline so the dashboard can show which
         # tier drove the spend without us re-parsing the model name.

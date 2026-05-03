@@ -652,6 +652,80 @@ class TestSummarizeBiasOrderByPriority:
         )
 
 
+class TestStoryAnalysisGpt5JsonMode:
+    """Premium-tier story_analysis (gpt-5-mini by default) was failing to
+    return parseable JSON ~90% of the time on 2026-05-03 because:
+      1. max_completion_tokens=4096 was too tight for gpt-5's reasoning
+         tokens — JSON truncated mid-stream.
+      2. response_format=json_object was not set, so the model
+         occasionally added commentary or wrapped in markdown without
+         the ```json marker the parser expects.
+
+    The fix:
+      - Double max_tokens for gpt-5 family calls.
+      - Set response_format=json_object (mirrors telegram_analysis
+        pass-0 pattern, which has been reliable for months)."""
+
+    def test_story_analysis_sets_json_response_format(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "story_analysis.py"
+        ).read_text()
+
+        # Scope to generate_story_analysis (Pass-2, the gpt-5-mini path).
+        # Pass-1 fact extraction uses gpt-4.1-nano which doesn't have the
+        # reasoning-token-truncation problem.
+        gen_idx = src.find("async def generate_story_analysis")
+        assert gen_idx >= 0, "generate_story_analysis function missing"
+        # Find the create call inside this function.
+        create_idx = src.find(
+            "client.chat.completions.create(**params)", gen_idx
+        )
+        assert create_idx >= 0, (
+            "generate_story_analysis must call openai chat.completions.create"
+        )
+        # Walk back ~2KB and confirm response_format=json_object is set
+        # within the function body, before the create call.
+        window = src[gen_idx : create_idx]
+        assert 'response_format' in window and 'json_object' in window, (
+            "generate_story_analysis must set params['response_format'] = "
+            "{'type': 'json_object'} before the chat.completions.create "
+            "call. Without it, gpt-5 family produces unparseable output "
+            "~90% of the time and force-resummarize fails silently. See "
+            "telegram_analysis.py:195 for the working pattern."
+        )
+
+    def test_story_analysis_doubles_token_budget_for_gpt5(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "story_analysis.py"
+        ).read_text()
+
+        # The is_gpt5 branch must yield a max_tokens at least 8000 so
+        # reasoning + JSON output both fit. The 8192 / 12288 numbers are
+        # the current values; the floor is what matters.
+        idx = src.find('chosen_model.startswith("gpt-5")')
+        assert idx >= 0, (
+            "story_analysis must branch on chosen_model.startswith('gpt-5') "
+            "to bump max_tokens — gpt-5's reasoning tokens consume the "
+            "completion budget before JSON output starts."
+        )
+        # Verify the bumped values are present.
+        window = src[idx : idx + 600]
+        # Look for any number >= 8000 in the gpt-5 branch.
+        import re
+        nums = [int(m.group()) for m in re.finditer(r"\b\d{4,5}\b", window)]
+        assert any(n >= 8000 for n in nums), (
+            "gpt-5 branch must allocate >= 8000 max_completion_tokens "
+            "(found numbers: {nums}). Reasoning tokens consume most of "
+            "a 4096 budget before JSON output begins."
+        )
+
+
 class TestEmbeddingNullCanaryEligibilityJoin:
     """The embedding_null_rate_24h canary must scope its denominator to
     articles the pipeline ACTUALLY tries to embed — content_type set AND
