@@ -3285,6 +3285,28 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
         """
     ))).scalar() or 0)
 
+    # Breakdown of NULL-embedding articles — disambiguates the three
+    # distinct stuck-modes so the operator can tell at a glance whether
+    # the bottleneck is classification, content filtering, or the
+    # processed_at trap.
+    no_emb_breakdown = (await db.execute(_t(
+        """
+        SELECT
+          COUNT(*) FILTER (WHERE content_type IS NULL) AS unclassified,
+          COUNT(*) FILTER (
+            WHERE content_type IS NOT NULL
+              AND processed_at IS NULL
+          ) AS classified_unprocessed,
+          COUNT(*) FILTER (
+            WHERE content_type IS NOT NULL
+              AND processed_at IS NOT NULL
+          ) AS processed_no_embedding,
+          COUNT(*) AS total
+        FROM articles
+        WHERE embedding IS NULL
+        """
+    ))).mappings().one()
+
     # Catches the 2026-05-02 regression: step_recluster_orphans bumped
     # last_updated_at on frozen stories. With the fix in place, frozen
     # stories should never have last_updated_at within the last hour.
@@ -3667,6 +3689,11 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
                 "total": total_arts,
                 "orphans": article_orphans,
                 "no_embedding": article_no_emb,
+                "no_embedding_breakdown": {
+                    "unclassified": int(no_emb_breakdown["unclassified"] or 0),
+                    "classified_unprocessed": int(no_emb_breakdown["classified_unprocessed"] or 0),
+                    "processed_no_embedding": int(no_emb_breakdown["processed_no_embedding"] or 0),
+                },
                 "stuck_null_emb_14d": article_stuck_null_emb,
                 "no_title_fa": no_title_fa,
                 "no_title_en": no_title_en,
