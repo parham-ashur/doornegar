@@ -573,6 +573,85 @@ class TestManualStorySeed:
         )
 
 
+class TestSummarizeBiasOrderByPriority:
+    """The 2026-05-03 evening regression: step_summarize and
+    score_unscored_articles BOTH selected candidates ordered only by
+    trending_score. Demoted umbrella stories (priority=-50, thousands of
+    articles, trending_score in the 1000s) starved the active priority=0
+    stories that actually appear at the top of the homepage. Result: top
+    homepage cards had no summary_fa or per-article BiasScores while the
+    LLM budget was burned on stories sunk to slot 8+ by priority sort.
+
+    Both candidate-selection queries MUST order by `priority DESC` first,
+    `trending_score DESC` second — same shape as the trending API and
+    homepage_scope itself."""
+
+    def test_summarize_orders_by_priority_then_trending(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent / "auto_maintenance.py"
+        ).read_text()
+
+        # Find step_summarize and grab a window covering the candidate
+        # SELECT (which sits ~120 lines into the function body).
+        idx = src.find("async def step_summarize")
+        assert idx >= 0, "step_summarize function missing"
+        # The candidate scan is the SELECT scoped by HOMEPAGE_POOL_SIZE.
+        scan_idx = src.find("HOMEPAGE_POOL_SIZE", idx)
+        assert scan_idx >= 0
+        # Find the .order_by within ~3KB of the HOMEPAGE_POOL_SIZE marker.
+        window = src[scan_idx : scan_idx + 3000]
+        # Locate the limit-by-HOMEPAGE_POOL_SIZE block.
+        limit_idx = window.find(".limit(HOMEPAGE_POOL_SIZE)")
+        assert limit_idx >= 0, "Could not locate HOMEPAGE_POOL_SIZE limit"
+        # Look backwards for the order_by — it must include priority.desc().
+        preceding = window[: limit_idx]
+        order_idx = preceding.rfind(".order_by(")
+        assert order_idx >= 0, "step_summarize candidate SELECT missing order_by"
+        order_clause = preceding[order_idx : limit_idx]
+        assert "priority.desc()" in order_clause, (
+            "step_summarize candidate SELECT must order by Story.priority.desc() "
+            "BEFORE trending_score, otherwise demoted umbrella stories "
+            "(priority=-50, trending_score in the thousands) monopolize the "
+            "LLM budget and the active homepage-top stories never get "
+            "summarized. See 2026-05-03 evening incident."
+        )
+        assert "trending_score.desc" in order_clause, (
+            "step_summarize candidate SELECT must keep the trending_score.desc "
+            "tiebreaker so older active stories don't always lose to the "
+            "newest-but-tiny one."
+        )
+
+    def test_bias_scoring_orders_by_priority_then_trending(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent / "app" / "services" / "bias_scoring.py"
+        ).read_text()
+
+        idx = src.find("async def score_unscored_articles")
+        assert idx >= 0, "score_unscored_articles missing"
+        # The candidate-ordering join must happen before query.limit(batch_size).
+        end = src.find("query.limit(batch_size)", idx)
+        assert end >= 0
+        window = src[idx:end]
+        assert "Story.priority.desc()" in window, (
+            "score_unscored_articles must order by Story.priority.desc() so "
+            "bias scoring spend lands on top-of-homepage cards, not on "
+            "demoted umbrella stories that visually sit at slot 8+."
+        )
+        assert "Story.trending_score.desc" in window, (
+            "score_unscored_articles must keep trending_score.desc as the "
+            "tiebreaker after priority."
+        )
+        # Must JOIN stories on Article.story_id to make the order_by valid.
+        assert "join(Story, Story.id == Article.story_id)" in window, (
+            "score_unscored_articles needs an explicit JOIN on stories so "
+            "Story.priority/trending_score are reachable in the order_by."
+        )
+
+
 class TestEmbeddingNullCanaryEligibilityJoin:
     """The embedding_null_rate_24h canary must scope its denominator to
     articles the pipeline ACTUALLY tries to embed — content_type set AND

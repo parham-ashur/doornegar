@@ -1190,6 +1190,14 @@ async def step_summarize():
         # and unchanged" case downstream — so on a stable day this scan
         # might produce 1-3 actual summaries (just the new arrivals)
         # rather than burning all 15 slots.
+        # Order MUST mirror the homepage card sort: priority DESC first,
+        # then trending_score DESC. Demoted umbrella stories (priority=-50)
+        # carry trending_scores in the thousands because they accreted 1000+
+        # articles before freezing, so a trending_score-only sort hands the
+        # entire LLM budget to stories that visually sit at slot 7+, while
+        # the active priority=0 stories at the top of the page stay blank
+        # (Parham 2026-05-03: top story 42 articles, NO summary; budget
+        # burned on 2461-article umbrella sunk to slot 8).
         result = await db.execute(
             select(Story)
             .options(selectinload(Story.articles))
@@ -1200,7 +1208,7 @@ async def step_summarize():
                 # untouched manual edits, lets anchored ones refresh.
                 (Story.is_edited.is_(False)) | (Story.summary_anchor.isnot(None)),
             )
-            .order_by(Story.trending_score.desc().nullslast())
+            .order_by(Story.priority.desc(), Story.trending_score.desc().nullslast())
             .limit(HOMEPAGE_POOL_SIZE)
         )
         scan_candidates = list(result.scalars().all())

@@ -374,6 +374,19 @@ async def score_unscored_articles(
         visible_story_ids = select(Story.id).where(Story.article_count >= 5)
         query = query.where(Article.story_id.in_(visible_story_ids))
 
+    # Order articles by their parent story's homepage rank so the per-run
+    # MAX_PER_RUN budget lands on the visible top cards first. Without
+    # this, articles came back in physical row order and demoted umbrellas
+    # (priority=-50, thousands of articles) statistically dominated the
+    # 60-article-per-run window — same shape as the step_summarize bug
+    # found 2026-05-03. Joining stories on the SELECT preserves the
+    # one-per-source-per-story dedup above.
+    query = (
+        query
+        .join(Story, Story.id == Article.story_id)
+        .order_by(Story.priority.desc(), Story.trending_score.desc().nullslast())
+    )
+
     result = await db.execute(query.limit(batch_size))
     articles = result.scalars().all()
 
