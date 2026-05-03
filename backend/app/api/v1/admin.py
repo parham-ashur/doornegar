@@ -1411,10 +1411,18 @@ async def trigger_bias_scoring(
     batch_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
-    """Manually trigger LLM bias scoring on unscored articles."""
+    """Manually trigger LLM bias scoring on unscored articles.
+
+    Homepage-scoped (Parham 2026-05-03): manual triggers MUST also stay
+    within the $30/mo budget. Pass homepage_only_top_n=20 to mirror the
+    cron path. Without it, this endpoint would let an admin accidentally
+    score thousands of off-homepage articles in one click.
+    """
     try:
         from app.services.bias_scoring import score_unscored_articles
-        stats = await score_unscored_articles(db, batch_size=batch_size)
+        stats = await score_unscored_articles(
+            db, batch_size=batch_size, homepage_only_top_n=20
+        )
         return {"status": "ok", "stats": stats}
     except Exception as e:
         logger.exception("Bias scoring failed")
@@ -1685,7 +1693,11 @@ async def run_full_pipeline(db: AsyncSession = Depends(get_db)):
 
     try:
         from app.services.bias_scoring import score_unscored_articles
-        results["bias_scoring"] = await score_unscored_articles(db)
+        # Homepage-scoped (Parham 2026-05-03): same gate as the cron's
+        # step_bias_score so manual /pipeline/run-all stays within budget.
+        results["bias_scoring"] = await score_unscored_articles(
+            db, homepage_only_top_n=20
+        )
     except Exception as e:
         results["bias_scoring"] = {"error": str(e)}
 
@@ -3289,32 +3301,37 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
     # distinct stuck-modes so the operator can tell at a glance whether
     # the bottleneck is classification, content filtering (legit), the
     # NLP pipeline missing eligible rows (bug), or the processed_at trap.
-    no_emb_breakdown = (await db.execute(_t(
+    # Two-step: first the easy partition (no JOIN), then a separate query
+    # for the eligibility split using the same SQL pattern as
+    # nlp_pipeline.process_unprocessed_articles to avoid drift.
+    no_emb_basic = (await db.execute(_t(
         """
         SELECT
-          COUNT(*) FILTER (WHERE a.content_type IS NULL) AS unclassified,
-          COUNT(*) FILTER (
-            WHERE a.content_type IS NOT NULL
-              AND a.processed_at IS NULL
-              AND NOT (
-                (s.content_filters -> 'allowed') @> to_jsonb(a.content_type)
-              )
-          ) AS filtered_by_source_allowed_list,
-          COUNT(*) FILTER (
-            WHERE a.content_type IS NOT NULL
-              AND a.processed_at IS NULL
-              AND (s.content_filters -> 'allowed') @> to_jsonb(a.content_type)
-          ) AS eligible_unprocessed_BUG,
-          COUNT(*) FILTER (
-            WHERE a.content_type IS NOT NULL
-              AND a.processed_at IS NOT NULL
-          ) AS processed_no_embedding,
+          COUNT(*) FILTER (WHERE content_type IS NULL) AS unclassified,
+          COUNT(*) FILTER (WHERE content_type IS NOT NULL AND processed_at IS NULL) AS classified_unprocessed,
+          COUNT(*) FILTER (WHERE content_type IS NOT NULL AND processed_at IS NOT NULL) AS processed_no_embedding,
           COUNT(*) AS total
-        FROM articles a
-        JOIN sources s ON s.id = a.source_id
-        WHERE a.embedding IS NULL
+        FROM articles
+        WHERE embedding IS NULL
         """
     ))).mappings().one()
+    # Eligible-unprocessed = matches the actual gate in step_process.
+    # Sub-bucket of classified_unprocessed; the rest are filtered by the
+    # source's content_filters.allowed list (correct behavior, no bug).
+    no_emb_eligible = int((await db.execute(_t(
+        """
+        SELECT COUNT(*) FROM articles a
+        JOIN sources s ON s.id = a.source_id
+        WHERE a.embedding IS NULL
+          AND a.content_type IS NOT NULL
+          AND a.processed_at IS NULL
+          AND (s.content_filters -> 'allowed') @> to_jsonb(a.content_type)
+        """
+    ))).scalar() or 0)
+    no_emb_unclassified = int(no_emb_basic["unclassified"] or 0)
+    no_emb_classified_unprocessed = int(no_emb_basic["classified_unprocessed"] or 0)
+    no_emb_processed_null = int(no_emb_basic["processed_no_embedding"] or 0)
+    no_emb_filtered = max(0, no_emb_classified_unprocessed - no_emb_eligible)
 
     # Catches the 2026-05-02 regression: step_recluster_orphans bumped
     # last_updated_at on frozen stories. With the fix in place, frozen
@@ -3699,10 +3716,10 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
                 "orphans": article_orphans,
                 "no_embedding": article_no_emb,
                 "no_embedding_breakdown": {
-                    "unclassified": int(no_emb_breakdown["unclassified"] or 0),
-                    "filtered_by_source_allowed_list": int(no_emb_breakdown["filtered_by_source_allowed_list"] or 0),
-                    "eligible_unprocessed_BUG": int(no_emb_breakdown["eligible_unprocessed_BUG"] or 0),
-                    "processed_no_embedding": int(no_emb_breakdown["processed_no_embedding"] or 0),
+                    "unclassified": no_emb_unclassified,
+                    "filtered_by_source_allowed_list": no_emb_filtered,
+                    "eligible_unprocessed_BUG": no_emb_eligible,
+                    "processed_no_embedding": no_emb_processed_null,
                 },
                 "stuck_null_emb_14d": article_stuck_null_emb,
                 "no_title_fa": no_title_fa,

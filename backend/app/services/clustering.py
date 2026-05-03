@@ -1400,11 +1400,18 @@ def _compute_centroid(embeddings: list[list[float] | None]) -> list[float] | Non
 # Step 3: Cluster unmatched articles into new stories
 # ---------------------------------------------------------------------------
 
-# Minimum articles required to create a new story from cluster_new.
-# Matches the visibility floor (article_count >= 5) — stories below this
-# would be hidden anyway, and each hidden story is an LLM call whose
-# output will be merged or deleted by maintenance.
-CLUSTER_NEW_GROUP_FLOOR = 5
+# Minimum group size for cluster_new. Lowered 2026-05-03 from 5 → 2
+# (Parham): the prior floor of 5 was the single biggest orphan-rate
+# driver — when a maintenance run had only 4 unmatched articles, the
+# entire batch was skipped and every article became an orphan with no
+# chance to seed a story. Orphans accumulated to 5342 by 2026-05-03.
+# Two-article seeds stay hidden (visibility gate is article_count>=4)
+# until subsequent matches grow them, but they DO contribute their
+# centroid to the matcher's candidate pool — which is the key benefit:
+# a fresh narrative starts gathering articles immediately instead of
+# waiting for 5 simultaneous reports. Singletons (=1) are still
+# excluded to avoid every wire story spawning its own micro-story.
+CLUSTER_NEW_GROUP_FLOOR = 2
 
 # Articles that have been sent to cluster_new this many times without
 # joining a viable group become orphans — skipped on future runs.

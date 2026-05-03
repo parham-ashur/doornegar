@@ -981,28 +981,56 @@ async def step_recompute_centroids():
     pre-filter in _match_to_existing_stories to skip irrelevant story/article
     pairs before calling the LLM.
 
-    Only updates stories whose centroid is NULL (new or invalidated).
+    Refresh policy (Parham 2026-05-03): the prior code only updated
+    stories whose centroid was NULL. But step_recluster_orphans attaches
+    new articles to existing stories without invalidating the centroid,
+    so the matcher used a STALE centroid (computed from the original
+    article set) for subsequent matches. This caused legitimate new
+    articles to be rejected because the stale centroid no longer
+    represented the cluster's evolved focus.
+    Now: recompute when (centroid IS NULL) OR (article_count changed
+    since last recompute, tracked via the cached count vs actual). Only
+    fires for active stories — frozen stories' centroids are immutable
+    by definition (no new articles can join).
     """
-    from sqlalchemy import select
+    from sqlalchemy import func as _func, select
 
     from app.database import async_session
     from app.models.article import Article
     from app.models.story import Story
     from app.services.clustering import _compute_centroid
 
-    stats = {"updated": 0, "skipped": 0}
+    stats = {"updated_null": 0, "updated_drift": 0, "skipped": 0}
 
     async with async_session() as db:
+        # Read live article counts per story so we can detect drift
+        # against the cached `Story.article_count`. We refresh centroid
+        # when the cached count was wrong (composition changed) — same
+        # signal step_recount_stories uses for its own UPDATE.
+        live_counts_q = await db.execute(
+            select(Article.story_id, _func.count(Article.id).label("c"))
+            .where(Article.story_id.isnot(None))
+            .group_by(Article.story_id)
+        )
+        live_counts = {sid: c for sid, c in live_counts_q.all()}
+
         result = await db.execute(
-            select(Story)
-            .where(
+            select(Story).where(
                 Story.article_count >= 2,
-                Story.centroid_embedding.is_(None),
+                Story.frozen_at.is_(None),
+                Story.archived_at.is_(None),
             )
         )
         stories = list(result.scalars().all())
 
         for story in stories:
+            cached = story.article_count or 0
+            actual = live_counts.get(story.id, cached)
+            is_null = story.centroid_embedding is None
+            drifted = (actual != cached)
+            if not (is_null or drifted):
+                continue
+
             emb_result = await db.execute(
                 select(Article.embedding)
                 .where(Article.story_id == story.id, Article.embedding.isnot(None))
@@ -1011,14 +1039,21 @@ async def step_recompute_centroids():
             centroid = _compute_centroid(embeddings)
             if centroid:
                 story.centroid_embedding = centroid
-                stats["updated"] += 1
+                if is_null:
+                    stats["updated_null"] += 1
+                else:
+                    stats["updated_drift"] += 1
             else:
                 stats["skipped"] += 1
 
         await db.commit()
 
-    if stats["updated"] > 0:
-        logger.info(f"Centroid recompute: {stats['updated']} stories updated")
+    total = stats["updated_null"] + stats["updated_drift"]
+    if total:
+        logger.info(
+            f"Centroid recompute: {stats['updated_null']} from-null, "
+            f"{stats['updated_drift']} composition-drift, {stats['skipped']} skipped"
+        )
     return stats
 
 
@@ -6589,31 +6624,28 @@ INGEST_ONLY_PIPELINE = [
     ("detect_hourly_updates", "Flag significant intra-day story updates", "step_detect_hourly_updates"),
 ]
 
-# Hourly pipeline — RSS-only. Designed to run every hour from 6am to
-# midnight Paris time (04:00–21:00 UTC). Skips Telegram (slow) and
-# everything LLM-heavy; focuses on getting new articles clustered and
-# detecting intra-day story updates for the "بروزرسانی" badge.
-HOURLY_PIPELINE = [
-    ("ingest_rss", "RSS-only ingest (no Telegram)", "step_ingest_rss"),
-    ("classify_content_type", "Classify content type (news / opinion / discussion / aggregation / other)", "step_classify_content_type"),
-    ("process", "NLP process (embed, translate, extract)", "step_process"),
-    ("cluster", "Cluster new articles into stories", "step_cluster"),
-    ("centroids", "Recompute story centroid embeddings", "step_recompute_centroids"),
-    ("detect_hourly_updates", "Flag significant intra-day story updates", "step_detect_hourly_updates"),
-    # F8 — fast source-trust pass. No-ops when no flags landed in the
-    # last hour, so this adds < 100ms to most runs.
-    ("source_trust_fast", "Fast source-trust check on hourly flags", "step_source_trust_fast"),
-]
+# HOURLY_PIPELINE removed 2026-05-03 (Parham): only FULL_PIPELINE
+# should run, 3× daily at 03/09/15 UTC. The two steps that were
+# HOURLY-only — `step_ingest_rss` and `step_source_trust_fast` —
+# now have no callers from any pipeline. They remain in the file for
+# manual debug invocation but should not be re-added to any pipeline
+# spec without Parham's explicit approval.
+#
+# INGEST_ONLY_PIPELINE is kept for the dashboard "Run Now" path which
+# users invoke manually for fast iteration on RSS sources without
+# waiting for the full ~100 min run.
 
 
 async def run_maintenance(mode: str = "full"):
     """Run maintenance pipeline.
 
-    mode="full"   → FULL_PIPELINE (~33 steps, daily at 04:00)
-    mode="ingest" → INGEST_ONLY_PIPELINE (~6 cheap steps, intended to run
-                    every 2-3 hours between the daily full run)
-    mode="hourly" → HOURLY_PIPELINE (RSS-only, 5 steps, runs hourly 6am–
-                    midnight Paris for intra-day update detection)
+    mode="full"   → FULL_PIPELINE (~55 steps, 3× daily at 03/09/15 UTC)
+    mode="ingest" → INGEST_ONLY_PIPELINE (12 steps, dashboard "Run Now"
+                    only — does not run on any cron schedule)
+
+    `hourly` mode was removed 2026-05-03; calls with mode="hourly" now
+    fall through to INGEST_ONLY_PIPELINE so any leftover Railway cron
+    invocation degrades safely instead of crashing.
     """
     from app.services import maintenance_state
 
@@ -6621,7 +6653,10 @@ async def run_maintenance(mode: str = "full"):
     if mode == "full":
         pipeline_spec = FULL_PIPELINE
     elif mode == "hourly":
-        pipeline_spec = HOURLY_PIPELINE
+        # 2026-05-03: hourly mode removed. Fall back to INGEST so any
+        # stale cron schedule keeps working but emits the cheaper pipeline.
+        logger.warning("Maintenance mode='hourly' is deprecated — falling back to INGEST_ONLY_PIPELINE")
+        pipeline_spec = INGEST_ONLY_PIPELINE
     else:
         pipeline_spec = INGEST_ONLY_PIPELINE
     # Resolve step callables by name (they're defined above in this module)

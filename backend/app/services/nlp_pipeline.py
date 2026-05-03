@@ -324,11 +324,41 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
 
     stats["embedding_deduped"] = dedup_count
 
-    # Step 5: Mark all as processed
+    # Step 5: Mark as processed — but ONLY if the work actually succeeded.
+    # Sentinel column trap (Parham 2026-05-03): the prior code
+    # unconditionally set `processed_at = now` even when embedding had
+    # failed (returned None). The article kept `embedding IS NULL` but
+    # `processed_at IS NOT NULL`, so the next run's `processed_at IS NULL`
+    # gate excluded it forever. Result: 1097 permanently-orphaned articles
+    # accumulated by 2026-05-03 and a 39% NULL-embedding rate.
+    #
+    # Fix: only stamp `processed_at` when the article either
+    #   (a) has an embedding now (NLP succeeded), OR
+    #   (b) has no source content for embedding to consume (so
+    #       re-trying wouldn't help — leave it stamped to skip).
+    # Articles that had content but failed to embed keep `processed_at
+    # IS NULL` and are picked up on the next maintenance run. The
+    # OR-clause in the gate (`embedding IS NULL AND processed_at IS NOT
+    # NULL` retry) becomes a belt-and-suspenders for the legacy backlog.
     now = datetime.now(timezone.utc)
+    skipped_unstamped = 0
     for article in articles:
-        article.processed_at = now
-        stats["processed"] += 1
+        had_content_to_embed = bool(
+            (article.content_text or article.summary or "").strip()
+        )
+        embed_ok = article.embedding is not None
+        if embed_ok or not had_content_to_embed:
+            article.processed_at = now
+            stats["processed"] += 1
+        else:
+            skipped_unstamped += 1
+    stats["skipped_unstamped"] = skipped_unstamped
+    if skipped_unstamped:
+        logger.warning(
+            f"NLP: left {skipped_unstamped}/{len(articles)} articles unstamped "
+            f"(processed_at NULL) so they'll retry next run — embedding failed "
+            f"AND content was present"
+        )
 
     await db.commit()
     logger.info(f"NLP pipeline complete: {stats}")

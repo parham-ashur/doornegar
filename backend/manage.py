@@ -59,12 +59,18 @@ async def cluster():
 
 
 async def score():
-    """Run LLM bias scoring on unscored articles."""
+    """Run LLM bias scoring on unscored articles.
+
+    Homepage-scoped (Parham 2026-05-03): the CLI MUST stay within the
+    $30/mo budget. Without homepage_only_top_n, a single `python manage.py
+    score` run could score thousands of off-homepage articles. The 20
+    matches the cron's step_bias_score gate exactly.
+    """
     from app.database import async_session
     from app.services.bias_scoring import score_unscored_articles
 
     async with async_session() as db:
-        stats = await score_unscored_articles(db)
+        stats = await score_unscored_articles(db, homepage_only_top_n=20)
         print(f"Bias scoring stats: {stats}")
 
 
@@ -111,8 +117,8 @@ async def pipeline():
         stats = await cluster_articles(db)
         print(f"  → {stats}")
 
-        print("Step 5/7: Bias scoring...")
-        stats = await score_unscored_articles(db)
+        print("Step 5/7: Bias scoring (homepage-scoped)...")
+        stats = await score_unscored_articles(db, homepage_only_top_n=20)
         print(f"  → {stats}")
 
         print("Step 6/7: Telegram ingestion...")

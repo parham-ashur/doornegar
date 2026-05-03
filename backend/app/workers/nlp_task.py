@@ -59,14 +59,22 @@ def cluster_stories_task(self):
 
 @celery_app.task(name="app.workers.nlp_task.score_bias_batch_task", bind=True)
 def score_bias_batch_task(self):
-    """Score unscored articles for bias using LLM analysis."""
-    logger.info("Starting bias scoring batch...")
+    """Score unscored articles for bias using LLM analysis.
+
+    Homepage-scoped (Parham 2026-05-03): if this task ever fires from a
+    Celery beat schedule we don't currently have, it MUST stay within
+    the $30/mo budget by only scoring homepage-visible stories. The
+    April 2026 overage was likely caused by an unscoped invocation of
+    this exact codepath. Pass `homepage_only_top_n=20` so the gate
+    behaves identically to the maintenance cron's `step_bias_score`.
+    """
+    logger.info("Starting bias scoring batch (homepage-scoped)...")
 
     async def _run():
         from app.services.bias_scoring import score_unscored_articles
 
         async with async_session() as db:
-            return await score_unscored_articles(db)
+            return await score_unscored_articles(db, homepage_only_top_n=20)
 
     stats = run_async(_run())
     logger.info(f"Bias scoring complete: {stats}")
