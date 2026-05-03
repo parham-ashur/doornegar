@@ -355,34 +355,21 @@ async def score_unscored_articles(
         ).exists(),
     )
 
-    # Strictest gate: homepage-only — top-N trending plus blindspots.
-    # Saves ~80% of bias scoring cost vs visible_stories_only since most
-    # ingested articles end up in stories that never reach the homepage.
+    # Strictest gate: homepage-only — exact mirror of the trending +
+    # blindspots APIs via the central homepage_scope module. The prior
+    # local filter was too loose (no priority >= 0, no
+    # trending_score > 0.5, sort missing priority DESC) and let bias
+    # spend land on demoted (-50) umbrellas and stale low-score stories.
+    # Parham 2026-05-03: every penny goes to homepage-visible only.
     if homepage_only_top_n is not None:
-        # frozen_at filter added 2026-05-02: 7d-by-creation freeze
-        # rule means frozen stories never reach the homepage, so
-        # scoring their articles burns LLM budget for nothing.
-        homepage_ids = (
-            select(Story.id)
-            .where(
-                Story.article_count >= 5,
-                Story.archived_at.is_(None),
-                Story.frozen_at.is_(None),
-            )
-            .order_by(Story.trending_score.desc().nullslast())
-            .limit(homepage_only_top_n)
-        ).union(
-            # Blindspots get scored too — the homepage blindspot
-            # section needs full bias panels even when their
-            # trending_score is below the top-N cut.
-            select(Story.id).where(
-                Story.is_blindspot.is_(True),
-                Story.article_count >= 5,
-                Story.archived_at.is_(None),
-                Story.frozen_at.is_(None),
-            )
+        from app.services.homepage_scope import homepage_story_ids
+        visible_ids = await homepage_story_ids(
+            db, trending_top_n=homepage_only_top_n
         )
-        query = query.where(Article.story_id.in_(homepage_ids))
+        if not visible_ids:
+            logger.info("Bias scoring: no homepage-visible stories — skipping")
+            return {"scored": 0, "failed": 0, "skipped": 0}
+        query = query.where(Article.story_id.in_(visible_ids))
     elif visible_stories_only:
         visible_story_ids = select(Story.id).where(Story.article_count >= 5)
         query = query.where(Article.story_id.in_(visible_story_ids))

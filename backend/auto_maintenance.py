@@ -1038,6 +1038,7 @@ async def step_summarize():
     from app.database import async_session
     from app.models.article import Article
     from app.models.story import Story
+    from app.services.homepage_scope import homepage_story_ids
     from app.services.story_analysis import generate_story_analysis
 
     async def _keepalive(db):
@@ -1058,15 +1059,20 @@ async def step_summarize():
     MAX_ARTICLES_PER_STORY = 10  # cap memory + prompt cost
 
     async with async_session() as db:
-        # Homepage-eligibility filters — must match the trending API
-        # (stories.py /trending and /blindspots) so we never spend LLM
-        # budget on a story that won't appear on the homepage.
-        # archived_at: 30d retired, never homepage. frozen_at: 7d-by-
-        # creation chapter close, never homepage (Parham 2026-05-02).
+        # Homepage scope (Parham 2026-05-03): every penny goes to the
+        # stories actually visible right now. `homepage_story_ids` returns
+        # the union of trending top-N + blindspots top-N, mirroring the
+        # filters in api/v1/stories.py exactly. The previous local
+        # `homepage_eligible` predicate let through priority=-50 demoted
+        # stories, blindspots-as-trending, and trending_score≤0.5
+        # stragglers — fixed by routing through homepage_story_ids.
+        visible_ids = await homepage_story_ids(db)
+        if not visible_ids:
+            logger.info("Summarize: no homepage-visible stories — skipping")
+            return {"skipped_no_homepage": True}
+
         homepage_eligible = (
-            (Story.article_count >= 5),
-            Story.archived_at.is_(None),
-            Story.frozen_at.is_(None),
+            Story.id.in_(visible_ids),
         )
 
         # 1. Pre-compute top-N trending story IDs (homepage tier)
@@ -1699,18 +1705,25 @@ async def step_story_quality():
     from app.database import async_session
     from app.models.article import Article
     from app.models.story import Story
+    from app.services.homepage_scope import homepage_story_ids
     from app.services.story_analysis import generate_story_analysis
 
     stats = {"summaries_regenerated": 0, "duplicates_flagged": 0, "stale_cleared": 0}
 
     # Phase 1 — mark stale stories that have grown ≥3 articles since the
-    # last summary. ORM scan, single-session, single commit at the end.
+    # last summary. Scoped to homepage-only (Parham 2026-05-03): without
+    # this filter the scan ran across all 1326+ frozen umbrellas and
+    # nulled their summaries, which Phase 2 then paid LLM to regenerate.
     async with async_session() as db:
+        homepage_ids = await homepage_story_ids(db)
+        if not homepage_ids:
+            # Nothing on the homepage right now — skip the whole step.
+            return stats
         result = await db.execute(
             select(Story)
             .options(selectinload(Story.articles).selectinload(Article.source))
             .where(
-                Story.article_count >= 5,
+                Story.id.in_(homepage_ids),
                 Story.summary_fa.isnot(None),
                 Story.is_edited.is_(False),
             )
@@ -1734,11 +1747,19 @@ async def step_story_quality():
         return stats
 
     async with async_session() as db:
+        # Re-fetch homepage_ids (rank may have shifted since Phase 1's
+        # commit changed cached article_count on stale-cleared stories).
+        homepage_ids = await homepage_story_ids(db)
+        if not homepage_ids:
+            return stats
         result = await db.execute(
             select(Story)
             .options(selectinload(Story.articles).selectinload(Article.source))
-            .where(Story.article_count >= 5, Story.summary_fa.is_(None))
-            .order_by(Story.article_count.desc())
+            .where(
+                Story.id.in_(homepage_ids),
+                Story.summary_fa.is_(None),
+            )
+            .order_by(Story.priority.desc(), Story.trending_score.desc())
             .limit(5)  # Max 5 per run to control costs
         )
         targets = list(result.scalars().all())
@@ -2184,6 +2205,14 @@ async def step_apply_summary_corrections():
     stats = {"regenerated": 0, "skipped": 0, "failed": 0}
 
     async with async_session() as db:
+        # Homepage scope (Parham 2026-05-03): regenerated summary only
+        # helps the visitor if the story is on the homepage. Off-homepage
+        # corrections stay as feedback rows; they replay automatically
+        # if/when the story climbs back into view.
+        from app.services.homepage_scope import homepage_story_ids
+        visible_ids = await homepage_story_ids(db)
+        if not visible_ids:
+            return stats
         rows = (await db.execute(
             select(RaterFeedback, Story)
             .join(Story, Story.id == RaterFeedback.story_id)
@@ -2194,6 +2223,7 @@ async def step_apply_summary_corrections():
                 RaterFeedback.applied_at.is_(None),
                 Story.is_edited.is_(False),
                 Story.summary_fa.isnot(None),
+                Story.id.in_(visible_ids),
             )
             .limit(20)
         )).all()
@@ -2310,6 +2340,10 @@ async def step_apply_summary_corrections():
                 try:
                     story_uuid = uuid.UUID(target_id)
                 except ValueError:
+                    continue
+                # Homepage scope (Parham 2026-05-03): only regenerate
+                # summaries that visitors actually see right now.
+                if story_uuid not in visible_ids:
                     continue
                 story = (await db.execute(
                     select(Story).where(Story.id == story_uuid)
@@ -2499,6 +2533,23 @@ async def step_niloofar_feedback_audit():
                 select(Story).where(Story.id == article.story_id)
             )).scalar_one_or_none()
             if not story:
+                stats["stale"] += 1
+                continue
+
+            # Homepage scope (Parham 2026-05-03): if the story is frozen,
+            # archived, or demoted, the wrong-clustering flag isn't
+            # actionable for any current visitor. Mark stale and skip
+            # the LLM call.
+            if (
+                story.frozen_at is not None
+                or story.archived_at is not None
+                or (story.priority or 0) <= -10
+            ):
+                await db.execute(
+                    update(ImprovementFeedback)
+                    .where(ImprovementFeedback.id == fb.id)
+                    .values(status="wont_do", admin_notes="Story off-homepage at audit time", resolved_at=datetime.now(timezone.utc))
+                )
                 stats["stale"] += 1
                 continue
 
@@ -3047,11 +3098,19 @@ async def step_extract_analyst_takes():
             logger.info("No new analyst posts to process")
             return stats
 
-        # 4. Get current story titles for matching
+        # 4. Get current story titles for matching — homepage scope
+        # only (Parham 2026-05-03). An analyst take linked to a frozen
+        # umbrella never surfaces; if the linked story isn't on the
+        # homepage, the LLM call extracting that take is wasted.
+        from app.services.homepage_scope import homepage_story_ids
+        visible_ids = await homepage_story_ids(db)
+        if not visible_ids:
+            logger.info("Analyst takes: no homepage-visible stories — skipping")
+            return stats
         story_result = await db.execute(
             select(Story)
-            .where(Story.article_count >= 3)
-            .order_by(Story.trending_score.desc())
+            .where(Story.id.in_(visible_ids))
+            .order_by(Story.priority.desc(), Story.trending_score.desc())
             .limit(50)
         )
         stories = list(story_result.scalars().all())
@@ -3195,6 +3254,14 @@ async def step_verify_predictions():
     stats = {"verified": 0, "correct": 0, "incorrect": 0, "inconclusive": 0, "failed": 0}
 
     async with async_session() as db:
+        # Homepage scope (Parham 2026-05-03): a verified prediction
+        # whose story isn't on the homepage doesn't render anywhere a
+        # visitor sees, so the verify-LLM call is wasted spend. Filter
+        # to predictions linked to currently-visible stories only.
+        from app.services.homepage_scope import homepage_story_ids
+        visible_ids = await homepage_story_ids(db)
+        if not visible_ids:
+            return stats
         result = await db.execute(
             select(AnalystTake)
             .options(selectinload(AnalystTake.story))
@@ -3204,7 +3271,7 @@ async def step_verify_predictions():
                 AnalystTake.published_at.isnot(None),
                 AnalystTake.published_at < cutoff,
                 AnalystTake.key_claim.isnot(None),
-                AnalystTake.story_id.isnot(None),
+                AnalystTake.story_id.in_(visible_ids),
             )
             .order_by(AnalystTake.published_at.asc())
             .limit(MAX_PER_RUN)
@@ -4031,6 +4098,7 @@ async def step_telegram_deep_analysis():
     from app.database import async_session
     from app.models.social import TelegramPost
     from app.models.story import Story
+    from app.services.homepage_scope import homepage_story_ids
     from app.services.telegram_analysis import analyze_story_telegram
     from sqlalchemy import func, select
     from sqlalchemy.orm import selectinload
@@ -4053,6 +4121,16 @@ async def step_telegram_deep_analysis():
     MAX_STORIES = 10
 
     async with async_session() as db:
+        # Homepage scope (Parham 2026-05-03): the prior union of
+        # trending+fresh let demoted, blindspot-overflow, and
+        # trending_score≤0.5 stories pull telegram pass2 budget. The
+        # central homepage_story_ids gate matches the API filters
+        # exactly so what gets analyzed is what visitors see.
+        visible_ids = await homepage_story_ids(db)
+        if not visible_ids:
+            logger.info("Telegram deep analysis: no homepage-visible stories — skipping")
+            return stats
+
         subq = (
             select(TelegramPost.story_id, func.count(TelegramPost.id).label("post_count"))
             .where(TelegramPost.story_id.isnot(None))
@@ -4062,36 +4140,17 @@ async def step_telegram_deep_analysis():
             .subquery()
         )
 
-        # Union two pools: top by trending_score (traditional) + top by
-        # last_updated_at (the pool the homepage sidebar draws from).
-        # Without the second pool, fresh stories never get analyzed and
-        # the homepage sidebar stays empty even when the step just ran.
-        # Dedup by id and cap at MAX_STORIES total.
-        trending_result = await db.execute(
+        ranked_result = await db.execute(
             select(Story.id, Story.title_fa, subq.c.post_count)
             .join(subq, Story.id == subq.c.story_id)
-            .where(Story.article_count >= ARTICLE_COUNT_FLOOR)
-            .where(Story.frozen_at.is_(None))
-            .order_by(Story.trending_score.desc())
+            .where(
+                Story.id.in_(visible_ids),
+                Story.article_count >= ARTICLE_COUNT_FLOOR,
+            )
+            .order_by(Story.priority.desc(), Story.trending_score.desc())
             .limit(MAX_STORIES)
         )
-        fresh_result = await db.execute(
-            select(Story.id, Story.title_fa, subq.c.post_count)
-            .join(subq, Story.id == subq.c.story_id)
-            .where(Story.article_count >= ARTICLE_COUNT_FLOOR)
-            .where(Story.frozen_at.is_(None))
-            .order_by(Story.last_updated_at.desc().nullslast())
-            .limit(MAX_STORIES)
-        )
-        seen_ids: set = set()
-        stories: list = []
-        for row in list(trending_result.all()) + list(fresh_result.all()):
-            if row[0] in seen_ids:
-                continue
-            seen_ids.add(row[0])
-            stories.append(row)
-            if len(stories) >= MAX_STORIES * 2:  # room for both pools
-                break
+        stories: list = list(ranked_result.all())
 
         def _posts_hash(posts: list) -> str:
             # Stable identity of the pool: post ID + text length (+text
@@ -4474,14 +4533,18 @@ async def step_quality_postprocess():
     stats = {"checked": 0, "articles_flagged": 0, "titles_improved": 0, "bias_corrected": 0}
 
     async with async_session() as db:
-        # Get top 15 visible stories — excluding hand-edited ones. The quality
-        # post-process can overwrite title_fa and drop articles, so curated
-        # stories must be skipped entirely.
+        # Homepage scope (Parham 2026-05-03): the prior filter let
+        # demoted (-50), blindspot, and stale low-trending stories
+        # through. Exact mirror via homepage_story_ids.
+        from app.services.homepage_scope import homepage_story_ids
+        visible_ids = await homepage_story_ids(db)
+        if not visible_ids:
+            return stats
         result = await db.execute(
             select(Story)
             .options(selectinload(Story.articles))
             .where(
-                Story.article_count >= 5,
+                Story.id.in_(visible_ids),
                 Story.summary_fa.isnot(None),
                 Story.is_edited.is_(False),
             )
@@ -4918,20 +4981,20 @@ async def step_detect_silences():
     OUTSIDE = "outside"
 
     async with async_session() as db:
-        # Homepage-eligible only (Parham 2026-05-02). Was top 200 →
-        # tightened to top 50 since detect_silences only matters for
-        # stories that could surface on the homepage as blindspots or
-        # coverage gaps. Frozen / archived stories are closed
-        # narratives — no point flagging silences nobody will see.
+        # Homepage scope (Parham 2026-05-03): silence detection only
+        # produces homepage-visible signals (the "blindspots" section
+        # and the per-story "silences" panel — both homepage-only).
+        # Routed through homepage_story_ids.
+        from app.services.homepage_scope import homepage_story_ids
+        visible_ids = await homepage_story_ids(db)
+        if not visible_ids:
+            logger.info("Detect silences: no homepage-visible stories — skipping")
+            return stats
         result = await db.execute(
             select(Story)
             .options(selectinload(Story.articles).selectinload(Article.source))
-            .where(
-                Story.article_count >= 5,
-                Story.archived_at.is_(None),
-                Story.frozen_at.is_(None),
-            )
-            .order_by(Story.trending_score.desc())
+            .where(Story.id.in_(visible_ids))
+            .order_by(Story.priority.desc(), Story.trending_score.desc())
             .limit(50)
         )
         stories = list(result.scalars().all())
@@ -5729,20 +5792,20 @@ async def step_editorial():
         ))
         await db.commit()
 
-    # Fetch top trending stories — filtered to homepage-eligible only
-    # (Parham 2026-05-02: scope all LLM-spending steps to what visitors
-    # actually see). Was top 30; tightened to top 15 to align with the
-    # post-freeze homepage band.
+    # Homepage scope (Parham 2026-05-03): the prior local filter was
+    # missing priority/blindspot/trending_score gates so demoted (-50)
+    # umbrellas pulled editorial budget. Routed through homepage_story_ids.
     async with async_session() as db:
+        from app.services.homepage_scope import homepage_story_ids
+        visible_ids = await homepage_story_ids(db)
+        if not visible_ids:
+            logger.info("Editorial: no homepage-visible stories — skipping")
+            return stats
         result = await db.execute(
             select(Story)
             .options(selectinload(Story.articles).selectinload(Article.source))
-            .where(
-                Story.article_count >= 5,
-                Story.archived_at.is_(None),
-                Story.frozen_at.is_(None),
-            )
-            .order_by(Story.trending_score.desc())
+            .where(Story.id.in_(visible_ids))
+            .order_by(Story.priority.desc(), Story.trending_score.desc())
             .limit(15)
         )
         stories = list(result.scalars().all())
@@ -5875,18 +5938,18 @@ async def step_niloofar_polish_telegram():
     stats = {"polished": 0, "skipped": 0, "failed": 0, "no_analysis": 0}
 
     async with async_session() as db:
-        # Homepage-eligible only (Parham 2026-05-02). Was top 30; the
-        # polish output only ever appears on the homepage telegram
-        # sidebar, so polishing rank-30 rows that won't show is wasted
-        # spend. Top 15 covers the visible band with headroom.
+        # Homepage scope (Parham 2026-05-03): polish output only ever
+        # appears on the homepage telegram sidebar. Routed through
+        # homepage_story_ids to mirror the trending API exactly.
+        from app.services.homepage_scope import homepage_story_ids
+        visible_ids = await homepage_story_ids(db)
+        if not visible_ids:
+            logger.info("Niloofar polish telegram: no homepage-visible stories — skipping")
+            return stats
         result = await db.execute(
             select(Story)
-            .where(
-                Story.article_count >= 5,
-                Story.archived_at.is_(None),
-                Story.frozen_at.is_(None),
-            )
-            .order_by(Story.trending_score.desc())
+            .where(Story.id.in_(visible_ids))
+            .order_by(Story.priority.desc(), Story.trending_score.desc())
             .limit(15)
         )
         stories = list(result.scalars().all())
