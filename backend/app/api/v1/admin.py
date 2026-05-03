@@ -1853,6 +1853,251 @@ class _EditStoryRequest(_BaseModel):
     bias_explanation_fa: str | None = None
 
 
+# ─────────────────────────────────────────────────────────────────────
+# Manual story seeding (Parham 2026-05-03)
+#
+# When the auto-clustering misses a story Parham knows happened, these
+# two endpoints let him guide it manually:
+#   1. GET /admin/articles/search?q=...  — find candidate articles
+#   2. POST /admin/stories/seed         — create a new story from picked
+#                                          article IDs
+# Both are admin-token gated. The seeded story is `is_edited=True` so
+# the maintenance pipeline won't overwrite the title/summary.
+# ─────────────────────────────────────────────────────────────────────
+
+
+@router.get("/articles/search", dependencies=[Depends(require_admin)])
+async def search_articles_for_seeding(
+    q: str = Query(..., min_length=2, description="Substring to match in title (Persian or English)"),
+    since_days: int = Query(14, ge=1, le=90, description="Only articles ingested in this window"),
+    unmatched_only: bool = Query(True, description="If true, only return articles whose story has <4 articles or is None"),
+    limit: int = Query(40, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+):
+    """Find candidate articles for manual story seeding.
+
+    Returns articles whose title (any language) contains `q`, ingested
+    in the last `since_days` days. By default filters to articles in
+    "weak" stories (article_count < 4) or no story at all — those are
+    the ones that benefit from manual grouping.
+
+    Use the returned `id` values as input to POST /admin/stories/seed.
+
+    Example: `curl -H "Authorization: Bearer $TOKEN" \\
+        "https://api.doornegar.org/api/v1/admin/articles/search?q=مترو تهران&since_days=2"`
+    """
+    from datetime import timedelta as _td
+    from sqlalchemy import or_ as _or
+    from app.models.article import Article as _Art
+    from app.models.story import Story as _Sty
+    from app.models.source import Source as _Src
+
+    pattern = f"%{q}%"
+    cutoff = datetime.now(timezone.utc) - _td(days=since_days)
+
+    base = (
+        select(
+            _Art.id,
+            _Art.title_fa,
+            _Art.title_en,
+            _Art.title_original,
+            _Art.url,
+            _Art.published_at,
+            _Art.story_id,
+            _Sty.title_fa.label("story_title_fa"),
+            _Sty.article_count.label("story_article_count"),
+            _Src.slug.label("source_slug"),
+        )
+        .join(_Src, _Src.id == _Art.source_id)
+        .outerjoin(_Sty, _Sty.id == _Art.story_id)
+        .where(
+            _or(
+                _Art.title_fa.ilike(pattern),
+                _Art.title_en.ilike(pattern),
+                _Art.title_original.ilike(pattern),
+            ),
+            _Art.ingested_at >= cutoff,
+        )
+        .order_by(_Art.published_at.desc().nullslast())
+        .limit(limit)
+    )
+
+    rows = (await db.execute(base)).all()
+    items = []
+    for r in rows:
+        weak = (r.story_id is None) or ((r.story_article_count or 0) < 4)
+        if unmatched_only and not weak:
+            continue
+        items.append({
+            "id": str(r.id),
+            "title_fa": r.title_fa,
+            "title_en": r.title_en,
+            "title_original": r.title_original,
+            "url": r.url,
+            "published_at": r.published_at.isoformat() if r.published_at else None,
+            "source_slug": r.source_slug,
+            "story_id": str(r.story_id) if r.story_id else None,
+            "story_title_fa": r.story_title_fa,
+            "story_article_count": int(r.story_article_count or 0),
+            "is_weak_attachment": weak,
+        })
+    return {"q": q, "since_days": since_days, "count": len(items), "items": items}
+
+
+class _SeedStoryRequest(_BaseModel):
+    title_fa: str
+    title_en: str | None = None
+    summary_fa: str | None = None
+    topics: list[str] | None = None
+    article_ids: list[str]  # UUIDs as strings
+    detach_from_existing: bool = True  # if an article is in another story, move it
+
+
+@router.post("/stories/seed", dependencies=[Depends(require_admin)])
+async def seed_story_manually(
+    request: _SeedStoryRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a new story from a hand-picked list of article IDs.
+
+    Parham 2026-05-03: lets Parham (or Niloofar in chat) initiate a
+    story for an event the auto-clustering missed. The new story is
+    marked `is_edited=True` so the maintenance pipeline won't overwrite
+    the title or summary. Centroid is computed from the provided
+    articles' embeddings (if any have them).
+
+    Body:
+      {
+        "title_fa": "...",            # required
+        "title_en": "...",            # optional, defaults to title_fa
+        "summary_fa": "...",          # optional starter summary
+        "topics": ["نظامی", ...],     # optional, defaults to []
+        "article_ids": ["uuid",...],  # required, >= 2 UUIDs
+        "detach_from_existing": true  # default; move articles out of
+                                       # their current story if any
+      }
+
+    Validation:
+      - At least 2 article_ids required (singletons orphan again).
+      - All article IDs must resolve to real rows.
+      - If detach_from_existing=False and any article is in another
+        story, the request is rejected (returns 409 with details).
+
+    Returns the new story's id, slug, and a summary of attachments.
+    """
+    import uuid as _uuid
+    from sqlalchemy import select as _select
+    from app.models.article import Article as _Art
+    from app.models.story import Story as _Sty
+    from app.services.clustering import generate_slug as _slug
+    from app.services.clustering import _compute_centroid as _centroid
+    from app.services.events import log_event as _log_event
+
+    # Validation: parse + dedup IDs.
+    try:
+        ids = list({_uuid.UUID(s) for s in request.article_ids})
+    except (ValueError, TypeError) as _e:
+        raise HTTPException(status_code=400, detail=f"Bad article id: {_e}")
+    if len(ids) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail="Need at least 2 distinct article_ids — singletons orphan again.",
+        )
+
+    # Fetch all referenced articles in one query.
+    arts = (await db.execute(_select(_Art).where(_Art.id.in_(ids)))).scalars().all()
+    found_ids = {a.id for a in arts}
+    missing = [str(i) for i in ids if i not in found_ids]
+    if missing:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Article IDs not found: {missing[:5]}{'...' if len(missing) > 5 else ''}",
+        )
+
+    # If any are already attached and detach_from_existing=False, reject.
+    already_attached = [(a.id, a.story_id) for a in arts if a.story_id is not None]
+    if already_attached and not request.detach_from_existing:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Some articles already belong to other stories — pass detach_from_existing=true to move them.",
+                "already_attached": [
+                    {"article_id": str(aid), "current_story_id": str(sid)}
+                    for aid, sid in already_attached[:10]
+                ],
+            },
+        )
+
+    # Compute centroid from whatever embeddings are available.
+    embeddings = [
+        a.embedding for a in arts
+        if isinstance(a.embedding, list) and len(a.embedding) > 0 and any(v != 0.0 for v in a.embedding[:5])
+    ]
+    centroid = _centroid(embeddings) if embeddings else None
+
+    # Source diversity.
+    src_ids = {a.source_id for a in arts if a.source_id}
+    pub_dates = [a.published_at for a in arts if a.published_at]
+    first_pub = min(pub_dates) if pub_dates else None
+    title_en = (request.title_en or request.title_fa).strip()
+
+    new_story = _Sty(
+        title_fa=request.title_fa.strip(),
+        title_en=title_en,
+        slug=_slug(title_en),
+        summary_fa=request.summary_fa,
+        article_count=len(arts),
+        source_count=len(src_ids),
+        topics=request.topics or [],
+        first_published_at=first_pub,
+        last_updated_at=datetime.now(timezone.utc),
+        trending_score=float(len(arts)),  # decay step will normalize on next run
+        priority=0,
+        is_edited=True,  # protect from pipeline overwrite
+        centroid_embedding=centroid,
+    )
+    db.add(new_story)
+    await db.flush()  # so new_story.id is assigned
+
+    # Reassign each article's story_id.
+    for a in arts:
+        a.story_id = new_story.id
+
+    await _log_event(
+        db,
+        event_type="story_manual_seed",
+        actor="admin",
+        story_id=new_story.id,
+        signals={
+            "article_count": len(arts),
+            "source_count": len(src_ids),
+            "title_fa": request.title_fa[:120],
+            "had_centroid": centroid is not None,
+            "moved_from_other_stories": len(already_attached),
+        },
+    )
+    await db.commit()
+
+    return {
+        "status": "ok",
+        "story": {
+            "id": str(new_story.id),
+            "slug": new_story.slug,
+            "title_fa": new_story.title_fa,
+            "title_en": new_story.title_en,
+            "article_count": new_story.article_count,
+            "source_count": new_story.source_count,
+            "is_edited": True,
+            "had_centroid": centroid is not None,
+        },
+        "moved_from_other_stories": [
+            {"article_id": str(aid), "previous_story_id": str(sid)}
+            for aid, sid in already_attached
+        ],
+        "url_hint": f"/fa/stories/{new_story.slug}",
+    }
+
+
 @router.patch("/stories/{story_id}")
 async def edit_story(story_id: str, request: _EditStoryRequest, db: AsyncSession = Depends(get_db)):
     """Edit a story's title, narratives, or priority. Admin-only.

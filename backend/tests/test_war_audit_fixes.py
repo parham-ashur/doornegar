@@ -479,3 +479,95 @@ class TestHourlyPipelineRemoved:
         assert "HOURLY_PIPELINE" not in window, (
             "mode='hourly' still references HOURLY_PIPELINE constant."
         )
+
+
+# ═════════════════════════════════════════════════════════════════════
+# 10. Manual story seeding (Parham 2026-05-03)
+# ═════════════════════════════════════════════════════════════════════
+
+class TestManualStorySeed:
+    """Two new admin endpoints let Parham (or Niloofar in chat) initiate
+    a story for an event the auto-clustering missed:
+      GET  /admin/articles/search  → find candidate articles
+      POST /admin/stories/seed     → create story from picked article IDs
+
+    Source-grep tests guard the contract — these endpoints must exist
+    and accept the right shapes.
+    """
+
+    def test_search_endpoint_exists_and_admin_gated(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py"
+        ).read_text()
+
+        # Find the search endpoint declaration.
+        marker = '@router.get("/articles/search"'
+        idx = src.find(marker)
+        assert idx >= 0, (
+            "GET /admin/articles/search endpoint missing. Parham depends "
+            "on it for manual story seeding (find candidates by keyword)."
+        )
+        # Must be admin-gated.
+        window = src[idx : idx + 200]
+        assert "Depends(require_admin)" in window, (
+            "/admin/articles/search must be admin-gated."
+        )
+
+    def test_seed_endpoint_exists_and_admin_gated(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py"
+        ).read_text()
+
+        marker = '@router.post("/stories/seed"'
+        idx = src.find(marker)
+        assert idx >= 0, (
+            "POST /admin/stories/seed endpoint missing. Parham depends "
+            "on it for manual story creation from picked article IDs."
+        )
+        window = src[idx : idx + 200]
+        assert "Depends(require_admin)" in window, (
+            "/admin/stories/seed must be admin-gated."
+        )
+
+    def test_seed_endpoint_marks_is_edited_true(self):
+        """The seeded story must be is_edited=True so the maintenance
+        pipeline doesn't overwrite Parham's title/summary.
+        """
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py"
+        ).read_text()
+
+        # Find the seed function body.
+        idx = src.find("async def seed_story_manually")
+        assert idx >= 0
+        # Find the Story() constructor call within the function (next
+        # ~3KB covers it).
+        window = src[idx : idx + 4000]
+        assert "is_edited=True" in window, (
+            "Seeded stories must set is_edited=True so the pipeline "
+            "doesn't clobber the manually-chosen title/summary."
+        )
+
+    def test_seed_endpoint_requires_at_least_2_articles(self):
+        """Singletons orphan again — the endpoint must reject lone
+        article IDs to keep the homepage stable.
+        """
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py"
+        ).read_text()
+        idx = src.find("async def seed_story_manually")
+        window = src[idx : idx + 4000]
+        # We assert the floor check is present; the exact phrasing of
+        # the error message is the operator-facing contract.
+        assert "len(ids) < 2" in window, (
+            "Seed endpoint must reject lists with fewer than 2 distinct "
+            "article IDs (singletons re-orphan)."
+        )
