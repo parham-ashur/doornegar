@@ -30,8 +30,8 @@ class Article(Base):
     author: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # Classification
-    language: Mapped[str] = mapped_column(String(5), default="fa")
-    categories: Mapped[dict] = mapped_column(JSONB, default=list)
+    language: Mapped[str] = mapped_column(String(5), default="fa", server_default="fa")
+    categories: Mapped[dict] = mapped_column(JSONB, default=list, server_default="[]")
     # Raw category/section captured from RSS feedparser entry. Used as a
     # weak signal for content-type classification.
     rss_category: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -191,6 +191,46 @@ async def lifespan(app: FastAPI):
                 )""",
                 "CREATE INDEX IF NOT EXISTS idx_worldview_window ON worldview_digests(window_start DESC, bundle)",
                 "CREATE INDEX IF NOT EXISTS idx_worldview_bundle_recent ON worldview_digests(bundle, generated_at DESC)",
+
+                # ── Critical missing indexes (Parham 2026-05-03 audit) ──
+                # The data-integrity audit identified hot WHERE/ORDER BY
+                # columns lacking indexes — sequential scans on stories
+                # and articles tables. CREATE INDEX IF NOT EXISTS is
+                # idempotent, fast on re-deploy after the first run.
+                # Stories: trending API + clustering use these heavily.
+                "CREATE INDEX IF NOT EXISTS idx_stories_trending_rank ON stories(priority DESC, trending_score DESC) WHERE archived_at IS NULL",
+                "CREATE INDEX IF NOT EXISTS idx_stories_first_published ON stories(first_published_at DESC NULLS LAST)",
+                "CREATE INDEX IF NOT EXISTS idx_stories_last_updated ON stories(last_updated_at DESC NULLS LAST)",
+                "CREATE INDEX IF NOT EXISTS idx_stories_frozen_at_set ON stories(frozen_at) WHERE frozen_at IS NOT NULL",
+                "CREATE INDEX IF NOT EXISTS idx_stories_blindspot ON stories(is_blindspot, archived_at) WHERE is_blindspot = TRUE",
+                # Articles: NLP pipeline + dedup query these.
+                "CREATE INDEX IF NOT EXISTS idx_articles_processed_null ON articles(ingested_at DESC) WHERE processed_at IS NULL",
+                "CREATE INDEX IF NOT EXISTS idx_articles_embedding_null_recent ON articles(ingested_at DESC) WHERE embedding IS NULL",
+                "CREATE INDEX IF NOT EXISTS idx_articles_story ON articles(story_id) WHERE story_id IS NOT NULL",
+                # Sources: content_filters JSONB queried on every NLP gate.
+                "CREATE INDEX IF NOT EXISTS idx_sources_content_filters ON sources USING GIN (content_filters)",
+
+                # ── server_default backfill (Parham 2026-05-03 audit) ──
+                # The data-integrity audit found Python-side defaults
+                # without server_default — out-of-band INSERTs (direct
+                # SQL, webhook ingestion, manual seeds) get NULL instead
+                # of the intended value, causing NoneType crashes
+                # downstream. ALTER COLUMN SET DEFAULT is idempotent.
+                "ALTER TABLE articles ALTER COLUMN cluster_attempts SET DEFAULT 0",
+                "ALTER TABLE stories ALTER COLUMN view_count SET DEFAULT 0",
+                "ALTER TABLE stories ALTER COLUMN article_count SET DEFAULT 0",
+                "ALTER TABLE stories ALTER COLUMN source_count SET DEFAULT 0",
+                "ALTER TABLE stories ALTER COLUMN priority SET DEFAULT 0",
+                "ALTER TABLE stories ALTER COLUMN trending_score SET DEFAULT 0",
+                # Backfill any historical NULLs so the new defaults take
+                # effect retroactively for rows inserted before this DDL
+                # ran. Bounded by current row count, fast.
+                "UPDATE articles SET cluster_attempts = 0 WHERE cluster_attempts IS NULL",
+                "UPDATE stories SET view_count = 0 WHERE view_count IS NULL",
+                "UPDATE stories SET article_count = 0 WHERE article_count IS NULL",
+                "UPDATE stories SET source_count = 0 WHERE source_count IS NULL",
+                "UPDATE stories SET priority = 0 WHERE priority IS NULL",
+                "UPDATE stories SET trending_score = 0 WHERE trending_score IS NULL",
             ):
                 try:
                     await db.execute(text(ddl))

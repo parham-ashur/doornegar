@@ -21,17 +21,17 @@ class Story(Base):
     summary_fa: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # View tracking
-    view_count: Mapped[int] = mapped_column(Integer, default=0)
+    view_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
     # Aggregated metrics
-    article_count: Mapped[int] = mapped_column(Integer, default=0)
-    source_count: Mapped[int] = mapped_column(Integer, default=0)
+    article_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    source_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
     # Coverage analysis
-    covered_by_state: Mapped[bool] = mapped_column(Boolean, default=False)
-    covered_by_diaspora: Mapped[bool] = mapped_column(Boolean, default=False)
+    covered_by_state: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    covered_by_diaspora: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     coverage_diversity_score: Mapped[float | None] = mapped_column(Float, nullable=True)
-    is_blindspot: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_blindspot: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     blindspot_type: Mapped[str | None] = mapped_column(
         String(20), nullable=True, comment="state_only | diaspora_only | single_source"
     )
@@ -46,8 +46,8 @@ class Story(Base):
     last_updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    trending_score: Mapped[float] = mapped_column(Float, default=0.0)
-    priority: Mapped[int] = mapped_column(Integer, default=0, comment="Manual priority: higher = more prominent. 0=auto")
+    trending_score: Mapped[float] = mapped_column(Float, default=0.0, server_default="0.0")
+    priority: Mapped[int] = mapped_column(Integer, default=0, server_default="0", comment="Manual priority: higher = more prominent. 0=auto")
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
