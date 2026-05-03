@@ -124,7 +124,11 @@ async def _get_maintenance_info(db: AsyncSession) -> dict:
 # with 10+ aggregate queries on every poll (was 3-5s, now 30s, but still
 # wasteful if multiple browser tabs are open).
 _dashboard_cache: dict = {"data": None, "expires": 0}
-_DASHBOARD_CACHE_TTL = 300  # seconds (5 min — saves ~80% of dashboard DB queries)
+# 60s (Parham 2026-05-03 audit): was 300s — operator polling /dashboard
+# every 30s during a maintenance run could see 5-min-old stats. 60s
+# matches the health overview cache and keeps DB load trivial (the
+# dashboard query takes ~50ms cold).
+_DASHBOARD_CACHE_TTL = 60
 
 
 @router.get("/dashboard")
@@ -3344,6 +3348,24 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
           AND last_updated_at >= NOW() - INTERVAL '1 hour'
     """))).scalar() or 0)
 
+    # article_count drift canary (Parham 2026-05-03 audit, item X):
+    # detects stories whose cached `article_count` doesn't match the
+    # actual COUNT(*) of articles linked to them. Drift causes wrong
+    # visibility gating (`article_count >= 4` filter) and breaks the
+    # centroid drift refresh that depends on the cached value.
+    # step_recount_stories should keep this at 0; persistent non-zero
+    # means recount is failing or running too rarely.
+    article_count_drift = int((await db.execute(_t("""
+        SELECT COUNT(*) FROM (
+          SELECT s.id, s.article_count AS cached, COUNT(a.id) AS live
+          FROM stories s
+          LEFT JOIN articles a ON a.story_id = s.id
+          WHERE s.archived_at IS NULL
+          GROUP BY s.id, s.article_count
+          HAVING s.article_count <> COUNT(a.id)
+        ) drift
+    """))).scalar() or 0)
+
     # ── FRESHNESS ─────────────────────────────────────────────────────
     last_article_dt = (await db.execute(_t(
         "SELECT MAX(ingested_at) FROM articles"
@@ -3466,6 +3488,18 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
             "Frozen stories whose last_updated_at advanced more than 5 minutes after frozen_at, "
             "within the last hour. step_recluster_orphans must refuse frozen stories — if this "
             "is > 0, the umbrella-accretion fix is broken (see 2026-05-02 incident).",
+        ),
+        _canary(
+            "article_count_drift", "Stories with cached article_count != live count",
+            article_count_drift, "= 0",
+            "error" if article_count_drift > 50 else (
+                "warn" if article_count_drift > 5 else "ok"
+            ),
+            "step_recount_stories backfills the cached `article_count` from COUNT(*) of "
+            "linked articles. Persistent drift breaks the visibility gate "
+            "(`article_count >= 4` filter) and the centroid-drift refresh in "
+            "step_recompute_centroids. Small non-zero is normal between recount "
+            "runs; sustained > 50 means the recount step is stuck or skipping.",
         ),
         _canary(
             "embedding_zero_rate_24h", "Embedding zero-rate (24h)",
@@ -3726,6 +3760,7 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
                 "no_title_en": no_title_en,
             },
             "frozen_recently_bumped": frozen_recently_bumped,
+            "article_count_drift": article_count_drift,
             "max_cluster_size": settings.max_cluster_size,
         },
         "freshness": {

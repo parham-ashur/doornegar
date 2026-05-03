@@ -697,12 +697,22 @@ async def _match_to_existing_stories(
             Story.frozen_at.is_(None),
             # F3 — archived stories are never resurrected.
             Story.archived_at.is_(None),
-            # Umbrella cap: drop stories whose first article is >14d
-            # old. Their continued growth signals editorial sprawl,
-            # not a coherent thread. Treats NULL first_published_at
-            # as eligible (legacy data) so we don't accidentally
-            # close every old-but-untimestamped story.
-            (Story.first_published_at.is_(None)) | (Story.first_published_at >= umbrella_cutoff),
+            # Umbrella cap: drop stories whose first article is older
+            # than the cutoff. Their continued growth signals editorial
+            # sprawl, not a coherent thread.
+            # Loophole closed 2026-05-03 (Parham): the prior NULL-tolerant
+            # form `(first_published_at IS NULL OR first_published_at >= cutoff)`
+            # let articles attach to ancient NULL-dated zombie stories
+            # (clustering audit found this could absorb fresh articles
+            # into 3-year-old stories). Now: NULL falls back to
+            # `created_at`, so the umbrella cap applies uniformly.
+            # `step_archive_stale` already backfills first_published_at
+            # from MIN(article.published_at), so legitimate new stories
+            # always have a real value before this gate fires.
+            (
+                func.coalesce(Story.first_published_at, Story.created_at)
+                >= umbrella_cutoff
+            ),
         )
         .order_by(Story.last_updated_at.desc().nullslast())
     )
@@ -757,7 +767,14 @@ async def _match_to_existing_stories(
             _RF.created_at >= rejection_cutoff,
         )
     )
-    anon_rej_q = await db.execute(
+    # Two query forms (per 2026-05-03 audit — the prior single-query
+    # form missed unresolved flags because it required
+    # orphaned_from_story_id IS NOT NULL):
+    #   1. Resolved flags — use the recorded `orphaned_from_story_id`.
+    #   2. Unresolved flags (still "open" in HITL queue) — join the
+    #      article's CURRENT story_id. This makes the rejection take
+    #      effect immediately rather than waiting for niloofar's audit.
+    anon_rej_resolved_q = await db.execute(
         select(_IF.target_id, _IF.orphaned_from_story_id).where(
             _IF.target_type == "article",
             _IF.issue_type == "wrong_clustering",
@@ -765,13 +782,46 @@ async def _match_to_existing_stories(
             _IF.created_at >= rejection_cutoff,
         )
     )
+    # Two-step: collect open-flag target ids (stored as String), then
+    # look up their current story_id via a separate UUID-typed query.
+    # Direct JOIN on String == UUID would fail at the SQL level.
+    open_flag_ids_q = await db.execute(
+        select(_IF.target_id).where(
+            _IF.target_type == "article",
+            _IF.issue_type == "wrong_clustering",
+            _IF.status == "open",
+            _IF.orphaned_from_story_id.is_(None),
+            _IF.created_at >= rejection_cutoff,
+        )
+    )
+    open_flag_ids: list = []
+    import uuid as _uuid
+    for (tid,) in open_flag_ids_q.all():
+        if not tid:
+            continue
+        try:
+            open_flag_ids.append(_uuid.UUID(tid))
+        except (ValueError, TypeError):
+            continue
+    anon_rej_open_pairs: list = []
+    if open_flag_ids:
+        open_lookup_q = await db.execute(
+            select(Article.id, Article.story_id).where(
+                Article.id.in_(open_flag_ids),
+                Article.story_id.isnot(None),
+            )
+        )
+        anon_rej_open_pairs = list(open_lookup_q.all())
     rejected_pairs: set[tuple[str, str]] = set()
     for art_id, sid in rater_rej_q.all():
         if art_id and sid:
             rejected_pairs.add((str(art_id), str(sid)))
-    for art_id_str, sid in anon_rej_q.all():
+    for art_id_str, sid in anon_rej_resolved_q.all():
         if art_id_str and sid:
             rejected_pairs.add((str(art_id_str), str(sid)))
+    for art_id, sid in anon_rej_open_pairs:
+        if art_id and sid:
+            rejected_pairs.add((str(art_id), str(sid)))
     if rejected_pairs:
         logger.info(f"Negative-pair memory: {len(rejected_pairs)} (article, story) rejections in window")
 
@@ -862,7 +912,23 @@ async def _match_to_existing_stories(
         # new-cluster creation along with the unmatched remainder.
         if article.id in reserved_ids:
             continue
-        if not article.embedding or not any(v != 0.0 for v in (article.embedding or [])[:5]):
+        # Bad-embedding guard. Tightened 2026-05-03 (Parham, audit):
+        # the prior check `not article.embedding or not any(...)`
+        # treats `[]` and `[0.0]*N` as bad, but ALSO treats `None` as
+        # bad — that's correct. The audit flagged that `[]` (empty list)
+        # is technically truthy-falsy in different paths; explicit
+        # length + non-zero check eliminates ambiguity. Articles
+        # landing here get their `cluster_attempts` bumped via the
+        # outer `articles_without_embedding` path, eventually orphaning
+        # — which is the right outcome for irrecoverable embeddings.
+        emb = article.embedding
+        is_bad = (
+            not emb
+            or not isinstance(emb, list)
+            or len(emb) == 0
+            or not any(v != 0.0 for v in emb[:5])
+        )
+        if is_bad:
             articles_without_embedding.append(article)
             continue
 
@@ -2468,6 +2534,19 @@ async def cluster_articles(db: AsyncSession, *, deadline_ts: float | None = None
         else:
             new_published, new_hidden = 0, 0
     except Exception as _e:
+        # Capture deeper context (Parham 2026-05-03 audit): the
+        # 2026-05-03 07:46 UTC run failed here with
+        # `ArgumentError: Object <Article https://t.me/presstv/187567>
+        # is not legal as a SQL literal value`. Static analysis didn't
+        # find the leak — adding traceback logging so the next failure
+        # surfaces the offending call site immediately rather than
+        # requiring another live forensic trip.
+        import traceback as _tb
+        logger.error(
+            f"cluster_phase=cluster_new failed: {type(_e).__name__}: {_e}\n"
+            f"unmatched_id_count={len(unmatched_ids) if unmatched_ids else 0}\n"
+            f"traceback:\n{_tb.format_exc()[:3000]}"
+        )
         raise RuntimeError(f"cluster_phase=cluster_new: {type(_e).__name__}: {_e}") from _e
     # Keep the outer `db` warm again — same rationale as above. The
     # cluster_new phase can run for many minutes when there's a backlog.

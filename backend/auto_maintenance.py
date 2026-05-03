@@ -869,7 +869,7 @@ async def step_recluster_orphans():
       - first_published_at >= umbrella_cutoff (14d, matches matcher)
     Plus the existing article_count >= 2 and is_edited=False guards.
     """
-    from sqlalchemy import select, update
+    from sqlalchemy import func, select, update
     from app.config import settings
     from app.database import async_session
     from app.models.article import Article
@@ -918,8 +918,13 @@ async def step_recluster_orphans():
                 Story.is_edited.is_(False),
                 Story.frozen_at.is_(None),
                 Story.archived_at.is_(None),
-                (Story.first_published_at.is_(None))
-                    | (Story.first_published_at >= umbrella_cutoff),
+                # Mirror clustering._match_to_existing_stories umbrella
+                # cap (clustering.py:705 — fixed 2026-05-03 to close the
+                # NULL-tolerant loophole). NULL falls back to created_at.
+                (
+                    func.coalesce(Story.first_published_at, Story.created_at)
+                    >= umbrella_cutoff
+                ),
             )
         )).all()
 
@@ -1226,10 +1231,22 @@ async def step_summarize():
                 continue
             # Check blob for the last-run article hash. If missing or
             # different → re-analyze. Also read the lock timestamp.
+            # Fail loud on parse error (Parham 2026-05-03 audit): the
+            # prior `except: b={}` silently treated corrupt blobs as
+            # empty, then regenerated overwriting the corrupt blob — so
+            # the original parse failure was untraceable AND the
+            # editorial state (analysis_locked_at, articles_hash) was
+            # silently lost. Now we log + skip the story so the operator
+            # sees it on /dashboard/health and can decide.
             try:
                 b = _json.loads(s.summary_en) if s.summary_en else {}
-            except Exception:
-                b = {}
+            except (ValueError, TypeError) as _je:
+                logger.warning(
+                    f"Corrupt summary_en blob on story {s.id} "
+                    f"({(s.title_fa or '')[:50]}): {type(_je).__name__}: {str(_je)[:120]}. "
+                    f"Skipping re-analysis to preserve whatever editorial state remains."
+                )
+                continue
             # Already locked → never re-analyze.
             if isinstance(b, dict) and b.get("analysis_locked_at"):
                 continue
@@ -2013,6 +2030,54 @@ async def step_database_backup():
     except Exception as e:
         logger.warning(f"Backup error: {e}")
         return {"error": str(e)}
+
+
+async def step_retention_audit():
+    """Append-only table retention (Parham 2026-05-03 audit).
+
+    Caps three append-only tables that previously grew unbounded:
+      • story_events (HITL + clustering decisions audit log)
+      • llm_usage_logs (per-call cost ledger)
+      • social_sentiment_snapshots (per-channel sentiment timeseries)
+
+    Without retention these tables drove a chunk of the April 2026 Neon
+    egress overage. Cutoffs are conservative — long enough that the
+    /dashboard/learning + /dashboard/cost views over their default
+    windows (7/30/90 days) keep working, short enough to bound storage.
+
+    Single transaction per table; errors on one don't block the others.
+    Row-counts logged so the cost dashboard can see the savings.
+    """
+    from sqlalchemy import text as _text
+    from app.database import async_session
+
+    cutoffs = [
+        ("story_events", "created_at", 180),       # 6 months — generous; HITL trail
+        ("llm_usage_logs", "timestamp", 90),       # 3 months — covers /dashboard/cost windows
+        ("social_sentiment_snapshots", "snapshot_at", 90),
+    ]
+    stats: dict = {"deleted": {}, "errors": {}}
+    async with async_session() as db:
+        for table, ts_col, days in cutoffs:
+            try:
+                result = await db.execute(_text(
+                    f"DELETE FROM {table} WHERE {ts_col} < NOW() - INTERVAL '{days} days'"
+                ))
+                stats["deleted"][table] = getattr(result, "rowcount", 0) or 0
+                await db.commit()
+            except Exception as _e:
+                # Roll back so a failure on one table doesn't poison
+                # the session for the next iteration.
+                try:
+                    await db.rollback()
+                except Exception:
+                    pass
+                stats["errors"][table] = str(_e)[:200]
+                logger.warning(f"Retention audit: {table} failed: {_e}")
+    total = sum(stats["deleted"].values())
+    if total:
+        logger.info(f"Retention audit: deleted {total} rows {stats['deleted']}")
+    return stats
 
 
 async def step_rater_feedback_apply():
@@ -5910,32 +5975,58 @@ async def step_editorial():
 - بدون قضاوت — فقط واقعیت‌ها
 - فقط متن ساده برگردان"""
 
-    for story in stories:
-        # Skip if already has fresh context (generated in last 12 hours)
-        if story.editorial_context_fa:
-            existing = story.editorial_context_fa
-            if isinstance(existing, dict) and existing.get("generated_at"):
-                try:
-                    gen_time = datetime.fromisoformat(existing["generated_at"])
-                    if (datetime.now(timezone.utc) - gen_time).total_seconds() < 43200:
-                        stats["skipped"] += 1
-                        continue
-                except (ValueError, TypeError):
-                    pass
+    import hashlib as _hashlib_ed
+    def _editorial_input_hash(story_obj: Story, titles_text: str) -> str:
+        # Stable identity of the inputs to the prompt — if these don't
+        # change, the LLM output won't either, so we can skip the call.
+        parts = [
+            (story_obj.title_fa or "")[:200],
+            (story_obj.summary_fa or "")[:300],
+            str(story_obj.article_count or 0),
+            str(story_obj.source_count or 0),
+            titles_text,
+        ]
+        return _hashlib_ed.sha1("|".join(parts).encode("utf-8")).hexdigest()[:12]
 
-        # Build article titles list
+    for story in stories:
+        # Build article titles list ONCE (used for both the hash and the
+        # prompt to ensure they're computed from the same inputs).
         titles = []
         for a in story.articles[:8]:
             t = a.title_fa or a.title_original or "?"
             src = a.source.name_fa if a.source else "?"
             titles.append(f"- [{src}] {t[:80]}")
+        titles_text = "\n".join(titles)
+        cur_hash = _editorial_input_hash(story, titles_text)
+
+        # Content-hash skip (Parham 2026-05-03): the prior 12-hour TTL
+        # re-ran every time even when inputs were identical (~$0.27/mo
+        # waste on stable days). Now: skip when stored hash matches AND
+        # the row was generated in the last 7 days (so an old hash
+        # eventually refreshes even if inputs are coincidentally
+        # unchanged — a safety valve against permanent staleness).
+        SAFETY_REFRESH_SECONDS = 7 * 86400
+        if story.editorial_context_fa:
+            existing = story.editorial_context_fa
+            if isinstance(existing, dict):
+                stored_hash = existing.get("input_hash")
+                gen_at_str = existing.get("generated_at")
+                if stored_hash == cur_hash and gen_at_str:
+                    try:
+                        gen_time = datetime.fromisoformat(gen_at_str)
+                        age = (datetime.now(timezone.utc) - gen_time).total_seconds()
+                        if age < SAFETY_REFRESH_SECONDS:
+                            stats["skipped"] += 1
+                            continue
+                    except (ValueError, TypeError):
+                        pass
 
         prompt = editorial_prompt.format(
             title_fa=story.title_fa or "",
             summary_fa=(story.summary_fa or "")[:300],
             article_count=story.article_count,
             source_count=story.source_count,
-            article_titles="\n".join(titles),
+            article_titles=titles_text,
         )
 
         params = build_openai_params(
@@ -5959,6 +6050,7 @@ async def step_editorial():
                 "context": context_text,
                 "generated_at": datetime.now(timezone.utc).isoformat(),
                 "model": settings.translation_model,
+                "input_hash": cur_hash,
             }
 
             async with async_session() as db:
@@ -6542,12 +6634,14 @@ FULL_PIPELINE = [
     ("centroids", "Recompute story centroid embeddings", "step_recompute_centroids"),
     ("recluster_orphans", "Second-chance clustering for 6h+ orphans (looser cosine)", "step_recluster_orphans"),
     ("telegram_link", "Link Telegram posts to stories (embeddings)", "step_telegram_link_posts"),
-    # Fix stale mis-links: posts whose best-match story has drifted
-    # since they were first attached get moved to where they actually
-    # belong now. Runs after new posts are linked so reassignment
-    # considers the freshest centroids. Invalidates affected stories'
-    # telegram_analysis cache so the next read regenerates cleanly.
-    ("telegram_reassign", "Reassign drifted Telegram posts to better-matching stories", "step_telegram_reassign_posts"),
+    # telegram_reassign DISABLED 2026-05-03 (Parham): chronic 1215s
+    # failure every single run for weeks. Pipeline-simplification audit
+    # confirmed structural failure mode (not transient). Daily 3× re-run
+    # of step_telegram_link_posts with fresh centroids covers most drift
+    # without the dedicated reassign pass. The function still exists
+    # (auto_maintenance.py:4019) for manual invocation if needed; just
+    # not in any cron schedule. Saves 1215s × 3 runs/day = ~1 hour/day
+    # of pipeline time.
     ("merge_similar", "Merge similar visible stories", "step_merge_similar"),
     ("summarize", "Summarize new stories", "step_summarize"),
     ("bias_score", "Bias scoring", "step_bias_score"),
@@ -6589,6 +6683,7 @@ FULL_PIPELINE = [
     ("disk", "Disk monitoring", "step_disk_monitoring"),
     ("cost_tracking", "LLM cost tracking", "step_cost_tracking"),
     ("backup", "Database backup", "step_database_backup"),
+    ("retention_audit", "Retention audit on append-only tables (story_events, llm_usage_logs, social_sentiment_snapshots)", "step_retention_audit"),
     ("quality_postprocess", "Quality post-processing (LLM review)", "step_quality_postprocess"),
     ("editorial", "Editorial context blurb for top stories", "step_editorial"),
     ("niloofar_polish_telegram", "Niloofar polishes Telegram predictions/claims for homepage", "step_niloofar_polish_telegram"),

@@ -196,6 +196,38 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
             embeddings = await _asyncio.to_thread(
                 generate_embeddings_batch, texts_for_embedding
             )
+            # Cost ledger entry (Parham 2026-05-03 audit): the embeddings
+            # API was a $9/mo blind spot in the cost dashboard. We log
+            # an estimate here — text-embedding-3-small is ~1 token per
+            # 4 characters of Persian, $0.02/1M tokens. Best-effort:
+            # actual usage info isn't returned by the batch helper, so
+            # this is an upper-bound estimate that surfaces the pattern
+            # of spend without complicating the embeddings module.
+            try:
+                from app.services.llm_usage import log_llm_usage
+                from app.nlp.embeddings import EMBEDDING_MODEL as _EMB_MODEL
+                # 1 token ~= 4 chars; cost = $0.02 per 1M tokens
+                est_tokens = sum(len(t) for t in texts_for_embedding) // 4
+                est_cost = est_tokens * 0.02 / 1_000_000
+                class _UsageStub:
+                    prompt_tokens = est_tokens
+                    completion_tokens = 0
+                    total_tokens = est_tokens
+                    cached_tokens = 0
+                await log_llm_usage(
+                    model=_EMB_MODEL,
+                    purpose="embedding.nlp_pipeline",
+                    usage=_UsageStub(),
+                    meta={
+                        "batch_size": len(texts_for_embedding),
+                        "estimated": True,
+                        "estimated_cost_usd": round(est_cost, 6),
+                    },
+                )
+            except Exception as _e:
+                # Logging is best-effort; never fail the pipeline on it.
+                logger.debug(f"Embedding cost log failed: {_e}")
+
             skipped = 0
             for article, embedding in zip(embeddable_articles, embeddings):
                 # Treat None as "unknown" — leave any existing embedding

@@ -34,8 +34,17 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # ── In-memory response cache for trending/blindspot (saves Neon transfer) ──
+# Thread-safety + leak control (Parham 2026-05-03 audit):
+#   * The cache is read+written across concurrent FastAPI requests.
+#     Without a lock, a slow read+write interleaving could overwrite
+#     a fresh write with a stale one. asyncio.Lock keeps it atomic.
+#   * Without TTL cleanup, expired entries that never get re-requested
+#     stay in memory forever. We sweep on every cache write.
+import asyncio as _asyncio
 _stories_cache: dict[str, dict] = {}
+_stories_cache_lock = _asyncio.Lock()
 _STORIES_CACHE_TTL = 120  # 2 minutes
+_STORIES_CACHE_MAX_ENTRIES = 64  # hard ceiling — sweep when exceeded
 
 
 # ── Egress-saving load options ──
@@ -79,7 +88,9 @@ def _story_detail_defers():
 
 
 @router.get("", response_model=StoryListResponse)
+@_limiter.limit("120/minute")
 async def list_stories(
+    request: Request,
     topic: str | None = None,
     blindspots_only: bool = False,
     page: int = Query(1, ge=1),
@@ -126,9 +137,10 @@ async def trending_stories(
     db: AsyncSession = Depends(get_db),
 ):
     cache_key = f"trending:{limit}:{min_articles}"
-    cached = _stories_cache.get(cache_key)
-    if cached and _time.time() < cached["expires"]:
-        return cached["data"]
+    async with _stories_cache_lock:
+        cached = _stories_cache.get(cache_key)
+        if cached and _time.time() < cached["expires"]:
+            return cached["data"]
 
     # Fetch more than needed so diversity reranking has room to work
     fetch_limit = min(limit * 3, 100)
@@ -157,7 +169,19 @@ async def trending_stories(
             # homepage when nothing fresher is available — which is the
             # whole point: don't go bare just because today was quiet.
         )
-        .order_by(Story.priority.desc(), Story.trending_score.desc())
+        # Sort (Parham 2026-05-03): priority DESC keeps active before
+        # frozen. Within the demoted-frozen tier, prefer the most
+        # recently FROZEN story (so the homepage tail rotates through
+        # fresh chapter-closes instead of letting the same biggest
+        # umbrella dominate every quiet day). For active priority=0
+        # stories, frozen_at IS NULL — coalesces to first_published_at
+        # so newer active stories win ties. trending_score is the final
+        # tiebreaker.
+        .order_by(
+            Story.priority.desc(),
+            func.coalesce(Story.frozen_at, Story.first_published_at).desc().nullslast(),
+            Story.trending_score.desc(),
+        )
         .limit(fetch_limit)
     )
     stories = list(result.scalars().all())
@@ -184,7 +208,18 @@ async def trending_stories(
     ranked = [s for _, _, s in scored[:limit]]
 
     data = [_story_brief_with_extras(s) for s in ranked]
-    _stories_cache[cache_key] = {"data": data, "expires": _time.time() + _STORIES_CACHE_TTL}
+    async with _stories_cache_lock:
+        # Sweep expired entries on every write — bounded by entry count
+        # so this never blocks past O(N). Also enforce hard ceiling.
+        now = _time.time()
+        expired = [k for k, v in _stories_cache.items() if v["expires"] < now]
+        for k in expired:
+            _stories_cache.pop(k, None)
+        if len(_stories_cache) >= _STORIES_CACHE_MAX_ENTRIES:
+            # Evict oldest by expiry — simple FIFO under load.
+            for k, _ in sorted(_stories_cache.items(), key=lambda kv: kv[1]["expires"])[: len(_stories_cache) // 4]:
+                _stories_cache.pop(k, None)
+        _stories_cache[cache_key] = {"data": data, "expires": now + _STORIES_CACHE_TTL}
     return data
 
 
@@ -687,8 +722,13 @@ async def get_related_stories(
 
     # ── Arc siblings first (curated grouping) ──
     if source.arc_id:
+        # selectinload + defers (Parham 2026-05-03 audit): _pick_real_image
+        # downstream reads Story.articles for each sibling — without
+        # eager-loading we'd N+1 fetch articles N times for an N-sibling
+        # arc. Same brief loader the trending list uses.
         arc_result = await db.execute(
             select(Story)
+            .options(_articles_load_brief(), *_story_listing_defers())
             .where(
                 Story.arc_id == source.arc_id,
                 Story.id != story_id,
