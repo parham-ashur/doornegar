@@ -571,11 +571,17 @@ async def force_resummarize(
     # and bias comparisons. Now we skip `is_edited=True` — those stories
     # need to be re-edited through Niloofar-in-chat if Parham wants new
     # depth, not through the auto prompt.
+    # archived_at IS NULL — same gate the public /api/v1/stories and
+    # /trending APIs use. Without it, force-resummarize burns gpt-5-mini
+    # calls on stories that no visitor sees (Parham 2026-05-03 evening:
+    # 9 of 10 picked IDs were archived). Per the "every penny goes to
+    # the homepage" rule, archived = retired = no spend.
     query = (
         select(Story)
         .options(selectinload(Story.articles).selectinload(Article.source))
         .where(Story.article_count >= 5)
         .where(Story.is_edited.is_(False))
+        .where(Story.archived_at.is_(None))
     )
     if order == "trending":
         # Match /api/v1/stories/trending: priority DESC, trending_score DESC

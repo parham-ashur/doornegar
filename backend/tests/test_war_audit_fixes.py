@@ -765,6 +765,70 @@ class TestDoornamaGpt5TokenBudget:
         )
 
 
+class TestDoornamaReasoningEffortMinimal:
+    """gpt-5-mini's default reasoning_effort=medium consumes 2000+ tokens
+    on internal reasoning even for the trivially-bounded دورنما task.
+    With max_tokens=3000, that left near-zero room for visible output;
+    every hero-card pass returned an empty completion. doornama is pure
+    synthesis over already-organized inputs (per-side summaries, bias
+    bullets, narrative arc) — no novel reasoning needed. Setting
+    reasoning_effort=minimal frees the budget for the prose paragraph
+    that the user actually sees."""
+
+    def test_doornama_sets_reasoning_effort_minimal_for_gpt5(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "doornama.py"
+        ).read_text()
+
+        idx = src.find("def generate_doornama_briefing")
+        assert idx >= 0, "generate_doornama_briefing missing"
+        end = src.find("client.chat.completions.create", idx)
+        assert end >= 0
+        window = src[idx:end]
+        assert 'reasoning_effort' in window and 'minimal' in window, (
+            "doornama must set params['reasoning_effort'] = 'minimal' on "
+            "gpt-5 family calls. Default 'medium' burns the entire "
+            "max_tokens budget on internal reasoning, returning empty "
+            "completions every pass."
+        )
+
+
+class TestForceResummarizeExcludesArchived:
+    """The /admin/force-resummarize endpoint was picking archived
+    stories (archived_at IS NOT NULL) — those are retired and not on
+    the homepage. Per "every penny goes to homepage-visible" rule,
+    archived stories must be excluded from the candidate pool. Mirrors
+    the gate used in /api/v1/stories and /api/v1/stories/trending.
+
+    Concrete past breach: 9 of 10 IDs picked by force-resummarize on
+    2026-05-03 were archived, wasting 9 gpt-5-mini calls (~$0.50)."""
+
+    def test_force_resummarize_filters_archived(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py"
+        ).read_text()
+
+        idx = src.find("async def force_resummarize")
+        assert idx >= 0, "force_resummarize endpoint missing"
+        # The candidate query lives inside the function body. Walk
+        # forward until we hit the .limit(limit) call that closes it.
+        end = src.find(".limit(limit)", idx)
+        assert end >= 0, "Could not locate force_resummarize candidate query"
+        window = src[idx:end]
+        assert "archived_at.is_(None)" in window, (
+            "force_resummarize candidate query must filter "
+            "Story.archived_at.is_(None) — archived stories are "
+            "retired and burning LLM spend on them violates the "
+            "homepage-visible-only rule. See /api/v1/stories.py:112 "
+            "for the canonical gate."
+        )
+
+
 class TestEmbeddingNullCanaryEligibilityJoin:
     """The embedding_null_rate_24h canary must scope its denominator to
     articles the pipeline ACTUALLY tries to embed — content_type set AND
