@@ -3270,6 +3270,20 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
     article_no_emb = int((await db.execute(_t(
         "SELECT COUNT(*) FROM articles WHERE embedding IS NULL"
     ))).scalar() or 0)
+    # "Stuck" = processed_at IS NOT NULL AND embedding IS NULL — the
+    # April-May 2026 trap: an article whose embedding API call failed
+    # past the 5-attempt retry got `processed_at = now` set anyway, so
+    # the prior `processed_at IS NULL` gate excluded it forever. See
+    # nlp_pipeline.process_unprocessed_articles for the fix and
+    # feedback_no_silent_fallbacks memory for the broader principle.
+    article_stuck_null_emb = int((await db.execute(_t(
+        """
+        SELECT COUNT(*) FROM articles
+        WHERE processed_at IS NOT NULL
+          AND embedding IS NULL
+          AND ingested_at >= NOW() - INTERVAL '14 days'
+        """
+    ))).scalar() or 0)
 
     # Catches the 2026-05-02 regression: step_recluster_orphans bumped
     # last_updated_at on frozen stories. With the fix in place, frozen
@@ -3418,6 +3432,18 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
             "error" if emb_null_pct >= 10 else ("warn" if emb_null_pct >= 5 else "ok"),
             "Articles ingested in the last 24h with NULL embedding. step_process should fill these "
             "on the next run; persistent NULLs mean the embedding API key or quota is broken.",
+        ),
+        _canary(
+            "embedding_stuck_null_14d", "Stuck NULL-embedding articles (14d)",
+            article_stuck_null_emb, "= 0",
+            "error" if article_stuck_null_emb >= 200 else (
+                "warn" if article_stuck_null_emb >= 50 else "ok"
+            ),
+            "Articles where processed_at IS NOT NULL AND embedding IS NULL — the trap that left "
+            "1100+ articles permanently orphaned on 2026-05-03 (39% NULL rate over 24h). "
+            "process_unprocessed_articles now retries these via an OR clause; if this stays "
+            "non-zero across runs, the OpenAI embedding API is genuinely failing on those texts "
+            "(check for 14-day-old content with content-policy hits or oversized inputs).",
         ),
         _canary(
             "clustering_halt", "Clustering halt (50+ articles, 0 stories in 24h)",
@@ -3641,6 +3667,7 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
                 "total": total_arts,
                 "orphans": article_orphans,
                 "no_embedding": article_no_emb,
+                "stuck_null_emb_14d": article_stuck_null_emb,
                 "no_title_fa": no_title_fa,
                 "no_title_en": no_title_en,
             },

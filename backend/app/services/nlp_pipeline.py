@@ -46,7 +46,22 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
     long Step 1 HTTP-fetch loop every 10 articles — so each commit
     works as a connection heartbeat AND saves partial work, making
     runs idempotent across container restarts.
+
+    NULL-embedding retry (Parham 2026-05-03): articles whose embedding
+    API call genuinely failed (rate limit / content policy / 5xx past
+    the 5-attempt retry window) used to be permanently orphaned —
+    `processed_at` was set even though `embedding` stayed NULL, so the
+    `processed_at IS NULL` gate excluded them from every subsequent
+    run. The 39.1% NULL rate canary on 2026-05-03 traced to this trap.
+    Fix: also pull articles with `processed_at IS NOT NULL AND
+    embedding IS NULL AND ingested_at >= NOW() - 14d` so they get
+    re-embedded on subsequent maintenance runs. The 14d cap prevents
+    digging into ancient data on first deploy.
     """
+    from datetime import timedelta as _td
+    from sqlalchemy import or_ as _or
+    retry_cutoff = datetime.now(timezone.utc) - _td(days=14)
+
     # Gate: only articles whose content_type is in the source's
     # allowed whitelist reach NLP. Unclassified rows (content_type
     # IS NULL) wait for the next classifier pass; non-news labels
@@ -56,7 +71,15 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
         .join(Source, Source.id == Article.source_id)
         .options(selectinload(Article.source))
         .where(
-            Article.processed_at.is_(None),
+            _or(
+                Article.processed_at.is_(None),
+                # Stuck NULL-embedding retry — see docstring.
+                (
+                    Article.processed_at.isnot(None)
+                    & Article.embedding.is_(None)
+                    & (Article.ingested_at >= retry_cutoff)
+                ),
+            ),
             Article.content_type.isnot(None),
             sa_text("(sources.content_filters -> 'allowed') @> to_jsonb(articles.content_type)"),
         )
