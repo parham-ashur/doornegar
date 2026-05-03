@@ -3548,18 +3548,28 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
         recent_runs.append(info)
 
     # ── PIPELINE ──────────────────────────────────────────────────────
+    # Scope to articles the pipeline ACTUALLY tries to embed. Articles
+    # dropped by content_type filter (s.content_filters.allowed) or still
+    # unclassified are excluded — they're legitimately NULL by design and
+    # would otherwise float the rate to ~50% on a healthy system. Mirrors
+    # the eligibility predicate in nlp_pipeline.process_unprocessed_articles
+    # — must stay in sync with that gate.
     emb_24h = (await db.execute(_t("""
         SELECT
-          count(*) FILTER (WHERE embedding IS NULL) AS null_emb,
+          count(*) FILTER (WHERE a.embedding IS NULL) AS null_emb,
           count(*) FILTER (
-            WHERE embedding IS NOT NULL
+            WHERE a.embedding IS NOT NULL
               AND NOT EXISTS (
-                SELECT 1 FROM jsonb_array_elements_text(embedding) v
+                SELECT 1 FROM jsonb_array_elements_text(a.embedding) v
                 WHERE v::float <> 0
               )
           ) AS all_zero,
           count(*) AS total
-        FROM articles WHERE ingested_at >= NOW() - INTERVAL '24 hours'
+        FROM articles a
+        JOIN sources s ON s.id = a.source_id
+        WHERE a.ingested_at >= NOW() - INTERVAL '24 hours'
+          AND a.content_type IS NOT NULL
+          AND (s.content_filters -> 'allowed') @> to_jsonb(a.content_type)
     """))).one()
     emb_total = int(emb_24h.total or 0)
     emb_null = int(emb_24h.null_emb or 0)
@@ -3841,11 +3851,14 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
             "must return None on failure, never a zero vector.",
         ),
         _canary(
-            "embedding_null_rate_24h", "Embedding NULL-rate (24h)",
+            "embedding_null_rate_24h", "Embedding NULL-rate (24h, eligible only)",
             f"{emb_null_pct}%", "< 5%",
             "error" if emb_null_pct >= 10 else ("warn" if emb_null_pct >= 5 else "ok"),
-            "Articles ingested in the last 24h with NULL embedding. step_process should fill these "
-            "on the next run; persistent NULLs mean the embedding API key or quota is broken.",
+            "Articles ingested in the last 24h that the pipeline is responsible for embedding "
+            "(content_type set AND source's content_filters.allowed includes that type) but "
+            "embedding IS NULL. Articles dropped by source filter are excluded — they're "
+            "correctly NULL by design. step_process should fill these on the next run; "
+            "persistent NULLs mean the embedding API key or quota is broken.",
         ),
         _canary(
             "embedding_stuck_null_14d", "Stuck NULL-embedding articles (14d)",

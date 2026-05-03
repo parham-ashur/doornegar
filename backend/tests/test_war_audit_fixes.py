@@ -571,3 +571,38 @@ class TestManualStorySeed:
             "Seed endpoint must reject lists with fewer than 2 distinct "
             "article IDs (singletons re-orphan)."
         )
+
+
+class TestEmbeddingNullCanaryEligibilityJoin:
+    """The embedding_null_rate_24h canary must scope its denominator to
+    articles the pipeline ACTUALLY tries to embed — content_type set AND
+    source's content_filters.allowed list includes that type. Without
+    the join, articles correctly dropped by the source filter inflate
+    the rate to ~50% on a healthy system, training operators to ignore
+    the alarm. Same trap as the 2026-05-02 false canaries (see
+    feedback_canary_design memory)."""
+
+    def test_emb_24h_query_joins_sources_table(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py"
+        ).read_text()
+
+        # Find the emb_24h block and grab the surrounding SQL.
+        idx = src.find("emb_24h = (await db.execute")
+        assert idx >= 0, "emb_24h canary query missing"
+        window = src[idx : idx + 1500]
+        assert "JOIN sources s" in window, (
+            "emb_24h canary must JOIN sources to filter to embedding-"
+            "eligible articles. Without it, articles correctly dropped "
+            "by source content_filters inflate the NULL-rate."
+        )
+        assert "content_filters" in window and "allowed" in window, (
+            "emb_24h canary must use the same content_filters.allowed "
+            "predicate as nlp_pipeline.process_unprocessed_articles."
+        )
+        assert "content_type IS NOT NULL" in window, (
+            "emb_24h canary must exclude unclassified articles "
+            "(content_type IS NULL) — they haven't reached the embed step."
+        )
