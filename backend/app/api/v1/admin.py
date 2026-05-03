@@ -738,6 +738,37 @@ async def _run_force_resummarize_job(story_ids: list[str], chosen_model: str) ->
                         extras["manual_image_url"] = manual_image
                     if analysis.get("analyst"):
                         extras["analyst"] = analysis["analyst"]
+
+                    # Generate دورنما briefing for the hero card. Mirrors
+                    # the inline call in step_summarize but only for the
+                    # FIRST story in the batch (force-resummarize already
+                    # orders by priority DESC, trending_score DESC — same
+                    # as homepage trending — so story_ids[0] IS the hero).
+                    # Anything beyond the hero is wasted spend per
+                    # settings.doornama_top_n=1.
+                    if sid == story_ids[0]:
+                        from app.services.doornama import (
+                            compute_briefing_hash,
+                            generate_doornama_briefing,
+                        )
+                        prior_brief_anchor = None
+                        if isinstance(story.summary_anchor, dict):
+                            prior_brief_anchor = story.summary_anchor.get("briefing_fa")
+                        brief_result = await generate_doornama_briefing(
+                            story_id=str(story.id),
+                            title_fa=story.title_fa,
+                            state_summary_fa=analysis.get("state_summary_fa"),
+                            diaspora_summary_fa=analysis.get("diaspora_summary_fa"),
+                            independent_summary_fa=analysis.get("independent_summary_fa"),
+                            bias_explanation_fa=analysis.get("bias_explanation_fa"),
+                            silence_analysis=analysis.get("silence_analysis"),
+                            narrative_arc=analysis.get("narrative_arc"),
+                            summary_anchor_briefing_fa=prior_brief_anchor,
+                        )
+                        if brief_result and brief_result.get("briefing_fa"):
+                            extras["briefing_fa"] = brief_result["briefing_fa"]
+                            extras["briefing_hash"] = brief_result.get("briefing_hash")
+
                     story.summary_en = _json.dumps(extras, ensure_ascii=False)
                     await db.commit()
                     _frs.mark_story_done(success=True)
