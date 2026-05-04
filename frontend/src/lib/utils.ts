@@ -29,21 +29,21 @@ export const alignmentLabels: Record<StateAlignment, { en: string; fa: string }>
 
 /** Convert English digits to Farsi digits.
  *
- *  Use for prose-embedded numbers ("۱۰ دقیقه پیش", "۲۰۲۴ سال").
- *  Do NOT use for tabular data (counts, percentages, rankings) —
- *  per DESIGN.md's Persian Equal-Craft Rule, tabular numbers stay
- *  Arabic 0-9 even on /fa for cross-language comparability. Use
- *  `tabularNum` (or just render the number directly) for those. */
+ *  Use for prose-embedded numbers ("۱۰ دقیقه پیش", "۲۰۲۴ سال"). */
 export function toFa(n: number | string): string {
   return String(n).replace(/[0-9]/g, (d) => "۰۱۲۳۴۵۶۷۸۹"[parseInt(d)]);
 }
 
 /** Stringify a number for tabular contexts (counts, percentages,
- *  rankings). Always returns Arabic 0-9 — does NOT convert to Persian
- *  digits, even on /fa. Identity function over String() with an explicit
- *  name so the intent is visible at the call site. */
+ *  rankings). Returns Persian digits — every number on the homepage
+ *  sits next to Persian labels («مقاله»، «رسانه»، «درون‌مرزی»), so
+ *  Persian digits read more naturally. Parham 2026-05-04 overrode the
+ *  prior Equal-Craft Rule (which kept Arabic 0-9 for cross-language
+ *  comparability) — the Persian-only chrome made the rule decorative,
+ *  not load-bearing. Kept as a separate function from `toFa` so the
+ *  intent is still visible at call sites. */
 export function tabularNum(n: number | string): string {
-  return String(n);
+  return toFa(n);
 }
 
 /** Split a Farsi bias_explanation into its sentence-level points.
