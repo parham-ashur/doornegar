@@ -535,7 +535,16 @@ export default async function HomeBody({
   // be missing — better than promoting a 3-week-old story.
   const heroFresh = withinAge(HERO_MAX_AGE_MS);
   const heroSafe = withinAge(BRIEFING_MAX_AGE_MS);
+  // Manual-pin override (Parham 2026-05-04): a story with priority > 0
+  // is the operator's explicit declaration that this IS the hero,
+  // regardless of whether step_detect_hourly_updates flagged it as
+  // having an update_signal. Without this clause the regular
+  // hasUpdate-gated find skipped a freshly-pinned story whose update
+  // signal hadn't yet been recomputed. Still requires bias narrative
+  // + 72h freshness so the card isn't visually broken.
+  const isPinned = (s: StoryBrief): boolean => (s.priority ?? 0) > 0;
   const hero =
+    sorted.find(s => isPinned(s) && hasBiasNarrative(s) && heroFresh(s)) ||
     sorted.find(s => hasBiasNarrative(s) && heroFresh(s) && hasUpdate(s) && s.state_pct >= 5 && s.diaspora_pct >= 5) ||
     sorted.find(s => hasBiasNarrative(s) && heroFresh(s) && s.state_pct >= 5 && s.diaspora_pct >= 5) ||
     sorted.find(s => hasBiasNarrative(s) && heroFresh(s)) ||
