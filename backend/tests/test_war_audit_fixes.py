@@ -829,6 +829,87 @@ class TestForceResummarizeExcludesArchived:
         )
 
 
+class TestStoryAnalysisGpt4oMiniTokenBudget:
+    """gpt-4o-mini was capped at max_tokens=4096 in story_analysis. The
+    prompt asks for 4 subgroup bullet arrays + 3 per-side summaries +
+    bias bullets + scores + narrative arc — on a 79-article hero card
+    (story 93bb4325, 2026-05-04), the JSON truncated before producing
+    the `narrative` dict. The fallback at line 619 rebuilds
+    state_summary_fa from narrative.inside bullets, but with narrative
+    missing entirely there's nothing to fallback FROM — so
+    state_summary_fa stayed null forever on big stories.
+
+    gpt-4o-mini has no reasoning tokens, so bumping max_tokens is pure
+    output-cap headroom and only costs more on stories that USE it.
+    """
+
+    def test_gpt4o_mini_max_tokens_bumped_to_8192(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "story_analysis.py"
+        ).read_text()
+
+        idx = src.find("async def generate_story_analysis")
+        assert idx >= 0
+        end = src.find("client.chat.completions.create", idx)
+        window = src[idx:end]
+        # The non-gpt5 (else) branch must allocate >= 8000 tokens.
+        # We grep for "8192" specifically since that's the chosen value
+        # and it's distinct from the gpt-5 branch's 8192/12288.
+        assert "8192 if include_analyst_factors else 8192" in window or (
+            "10240 if include_analyst_factors else 8192" in window
+        ), (
+            "gpt-4o-mini story_analysis branch must allocate >= 8192 "
+            "max_tokens to avoid truncating the narrative dict on big "
+            "stories. Hero card 93bb4325 (2026-05-04) was missing "
+            "state_summary_fa because the response truncated."
+        )
+
+
+class TestRecalcTrendingBeforeSummarize:
+    """step_summarize uses Story.trending_score to pick `doornama_top_ids`
+    via homepage_story_ids. If trending_score is stale (recomputed AFTER
+    summarize at line 6681 in FULL_PIPELINE), the briefing's hero pick
+    can be a cron cycle behind reality.
+
+    Fix: add an extra recalc_trending pass right after merge_similar,
+    before summarize. The recompute is idempotent and cheap (~3s);
+    the original late recalc still runs to pick up later-step changes
+    (prune/demote/archive)."""
+
+    def test_recalc_trending_runs_before_summarize(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent / "auto_maintenance.py"
+        ).read_text()
+
+        # Find the FULL_PIPELINE block and confirm step ordering.
+        idx = src.find("FULL_PIPELINE = [")
+        assert idx >= 0
+        # Find positions of merge_similar, the pre-summarize recalc, and summarize.
+        # The recalc must be between merge_similar and summarize.
+        merge_pos = src.find('"step_merge_similar"', idx)
+        summarize_pos = src.find('"step_summarize"', idx)
+        recalc_pre_pos = src.find('"recalc_trending_pre_summarize"', idx)
+        assert merge_pos >= 0 and summarize_pos >= 0, (
+            "FULL_PIPELINE must contain merge_similar and summarize"
+        )
+        assert recalc_pre_pos >= 0, (
+            "FULL_PIPELINE must contain a 'recalc_trending_pre_summarize' "
+            "step between merge_similar and summarize so doornama_top_ids "
+            "reflects post-ingest reality. Without it, the hero-card "
+            "briefing lags by one 6h cron cycle."
+        )
+        assert merge_pos < recalc_pre_pos < summarize_pos, (
+            f"Step ordering wrong: merge_similar({merge_pos}) → "
+            f"recalc_trending_pre_summarize({recalc_pre_pos}) → "
+            f"summarize({summarize_pos}) is the required order."
+        )
+
+
 class TestEmbeddingNullCanaryEligibilityJoin:
     """The embedding_null_rate_24h canary must scope its denominator to
     articles the pipeline ACTUALLY tries to embed — content_type set AND

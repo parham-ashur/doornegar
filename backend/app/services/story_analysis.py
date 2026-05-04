@@ -517,9 +517,18 @@ async def generate_story_analysis(
         # response as JSON" (Parham 2026-05-03 evening: 9/10 failures on
         # force-resummarize, including the top homepage card). Doubling
         # the cap leaves enough headroom for reasoning + the actual JSON.
+        #
+        # gpt-4o-mini also got bumped 4096 → 8192 (Parham 2026-05-04):
+        # the prompt asks for 4 subgroup bullet arrays + 3 per-side
+        # summaries + bias bullets + scores + arc + (optional) analyst.
+        # On a 79-article hero card (story 93bb4325), the response
+        # truncated before producing the `narrative` dict, leaving
+        # state_summary_fa null with no fallback rebuild possible.
+        # gpt-4o-mini has no reasoning tokens, so the bump is pure
+        # output headroom and only costs more on stories that USE it.
         is_gpt5 = chosen_model.startswith("gpt-5")
         max_tokens = (12288 if include_analyst_factors else 8192) if is_gpt5 \
-            else (6144 if include_analyst_factors else 4096)
+            else (10240 if include_analyst_factors else 8192)
         params = build_openai_params(
             model=chosen_model,
             prompt=prompt,

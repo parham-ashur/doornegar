@@ -6659,6 +6659,15 @@ FULL_PIPELINE = [
     # not in any cron schedule. Saves 1215s × 3 runs/day = ~1 hour/day
     # of pipeline time.
     ("merge_similar", "Merge similar visible stories", "step_merge_similar"),
+    # Recompute trending BEFORE summarize so doornama_top_ids reflects
+    # post-ingest reality (Parham 2026-05-04). Without this, step_summarize
+    # was picking the briefing's hero card based on the PRIOR cron's
+    # trending_score — so a story that climbed to rank 1 during this
+    # cron's ingest didn't get a دورنما until the NEXT cron 6h later.
+    # Idempotent + cheap (~3s); the late recalc_trending below still runs
+    # to pick up changes from prune/demote/archive steps after summarize.
+    ("recalc_trending_pre_summarize", "Recalculate trending before summarize",
+     "step_recalculate_trending"),
     ("summarize", "Summarize new stories", "step_summarize"),
     ("bias_score", "Bias scoring", "step_bias_score"),
     ("fix_images", "Fix broken images", "step_fix_images"),
