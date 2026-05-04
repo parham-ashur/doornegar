@@ -1044,6 +1044,108 @@ class TestSummarizeHomepagePoolSize:
         )
 
 
+class TestNearFreezeCosineThreshold:
+    """Stories in the 5-7d window (last days before freeze) need extra
+    accretion friction to prevent the umbrella drift pattern observed
+    in story 5adc903e (Apr 10 cluster grew to 30 unrelated articles
+    over 24 days). The freeze rule blocks attachment at 7d, but the
+    days approaching freeze are still vulnerable to articles squeezing
+    in via the prior 0.55 threshold.
+
+    Adds a third tier:
+      0-2d   → 0.40 (fresh, easy accretion)
+      2-5d   → 0.55 (existing aged)
+      5-7d   → 0.65 (NEW — near-freeze tightening)
+      7d+    → frozen, no attachment at all"""
+
+    def test_clustering_has_near_freeze_threshold(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "clustering.py"
+        ).read_text()
+
+        assert "EMBEDDING_SIM_THRESHOLD_NEAR_FREEZE = 0.65" in src, (
+            "clustering.py must define EMBEDDING_SIM_THRESHOLD_NEAR_FREEZE = 0.65 "
+            "for the 5-7d aged-candidate window."
+        )
+        assert "NEAR_FREEZE_CANDIDATE_DAYS = 5" in src, (
+            "clustering.py must define NEAR_FREEZE_CANDIDATE_DAYS = 5 — "
+            "the boundary at which the tighter threshold kicks in."
+        )
+
+    def test_clustering_uses_near_freeze_threshold_in_branch(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "clustering.py"
+        ).read_text()
+
+        # The threshold-selection block must include a near-freeze branch.
+        # Find the passage where base_threshold is assigned.
+        idx = src.find("EMBEDDING_SIM_THRESHOLD_AGED")
+        # Walk forward to the threshold-selection if/elif chain.
+        chain_idx = src.find(
+            "elif age_days > AGED_CANDIDATE_DAYS:", idx
+        )
+        # The new branch must precede the AGED_CANDIDATE_DAYS branch
+        # (5d gate runs BEFORE 2d gate so the higher threshold wins).
+        near_branch = src.rfind("NEAR_FREEZE_CANDIDATE_DAYS", 0, chain_idx)
+        assert near_branch >= 0, (
+            "Threshold-selection chain must check "
+            "NEAR_FREEZE_CANDIDATE_DAYS BEFORE AGED_CANDIDATE_DAYS."
+        )
+        assert chain_idx > near_branch, (
+            "Order wrong: NEAR_FREEZE branch must come first so the "
+            "higher 0.65 threshold wins for 5d+ stories."
+        )
+
+
+class TestTitleCohesionGate:
+    """When step_summarize regenerates a story title, verify the new
+    title actually represents the cluster. If cosine(title, centroid)
+    < 0.5, keep the prior title.
+
+    Catches the umbrella-title drift pattern (story 5adc903e):
+    centroid was a junk-drawer of Iran-region topics; the LLM picked
+    the most recent Hezbollah-weapon article as the title. Old title
+    was equally wrong but at least kept the URL stable."""
+
+    def test_step_summarize_has_title_cohesion_gate(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent / "auto_maintenance.py"
+        ).read_text()
+
+        # Find step_summarize body
+        idx = src.find("async def step_summarize(")
+        # Skip past step_summarize_newly_visible (defined first in file)
+        if "newly_visible" in src[idx:idx+100]:
+            idx = src.find("async def step_summarize(", idx + 1)
+        assert idx >= 0
+        end_marker = src.find("\n\nasync def ", idx + 100)
+        body = src[idx : end_marker if end_marker > 0 else len(src)]
+
+        # The cohesion gate uses generate_embedding + cosine_similarity
+        assert "generate_embedding" in body, (
+            "step_summarize must call generate_embedding to gate the "
+            "title update against the cluster centroid."
+        )
+        assert "title_sim" in body or "title_cohesion" in body.lower(), (
+            "step_summarize must compute a similarity between the "
+            "proposed title and the story's centroid."
+        )
+        # The gate must explicitly compare to a 0.5 threshold (or
+        # equivalent) and skip the title write when below.
+        assert "0.5" in body, (
+            "Cohesion gate must threshold at 0.5 — the documented "
+            "cutoff for an off-cluster title."
+        )
+
+
 class TestEmbeddingNullCanaryEligibilityJoin:
     """The embedding_null_rate_24h canary must scope its denominator to
     articles the pipeline ACTUALLY tries to embed — content_type set AND

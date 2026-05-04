@@ -647,6 +647,17 @@ async def _match_to_existing_stories(
     # onto a 4-day-old cluster on weak cosine alone.
     EMBEDDING_SIM_THRESHOLD_AGED = 0.55
     AGED_CANDIDATE_DAYS = 2
+    # Past 5 days, tighten further — the cluster is approaching the 7d
+    # freeze cliff. Once frozen (step_archive_stale), no new articles
+    # can join at all. The 5-7d window is the last chance for accretion
+    # and benefits from extra friction so fresh-but-tangentially-similar
+    # articles spawn new stories instead of squeezing onto a soon-to-be-
+    # frozen umbrella. Catches the same drift pattern as the 5adc903e
+    # incident (Apr 10 cluster grew to 30 articles spanning unrelated
+    # topics over 24 days; many attached during its 5-7d window before
+    # freeze should have fired).
+    EMBEDDING_SIM_THRESHOLD_NEAR_FREEZE = 0.65
+    NEAR_FREEZE_CANDIDATE_DAYS = 5
     AUTO_MATCH_COSINE = 0.85
     AUTO_REJECT_COSINE = 0.60
     AUTO_MATCH_JACCARD = 0.35
@@ -996,6 +1007,9 @@ async def _match_to_existing_stories(
             if target_small:
                 # Small-story rule wins — already a stricter gate.
                 base_threshold = 0.45
+            elif age_days >= NEAR_FREEZE_CANDIDATE_DAYS:
+                # 5-7d band: tightest accretion gate before freeze.
+                base_threshold = EMBEDDING_SIM_THRESHOLD_NEAR_FREEZE
             elif age_days > AGED_CANDIDATE_DAYS:
                 base_threshold = EMBEDDING_SIM_THRESHOLD_AGED
             else:

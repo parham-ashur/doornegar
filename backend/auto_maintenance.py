@@ -1644,11 +1644,52 @@ async def step_summarize():
                     summary_anchor=story.summary_anchor,
                 )
                 story.summary_fa = analysis.get("summary_fa")
-                # Update title if LLM returned a better one
-                if analysis.get("title_fa") and analysis["title_fa"].strip():
-                    story.title_fa = analysis["title_fa"].strip()
-                if analysis.get("title_en") and analysis["title_en"].strip():
-                    story.title_en = analysis["title_en"].strip()
+                # Update title if LLM returned a better one — but ONLY if
+                # the new title actually represents the cluster. Cohesion
+                # gate (Parham 2026-05-04, story 5adc903e incident): a
+                # cluster of 30 unrelated Iran-region articles got titled
+                # "Hezbollah uses new weapon" because that was the most
+                # recent dominant article. Title was unrepresentative of
+                # the other 29 articles. Now we embed the proposed title
+                # and compare to the cluster centroid; if cosine < 0.5
+                # the title is off-cluster — log a warning and keep the
+                # prior title. Story_analysis is still saved (summary_fa,
+                # bias_explanation_fa, etc.) — only the title is gated.
+                proposed_title_fa = (analysis.get("title_fa") or "").strip()
+                proposed_title_en = (analysis.get("title_en") or "").strip()
+                if proposed_title_fa or proposed_title_en:
+                    title_cohesion_ok = True
+                    if story.centroid_embedding and proposed_title_fa:
+                        try:
+                            from app.nlp.embeddings import (
+                                generate_embedding,
+                                cosine_similarity as _cs_title,
+                            )
+                            title_emb = generate_embedding(proposed_title_fa)
+                            if title_emb:
+                                title_sim = _cs_title(
+                                    story.centroid_embedding, title_emb
+                                )
+                                if title_sim < 0.5:
+                                    title_cohesion_ok = False
+                                    logger.warning(
+                                        f"Title cohesion gate: new title "
+                                        f"'{proposed_title_fa[:50]}' has "
+                                        f"cosine {title_sim:.3f} vs centroid "
+                                        f"for story {story.id} — keeping "
+                                        f"prior title '{(story.title_fa or '')[:50]}'"
+                                    )
+                        except Exception as _ce:
+                            # Embedding failure shouldn't block summary
+                            # update; just log and apply the title anyway.
+                            logger.warning(
+                                f"Title cohesion check failed for {story.id}: {_ce}"
+                            )
+                    if title_cohesion_ok:
+                        if proposed_title_fa:
+                            story.title_fa = proposed_title_fa
+                        if proposed_title_en:
+                            story.title_en = proposed_title_en
                 # Preserve Claude-scored neutrality across LLM re-runs —
                 # the LLM no longer produces these fields, they come from
                 # scripts/neutrality_audit.py. Read old extras first and
