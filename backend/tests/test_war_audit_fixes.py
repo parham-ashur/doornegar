@@ -593,23 +593,21 @@ class TestSummarizeBiasOrderByPriority:
             Path(__file__).parent.parent / "auto_maintenance.py"
         ).read_text()
 
-        # Find step_summarize and grab a window covering the candidate
-        # SELECT (which sits ~120 lines into the function body).
-        idx = src.find("async def step_summarize")
+        # Find step_summarize (the main one — skip past
+        # step_summarize_newly_visible which was added 2026-05-04).
+        idx = src.find("async def step_summarize(")
         assert idx >= 0, "step_summarize function missing"
         # The candidate scan is the SELECT scoped by HOMEPAGE_POOL_SIZE.
-        scan_idx = src.find("HOMEPAGE_POOL_SIZE", idx)
-        assert scan_idx >= 0
-        # Find the .order_by within ~3KB of the HOMEPAGE_POOL_SIZE marker.
-        window = src[scan_idx : scan_idx + 3000]
-        # Locate the limit-by-HOMEPAGE_POOL_SIZE block.
-        limit_idx = window.find(".limit(HOMEPAGE_POOL_SIZE)")
+        # Find the LIMIT call directly (avoids matching the docstring-
+        # mention of HOMEPAGE_POOL_SIZE in step_summarize_newly_visible).
+        limit_idx = src.find(".limit(HOMEPAGE_POOL_SIZE)", idx)
         assert limit_idx >= 0, "Could not locate HOMEPAGE_POOL_SIZE limit"
-        # Look backwards for the order_by — it must include priority.desc().
-        preceding = window[: limit_idx]
+        # Look backwards for the order_by — must be within ~3KB before
+        # the limit call and must include priority.desc().
+        preceding = src[max(0, limit_idx - 3000) : limit_idx]
         order_idx = preceding.rfind(".order_by(")
         assert order_idx >= 0, "step_summarize candidate SELECT missing order_by"
-        order_clause = preceding[order_idx : limit_idx]
+        order_clause = preceding[order_idx:]
         assert "priority.desc()" in order_clause, (
             "step_summarize candidate SELECT must order by Story.priority.desc() "
             "BEFORE trending_score, otherwise demoted umbrella stories "
@@ -907,6 +905,142 @@ class TestRecalcTrendingBeforeSummarize:
             f"Step ordering wrong: merge_similar({merge_pos}) → "
             f"recalc_trending_pre_summarize({recalc_pre_pos}) → "
             f"summarize({summarize_pos}) is the required order."
+        )
+
+
+class TestSummarizeNewlyVisibleStep:
+    """A homepage-eligible story missing a summary should NOT have to wait
+    until step_summarize fires (~30-50 min into a cron, after the 18-min
+    telegram_link step). The new step_summarize_newly_visible runs right
+    after recluster_orphans so newly-promoted stories get summaries
+    ~10-15 min into the cron instead.
+
+    Tripwires:
+      1. The function exists.
+      2. It's wired into FULL_PIPELINE between recluster_orphans and
+         telegram_link.
+      3. It's also in INGEST_ONLY_PIPELINE (dashboard "Run Now" path).
+      4. It only handles stories with summary_fa IS NULL (not a
+         duplicate of step_summarize's full responsibility)."""
+
+    def test_function_exists(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent / "auto_maintenance.py"
+        ).read_text()
+        assert "async def step_summarize_newly_visible" in src, (
+            "step_summarize_newly_visible function must exist."
+        )
+
+    def test_function_filters_to_summary_fa_null(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent / "auto_maintenance.py"
+        ).read_text()
+        idx = src.find("async def step_summarize_newly_visible")
+        end = src.find("async def step_summarize", idx + 1)
+        body = src[idx:end]
+        assert "Story.summary_fa.is_(None)" in body, (
+            "step_summarize_newly_visible must filter to "
+            "Story.summary_fa.is_(None) — its only job is filling new "
+            "stories. Refresh of existing summaries is step_summarize's "
+            "job."
+        )
+        # Homepage-eligible filter set
+        assert "Story.is_blindspot.is_(False)" in body, (
+            "step_summarize_newly_visible must exclude blindspots."
+        )
+        assert "Story.archived_at.is_(None)" in body, (
+            "step_summarize_newly_visible must exclude archived."
+        )
+        assert "Story.article_count >= 4" in body, (
+            "step_summarize_newly_visible must enforce the >= 4 "
+            "homepage threshold."
+        )
+
+    def test_wired_into_full_pipeline_between_recluster_and_telegram_link(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent / "auto_maintenance.py"
+        ).read_text()
+
+        # Find FULL_PIPELINE block.
+        full_idx = src.find("FULL_PIPELINE = [")
+        assert full_idx >= 0
+        full_end = src.find("INGEST_ONLY_PIPELINE = [", full_idx)
+        full_block = src[full_idx:full_end]
+
+        recluster_pos = full_block.find('"step_recluster_orphans"')
+        new_step_pos = full_block.find('"step_summarize_newly_visible"')
+        telegram_pos = full_block.find('"step_telegram_link_posts"')
+
+        assert recluster_pos >= 0 and telegram_pos >= 0, (
+            "FULL_PIPELINE must contain recluster_orphans and "
+            "telegram_link_posts."
+        )
+        assert new_step_pos >= 0, (
+            "FULL_PIPELINE must contain step_summarize_newly_visible."
+        )
+        assert recluster_pos < new_step_pos < telegram_pos, (
+            "step_summarize_newly_visible must be wired BETWEEN "
+            "recluster_orphans and telegram_link_posts in FULL_PIPELINE."
+        )
+
+    def test_wired_into_ingest_only_pipeline(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent / "auto_maintenance.py"
+        ).read_text()
+        ingest_idx = src.find("INGEST_ONLY_PIPELINE = [")
+        assert ingest_idx >= 0
+        # Find end of the list (next top-level definition)
+        ingest_end = src.find("\n]", ingest_idx)
+        ingest_block = src[ingest_idx:ingest_end]
+        assert "step_summarize_newly_visible" in ingest_block, (
+            "INGEST_ONLY_PIPELINE must also include "
+            "step_summarize_newly_visible so dashboard 'Run Now' fills "
+            "summaries for newly-eligible homepage stories."
+        )
+
+
+class TestSummarizeHomepagePoolSize:
+    """The candidate-scan in step_summarize uses HOMEPAGE_POOL_SIZE to
+    bound the SELECT … LIMIT. With the prior cap of 10, lower-ranked
+    visible cards could escape the scan entirely when the homepage had
+    >10 stories. Bumped to 20 to match homepage_story_ids() defaults
+    (top-20 trending + top-20 blindspots union)."""
+
+    def test_pool_size_bumped_to_at_least_20(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent / "auto_maintenance.py"
+        ).read_text()
+        idx = src.find("async def step_summarize")
+        # Skip past the newly_visible function — find the second
+        # occurrence (the real step_summarize).
+        idx = src.find("async def step_summarize", idx + 1)
+        # No wait — step_summarize_newly_visible is FIRST. The plain
+        # step_summarize is the second match. Re-find from start.
+        first = src.find("async def step_summarize_newly_visible")
+        second = src.find("async def step_summarize(", first + 1)
+        assert second >= 0, "Could not find step_summarize (real one)"
+        end = src.find("\n\nasync def ", second + 1)
+        body = src[second:end if end > 0 else len(src)]
+
+        # Find HOMEPAGE_POOL_SIZE assignment
+        import re
+        m = re.search(r"HOMEPAGE_POOL_SIZE\s*=\s*(\d+)", body)
+        assert m, "HOMEPAGE_POOL_SIZE assignment missing in step_summarize"
+        val = int(m.group(1))
+        assert val >= 20, (
+            f"HOMEPAGE_POOL_SIZE must be >= 20 (found {val}) so the "
+            f"scan covers all visible homepage cards. Stories below "
+            f"the pool cap can never be re-summarized."
         )
 
 

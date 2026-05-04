@@ -1086,6 +1086,151 @@ async def step_merge_similar():
     return {"merged": merged}
 
 
+async def step_summarize_newly_visible():
+    """Generate summaries for any homepage-eligible story currently lacking one.
+
+    Runs early in FULL_PIPELINE — right after step_recluster_orphans, BEFORE
+    step_telegram_link_posts (which takes ~18 min). The point: when a story
+    just crossed `article_count >= 4` via this cron's clustering, give it a
+    summary as soon as possible — so visitors hitting the homepage between
+    crons don't see blank cards on freshly-promoted stories. Without this
+    step, the regular step_summarize at line ~6664 would handle it 30-50 min
+    into the cron instead of 10-15 min.
+
+    Differs from step_summarize in three ways:
+    - Only handles stories with `summary_fa IS NULL` (no hash-check, no
+      delta refresh — that's still step_summarize's job)
+    - Always uses baseline model (settings.story_analysis_model) — the
+      premium tier and دورنما are still handled in step_summarize once
+      telegram_link has finished enriching the prompt context
+    - No HOMEPAGE_POOL_SIZE cap — every homepage-eligible story without a
+      summary gets one, capped only by MAX_PER_RUN cost safety
+
+    Cost: at most 15 LLM calls/run × 3 cron runs/day = ~$0.20/day worst
+    case (gpt-4o-mini ~$0.005/call). On a quiet day, zero LLM calls.
+    """
+    import json as _json
+
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    from app.config import settings
+    from app.database import async_session
+    from app.models.article import Article
+    from app.models.story import Story
+    from app.services.story_analysis import generate_story_analysis
+
+    MAX_PER_RUN = 15
+    MAX_ARTICLES_PER_STORY = 10
+    retry_cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+
+    stats = {"checked": 0, "generated": 0, "failed": 0, "no_articles": 0}
+
+    async with async_session() as db:
+        # Mirrors homepage_eligible_filters() + adds the "no summary yet"
+        # gate. Excludes is_blindspot stories (the blindspot section uses
+        # a different surface) and the priority=-100 hidden tier.
+        result = await db.execute(
+            select(Story)
+            .options(selectinload(Story.articles).selectinload(Article.source))
+            .where(
+                Story.article_count >= 4,
+                Story.summary_fa.is_(None),
+                Story.is_blindspot.is_(False),
+                Story.archived_at.is_(None),
+                Story.priority > -100,
+                # 24h backoff if a recent LLM call failed
+                (Story.llm_failed_at.is_(None)) | (Story.llm_failed_at < retry_cutoff),
+                # Don't clobber Niloofar's manual edits unless anchored
+                (Story.is_edited.is_(False)) | (Story.summary_anchor.isnot(None)),
+            )
+            .order_by(Story.priority.desc(), Story.trending_score.desc().nullslast())
+            .limit(MAX_PER_RUN)
+        )
+        stories = list(result.scalars().all())
+        stats["checked"] = len(stories)
+        if not stories:
+            return stats
+
+        from app.services.narrative_groups import narrative_group as _ng
+
+        for story in stories:
+            top_articles = sorted(
+                [a for a in (story.articles or []) if a.published_at],
+                key=lambda a: a.published_at, reverse=True,
+            )[:MAX_ARTICLES_PER_STORY]
+            if not top_articles:
+                stats["no_articles"] += 1
+                continue
+
+            articles_info = [
+                {
+                    "id": str(a.id),
+                    "source_slug": a.source.slug if a.source else None,
+                    "title": a.title_original or a.title_fa or a.title_en or "",
+                    "content": (a.content_text or a.summary or "")[:1500],
+                    "source_name_fa": a.source.name_fa if a.source else "نامشخص",
+                    "state_alignment": a.source.state_alignment if a.source else "",
+                    "production_location": a.source.production_location if a.source else None,
+                    "factional_alignment": a.source.factional_alignment if a.source else None,
+                    "narrative_group": _ng(a.source) if a.source else "moderate_diaspora",
+                    "published_at": a.published_at.isoformat() if a.published_at else "",
+                }
+                for a in top_articles
+            ]
+
+            try:
+                analysis = await generate_story_analysis(
+                    story, articles_info,
+                    model=settings.story_analysis_model,
+                    include_analyst_factors=False,
+                )
+                if not analysis or not analysis.get("summary_fa"):
+                    stats["failed"] += 1
+                    story.llm_failed_at = datetime.now(timezone.utc)
+                    await db.commit()
+                    continue
+
+                story.summary_fa = analysis.get("summary_fa")
+                if analysis.get("title_fa") and analysis["title_fa"].strip():
+                    story.title_fa = analysis["title_fa"].strip()
+                if analysis.get("title_en") and analysis["title_en"].strip():
+                    story.title_en = analysis["title_en"].strip()
+
+                extras = {
+                    "state_summary_fa": analysis.get("state_summary_fa"),
+                    "diaspora_summary_fa": analysis.get("diaspora_summary_fa"),
+                    "independent_summary_fa": analysis.get("independent_summary_fa"),
+                    "bias_explanation_fa": analysis.get("bias_explanation_fa"),
+                    "scores": analysis.get("scores"),
+                    "llm_model_used": settings.story_analysis_model,
+                }
+                if analysis.get("dispute_score") is not None:
+                    extras["dispute_score"] = analysis["dispute_score"]
+                if analysis.get("loaded_words"):
+                    extras["loaded_words"] = analysis["loaded_words"]
+                if analysis.get("narrative_arc"):
+                    extras["narrative_arc"] = analysis["narrative_arc"]
+                if analysis.get("article_evidence"):
+                    extras["article_evidence"] = analysis["article_evidence"]
+                story.summary_en = _json.dumps(extras, ensure_ascii=False)
+                story.llm_failed_at = None
+                await db.commit()
+                stats["generated"] += 1
+                logger.info(f"  ✓ newly-visible: {(story.title_fa or '')[:50]}")
+            except Exception as e:
+                logger.warning(f"  ✗ newly-visible {story.id}: {e}")
+                stats["failed"] += 1
+                try:
+                    story.llm_failed_at = datetime.now(timezone.utc)
+                    await db.commit()
+                except Exception:
+                    await db.rollback()
+
+    logger.info(f"Newly-visible summaries: {stats}")
+    return stats
+
+
 async def step_summarize():
     """Step 4: Generate summaries for stories without one.
 
@@ -1182,9 +1327,16 @@ async def step_summarize():
         # is_edited stories with a summary_anchor still refresh on the
         # normal cadence; without an anchor they skip (preserves manual
         # work that pre-dates the anchor pattern).
-        MAX_STORIES_PER_RUN = 10
+        # 2026-05-04: bumped to 20 to match homepage_story_ids() default
+        # of top-20 trending + top-20 blindspots. With pool=10 the bottom
+        # 2-7 visible cards could escape the candidate scan entirely
+        # (depending on how many priority=0 vs -50 stories were on the
+        # page). Stories without summaries are ALSO covered earlier by
+        # step_summarize_newly_visible — this is belt-and-braces for
+        # refresh of stale summaries on lower-ranked cards.
+        MAX_STORIES_PER_RUN = 20
         retry_cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
-        HOMEPAGE_POOL_SIZE = 10
+        HOMEPAGE_POOL_SIZE = 20
 
         # Within that pool, hash-skip handles the "already summarized
         # and unchanged" case downstream — so on a stable day this scan
@@ -6649,6 +6801,15 @@ FULL_PIPELINE = [
     ("cluster", "Cluster articles into stories", "step_cluster"),
     ("centroids", "Recompute story centroid embeddings", "step_recompute_centroids"),
     ("recluster_orphans", "Second-chance clustering for 6h+ orphans (looser cosine)", "step_recluster_orphans"),
+    # Catch any story that just crossed `article_count >= 4` and is
+    # homepage-eligible but lacks a summary. Runs BEFORE telegram_link
+    # (~18min) so newly-visible stories get summaries ~10-15 min into
+    # the cron instead of ~30-50 min. The regular step_summarize below
+    # still runs to refresh existing summaries with telegram-enriched
+    # context (Parham 2026-05-04 — homepage cards were blank for 30+
+    # min during cron runs because step_summarize ran too late).
+    ("summarize_newly_visible", "Summarize newly-eligible homepage stories",
+     "step_summarize_newly_visible"),
     ("telegram_link", "Link Telegram posts to stories (embeddings)", "step_telegram_link_posts"),
     # telegram_reassign DISABLED 2026-05-03 (Parham): chronic 1215s
     # failure every single run for weeks. Pipeline-simplification audit
@@ -6734,6 +6895,11 @@ INGEST_ONLY_PIPELINE = [
     ("cluster", "Cluster articles into stories", "step_cluster"),
     ("centroids", "Recompute story centroid embeddings", "step_recompute_centroids"),
     ("recluster_orphans", "Second-chance clustering for 6h+ orphans (looser cosine)", "step_recluster_orphans"),
+    # Same trigger as in FULL_PIPELINE — gives the dashboard "Run Now"
+    # path a chance to fill in summaries for stories that just crossed
+    # article_count >= 4 via this run's clustering.
+    ("summarize_newly_visible", "Summarize newly-eligible homepage stories",
+     "step_summarize_newly_visible"),
     ("telegram_link", "Link Telegram posts to stories (embeddings)", "step_telegram_link_posts"),
     # Keeps newly-ingested images on R2 so the homepage never depends on
     # the origin CDN being reachable from Vercel. Idempotent, capped 300/run.
