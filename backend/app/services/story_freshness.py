@@ -116,15 +116,15 @@ def compute_update_signal(
 
     # 1) Dispute score shifted materially (narratives became more or
     #    less contested). Phrase the direction for the reader.
-    # Arrow direction in RTL: "old ← new" reads naturally right-to-left
-    # as "from [old value on right] to [new value on left]".
+    # Numbers omitted on purpose: dispute_score is a 0-1 abstract metric
+    # readers don't have intuition for. Direction alone is the signal.
     if snap_dispute is not None and current_dispute_score is not None:
         delta = current_dispute_score - snap_dispute
         if abs(delta) >= DISPUTE_DELTA_THRESHOLD:
             if delta > 0:
-                reason = f"اختلاف روایت‌ها افزایش یافت ({_fa_one_decimal(snap_dispute)} ← {_fa_one_decimal(current_dispute_score)})"
+                reason = "اختلاف روایت‌ها افزایش یافت"
             else:
-                reason = f"اختلاف روایت‌ها کاهش یافت ({_fa_one_decimal(snap_dispute)} ← {_fa_one_decimal(current_dispute_score)})"
+                reason = "اختلاف روایت‌ها کاهش یافت"
             return {"has_update": True, "kind": "dispute", "reason_fa": reason}
 
     # 2) Coverage distribution shifted — a new side started covering or
