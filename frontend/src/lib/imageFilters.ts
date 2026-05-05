@@ -73,6 +73,21 @@ export function isGeoblockedFromVercel(src: string): boolean {
   }
 }
 
+// Cloudflare R2 public-bucket hosts. Images here were already
+// resized + recompressed at upload time (see backend `image_downloader.py`:
+// WebP @ q75, max 1600px wide). Routing them through Vercel's
+// `/_next/image` adds nothing except quota burn — and once the monthly
+// quota is exhausted the optimizer returns 402 and the entire homepage
+// goes blank. Bypass.
+export function isR2Hosted(src: string): boolean {
+  try {
+    const host = new URL(src).hostname.toLowerCase();
+    return host.endsWith(".r2.dev") || host.endsWith(".r2.cloudflarestorage.com");
+  } catch {
+    return false;
+  }
+}
+
 export function resolveUrl(src: string): string {
   if (src.startsWith("/images/")) return `${API_BASE}${src}`;
   return src;

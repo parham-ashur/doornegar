@@ -5,6 +5,7 @@ import Image from "next/image";
 import { Newspaper } from "lucide-react";
 import {
   isGeoblockedFromVercel,
+  isR2Hosted,
   isUnusableUrl,
   resolveUrl,
 } from "@/lib/imageFilters";
@@ -40,7 +41,7 @@ export default function SafeImage({
   }
 
   const resolved = resolveUrl(src);
-  const skipOptimization = isGeoblockedFromVercel(resolved);
+  const skipOptimization = isGeoblockedFromVercel(resolved) || isR2Hosted(resolved);
 
   // next/image fill mode needs a position:relative parent. We render our own
   // so callers don't have to add `relative` to every aspect-ratio wrapper.

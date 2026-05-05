@@ -9,6 +9,7 @@ import Image from "next/image";
 import { Newspaper } from "lucide-react";
 import {
   isGeoblockedFromVercel,
+  isR2Hosted,
   isUnusableUrl,
   resolveUrl,
 } from "@/lib/imageFilters";
@@ -48,7 +49,7 @@ export default function SafeImageStatic({
   }
 
   const resolved = resolveUrl(src!);
-  const skipOptimization = isGeoblockedFromVercel(resolved);
+  const skipOptimization = isGeoblockedFromVercel(resolved) || isR2Hosted(resolved);
 
   return (
     <div className="relative h-full w-full">
