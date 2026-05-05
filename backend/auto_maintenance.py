@@ -3971,6 +3971,7 @@ async def step_demote_umbrella_stories():
             select(Story).where(
                 Story.frozen_at.isnot(None),
                 Story.priority > -10,        # not already demoted/hidden
+                Story.priority <= 0,         # respect manual pins (priority>0)
                 Story.archived_at.is_(None),  # archived has its own removal
             )
         )).scalars().all()
@@ -4079,6 +4080,13 @@ async def step_archive_stale():
         freeze_result = await db.execute(
             select(Story).where(
                 Story.frozen_at.is_(None),
+                # Respect manual pins (priority > 0). A pinned story
+                # is the operator's explicit declaration "keep this on
+                # the homepage" — freezing it would trigger the demote
+                # step's priority=-50 and stomp the pin (Parham
+                # 2026-05-05: pinned f0479292 yesterday, got demoted
+                # overnight when the auto-freeze fired on its 25-day age).
+                Story.priority <= 0,
                 or_(
                     Story.first_published_at < freeze_cutoff,
                     (Story.first_published_at.is_(None))

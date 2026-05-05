@@ -1146,6 +1146,61 @@ class TestTitleCohesionGate:
         )
 
 
+class TestPinnedStoriesProtectedFromAutoLifecycle:
+    """A manually-pinned story (priority > 0) is the operator's explicit
+    declaration that the story IS the hero card. Auto-freeze and
+    auto-demote must not stomp the pin.
+
+    Concrete past incident (2026-05-05): Parham pinned f0479292 to
+    priority=10 to fix the hero. Overnight, step_archive_stale froze it
+    (it was 25 days old by first_published_at), then
+    step_demote_umbrella_stories set priority=-50 because frozen_at
+    was now set. The pin was overridden silently and the homepage
+    reverted to the wrong hero card."""
+
+    def test_archive_stale_skips_pinned_stories(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent / "auto_maintenance.py"
+        ).read_text()
+
+        idx = src.find("async def step_archive_stale")
+        assert idx >= 0
+        # Find the freeze SELECT inside the function.
+        freeze_idx = src.find("freeze_result = await db.execute", idx)
+        assert freeze_idx >= 0
+        # Walk forward to the closing of that SELECT.
+        end = src.find(")\n        )", freeze_idx)
+        body = src[freeze_idx : end]
+        assert "Story.priority <= 0" in body, (
+            "step_archive_stale's freeze SELECT must filter "
+            "Story.priority <= 0 so manually pinned stories "
+            "(priority > 0) are not auto-frozen and subsequently "
+            "demoted by step_demote_umbrella_stories."
+        )
+
+    def test_demote_umbrella_skips_pinned_stories(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent / "auto_maintenance.py"
+        ).read_text()
+
+        idx = src.find("async def step_demote_umbrella_stories")
+        assert idx >= 0
+        # Find the demote SELECT inside the function.
+        sel_idx = src.find("select(Story).where(", idx)
+        assert sel_idx >= 0
+        end = src.find(")\n        )).scalars()", sel_idx)
+        body = src[sel_idx : end]
+        assert "Story.priority <= 0" in body, (
+            "step_demote_umbrella_stories must filter Story.priority <= 0 "
+            "so a manual pin (priority > 0) is never overridden by the "
+            "demote-on-freeze cascade."
+        )
+
+
 class TestEmbeddingNullCanaryEligibilityJoin:
     """The embedding_null_rate_24h canary must scope its denominator to
     articles the pipeline ACTUALLY tries to embed — content_type set AND
