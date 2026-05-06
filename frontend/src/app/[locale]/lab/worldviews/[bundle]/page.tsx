@@ -127,7 +127,7 @@ async function fetchDetail(bundle: string): Promise<FetchResult> {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const res = await fetch(`${API}/api/v1/worldviews/${bundle}`, {
-        next: { revalidate: 300 },
+        cache: "no-store",
       });
       if (res.ok) {
         const data = (await res.json()) as WorldviewDetail;

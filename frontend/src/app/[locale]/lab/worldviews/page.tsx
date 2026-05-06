@@ -1,5 +1,6 @@
 import { setRequestLocale } from "next-intl/server";
 import Link from "next/link";
+import WorldviewsClientFallback from "./WorldviewsClientFallback";
 
 // Worldview cards refresh weekly (Monday FULL_PIPELINE). 5-min ISR
 // burned 6× more Fluid Active CPU than necessary. 30 min is still
@@ -129,25 +130,32 @@ type FetchResult =
   | { ok: true; data: CurrentResponse }
   | { ok: false; error: string };
 
-// Single retry on 5xx / fetch errors. Vercel SSR runs right after each
-// deploy; if Railway is briefly restarting (cold-start, container
-// recycle) the first attempt sees 502/503/504 and ISR caches that
-// error response for 30 minutes. One retry with a short backoff turns
-// most of those into successful regens. Permanent errors still bubble
-// through to the user-visible amber panel.
+// Retry on 5xx / fetch errors. `cache: 'no-store'` disables Next.js
+// fetch-level caching of the response — a previously-stored 5xx
+// response can otherwise keep serving even after the upstream API
+// recovers. Page-level ISR (revalidate=1800) still caches the HTML
+// output, so we don't pay for a fresh fetch on every request — just
+// on every page revalidation.
+//
+// On 2026-05-06 the page got stuck on cached 502 even though the API
+// was returning 200 to every other client. Vercel's SSR egress IPs
+// were apparently being rate-limited or temporarily blocked by Railway
+// edge. This SSR retry handles brief transients; the client-side
+// fallback in WorldviewsClient.tsx handles sustained egress issues by
+// re-fetching from the user's browser, which goes through a different
+// network path entirely.
 async function fetchCurrent(): Promise<FetchResult> {
   let lastError = "fetch failed: unknown";
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const res = await fetch(`${API}/api/v1/worldviews/current`, {
-        next: { revalidate: 300 },
+        cache: "no-store",
       });
       if (res.ok) {
         const data = (await res.json()) as CurrentResponse;
         return { ok: true, data };
       }
       lastError = `HTTP ${res.status} from API`;
-      // Retry on 5xx (origin transient) but bail on 4xx (real error).
       if (res.status < 500 || attempt > 0) break;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -388,18 +396,12 @@ export default async function WorldviewsLabPage({
       </header>
 
       {fetchError ? (
-        <div className="border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/30 p-6">
-          <p className="text-[14px] font-semibold text-amber-900 dark:text-amber-200">
-            دادهٔ این صفحه در این لحظه از سرور قابل دریافت نبود.
-          </p>
-          <p className="text-[12.5px] text-amber-800 dark:text-amber-300 mt-2 font-mono">
-            {fetchError}
-          </p>
-          <p className="text-[12.5px] text-slate-600 dark:text-slate-400 mt-3">
-            صفحه چند دقیقه دیگر دوباره تلاش می‌کند. اگر این پیام پایدار است،
-            احتمالاً ISR کش یک پاسخ خطا را ذخیره کرده — یک استقرار جدید آن را پاک می‌کند.
-          </p>
-        </div>
+        // SSR fetch failed (Vercel→Railway egress issue, transient
+        // backend, or stuck ISR cache). Hand off to a client component
+        // that fetches from the user's browser. Browser→Railway uses
+        // a different network path that's resilient to Vercel-egress
+        // rate limits.
+        <WorldviewsClientFallback locale={locale} initialError={fetchError} />
       ) : cards.length === 0 ? (
         <div className="border border-slate-200 dark:border-slate-800 p-8">
           <p className="text-[14px] text-slate-600 dark:text-slate-400">
