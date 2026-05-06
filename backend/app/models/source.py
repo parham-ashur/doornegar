@@ -14,6 +14,11 @@ class Source(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name_en: Mapped[str] = mapped_column(String(255))
     name_fa: Mapped[str] = mapped_column(String(255))
+    # French outlet name. Populated in Phase 1 of the EN+FR rollout from
+    # the canonical glossary in project_en_fr_rollout.md. Until then,
+    # voice prompts fall back to name_en + an inline mapping for
+    # well-known Persian outlet names.
+    name_fr: Mapped[str | None] = mapped_column(String(255), nullable=True)
     slug: Mapped[str] = mapped_column(String(100), unique=True, index=True)
     website_url: Mapped[str] = mapped_column(Text)
     rss_urls: Mapped[dict] = mapped_column(JSONB, default=list)

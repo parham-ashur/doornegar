@@ -3916,6 +3916,85 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
         WHERE title_fa IS NULL AND title_original IS NOT NULL
     """))).scalar() or 0)
 
+    # ── Multi-locale translation canaries (EN+FR rollout Phase 0h) ─────
+    # Pre-Phase-2, no translation_* LLM calls are made. The canaries
+    # below report "ok" with a phase-not-active note in that case so
+    # they don't fire warn/error while the translation pipeline is
+    # still being built. Once any translation_* row appears in
+    # llm_usage_logs the canaries flip to evaluating real values.
+    translation_active_7d = int((await db.execute(_t("""
+        SELECT COUNT(*) FROM llm_usage_logs
+        WHERE purpose LIKE 'translation_%'
+          AND timestamp >= NOW() - INTERVAL '7 days'
+    """))).scalar() or 0)
+    translation_phase_active = translation_active_7d > 0
+
+    translation_cost_24h = float((await db.execute(_t("""
+        SELECT COALESCE(SUM(total_cost), 0)
+        FROM llm_usage_logs
+        WHERE purpose LIKE 'translation_%'
+          AND timestamp >= NOW() - INTERVAL '24 hours'
+    """))).scalar() or 0.0)
+
+    translation_attempts_24h = int((await db.execute(_t("""
+        SELECT COUNT(*) FROM llm_usage_logs
+        WHERE purpose LIKE 'translation_%'
+          AND timestamp >= NOW() - INTERVAL '24 hours'
+    """))).scalar() or 0)
+    # A translation call that committed zero priced tokens is a strong
+    # signal of failure (LLM-refusal sentinel detected, JSON parse
+    # failed, etc.). Phase 2 will additionally tag failures via
+    # meta->>'failed' = 'true' but this fallback works without that.
+    translation_failures_24h = int((await db.execute(_t("""
+        SELECT COUNT(*) FROM llm_usage_logs
+        WHERE purpose LIKE 'translation_%'
+          AND timestamp >= NOW() - INTERVAL '24 hours'
+          AND (
+              total_cost = 0
+              OR (meta IS NOT NULL AND meta->>'failed' = 'true')
+          )
+    """))).scalar() or 0)
+    translation_failure_rate_pct = (
+        round(100 * translation_failures_24h / translation_attempts_24h, 1)
+        if translation_attempts_24h > 0
+        else 0.0
+    )
+
+    # Stale = FA content has been updated since translation was written.
+    # Pre-Phase-2 (no translations exist) this is always 0 because the
+    # translations->'en'->>'translated_at' path is NULL.
+    translation_stale_count = int((await db.execute(_t("""
+        SELECT COUNT(*) FROM stories
+        WHERE archived_at IS NULL
+          AND article_count >= 5
+          AND (
+            (translations->'en'->>'translated_at' IS NOT NULL
+             AND COALESCE(updated_at, created_at)
+                 > (translations->'en'->>'translated_at')::timestamptz
+                   + INTERVAL '6 hours')
+            OR
+            (translations->'fr'->>'translated_at' IS NOT NULL
+             AND COALESCE(updated_at, created_at)
+                 > (translations->'fr'->>'translated_at')::timestamptz
+                   + INTERVAL '6 hours')
+          )
+    """))).scalar() or 0)
+
+    # Articles inside homepage-visible stories whose title_translations
+    # haven't been populated. Pre-Phase-2 this matches every article in
+    # those stories — meaningful only once translation is active.
+    translation_orphan_count = int((await db.execute(_t("""
+        SELECT COUNT(*) FROM articles a
+        WHERE a.story_id IN (
+            SELECT id FROM stories
+            WHERE archived_at IS NULL AND article_count >= 5
+        )
+        AND (
+            a.title_translations IS NULL
+            OR a.title_translations->'en' IS NULL
+        )
+    """))).scalar() or 0) if translation_phase_active else 0
+
     total_arts = int((await db.execute(select(func.count(Article.id)))).scalar() or 0)
     bias_eligible = int((await db.execute(_t("""
         SELECT COUNT(*) FROM articles
@@ -4308,6 +4387,64 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
             "Per the freshness model, anything >7d should be frozen and excluded from trending. "
             "If oldest_trending >= 7d, the freeze writes aren't persisting (see "
             "feedback_stats_vs_persistence memory).",
+        ),
+        # ── Translation pipeline canaries (EN+FR rollout Phase 0h) ──
+        # All 4 stay green while translation_phase_active is False
+        # (no translation_* rows in llm_usage_logs in the last 7d).
+        # They activate the moment Phase 2 ships and the first
+        # translation call lands. See project_en_fr_rollout.md.
+        _canary(
+            "translation_cost_rate_24h", "Translation cost (last 24h)",
+            f"${round(translation_cost_24h, 4)}",
+            "< $1.00 (circuit-breaker threshold)",
+            "error" if translation_cost_24h > 1.0 else (
+                "warn" if translation_cost_24h > 0.5 else "ok"
+            ),
+            "Sum of llm_usage_logs.total_cost where purpose LIKE 'translation_%' in the last 24h. "
+            "The translation pipeline has a $1/24h circuit breaker — exceeding it stops new "
+            "translations until manual reset. Sustained > $0.50 means translation is being "
+            "triggered too often (FA edits propagating in tight loops, or auto-clear hooks "
+            "firing on stable content).",
+        ),
+        _canary(
+            "translation_failure_rate", "Translation failure rate (24h)",
+            f"{translation_failure_rate_pct}% ({translation_failures_24h}/{translation_attempts_24h})",
+            "< 5%",
+            "ok" if not translation_phase_active else (
+                "error" if translation_failure_rate_pct >= 5.0 else (
+                    "warn" if translation_failure_rate_pct >= 2.0 else "ok"
+                )
+            ),
+            "Failures = translation calls with $0 cost or meta.failed=true in the last 24h. "
+            "Phase 2 wires meta.failed; until then a $0 row is the cleanest failure signal. "
+            "> 5% sustained means LLM provider rate-limit pressure, prompt regression, or "
+            "JSON-parse failures. Reports 0% before Phase 2 ships.",
+        ),
+        _canary(
+            "translation_stale_count", "Stories with stale translation",
+            translation_stale_count, "≤ 5",
+            "ok" if not translation_phase_active else (
+                "error" if translation_stale_count > 20 else (
+                    "warn" if translation_stale_count > 5 else "ok"
+                )
+            ),
+            "Homepage-eligible stories where FA content was updated > 6h ago but the locale "
+            "translation hasn't kept up. Auto-clear-on-FA-edit + the translation cron should "
+            "drain this every cycle. Sustained > 5 means the auto-clear hook is missing on an "
+            "editing endpoint or the translation step is throttled (see Re-translate trigger "
+            "map in project_en_fr_rollout.md). Reports 0 before Phase 2 ships (no "
+            "translations.{en,fr}.translated_at exists yet).",
+        ),
+        _canary(
+            "translation_orphan_articles", "Articles in homepage stories without EN translation",
+            translation_orphan_count, "drains hourly once active",
+            "ok" if not translation_phase_active else (
+                "warn" if translation_orphan_count > 200 else "ok"
+            ),
+            "articles.title_translations is NULL or missing the EN slot, in stories that meet "
+            "homepage eligibility (article_count >= 5 AND archived_at IS NULL). The utility-tier "
+            "batch translator (gpt-4.1-nano) drains this 200/cron. Sustained > 200 means the "
+            "title-translation step is throttled or skipping. Reports 0 before Phase 2 ships.",
         ),
     ]
 

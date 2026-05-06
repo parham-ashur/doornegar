@@ -242,6 +242,11 @@ async def lifespan(app: FastAPI):
                 "ALTER TABLE articles ADD COLUMN IF NOT EXISTS title_translations JSONB",
                 "CREATE INDEX IF NOT EXISTS idx_stories_en_missing ON stories ((translations->'en'->>'title')) WHERE translations->'en'->>'title' IS NULL",
                 "CREATE INDEX IF NOT EXISTS idx_stories_fr_missing ON stories ((translations->'fr'->>'title')) WHERE translations->'fr'->>'title' IS NULL",
+                # Phase 0d — source-name glossary. name_fr populated in
+                # Phase 1 from the canonical glossary in
+                # project_en_fr_rollout.md. Voice prompts fall back to
+                # name_en until then.
+                "ALTER TABLE sources ADD COLUMN IF NOT EXISTS name_fr VARCHAR(255)",
             ):
                 try:
                     await db.execute(text(ddl))

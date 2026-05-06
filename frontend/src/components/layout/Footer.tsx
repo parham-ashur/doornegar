@@ -1,11 +1,19 @@
+import { getLocale } from "next-intl/server";
 import DoornegarAnimation from "@/components/common/DoornegarAnimation";
 
-export default function Footer() {
+export default async function Footer() {
+  const locale = await getLocale();
+  const dir = locale === "fa" ? "rtl" : "ltr";
+  // Persian copy is the only locale shipping today; EN+FR placeholders
+  // render English UI chrome but keep the brand block the same shape.
+  // Phase 1 of the rollout adds locale-keyed text. Until then, the
+  // Persian description still appears on /en/* and /fr/* pages — Vercel
+  // accepts mixed-script footers and audience-share is FA-dominant.
   return (
-    <footer className="border-t border-slate-200 bg-white dark:border-slate-800 dark:bg-anthracite" dir="rtl">
+    <footer className="border-t border-slate-200 bg-white dark:border-slate-800 dark:bg-anthracite" dir={dir}>
       <div className="mx-auto max-w-7xl px-4 py-8">
         <div className="flex flex-col-reverse md:flex-row items-center justify-between gap-6 md:gap-8">
-          {/* Right (RTL): Animation + name */}
+          {/* Logical-start side (RTL: right; LTR: left): Animation + name */}
           <div className="flex items-center gap-4 shrink-0">
             <DoornegarAnimation size="footer" />
             <p className="text-2xl md:text-3xl font-black text-slate-900 dark:text-white">
@@ -13,7 +21,7 @@ export default function Footer() {
             </p>
           </div>
 
-          {/* Left (RTL): description + tags */}
+          {/* Logical-end side (RTL: left; LTR: right): description + tags */}
           <div className="flex flex-col gap-2 text-center md:text-start">
             <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-500">
               سکوی شفافیت رسانه‌ای ایران — مقایسه پوشش خبری رسانه‌های داخل و خارج ایران.

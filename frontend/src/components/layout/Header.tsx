@@ -5,6 +5,7 @@ import { useLocale } from "next-intl";
 import { Menu, X } from "lucide-react";
 import { useState, useEffect } from "react";
 import HeaderAnimation from "./HeaderAnimation";
+import LocaleSwitcher from "./LocaleSwitcher";
 
 function WorldClocks() {
   const [clocks, setClocks] = useState("");
@@ -71,7 +72,10 @@ export default function Header() {
         }
       `}</style>
     <header className="sticky top-0 z-50 border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-anthracite overflow-hidden">
-      <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4" dir="rtl">
+      <div
+        className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4"
+        dir={locale === "fa" ? "rtl" : "ltr"}
+      >
         {/* Logo + tagline */}
         <div className="flex items-center gap-3">
           <Link
@@ -92,8 +96,10 @@ export default function Header() {
             navLinks defined above so re-enabling is a paste-back of
             the <nav> + mobile hamburger + mobile <nav> blocks. */}
 
-        {/* Tehran date/time — left side */}
-        <div className="header-fade">
+        {/* Left side (RTL): locale switcher + Tehran date/time */}
+        <div className="header-fade flex items-center gap-3">
+          <LocaleSwitcher />
+          <span className="text-slate-300 dark:text-slate-700" aria-hidden>·</span>
           <WorldClocks />
         </div>
       </div>

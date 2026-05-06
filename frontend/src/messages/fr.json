@@ -1,0 +1,73 @@
+{
+  "app": {
+    "name": "Doornegar",
+    "tagline": "Iranian Media Transparency",
+    "description": "Step back and see how media shapes the news"
+  },
+  "nav": {
+    "home": "Home",
+    "stories": "Stories",
+    "sources": "Sources",
+    "blindspots": "Blind Spots",
+    "about": "About"
+  },
+  "home": {
+    "hero_title": "See the news from a different angle",
+    "hero_subtitle": "Compare coverage across Iranian media — inside and outside",
+    "trending": "Trending Stories",
+    "blindspot_alert": "Blind Spot Alert",
+    "blindspot_desc": "Stories only covered by one side",
+    "view_all": "View all"
+  },
+  "story": {
+    "sources_covered": "{count} sources",
+    "articles": "Articles",
+    "comparison": "Comparison",
+    "bias_analysis": "Bias Analysis",
+    "social_reaction": "Social Reaction",
+    "covered_by": "Covered by",
+    "state_only": "State media only",
+    "diaspora_only": "Diaspora media only",
+    "blind_spot": "Blind Spot",
+    "framing": "Framing",
+    "no_stories": "No stories yet"
+  },
+  "source": {
+    "state": "State",
+    "semi_state": "Semi-State",
+    "independent": "Independent",
+    "diaspora": "Diaspora",
+    "irgc": "IRGC-affiliated",
+    "inside_iran": "Inside Iran",
+    "outside_iran": "Outside Iran",
+    "credibility": "Credibility",
+    "factional": "Political faction"
+  },
+  "bias": {
+    "political_alignment": "Political Alignment",
+    "pro_regime": "Pro-regime",
+    "reformist": "Reformist",
+    "opposition": "Opposition",
+    "center": "Center",
+    "tone": "Tone",
+    "factuality": "Factuality",
+    "emotional_language": "Emotional Language",
+    "framing": "Framing"
+  },
+  "social": {
+    "telegram_reactions": "Telegram Reactions",
+    "posts": "posts",
+    "views": "views",
+    "sentiment": "Sentiment",
+    "positive": "Positive",
+    "negative": "Negative",
+    "neutral": "Neutral"
+  },
+  "common": {
+    "loading": "Loading...",
+    "error": "Something went wrong",
+    "retry": "Retry",
+    "back": "Back",
+    "language": "فارسی"
+  }
+}

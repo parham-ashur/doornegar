@@ -1,4 +1,5 @@
 import type { MetadataRoute } from "next";
+import { advertisedLocales } from "@/i18n";
 
 // Canonical domain for all absolute URLs emitted by the sitemap. Matches
 // robots.txt and layout.metadataBase so Google sees a single identity
@@ -33,7 +34,12 @@ async function safeFetch<T>(path: string): Promise<T | null> {
 }
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const locales = ["fa", "en"] as const;
+  // Drives every locale loop below. Single source of truth: src/i18n.ts.
+  // 'fr' is registered in the Next-intl `locales` tuple but excluded
+  // from `advertisedLocales` until Phase 1 ships proper French
+  // translations — keeping it out of the sitemap avoids advertising
+  // English-placeholder French pages to crawlers.
+  const locales = advertisedLocales;
   const now = new Date();
   const entries: MetadataRoute.Sitemap = [];
 
