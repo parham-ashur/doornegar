@@ -72,6 +72,18 @@ MIN_ANALYZED_ARTICLES = 25
 MIN_ARTICLES_PER_BELIEF = 3
 MIN_SOURCES_PER_BELIEF = 2
 
+# Small-bundle relaxation (added 2026-05-06 after radical_diaspora — with
+# only 3 tracked sources — produced status='ok' but every belief got
+# stripped because gpt-4o-mini cited articles from a single dominant
+# outlet). Requiring ≥2 distinct sources per belief is structurally near-
+# impossible when the bundle itself has only 2-3 sources. For these
+# small bundles we drop the diversity floor to 1 — single-source beliefs
+# pass if they still meet the article-count floor. Per-bundle source
+# threshold itself stays at MIN_SOURCES=2; this only affects the
+# per-belief floor inside `_check_ground`.
+SMALL_BUNDLE_SOURCE_CAP = 3
+SMALL_BUNDLE_MIN_SOURCES_PER_BELIEF = 1
+
 # LLM sampling bounds
 SAMPLE_BIAS_NARRATIVES = 10
 TOP_ENTITIES = 20
@@ -493,6 +505,15 @@ def _validate_and_trim(
     evidence: dict[str, list[str]] = {}
     synthesis: dict[str, Any] = {}
 
+    # Dynamic source floor: drops to 1 for small bundles (≤3 tracked
+    # sources) since the LLM can't always cite ≥2 distinct ones when only
+    # 3 exist and one dominates the coverage. See SMALL_BUNDLE_* above.
+    min_sources_per_belief = (
+        SMALL_BUNDLE_MIN_SOURCES_PER_BELIEF
+        if agg.source_count <= SMALL_BUNDLE_SOURCE_CAP
+        else MIN_SOURCES_PER_BELIEF
+    )
+
     def _check_ground(entry: dict, kind: str, idx: int) -> dict | None:
         count = int(entry.get("article_count", 0) or 0)
         ids_raw = entry.get("example_article_ids") or []
@@ -502,7 +523,7 @@ def _validate_and_trim(
         distinct_sources = {agg.article_to_source[x] for x in valid_ids}
         if count < MIN_ARTICLES_PER_BELIEF:
             return None
-        if len(valid_ids) == 0 or len(distinct_sources) < MIN_SOURCES_PER_BELIEF:
+        if len(valid_ids) == 0 or len(distinct_sources) < min_sources_per_belief:
             return None
         entry = dict(entry)
         entry["example_article_ids"] = valid_ids[:5]
