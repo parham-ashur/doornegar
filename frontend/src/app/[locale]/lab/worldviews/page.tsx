@@ -119,15 +119,29 @@ function formatDateRangeFa(start: string, end: string): string {
   return `${toFaDigits(parseInt(sd, 10))} ${months[parseInt(sm, 10) - 1]} تا ${toFaDigits(parseInt(ed, 10))} ${months[parseInt(em, 10) - 1]} ${toFaDigits(ey)}`;
 }
 
-async function fetchCurrent(): Promise<CurrentResponse | null> {
+// Returns either {ok: true, data} or {ok: false, error} so the page can
+// distinguish "API said no data this week" from "we couldn't reach the
+// API at SSR time and the empty state was cached for 30 minutes". The
+// previous silent-null pattern caused a cached empty state on
+// 2026-05-06 that survived ~30 min after a deploy because nobody could
+// see the SSR fetch had failed.
+type FetchResult =
+  | { ok: true; data: CurrentResponse }
+  | { ok: false; error: string };
+
+async function fetchCurrent(): Promise<FetchResult> {
   try {
     const res = await fetch(`${API}/api/v1/worldviews/current`, {
       next: { revalidate: 300 },
     });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch {
-    return null;
+    if (!res.ok) {
+      return { ok: false, error: `HTTP ${res.status} from API` };
+    }
+    const data = (await res.json()) as CurrentResponse;
+    return { ok: true, data };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { ok: false, error: `fetch failed: ${msg}` };
   }
 }
 
@@ -320,7 +334,9 @@ export default async function WorldviewsLabPage({
 }) {
   const { locale } = await params;
   setRequestLocale(locale);
-  const data = await fetchCurrent();
+  const result = await fetchCurrent();
+  const fetchError = result.ok ? null : result.error;
+  const data = result.ok ? result.data : null;
   const cards = data?.cards || [];
   const byBundle = new Map<Bundle, WorldviewCard>(
     cards.map((c) => [c.bundle, c])
@@ -357,10 +373,23 @@ export default async function WorldviewsLabPage({
         </p>
       </header>
 
-      {cards.length === 0 ? (
+      {fetchError ? (
+        <div className="border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/30 p-6">
+          <p className="text-[14px] font-semibold text-amber-900 dark:text-amber-200">
+            دادهٔ این صفحه در این لحظه از سرور قابل دریافت نبود.
+          </p>
+          <p className="text-[12.5px] text-amber-800 dark:text-amber-300 mt-2 font-mono">
+            {fetchError}
+          </p>
+          <p className="text-[12.5px] text-slate-600 dark:text-slate-400 mt-3">
+            صفحه چند دقیقه دیگر دوباره تلاش می‌کند. اگر این پیام پایدار است،
+            احتمالاً ISR کش یک پاسخ خطا را ذخیره کرده — یک استقرار جدید آن را پاک می‌کند.
+          </p>
+        </div>
+      ) : cards.length === 0 ? (
         <div className="border border-slate-200 dark:border-slate-800 p-8">
           <p className="text-[14px] text-slate-600 dark:text-slate-400">
-            هنوز چکیده‌ای تولید نشده است.
+            این هفته چکیده‌ای تولید نشد.
           </p>
           <p className="text-[12.5px] text-slate-500 dark:text-slate-500 mt-2">
             این فرایند هر دوشنبه اجرا می‌شود.
