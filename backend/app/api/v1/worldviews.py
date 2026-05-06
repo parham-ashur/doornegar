@@ -38,8 +38,17 @@ from app.services.narrative_groups import (
     NARRATIVE_GROUPS_ORDER,
     GROUP_LABELS_FA,
     NarrativeGroup,
+    narrative_group,
 )
-from app.services.worldview_digest import generate_worldview_digests
+from app.services.worldview_digest import (
+    _aggregate,
+    _default_window,
+    _detect_absences,
+    _gather_bundle_data,
+    _upsert_digest,
+    _validate_and_trim,
+    generate_worldview_digests,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -291,4 +300,158 @@ async def admin_generate(
         "status": "accepted",
         "message": "Synthesis running in background. Poll /api/v1/worldviews/current to see results.",
         "anchor": anchor.isoformat() if anchor else None,
+    }
+
+
+# ─── Niloofar (Claude-driven) synthesis path ─────────────────────────
+#
+# Two endpoints that bypass the OpenAI gpt-4o-mini call:
+#   GET  /admin/{bundle}/aggregate    — returns the same BundleAggregate
+#                                       the LLM call would have seen,
+#                                       so Niloofar can write grounded
+#                                       beliefs against real article IDs
+#   POST /admin/{bundle}/niloofar     — accepts a hand-authored synthesis
+#                                       JSON, applies the same grounding
+#                                       floor + UPSERT path used by the
+#                                       gpt-4o-mini route, sets
+#                                       model_used='niloofar-claude' and
+#                                       token_cost_usd=0
+#
+# Documented as "Option A" in memory project_worldview_niloofar_swap.md.
+
+
+async def _build_aggregates(
+    db: AsyncSession,
+    anchor: date | None,
+):
+    """Run the deterministic pre-LLM aggregation across all 4 bundles.
+    Cross-bundle absence detection requires every bundle's topic counts,
+    so we always aggregate the full set even when the caller only wants
+    one bundle. No LLM cost — pure SQL + python."""
+    window_start, window_end = _default_window(anchor)
+    src_res = await db.execute(select(Source).where(Source.is_active.is_(True)))
+    sources = src_res.scalars().all()
+    src_to_bundle = {str(s.id): narrative_group(s) for s in sources}
+
+    aggregates = {}
+    for b in NARRATIVE_GROUPS_ORDER:
+        articles, bs_map = await _gather_bundle_data(
+            db, b, window_start, window_end, src_to_bundle
+        )
+        aggregates[b] = _aggregate(b, window_start, window_end, articles, bs_map)
+    _detect_absences(aggregates)
+    return window_start, window_end, aggregates
+
+
+@router.get(
+    "/admin/{bundle}/aggregate",
+    dependencies=[Depends(require_admin)],
+    summary="Pre-LLM bundle aggregate for Niloofar (Claude-driven) synthesis.",
+)
+async def get_bundle_aggregate(
+    bundle: str,
+    anchor: date | None = Query(
+        None,
+        description="ISO week anchor; defaults to most recent Monday.",
+    ),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the same BundleAggregate the gpt-4o-mini call would have
+    seen. Includes article_to_source so the chat-side author can write
+    grounded beliefs that pass the per-belief evidence floor."""
+    if bundle not in NARRATIVE_GROUPS_ORDER:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown bundle: {bundle}. Expected one of {list(NARRATIVE_GROUPS_ORDER)}.",
+        )
+    window_start, window_end, aggregates = await _build_aggregates(db, anchor)
+    agg = aggregates[bundle]
+    return {
+        "bundle": bundle,
+        "window_start": window_start.date().isoformat(),
+        "window_end": window_end.date().isoformat(),
+        "article_count": agg.article_count,
+        "source_count": agg.source_count,
+        "bias_coverage_pct": round(agg.bias_coverage_pct, 1),
+        "tone_summary": agg.tone_summary,
+        "framing_top": [{"label": l, "count": c} for l, c in agg.framing_top],
+        "entity_top": [{"name": n, "count": c} for n, c in agg.entity_top],
+        "topic_top": [{"topic": t, "count": c} for t, c in agg.topic_top],
+        "bias_samples": agg.bias_samples,
+        "absences_from_other_bundles": agg.absences,
+        "article_to_source": agg.article_to_source,
+    }
+
+
+class _NiloofarSynthesisRequest(BaseModel):
+    synthesis: dict
+    # anchor is optional: if omitted, uses the same default window the
+    # auto pipeline would for the current call (last full ISO week).
+    anchor: date | None = None
+
+
+@router.post(
+    "/admin/{bundle}/niloofar",
+    dependencies=[Depends(require_admin)],
+    summary="UPSERT a Niloofar (Claude-driven) synthesis for one bundle.",
+)
+async def niloofar_synthesize_bundle(
+    bundle: str,
+    request: _NiloofarSynthesisRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Apply the same grounding floor + UPSERT used by the gpt-4o-mini
+    route, but with chat-authored synthesis and zero LLM cost.
+
+    Body:
+      {
+        "synthesis": {
+          "core_beliefs": [{text, article_count, example_article_ids}, ...],
+          "emphasized":   [{topic, note, article_count, example_article_ids}, ...],
+          "predictions_primed": [{text, article_count, example_article_ids}, ...],
+          "absent":       [{topic, note}, ...],
+          "tone_profile": {dominant, alt, description}
+        },
+        "anchor": null
+      }
+
+    Same JSON shape the OpenAI prompt asks for. example_article_ids
+    must be UUIDs that appear in the bundle's input data — the
+    grounding floor drops anything else.
+    """
+    if bundle not in NARRATIVE_GROUPS_ORDER:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown bundle: {bundle}. Expected one of {list(NARRATIVE_GROUPS_ORDER)}.",
+        )
+
+    window_start, window_end, aggregates = await _build_aggregates(db, request.anchor)
+    agg = aggregates[bundle]
+
+    synthesis, evidence = _validate_and_trim(request.synthesis, agg)
+
+    await _upsert_digest(
+        db,
+        bundle,
+        window_start.date(),
+        window_end.date(),
+        status="ok",
+        agg=agg,
+        synthesis=synthesis,
+        evidence=evidence,
+        model_used="niloofar-claude",
+        token_cost_usd=0.0,
+    )
+    await db.commit()
+
+    return {
+        "status": "ok",
+        "bundle": bundle,
+        "window_start": window_start.date().isoformat(),
+        "window_end": window_end.date().isoformat(),
+        "beliefs_kept": len(synthesis.get("core_beliefs", [])),
+        "emphasized_kept": len(synthesis.get("emphasized", [])),
+        "predictions_kept": len(synthesis.get("predictions_primed", [])),
+        "absent_kept": len(synthesis.get("absent", [])),
+        "model_used": "niloofar-claude",
     }

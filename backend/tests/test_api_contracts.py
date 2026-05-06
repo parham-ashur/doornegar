@@ -327,6 +327,94 @@ class TestDetachArticlesEndpoint:
         )
 
 
+class TestNiloofarWorldviewEndpoints:
+    """Niloofar (Claude-driven) synthesis path bypasses the gpt-4o-mini
+    OpenAI call so worldview cards can be authored from chat. Two
+    endpoints — GET aggregate, POST synthesis — that share the same
+    BundleAggregate path the auto pipeline uses."""
+
+    def test_aggregate_endpoint_registered(self):
+        src = (
+            Path(__file__).parent.parent / "app" / "api" / "v1" / "worldviews.py"
+        ).read_text()
+        assert '@router.get(\n    "/admin/{bundle}/aggregate"' in src or \
+               '@router.get("/admin/{bundle}/aggregate"' in src, (
+            "GET /admin/{bundle}/aggregate must exist for chat-side "
+            "Niloofar synthesis to know which article IDs are valid."
+        )
+
+    def test_aggregate_endpoint_admin_gated(self):
+        src = (
+            Path(__file__).parent.parent / "app" / "api" / "v1" / "worldviews.py"
+        ).read_text()
+        idx = src.find('"/admin/{bundle}/aggregate"')
+        assert idx >= 0
+        decorator = src[idx : src.find("async def", idx)]
+        assert "Depends(require_admin)" in decorator, (
+            "/admin/{bundle}/aggregate exposes article-level bias "
+            "narratives — must be admin-gated."
+        )
+
+    def test_niloofar_synthesize_endpoint_registered(self):
+        src = (
+            Path(__file__).parent.parent / "app" / "api" / "v1" / "worldviews.py"
+        ).read_text()
+        assert '"/admin/{bundle}/niloofar"' in src, (
+            "POST /admin/{bundle}/niloofar must exist so chat-authored "
+            "synthesis can UPSERT into worldview_digests."
+        )
+
+    def test_niloofar_synthesize_endpoint_admin_gated(self):
+        src = (
+            Path(__file__).parent.parent / "app" / "api" / "v1" / "worldviews.py"
+        ).read_text()
+        idx = src.find('"/admin/{bundle}/niloofar"')
+        assert idx >= 0
+        decorator = src[idx : src.find("async def", idx)]
+        assert "Depends(require_admin)" in decorator, (
+            "/admin/{bundle}/niloofar mutates worldview_digests — "
+            "must be admin-gated."
+        )
+
+    def test_niloofar_route_uses_validate_and_trim(self):
+        """Niloofar synthesis must run through the SAME grounding floor
+        the gpt-4o-mini path uses. Otherwise hand-authored beliefs could
+        ship without the ≥3 articles / valid-UUIDs guarantees."""
+        src = (
+            Path(__file__).parent.parent / "app" / "api" / "v1" / "worldviews.py"
+        ).read_text()
+        idx = src.find("async def niloofar_synthesize_bundle")
+        end = src.find("\n\n\n", idx)
+        body = src[idx : end if end > 0 else len(src)]
+        assert "_validate_and_trim" in body, (
+            "niloofar_synthesize_bundle must call _validate_and_trim — "
+            "this is the function that drops hallucinated UUIDs and "
+            "applies the per-belief evidence floor. Without it, the "
+            "chat-authored path has weaker guarantees than the LLM path."
+        )
+
+    def test_niloofar_route_marks_provenance(self):
+        """The cost ledger filters by model_used. niloofar-authored rows
+        must declare themselves so /dashboard/cost can attribute them
+        correctly (zero cost vs gpt-4o-mini's per-row cost)."""
+        src = (
+            Path(__file__).parent.parent / "app" / "api" / "v1" / "worldviews.py"
+        ).read_text()
+        idx = src.find("async def niloofar_synthesize_bundle")
+        end = src.find("\n\n\n", idx)
+        body = src[idx : end if end > 0 else len(src)]
+        assert 'model_used="niloofar-claude"' in body, (
+            "niloofar_synthesize_bundle must set model_used='niloofar-claude' "
+            "so the cost ledger can distinguish chat-authored rows from "
+            "OpenAI-authored ones."
+        )
+        assert "token_cost_usd=0" in body, (
+            "Niloofar (Claude) synthesis is zero LLM-cost via this path "
+            "(the chat-side cost is borne separately by the human-Claude "
+            "session)."
+        )
+
+
 class TestAttachArticlesEndpoint:
     """`/admin/articles/attach` is the mirror of /articles/detach.
     Lets Niloofar arc-curation finish in chat when the auto-matcher
