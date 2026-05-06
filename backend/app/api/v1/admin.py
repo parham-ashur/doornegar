@@ -2837,6 +2837,118 @@ async def patch_article(
     return {"status": "ok", "article_id": article_id, "image_url": article.image_url}
 
 
+class _DetachArticlesRequest(_BaseModel):
+    article_ids: list[str]
+
+
+@router.post("/articles/detach", dependencies=[Depends(require_admin)])
+async def detach_articles_from_stories(
+    request: _DetachArticlesRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Detach articles from their parent stories (orphan them).
+
+    HTTP mirror of the `remove_article` capability that previously lived
+    only in `scripts/journalist_audit.py --apply-from`. Lets Niloofar
+    audits in chat finish the audit without dropping to a Railway CLI.
+
+    Each article's `story_id` is set to NULL. Affected stories are
+    recounted so cached `article_count` stays in sync. The 90-day
+    negative-pair memory used by the clustering matcher is NOT written
+    here — these detaches are flagged as off-topic, not as a wrong
+    cluster decision the matcher should remember.
+
+    Body:
+      { "article_ids": ["uuid", ...] }
+
+    Response:
+      {
+        "status": "ok",
+        "detached": N,
+        "not_found": ["uuid", ...],
+        "story_recounts": [
+          {"story_id": "...", "old_count": M, "new_count": M-K}
+        ]
+      }
+    """
+    import uuid as _uuid
+    from collections import defaultdict
+    from sqlalchemy import update as _update
+    from app.models.article import Article
+    from app.models.story import Story
+    from app.services.events import log_event as _log_event
+
+    try:
+        ids = list({_uuid.UUID(s) for s in request.article_ids})
+    except (ValueError, TypeError) as e:
+        raise HTTPException(status_code=400, detail=f"Bad article id: {e}")
+    if not ids:
+        raise HTTPException(status_code=400, detail="article_ids cannot be empty")
+
+    # Read current state for the recount + audit log.
+    rows = (await db.execute(
+        select(Article.id, Article.story_id).where(Article.id.in_(ids))
+    )).all()
+    found_ids = {r[0] for r in rows}
+    not_found = [str(i) for i in ids if i not in found_ids]
+    article_to_story: dict = {r[0]: r[1] for r in rows}
+
+    # Group by source story so we can recount each in one query each.
+    by_story: dict = defaultdict(list)
+    for aid, sid in article_to_story.items():
+        if sid is not None:
+            by_story[sid].append(aid)
+
+    # Detach: set story_id = NULL on every found article.
+    if found_ids:
+        await db.execute(
+            _update(Article)
+            .where(Article.id.in_(found_ids))
+            .values(story_id=None)
+            .execution_options(synchronize_session=False)
+        )
+
+    # Recount each affected story so cached article_count + the
+    # `oversized_active_stories` canary stay accurate.
+    recounts: list = []
+    for sid, detached_ids in by_story.items():
+        live = (await db.execute(
+            select(func.count(Article.id)).where(Article.story_id == sid)
+        )).scalar() or 0
+        story = await db.get(Story, sid)
+        if story is None:
+            continue
+        old_count = int(story.article_count or 0)
+        story.article_count = live
+        recounts.append({
+            "story_id": str(sid),
+            "old_count": old_count,
+            "new_count": live,
+            "detached": len(detached_ids),
+        })
+        # One audit-log row per story so the timeline shows the action.
+        await _log_event(
+            db,
+            event_type="articles_detached",
+            actor="admin",
+            story_id=sid,
+            signals={
+                "detached_article_ids": [str(a) for a in detached_ids[:50]],
+                "old_count": old_count,
+                "new_count": live,
+                "reason": "off-topic (manual detach)",
+            },
+        )
+
+    await db.commit()
+    return {
+        "status": "ok",
+        "detached": len(found_ids),
+        "not_found": not_found,
+        "story_recounts": recounts,
+    }
+
+
 # NOTE: a previous duplicate PATCH /stories/{story_id} handler was defined
 # here. Removed because the earlier `edit_story` handler (search for
 # _EditStoryRequest above) already owns this route and is authoritative.

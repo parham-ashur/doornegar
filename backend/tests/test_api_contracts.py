@@ -263,6 +263,70 @@ class TestBiasScoringHonorsHomepageScope:
 # 6. Live-app smoke: response_model fields actually serialize
 # ═════════════════════════════════════════════════════════════════════
 
+class TestDetachArticlesEndpoint:
+    """`/admin/articles/detach` lets Niloofar audits finish in chat
+    without dropping to the Railway CLI for `remove_article`. The
+    endpoint must:
+    - Detach all listed article IDs (set story_id = NULL)
+    - Recount affected stories so the canary stays accurate
+    - Surface not-found IDs separately
+    - Log an `articles_detached` event per affected story
+    """
+
+    def test_endpoint_registered(self):
+        src = (
+            Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py"
+        ).read_text()
+        assert '@router.post("/articles/detach"' in src, (
+            "POST /articles/detach must exist for HTTP-driven Niloofar "
+            "remove_article fixes."
+        )
+
+    def test_endpoint_admin_gated(self):
+        src = (
+            Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py"
+        ).read_text()
+        idx = src.find('@router.post("/articles/detach"')
+        assert idx >= 0
+        # Decorator spans up to the next `async def`.
+        decorator = src[idx : src.find("async def", idx)]
+        assert "Depends(require_admin)" in decorator, (
+            "/articles/detach mutates production data — must be "
+            "admin-gated."
+        )
+
+    def test_endpoint_recounts_affected_stories(self):
+        """The cached article_count drift catastrophe (April 2026) was
+        fixed by adding recount steps everywhere mutations happen.
+        This endpoint is one of those mutation points."""
+        src = (
+            Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py"
+        ).read_text()
+        idx = src.find("async def detach_articles_from_stories(")
+        assert idx >= 0
+        end = src.find("\n\n\n", idx)
+        body = src[idx : end if end > 0 else len(src)]
+        assert "story.article_count = live" in body, (
+            "detach_articles_from_stories must recount each affected "
+            "story so the cached article_count stays in sync. Without "
+            "this, the oversized_active_stories canary (and other "
+            "filters that rely on cached counts) drift."
+        )
+
+    def test_endpoint_logs_audit_event(self):
+        src = (
+            Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py"
+        ).read_text()
+        idx = src.find("async def detach_articles_from_stories(")
+        end = src.find("\n\n\n", idx)
+        body = src[idx : end if end > 0 else len(src)]
+        assert 'event_type="articles_detached"' in body, (
+            "detach_articles_from_stories must emit an articles_detached "
+            "story_event so the per-story timeline shows the action. "
+            "Silent mutations are how the audit trail rots."
+        )
+
+
 class TestSchemaSerializationSmoke:
     """Construct a StoryBrief from the absolute minimum required
     fields and verify it serializes. Catches the case where someone
