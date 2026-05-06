@@ -114,16 +114,35 @@ function formatPublishedFa(iso: string | null): string | null {
   }
 }
 
-async function fetchDetail(bundle: string): Promise<WorldviewDetail | null> {
-  try {
-    const res = await fetch(`${API}/api/v1/worldviews/${bundle}`, {
-      next: { revalidate: 300 },
-    });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch {
-    return null;
+type FetchResult =
+  | { ok: true; data: WorldviewDetail }
+  | { ok: false; error: string };
+
+// Same retry-on-5xx pattern as the overview page (worldviews/page.tsx).
+// First attempt right after a Vercel deploy can see a brief 5xx if
+// Railway is still cycling; one retry with backoff catches most
+// transients before ISR caches the error for 30 min.
+async function fetchDetail(bundle: string): Promise<FetchResult> {
+  let lastError = "fetch failed: unknown";
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(`${API}/api/v1/worldviews/${bundle}`, {
+        next: { revalidate: 300 },
+      });
+      if (res.ok) {
+        const data = (await res.json()) as WorldviewDetail;
+        return { ok: true, data };
+      }
+      lastError = `HTTP ${res.status} from API`;
+      if (res.status < 500 || attempt > 0) break;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      lastError = `fetch failed: ${msg}`;
+      if (attempt > 0) break;
+    }
+    await new Promise((r) => setTimeout(r, 750));
   }
+  return { ok: false, error: lastError };
 }
 
 // ─── Citation list (the «شواهد و مقالات» beneath each belief) ──────
@@ -324,16 +343,25 @@ export default async function WorldviewBundlePage({
     notFound();
   }
   const bundle = bundleParam as Bundle;
-  const data = await fetchDetail(bundle);
-  if (!data) {
+  const result = await fetchDetail(bundle);
+  if (!result.ok) {
     return (
-      <div dir="rtl" className="mx-auto max-w-3xl px-4 py-16 text-center">
-        <p className="text-[14px] text-slate-500 dark:text-slate-400">
-          چکیده‌ای برای این گروه موجود نیست.
-        </p>
+      <div dir="rtl" className="mx-auto max-w-3xl px-4 py-16">
+        <div className="border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/30 p-6">
+          <p className="text-[14px] font-semibold text-amber-900 dark:text-amber-200">
+            دادهٔ این صفحه در این لحظه از سرور قابل دریافت نبود.
+          </p>
+          <p className="text-[12.5px] text-amber-800 dark:text-amber-300 mt-2 font-mono">
+            {result.error}
+          </p>
+          <p className="text-[12.5px] text-slate-600 dark:text-slate-400 mt-3">
+            صفحه چند دقیقه دیگر دوباره تلاش می‌کند. اگر این پیام پایدار است،
+            احتمالاً ISR کش یک پاسخ خطا را ذخیره کرده — یک استقرار جدید آن را پاک می‌کند.
+          </p>
+        </div>
         <Link
           href={`/${locale}/lab/worldviews`}
-          className="inline-flex items-center gap-1 text-[13px] text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 mt-4 underline underline-offset-4 decoration-slate-300"
+          className="inline-flex items-center gap-1.5 text-[13px] text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 mt-6 underline underline-offset-4 decoration-slate-300"
         >
           <ArrowLeft className="w-4 h-4" />
           بازگشت به همهٔ گروه‌ها
@@ -341,6 +369,7 @@ export default async function WorldviewBundlePage({
       </div>
     );
   }
+  const data = result.data;
 
   const theme = BUNDLES[bundle];
   const s = data.synthesis_fa;

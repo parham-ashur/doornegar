@@ -129,20 +129,34 @@ type FetchResult =
   | { ok: true; data: CurrentResponse }
   | { ok: false; error: string };
 
+// Single retry on 5xx / fetch errors. Vercel SSR runs right after each
+// deploy; if Railway is briefly restarting (cold-start, container
+// recycle) the first attempt sees 502/503/504 and ISR caches that
+// error response for 30 minutes. One retry with a short backoff turns
+// most of those into successful regens. Permanent errors still bubble
+// through to the user-visible amber panel.
 async function fetchCurrent(): Promise<FetchResult> {
-  try {
-    const res = await fetch(`${API}/api/v1/worldviews/current`, {
-      next: { revalidate: 300 },
-    });
-    if (!res.ok) {
-      return { ok: false, error: `HTTP ${res.status} from API` };
+  let lastError = "fetch failed: unknown";
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(`${API}/api/v1/worldviews/current`, {
+        next: { revalidate: 300 },
+      });
+      if (res.ok) {
+        const data = (await res.json()) as CurrentResponse;
+        return { ok: true, data };
+      }
+      lastError = `HTTP ${res.status} from API`;
+      // Retry on 5xx (origin transient) but bail on 4xx (real error).
+      if (res.status < 500 || attempt > 0) break;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      lastError = `fetch failed: ${msg}`;
+      if (attempt > 0) break;
     }
-    const data = (await res.json()) as CurrentResponse;
-    return { ok: true, data };
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    return { ok: false, error: `fetch failed: ${msg}` };
+    await new Promise((r) => setTimeout(r, 750));
   }
+  return { ok: false, error: lastError };
 }
 
 // ─── Card pieces ─────────────────────────────────────────────────
