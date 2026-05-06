@@ -1985,10 +1985,31 @@ async def merge_similar_visible_stories(db: AsyncSession) -> int:
     OVERLAP_THRESHOLD = 0.4
     CENTROID_COSINE_THRESHOLD = 0.78
     MAX_CANDIDATES_TO_LLM = 30
+    UMBRELLA_FIRST_PUB_CAP_DAYS = 7  # mirror clustering matcher + freeze rule
 
+    # Mirror the safety gates in `_match_to_existing_stories` so old or
+    # oversized umbrellas can't be picked as merge keepers. Background:
+    # an unfrozen 245-article umbrella would otherwise absorb fresh
+    # sibling clusters every cron tick. Articles transferred → `_refresh_
+    # story_metadata` bumps `last_updated_at` → story looks fresh on the
+    # homepage despite being a 30-day-old chapter the freeze rule
+    # already chose to retire. step_archive_stale freezes it again at
+    # the end of the cron, but the in-cron merge already grew the
+    # cluster and bumped its timestamp. Verified 2026-05-06 against
+    # story f06af369 (245 articles, first_published_at = 2026-04-06).
+    umbrella_cutoff = datetime.now(timezone.utc) - timedelta(days=UMBRELLA_FIRST_PUB_CAP_DAYS)
     result = await db.execute(
         select(Story)
-        .where(Story.article_count >= 5, Story.frozen_at.is_(None))
+        .where(
+            Story.article_count >= 5,
+            Story.article_count < settings.max_cluster_size,
+            Story.frozen_at.is_(None),
+            Story.archived_at.is_(None),
+            (
+                func.coalesce(Story.first_published_at, Story.created_at)
+                >= umbrella_cutoff
+            ),
+        )
         .order_by(Story.trending_score.desc())
         .limit(80)
     )

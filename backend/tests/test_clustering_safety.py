@@ -350,6 +350,71 @@ class TestHomepageScopeContract:
 
 
 # ═════════════════════════════════════════════════════════════════════
+# 5b. merge_similar_visible_stories has the SAME gates as the matcher
+# ═════════════════════════════════════════════════════════════════════
+
+class TestMergeSimilarHasMatcherGates:
+    """`merge_similar_visible_stories` is the third bypass surface
+    after `_match_to_existing_stories` and `step_recluster_orphans`.
+    When step_merge_similar picks an oversized/old umbrella as the
+    merge keeper, sibling stories' articles transfer to the umbrella
+    AND `_refresh_story_metadata` bumps `last_updated_at` — the
+    story then appears 'updated 1 hour ago' on the homepage despite
+    being a 30-day-old chapter the freeze rule chose to retire.
+
+    Verified 2026-05-06 against story f06af369: 245 articles,
+    first_published_at = 2026-04-06, kept getting bumped every cron
+    until this gate was added.
+
+    Each gate below mirrors a safety constraint already present in
+    `_match_to_existing_stories`. If any is removed, the bypass
+    surface re-opens."""
+
+    def _merge_visible_body(self) -> str:
+        src = _clustering_src()
+        idx = src.find("async def merge_similar_visible_stories(")
+        assert idx >= 0
+        end = src.find("\n\nasync def ", idx + 100)
+        return src[idx : end if end > 0 else len(src)]
+
+    def test_excludes_frozen_stories(self):
+        body = self._merge_visible_body()
+        assert "Story.frozen_at.is_(None)" in body, (
+            "merge_similar must exclude frozen stories — already there "
+            "but pinned so it can't be removed."
+        )
+
+    def test_excludes_archived_stories(self):
+        body = self._merge_visible_body()
+        assert "Story.archived_at.is_(None)" in body, (
+            "merge_similar must exclude archived stories from being "
+            "merge keepers (mirrors _match_to_existing_stories)."
+        )
+
+    def test_enforces_max_cluster_size_cap(self):
+        body = self._merge_visible_body()
+        assert "Story.article_count < settings.max_cluster_size" in body, (
+            "merge_similar must refuse oversized stories as merge "
+            "keepers. An umbrella with article_count >= max_cluster_size "
+            "(30) should be retired, not allowed to absorb more siblings. "
+            "f06af369 incident 2026-05-06."
+        )
+
+    def test_enforces_umbrella_first_published_cap(self):
+        body = self._merge_visible_body()
+        assert "UMBRELLA_FIRST_PUB_CAP_DAYS" in body, (
+            "merge_similar must define UMBRELLA_FIRST_PUB_CAP_DAYS — "
+            "stories past the 7d freeze cliff cannot be merge keepers."
+        )
+        # NULL fallback to created_at (same loophole closure as matcher).
+        assert "func.coalesce(Story.first_published_at, Story.created_at)" in body, (
+            "merge_similar's umbrella cap must use coalesce(..., "
+            "created_at) so NULL-dated stories also get gated. Mirrors "
+            "the 2026-05-03 loophole closure in _match_to_existing_stories."
+        )
+
+
+# ═════════════════════════════════════════════════════════════════════
 # 6. The BATCH_SIZE / MAX_CLUSTER_ATTEMPTS sanity bounds
 # ═════════════════════════════════════════════════════════════════════
 
