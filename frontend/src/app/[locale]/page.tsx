@@ -9,12 +9,12 @@ import HomeBody from "@/components/home/HomeBody";
 // renders the same component with feedbackMode and a FeedbackProvider
 // wrapper.
 //
-// 5 min was contributing ~30% of Fluid Active CPU even at low traffic
-// (homepage is the most-visited page). 10 min ISR halves regens; the
-// homepage data (trending stories, blindspots, weekly digest) only
-// shifts on the 6-hourly cron, so a 10-min freshness window doesn't
-// affect what readers see.
-export const revalidate = 600;
+// Bumped 600 → 900 (15 min) on 2026-05-06 as Vercel headroom for the
+// upcoming /en/ + /fr/ rollout. Per-locale ISR caches multiply
+// page-regen work; this bump pre-pays for the multiplier. Underlying
+// data shifts only on the 6-hourly cron, so 15-min freshness still
+// doesn't affect what readers see.
+export const revalidate = 900;
 
 export default async function HomePage({
   params: { locale },
