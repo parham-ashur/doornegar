@@ -12,25 +12,25 @@ type Bundle = "principlist" | "reformist" | "moderate_diaspora" | "radical_diasp
 const BUNDLES: Record<Bundle, { label: string; side: string; accentBorder: string; accentDot: string }> = {
   principlist: {
     label: "اصول‌گرا",
-    side: "درون مرز",
+    side: "درون‌مرزی",
     accentBorder: "border-t-[#1e3a5f] dark:border-t-[#93c5fd]",
     accentDot: "bg-[#1e3a5f] dark:bg-[#93c5fd]",
   },
   reformist: {
-    label: "اصلاح‌طلب/مستقل",
-    side: "درون مرز",
+    label: "اصلاح‌طلب",
+    side: "درون‌مرزی",
     accentBorder: "border-t-[#4f7cac] dark:border-t-[#7ba3cf]",
     accentDot: "bg-[#4f7cac] dark:bg-[#7ba3cf]",
   },
   moderate_diaspora: {
     label: "میانه‌رو",
-    side: "برون مرز",
+    side: "برون‌مرزی",
     accentBorder: "border-t-[#f97316] dark:border-t-[#fdba74]",
     accentDot: "bg-[#f97316] dark:bg-[#fdba74]",
   },
   radical_diaspora: {
-    label: "مخالف رادیکال",
-    side: "برون مرز",
+    label: "رادیکال",
+    side: "برون‌مرزی",
     accentBorder: "border-t-[#c2410c] dark:border-t-[#fb923c]",
     accentDot: "bg-[#c2410c] dark:bg-[#fb923c]",
   },
@@ -203,9 +203,19 @@ function BeliefBlock({
   );
 }
 
+// Detail-page section heading. Turning-points between
+// «چه گفتند» / «چه برجسته کردند» / «چه انتظاری ساختند» / «و چه نگفتند».
+// On the detail page the surrounding rhythm is generous (each section
+// has space-y-10 wrapper), so the heading itself just needs to feel
+// like a chapter break. DESIGN.md §3 «running head» applied at title
+// scale (1.125rem ≈ 18px) since this is a longer-form page than the
+// 4-card overview.
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <h2 className="text-[12px] tracking-wide font-semibold text-slate-500 dark:text-slate-400 mb-1">
+    <h2
+      className="text-[18px] font-bold text-slate-900 dark:text-slate-100 tracking-wide mb-4 pb-2 border-b border-slate-200 dark:border-slate-800"
+      style={{ textWrap: "pretty" } as React.CSSProperties}
+    >
       {children}
     </h2>
   );
@@ -263,23 +273,23 @@ export default async function WorldviewBundlePage({
 
       {/* Header */}
       <header className={`border-t-[2px] ${theme.accentBorder} pt-5 mb-2`}>
-        <div className="flex items-center gap-2">
-          <span className={`inline-block w-2 h-2 ${theme.accentDot}`} aria-hidden="true" />
-          <h1 className="text-[28px] font-bold text-slate-900 dark:text-slate-100" style={{ textWrap: "pretty" } as React.CSSProperties}>
+        <div className="flex items-center gap-2.5">
+          <span className={`inline-block w-3 h-3 ${theme.accentDot}`} aria-hidden="true" />
+          <h1 className="text-[30px] font-bold text-slate-900 dark:text-slate-100" style={{ textWrap: "pretty" } as React.CSSProperties}>
             {theme.label}
           </h1>
         </div>
-        <p className="text-[11px] tracking-wide text-slate-400 dark:text-slate-500 mt-1 ms-4">
+        <p className="text-[12.5px] tracking-wide text-slate-500 dark:text-slate-400 mt-2 ms-[22px]">
           {theme.side} · بازهٔ {formatDateRangeFa(data.window_start, data.window_end)}
         </p>
-        <p className="text-[12.5px] text-slate-500 dark:text-slate-500 mt-3 ms-4">
+        <p className="text-[13px] text-slate-500 dark:text-slate-400 mt-2 ms-[22px]">
           {toFa(data.article_count)} مقاله · {toFa(data.source_count)} منبع
           · پوشش تحلیل {toFa(Math.round(data.coverage_pct))}٪
         </p>
       </header>
 
       {/* Editorial caveat — single line, italicized, no box */}
-      <p className="text-[12px] leading-6 text-slate-500 dark:text-slate-500 mt-4 mb-8 italic">
+      <p className="text-[13px] leading-7 text-slate-500 dark:text-slate-400 mt-5 mb-10 italic">
         تصویری از <strong className="font-semibold not-italic">محیط اطلاعاتی</strong> این رسانه‌ها در هفتهٔ گذشته،
         نه باور خوانندگان یا یک گروه اجتماعی.
       </p>

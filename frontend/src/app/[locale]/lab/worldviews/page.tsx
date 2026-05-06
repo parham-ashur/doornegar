@@ -63,25 +63,25 @@ const BUNDLE_THEME: Record<Bundle, {
 }> = {
   principlist: {
     label: "اصول‌گرا",
-    side: "درون مرز",
+    side: "درون‌مرزی",
     accentBorder: "border-t-[#1e3a5f] dark:border-t-[#93c5fd]",
     accentDot: "bg-[#1e3a5f] dark:bg-[#93c5fd]",
   },
   reformist: {
-    label: "اصلاح‌طلب/مستقل",
-    side: "درون مرز",
+    label: "اصلاح‌طلب",
+    side: "درون‌مرزی",
     accentBorder: "border-t-[#4f7cac] dark:border-t-[#7ba3cf]",
     accentDot: "bg-[#4f7cac] dark:bg-[#7ba3cf]",
   },
   moderate_diaspora: {
     label: "میانه‌رو",
-    side: "برون مرز",
+    side: "برون‌مرزی",
     accentBorder: "border-t-[#f97316] dark:border-t-[#fdba74]",
     accentDot: "bg-[#f97316] dark:bg-[#fdba74]",
   },
   radical_diaspora: {
-    label: "مخالف رادیکال",
-    side: "برون مرز",
+    label: "رادیکال",
+    side: "برون‌مرزی",
     accentBorder: "border-t-[#c2410c] dark:border-t-[#fb923c]",
     accentDot: "bg-[#c2410c] dark:bg-[#fb923c]",
   },
@@ -133,14 +133,14 @@ async function fetchCurrent(): Promise<CurrentResponse | null> {
 function CardHeader({ card }: { card: WorldviewCard }) {
   const theme = BUNDLE_THEME[card.bundle];
   return (
-    <div className="mb-3">
+    <div className="mb-4">
       <div className="flex items-center gap-2">
-        <span className={`inline-block w-2 h-2 ${theme.accentDot}`} aria-hidden="true" />
-        <h3 className="text-[20px] font-bold text-slate-900 dark:text-slate-100" style={{ textWrap: "pretty" } as React.CSSProperties}>
+        <span className={`inline-block w-2.5 h-2.5 ${theme.accentDot}`} aria-hidden="true" />
+        <h3 className="text-[22px] font-bold text-slate-900 dark:text-slate-100" style={{ textWrap: "pretty" } as React.CSSProperties}>
           {theme.label}
         </h3>
       </div>
-      <p className="text-[11px] tracking-wide text-slate-400 dark:text-slate-500 mt-1 ms-4">
+      <p className="text-[12px] tracking-wide text-slate-500 dark:text-slate-400 mt-1.5 ms-[18px]">
         {theme.side} · {toFaDigits(card.article_count)} مقاله از {toFaDigits(card.source_count)} منبع
       </p>
     </div>
@@ -151,17 +151,28 @@ function ToneSignature({ tone }: { tone: ToneProfile | undefined }) {
   if (!tone?.description && !tone?.dominant) return null;
   const text = tone.description || tone.dominant || "";
   return (
-    <p className="text-[12.5px] leading-6 text-slate-500 dark:text-slate-400 italic mb-4">
+    <p className="text-[13.5px] leading-7 text-slate-600 dark:text-slate-400 italic mb-1">
       {text}
     </p>
   );
 }
 
+// Section heading inside a card — turning-point between
+// «چه گفتند» / «چه برجسته کردند» / «چه انتظاری ساختند» / «و چه نگفتند».
+// These MUST read as breaks, not captions:
+//   - full-ink slate-900 (not slate-400 hint text)
+//   - bold, ~14px Persian (legible, not heading-loud)
+//   - hairline above to mark each transition
+//   - generous breathing room on both sides
+// «editorial running head» pattern, DESIGN.md §3.
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <p className="text-[11px] tracking-wide text-slate-400 dark:text-slate-500 mt-4 mb-2">
+    <h4
+      className="text-[14px] font-bold text-slate-900 dark:text-slate-100 tracking-wide mt-7 pt-5 border-t border-slate-200 dark:border-slate-800 mb-3"
+      style={{ textWrap: "pretty" } as React.CSSProperties}
+    >
       {children}
-    </p>
+    </h4>
   );
 }
 
@@ -170,11 +181,11 @@ function BeliefParagraph({ item }: { item: BeliefWithEvidence }) {
   if (!text) return null;
   return (
     <div>
-      <p className="text-[14px] leading-7 text-slate-700 dark:text-slate-300">
+      <p className="text-[14.5px] leading-[1.85] text-slate-700 dark:text-slate-300">
         {text}
       </p>
       {item.note && (
-        <p className="mt-1 text-[12.5px] leading-6 text-slate-500 dark:text-slate-500">
+        <p className="mt-1.5 text-[13px] leading-7 text-slate-500 dark:text-slate-400">
           {item.note}
         </p>
       )}
