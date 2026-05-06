@@ -1,7 +1,7 @@
 import { setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Info, ArrowLeft } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 
 export const revalidate = 300;
 
@@ -9,30 +9,30 @@ const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 type Bundle = "principlist" | "reformist" | "moderate_diaspora" | "radical_diaspora";
 
-const BUNDLES: Record<Bundle, { label: string; side: string; accent: string; borderTop: string }> = {
+const BUNDLES: Record<Bundle, { label: string; side: string; accentBorder: string; accentDot: string }> = {
   principlist: {
     label: "اصول‌گرا",
     side: "درون مرز",
-    accent: "text-[#1e3a5f] dark:text-[#93c5fd]",
-    borderTop: "border-t-[3px] border-[#1e3a5f] dark:border-[#93c5fd]",
+    accentBorder: "border-t-[#1e3a5f] dark:border-t-[#93c5fd]",
+    accentDot: "bg-[#1e3a5f] dark:bg-[#93c5fd]",
   },
   reformist: {
     label: "اصلاح‌طلب/مستقل",
     side: "درون مرز",
-    accent: "text-[#4f7cac] dark:text-[#7ba3cf]",
-    borderTop: "border-t-[3px] border-[#4f7cac] dark:border-[#7ba3cf]",
+    accentBorder: "border-t-[#4f7cac] dark:border-t-[#7ba3cf]",
+    accentDot: "bg-[#4f7cac] dark:bg-[#7ba3cf]",
   },
   moderate_diaspora: {
     label: "میانه‌رو",
     side: "برون مرز",
-    accent: "text-[#f97316] dark:text-[#fdba74]",
-    borderTop: "border-t-[3px] border-[#f97316] dark:border-[#fdba74]",
+    accentBorder: "border-t-[#f97316] dark:border-t-[#fdba74]",
+    accentDot: "bg-[#f97316] dark:bg-[#fdba74]",
   },
   radical_diaspora: {
     label: "مخالف رادیکال",
     side: "برون مرز",
-    accent: "text-[#c2410c] dark:text-[#fb923c]",
-    borderTop: "border-t-[3px] border-[#c2410c] dark:border-[#fb923c]",
+    accentBorder: "border-t-[#c2410c] dark:border-t-[#fb923c]",
+    accentDot: "bg-[#c2410c] dark:bg-[#fb923c]",
   },
 };
 
@@ -84,9 +84,18 @@ function toFa(n: number | string): string {
   return String(n).replace(/[0-9]/g, (d) => map[Number(d)]);
 }
 
-function formatDateFa(iso: string): string {
-  const [y, m, d] = iso.split("-");
-  return `${toFa(y)}/${toFa(m)}/${toFa(d)}`;
+function formatDateRangeFa(start: string, end: string): string {
+  const months = [
+    "ژانویه", "فوریه", "مارس", "آوریل", "مه", "ژوئن",
+    "ژوئیه", "اوت", "سپتامبر", "اکتبر", "نوامبر", "دسامبر",
+  ];
+  const [, sm, sd] = start.split("-");
+  const [ey, em, ed] = end.split("-");
+  const sameMonth = sm === em;
+  if (sameMonth) {
+    return `${toFa(parseInt(sd, 10))} تا ${toFa(parseInt(ed, 10))} ${months[parseInt(em, 10) - 1]} ${toFa(ey)}`;
+  }
+  return `${toFa(parseInt(sd, 10))} ${months[parseInt(sm, 10) - 1]} تا ${toFa(parseInt(ed, 10))} ${months[parseInt(em, 10) - 1]} ${toFa(ey)}`;
 }
 
 async function fetchDetail(bundle: string): Promise<WorldviewDetail | null> {
@@ -112,31 +121,26 @@ function EvidenceList({
 }) {
   if (!ids || ids.length === 0) return null;
   return (
-    <ul className="mt-2 space-y-1.5">
+    <ul className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-px bg-slate-200 dark:bg-slate-800 border border-slate-200 dark:border-slate-800">
       {ids.map((id) => {
         const meta = articles?.[id];
-        // Preferred link target: the CONTAINING STORY page (where this
-        // article actually lives). Falls back to the outlet's original
-        // URL if we don't have a story, and finally to a non-link chip
-        // if we have neither.
         const storyHref = meta?.story_id ? `/${locale}/stories/${meta.story_id}` : null;
         const outletUrl = meta?.url || null;
         const title = meta?.title_fa?.trim() || id.slice(0, 8) + "…";
         const source = meta?.source_name_fa || meta?.source_slug;
         const inner = (
           <>
-            <span className="text-[13px] leading-5 text-slate-700 dark:text-slate-300 line-clamp-2">
+            <span className="text-[13px] leading-6 text-slate-700 dark:text-slate-300 line-clamp-2">
               {title}
             </span>
             {source && (
-              <span className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5 block">
+              <span className="text-[11px] tracking-wide text-slate-400 dark:text-slate-500 mt-1 block">
                 {source}
               </span>
             )}
           </>
         );
-        const className =
-          "block group border border-slate-200 dark:border-slate-700 px-2 py-1.5 hover:border-blue-400 dark:hover:border-blue-600 transition-colors";
+        const className = "block bg-white dark:bg-slate-900 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors";
         if (storyHref) {
           return (
             <li key={id}>
@@ -177,7 +181,6 @@ function BeliefBlock({
   evidence,
   articles,
   locale,
-  accent,
 }: {
   kind: "core_beliefs" | "emphasized" | "predictions_primed";
   idx: number;
@@ -185,22 +188,26 @@ function BeliefBlock({
   evidence: Record<string, string[]> | null;
   articles: Record<string, EvidenceArticle> | null;
   locale: string;
-  accent: string;
 }) {
   const text = item.text || item.topic || "";
   if (!text) return null;
-  const ids =
-    evidence?.[`${kind}:${idx}`] ||
-    item.example_article_ids ||
-    [];
+  const ids = evidence?.[`${kind}:${idx}`] || item.example_article_ids || [];
   return (
-    <li className="border-b border-slate-100 dark:border-slate-800 py-4 last:border-0">
-      <p className="text-[15px] leading-7 text-slate-800 dark:text-slate-200">{text}</p>
+    <li className="border-b border-slate-200 dark:border-slate-800 py-6 last:border-0">
+      <p className="text-[16px] leading-[1.85] text-slate-800 dark:text-slate-200">{text}</p>
       {item.note && (
-        <p className="text-[13px] leading-6 text-slate-500 dark:text-slate-400 mt-2">{item.note}</p>
+        <p className="text-[13px] leading-7 text-slate-500 dark:text-slate-400 mt-2">{item.note}</p>
       )}
       <EvidenceList ids={ids} articles={articles} locale={locale} />
     </li>
+  );
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <h2 className="text-[12px] tracking-wide font-semibold text-slate-500 dark:text-slate-400 mb-1">
+      {children}
+    </h2>
   );
 }
 
@@ -220,14 +227,14 @@ export default async function WorldviewBundlePage({
     return (
       <div dir="rtl" className="mx-auto max-w-3xl px-4 py-16 text-center">
         <p className="text-[14px] text-slate-500 dark:text-slate-400">
-          هنوز چکیده‌ای برای این گروه تولید نشده است.
+          چکیده‌ای برای این گروه موجود نیست.
         </p>
         <Link
           href={`/${locale}/lab/worldviews`}
-          className="inline-flex items-center gap-1 text-[13px] text-blue-600 dark:text-blue-400 hover:underline mt-4"
+          className="inline-flex items-center gap-1 text-[13px] text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 mt-4 underline underline-offset-4 decoration-slate-300"
         >
           <ArrowLeft className="w-4 h-4" />
-          بازگشت
+          بازگشت به همهٔ گروه‌ها
         </Link>
       </div>
     );
@@ -237,61 +244,106 @@ export default async function WorldviewBundlePage({
   const s = data.synthesis_fa;
   const evidence = data.evidence_fa;
   const articles = data.evidence_articles;
+  const beliefs = s?.core_beliefs || [];
+  const emphasized = s?.emphasized || [];
+  const predictions = s?.predictions_primed || [];
+  const absent = s?.absent || [];
+  const totalGrounded = beliefs.length + emphasized.length + predictions.length;
+  const groundedOut = data.status === "ok" && totalGrounded === 0;
 
   return (
     <div dir="rtl" className="mx-auto max-w-3xl px-4 py-8">
       <Link
         href={`/${locale}/lab/worldviews`}
-        className="inline-flex items-center gap-1 text-[12px] text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 mb-6"
+        className="inline-flex items-center gap-1 text-[12px] text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 mb-8"
       >
         <ArrowLeft className="w-3.5 h-3.5" />
         همهٔ گروه‌ها
       </Link>
 
-      {/* Unskippable caveat — at the top of the detail page */}
-      <div className="flex items-start gap-2 text-[12px] leading-5 text-slate-500 dark:text-slate-400 mb-5 p-3 border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50">
-        <Info className="w-4 h-4 shrink-0 mt-0.5" />
-        <span>
-          این صفحه چکیدهٔ آنچه <strong>رسانه‌ها</strong>ی این گروه در هفتهٔ گذشته به خوانندگان خود گفتند را نشان می‌دهد، نه آنچه <strong>خوانندگان</strong> یا یک گروه اجتماعی باور دارند.
-        </span>
-      </div>
-
       {/* Header */}
-      <div className={`${theme.borderTop} pt-4`}>
-        <div className="flex items-baseline justify-between flex-wrap gap-2">
-          <div>
-            <h1 className={`text-[24px] font-black ${theme.accent}`}>{theme.label}</h1>
-            <p className="text-[12px] text-slate-400 dark:text-slate-500 mt-0.5">{theme.side}</p>
-          </div>
-          <span className="text-[12px] text-slate-400 dark:text-slate-500">
-            {formatDateFa(data.window_start)} – {formatDateFa(data.window_end)}
-          </span>
+      <header className={`border-t-[2px] ${theme.accentBorder} pt-5 mb-2`}>
+        <div className="flex items-center gap-2">
+          <span className={`inline-block w-2 h-2 ${theme.accentDot}`} aria-hidden="true" />
+          <h1 className="text-[28px] font-bold text-slate-900 dark:text-slate-100" style={{ textWrap: "pretty" } as React.CSSProperties}>
+            {theme.label}
+          </h1>
         </div>
-        <p className="text-[12px] text-slate-400 dark:text-slate-500 mt-2">
-          {toFa(data.article_count)} مقاله · {toFa(data.source_count)} رسانه ·
-          پوشش تحلیل {toFa(Math.round(data.coverage_pct))}٪
-          {data.model_used && ` · ${data.model_used}`}
+        <p className="text-[11px] tracking-wide text-slate-400 dark:text-slate-500 mt-1 ms-4">
+          {theme.side} · بازهٔ {formatDateRangeFa(data.window_start, data.window_end)}
         </p>
-      </div>
+        <p className="text-[12.5px] text-slate-500 dark:text-slate-500 mt-3 ms-4">
+          {toFa(data.article_count)} مقاله · {toFa(data.source_count)} منبع
+          · پوشش تحلیل {toFa(Math.round(data.coverage_pct))}٪
+        </p>
+      </header>
+
+      {/* Editorial caveat — single line, italicized, no box */}
+      <p className="text-[12px] leading-6 text-slate-500 dark:text-slate-500 mt-4 mb-8 italic">
+        تصویری از <strong className="font-semibold not-italic">محیط اطلاعاتی</strong> این رسانه‌ها در هفتهٔ گذشته،
+        نه باور خوانندگان یا یک گروه اجتماعی.
+      </p>
 
       {data.status !== "ok" || !s ? (
-        <div className="mt-6 p-5 border border-slate-200 dark:border-slate-700">
-          <p className="text-[14px] text-slate-500 dark:text-slate-400">
-            اطلاعات کافی برای این هفته وجود نداشت.
-          </p>
-          <p className="text-[12px] text-slate-400 dark:text-slate-500 mt-2">
-            برای تولید یک جهان‌بینی حداقل ۲۰ مقاله از ۳ رسانه با پوشش تحلیل ۷۵٪ لازم است.
+        <div className="text-[14.5px] leading-8 text-slate-600 dark:text-slate-400">
+          <p>
+            این بازه با {toFa(data.article_count)} مقاله از {toFa(data.source_count)} منبع
+            به آستانهٔ تولید چکیده نرسید — حداقل ۲۰ مقاله از ۲ منبع لازم است.
           </p>
         </div>
-      ) : (
-        <div className="mt-6 space-y-8">
-          {s.core_beliefs && s.core_beliefs.length > 0 && (
-            <section>
-              <h2 className="text-[16px] font-black text-slate-900 dark:text-white mb-2">
-                چه چیزی گفته شد
-              </h2>
+      ) : groundedOut ? (
+        <>
+          <p className="text-[14.5px] leading-8 text-slate-600 dark:text-slate-400">
+            این هفته هیچ ادعایی به آستانهٔ شواهد لازم نرسید
+            — هر گزاره باید دست‌کم ۳ مقاله از ۲ منبع متمایز پشتش باشد،
+            و این گروه با {toFa(data.source_count)} منبع تحت ردیابی به آن آستانه نمی‌رسد.
+            باقی این هفته به‌صورت خالی سپری شد.
+          </p>
+          {s?.tone_profile?.description && (
+            <div className="mt-8">
+              <SectionLabel>لحن مسلط</SectionLabel>
+              <p className="text-[14px] leading-7 text-slate-600 dark:text-slate-400 italic">
+                {s.tone_profile.description}
+              </p>
+            </div>
+          )}
+          {absent.length > 0 && (
+            <div className="mt-8">
+              <SectionLabel>چه نگفتند</SectionLabel>
               <ul>
-                {s.core_beliefs.map((item, i) => (
+                {absent.map((item, i) => (
+                  <li
+                    key={`ab${i}`}
+                    className="border-b border-slate-200 dark:border-slate-800 py-4 last:border-0"
+                  >
+                    <p className="text-[15px] leading-7 text-slate-700 dark:text-slate-300">
+                      {item.topic || item.text}
+                    </p>
+                    {item.note && (
+                      <p className="text-[12.5px] leading-6 text-slate-500 dark:text-slate-500 mt-1">
+                        {item.note}
+                      </p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="space-y-10">
+          {/* Tone signature elevated near the top */}
+          {s.tone_profile?.description && (
+            <p className="text-[14px] leading-8 text-slate-600 dark:text-slate-400 italic border-r-2 border-slate-200 dark:border-slate-700 pr-4">
+              {s.tone_profile.description}
+            </p>
+          )}
+
+          {beliefs.length > 0 && (
+            <section>
+              <SectionLabel>چه گفتند</SectionLabel>
+              <ul>
+                {beliefs.map((item, i) => (
                   <BeliefBlock
                     key={`cb${i}`}
                     kind="core_beliefs"
@@ -300,20 +352,17 @@ export default async function WorldviewBundlePage({
                     evidence={evidence}
                     articles={articles}
                     locale={locale}
-                    accent={theme.accent}
                   />
                 ))}
               </ul>
             </section>
           )}
 
-          {s.emphasized && s.emphasized.length > 0 && (
+          {emphasized.length > 0 && (
             <section>
-              <h2 className="text-[16px] font-black text-slate-900 dark:text-white mb-2">
-                چه چیزی برجسته شد
-              </h2>
+              <SectionLabel>چه برجسته کردند</SectionLabel>
               <ul>
-                {s.emphasized.map((item, i) => (
+                {emphasized.map((item, i) => (
                   <BeliefBlock
                     key={`em${i}`}
                     kind="emphasized"
@@ -322,45 +371,17 @@ export default async function WorldviewBundlePage({
                     evidence={evidence}
                     articles={articles}
                     locale={locale}
-                    accent={theme.accent}
                   />
                 ))}
               </ul>
             </section>
           )}
 
-          {s.absent && s.absent.length > 0 && (
+          {predictions.length > 0 && (
             <section>
-              <h2 className="text-[16px] font-black text-slate-900 dark:text-white mb-2">
-                چه چیزی گفته نشد
-              </h2>
+              <SectionLabel>چه انتظاری ساختند</SectionLabel>
               <ul>
-                {s.absent.map((item, i) => (
-                  <li
-                    key={`ab${i}`}
-                    className="border-b border-slate-100 dark:border-slate-800 py-3 last:border-0"
-                  >
-                    <p className="text-[15px] leading-6 text-slate-600 dark:text-slate-400">
-                      {item.topic || item.text}
-                    </p>
-                    {item.note && (
-                      <p className="text-[12px] leading-5 text-slate-500 dark:text-slate-500 mt-1">
-                        {item.note}
-                      </p>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-
-          {s.predictions_primed && s.predictions_primed.length > 0 && (
-            <section>
-              <h2 className="text-[16px] font-black text-slate-900 dark:text-white mb-2">
-                چه انتظاری ساخته شد
-              </h2>
-              <ul>
-                {s.predictions_primed.map((item, i) => (
+                {predictions.map((item, i) => (
                   <BeliefBlock
                     key={`pr${i}`}
                     kind="predictions_primed"
@@ -369,27 +390,32 @@ export default async function WorldviewBundlePage({
                     evidence={evidence}
                     articles={articles}
                     locale={locale}
-                    accent={theme.accent}
                   />
                 ))}
               </ul>
             </section>
           )}
 
-          {s.tone_profile?.description && (
+          {absent.length > 0 && (
             <section>
-              <h2 className="text-[16px] font-black text-slate-900 dark:text-white mb-2">
-                لحن مسلط
-              </h2>
-              <p className="text-[14px] leading-6 text-slate-600 dark:text-slate-400 italic">
-                {s.tone_profile.description}
-              </p>
-              {(s.tone_profile.dominant || s.tone_profile.alt) && (
-                <p className="text-[12px] text-slate-400 dark:text-slate-500 mt-1">
-                  {s.tone_profile.dominant && <span>غالب: {s.tone_profile.dominant}</span>}
-                  {s.tone_profile.alt && <span className="mx-3">ثانوی: {s.tone_profile.alt}</span>}
-                </p>
-              )}
+              <SectionLabel>و چه نگفتند</SectionLabel>
+              <ul>
+                {absent.map((item, i) => (
+                  <li
+                    key={`ab${i}`}
+                    className="border-b border-slate-200 dark:border-slate-800 py-4 last:border-0"
+                  >
+                    <p className="text-[15px] leading-7 text-slate-700 dark:text-slate-300">
+                      {item.topic || item.text}
+                    </p>
+                    {item.note && (
+                      <p className="text-[12.5px] leading-6 text-slate-500 dark:text-slate-500 mt-1">
+                        {item.note}
+                      </p>
+                    )}
+                  </li>
+                ))}
+              </ul>
             </section>
           )}
         </div>

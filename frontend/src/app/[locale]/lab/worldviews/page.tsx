@@ -1,6 +1,5 @@
 import { setRequestLocale } from "next-intl/server";
 import Link from "next/link";
-import { Info } from "lucide-react";
 
 export const revalidate = 300;
 
@@ -52,42 +51,49 @@ interface CurrentResponse {
   cards: WorldviewCard[];
 }
 
-// ─── Visual tokens (match the 4-subgroup palette used site-wide) ──
-const BUNDLE_THEME: Record<Bundle, { borderTop: string; label: string; side: string; accent: string }> = {
+// 4-subgroup palette — sitewide tokens; kept identical to NarrativeMap /
+// WordsOfWeek / SourceComparison so the bundle identity is consistent.
+// Per DESIGN.md, color is information: these are the bundle markers,
+// reduced to a hairline so the page surface stays editorial.
+const BUNDLE_THEME: Record<Bundle, {
+  label: string;
+  side: string;
+  accentBorder: string;  // hairline at top
+  accentDot: string;     // tiny dot beside label
+}> = {
   principlist: {
-    borderTop: "border-t-[3px] border-[#1e3a5f] dark:border-[#93c5fd]",
     label: "اصول‌گرا",
     side: "درون مرز",
-    accent: "text-[#1e3a5f] dark:text-[#93c5fd]",
+    accentBorder: "border-t-[#1e3a5f] dark:border-t-[#93c5fd]",
+    accentDot: "bg-[#1e3a5f] dark:bg-[#93c5fd]",
   },
   reformist: {
-    borderTop: "border-t-[3px] border-[#4f7cac] dark:border-[#7ba3cf]",
     label: "اصلاح‌طلب/مستقل",
     side: "درون مرز",
-    accent: "text-[#4f7cac] dark:text-[#7ba3cf]",
+    accentBorder: "border-t-[#4f7cac] dark:border-t-[#7ba3cf]",
+    accentDot: "bg-[#4f7cac] dark:bg-[#7ba3cf]",
   },
   moderate_diaspora: {
-    borderTop: "border-t-[3px] border-[#f97316] dark:border-[#fdba74]",
     label: "میانه‌رو",
     side: "برون مرز",
-    accent: "text-[#f97316] dark:text-[#fdba74]",
+    accentBorder: "border-t-[#f97316] dark:border-t-[#fdba74]",
+    accentDot: "bg-[#f97316] dark:bg-[#fdba74]",
   },
   radical_diaspora: {
-    borderTop: "border-t-[3px] border-[#c2410c] dark:border-[#fb923c]",
     label: "مخالف رادیکال",
     side: "برون مرز",
-    accent: "text-[#c2410c] dark:text-[#fb923c]",
+    accentBorder: "border-t-[#c2410c] dark:border-t-[#fb923c]",
+    accentDot: "bg-[#c2410c] dark:bg-[#fb923c]",
   },
 };
 
-// DOM order for a 2-column RTL grid so that principlist + reformist
-// land on the RIGHT column (top, bottom) and moderate + radical land
-// on the LEFT column (top, bottom). Parham's spec.
+// In a 2-col RTL grid, col 1 sits on the right. Order: principlist (top-right),
+// moderate (top-left), reformist (bottom-right), radical (bottom-left).
 const GRID_ORDER: Bundle[] = [
-  "principlist",        // row 1, right
-  "moderate_diaspora",  // row 1, left
-  "reformist",          // row 2, right
-  "radical_diaspora",   // row 2, left
+  "principlist",
+  "moderate_diaspora",
+  "reformist",
+  "radical_diaspora",
 ];
 
 // ─── Helpers ─────────────────────────────────────────────────────
@@ -96,12 +102,18 @@ function toFaDigits(n: number | string): string {
   return String(n).replace(/[0-9]/g, (d) => map[Number(d)]);
 }
 
-function formatDateFa(iso: string): string {
-  // Display as YYYY/MM/DD with Farsi digits. Jalali rendering intentionally
-  // deferred — the window anchors are UTC dates we also write back to the
-  // DB, so showing Gregorian is less ambiguous than a noisy conversion.
-  const [y, m, d] = iso.split("-");
-  return `${toFaDigits(y)}/${toFaDigits(m)}/${toFaDigits(d)}`;
+function formatDateRangeFa(start: string, end: string): string {
+  const months = [
+    "ژانویه", "فوریه", "مارس", "آوریل", "مه", "ژوئن",
+    "ژوئیه", "اوت", "سپتامبر", "اکتبر", "نوامبر", "دسامبر",
+  ];
+  const [, sm, sd] = start.split("-");
+  const [ey, em, ed] = end.split("-");
+  const sameMonth = sm === em;
+  if (sameMonth) {
+    return `${toFaDigits(parseInt(sd, 10))} تا ${toFaDigits(parseInt(ed, 10))} ${months[parseInt(em, 10) - 1]} ${toFaDigits(ey)}`;
+  }
+  return `${toFaDigits(parseInt(sd, 10))} ${months[parseInt(sm, 10) - 1]} تا ${toFaDigits(parseInt(ed, 10))} ${months[parseInt(em, 10) - 1]} ${toFaDigits(ey)}`;
 }
 
 async function fetchCurrent(): Promise<CurrentResponse | null> {
@@ -116,53 +128,53 @@ async function fetchCurrent(): Promise<CurrentResponse | null> {
   }
 }
 
-// ─── Card components ─────────────────────────────────────────────
-function CaveatChip() {
-  return (
-    <div className="flex items-start gap-1.5 text-[11px] leading-5 text-slate-400 dark:text-slate-500 mt-3 pt-2 border-t border-slate-100 dark:border-slate-800">
-      <Info className="w-3 h-3 shrink-0 mt-0.5" />
-      <span>
-        چکیده‌ای از آنچه این رسانه‌ها گفتند، نه آنچه خوانندگان‌شان باور دارند.
-      </span>
-    </div>
-  );
-}
+// ─── Card pieces ─────────────────────────────────────────────────
 
-function InsufficientCard({ card, locale }: { card: WorldviewCard; locale: string }) {
+function CardHeader({ card }: { card: WorldviewCard }) {
   const theme = BUNDLE_THEME[card.bundle];
   return (
-    <div className={`${theme.borderTop} bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5`}>
-      <div className="flex items-baseline justify-between">
-        <div>
-          <h3 className={`text-[18px] font-black ${theme.accent}`}>{theme.label}</h3>
-          <p className="text-[11px] text-slate-400 mt-0.5">{theme.side}</p>
-        </div>
-        <span className="text-[11px] text-slate-400">
-          {formatDateFa(card.window_start)} – {formatDateFa(card.window_end)}
-        </span>
+    <div className="mb-3">
+      <div className="flex items-center gap-2">
+        <span className={`inline-block w-2 h-2 ${theme.accentDot}`} aria-hidden="true" />
+        <h3 className="text-[20px] font-bold text-slate-900 dark:text-slate-100" style={{ textWrap: "pretty" } as React.CSSProperties}>
+          {theme.label}
+        </h3>
       </div>
-      <p className="text-[14px] leading-6 text-slate-500 dark:text-slate-400 mt-4">
-        اطلاعات کافی این هفته در دسترس نیست.
+      <p className="text-[11px] tracking-wide text-slate-400 dark:text-slate-500 mt-1 ms-4">
+        {theme.side} · {toFaDigits(card.article_count)} مقاله از {toFaDigits(card.source_count)} منبع
       </p>
-      <p className="text-[12px] leading-5 text-slate-400 dark:text-slate-500 mt-2">
-        {toFaDigits(card.article_count)} مقاله از {toFaDigits(card.source_count)} رسانه در این بازه
-        — برای تولید یک جهان‌بینی معتبر کافی نبود.
-      </p>
-      <CaveatChip />
     </div>
   );
 }
 
-function BeliefParagraph({ item, accent }: { item: BeliefWithEvidence; accent: string }) {
+function ToneSignature({ tone }: { tone: ToneProfile | undefined }) {
+  if (!tone?.description && !tone?.dominant) return null;
+  const text = tone.description || tone.dominant || "";
+  return (
+    <p className="text-[12.5px] leading-6 text-slate-500 dark:text-slate-400 italic mb-4">
+      {text}
+    </p>
+  );
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="text-[11px] tracking-wide text-slate-400 dark:text-slate-500 mt-4 mb-2">
+      {children}
+    </p>
+  );
+}
+
+function BeliefParagraph({ item }: { item: BeliefWithEvidence }) {
   const text = item.text || item.topic || "";
   if (!text) return null;
   return (
-    <div className="border-r-2 pr-3 py-1" style={{ borderColor: "currentColor" }}>
-      <p className={`text-[14px] leading-7 text-slate-700 dark:text-slate-300 ${accent.replace("text-", "marker:")}`}>
+    <div>
+      <p className="text-[14px] leading-7 text-slate-700 dark:text-slate-300">
         {text}
       </p>
       {item.note && (
-        <p className="mt-1 text-[12px] leading-6 text-slate-500 dark:text-slate-500">
+        <p className="mt-1 text-[12.5px] leading-6 text-slate-500 dark:text-slate-500">
           {item.note}
         </p>
       )}
@@ -170,103 +182,118 @@ function BeliefParagraph({ item, accent }: { item: BeliefWithEvidence; accent: s
   );
 }
 
+function GroundedOutCard({ card }: { card: WorldviewCard }) {
+  // Status='ok' but every list got stripped by the grounding floor
+  // (≥3 articles, ≥2 sources per belief). Common when a bundle has
+  // ≤3 sources total — radical_diaspora's structural reality. Surface
+  // it as fact, not failure.
+  return (
+    <div className="mt-3 text-[13.5px] leading-7 text-slate-600 dark:text-slate-400">
+      <p>
+        این هفته هیچ ادعایی به آستانهٔ شواهد لازم نرسید
+        — هر گزاره باید دست‌کم ۳ مقاله از ۲ منبع متمایز پشتش باشد،
+        و این گروه با {toFaDigits(card.source_count)} منبع تحت ردیابی
+        به آن آستانه نمی‌رسد.
+      </p>
+    </div>
+  );
+}
+
+function InsufficientCard({ card }: { card: WorldviewCard }) {
+  return (
+    <p className="mt-3 text-[13.5px] leading-7 text-slate-600 dark:text-slate-400">
+      این بازه با {toFaDigits(card.article_count)} مقاله از {toFaDigits(card.source_count)} منبع
+      به آستانهٔ تولید چکیده نرسید — حداقل ۲۰ مقاله از ۲ منبع لازم است.
+    </p>
+  );
+}
+
 function WorldviewCardBox({ card, locale }: { card: WorldviewCard; locale: string }) {
-  if (card.status !== "ok" || !card.synthesis_fa) {
-    return <InsufficientCard card={card} locale={locale} />;
-  }
   const theme = BUNDLE_THEME[card.bundle];
+  const wrapperBase = `border-t-[2px] ${theme.accentBorder} bg-white dark:bg-slate-900 border-x border-b border-slate-200 dark:border-slate-800 p-5 flex flex-col`;
+
+  // Insufficient: precondition gate (too few articles/sources/coverage).
+  if (card.status !== "ok") {
+    return (
+      <div className={wrapperBase}>
+        <CardHeader card={card} />
+        <InsufficientCard card={card} />
+      </div>
+    );
+  }
+
   const s = card.synthesis_fa;
-  const beliefs = (s.core_beliefs || []).slice(0, 3);
-  const emphasized = (s.emphasized || []).slice(0, 3);
-  const absent = (s.absent || []).slice(0, 2);
-  const predictions = (s.predictions_primed || []).slice(0, 2);
+  const beliefs = (s?.core_beliefs || []).slice(0, 3);
+  const emphasized = (s?.emphasized || []).slice(0, 3);
+  const absent = (s?.absent || []).slice(0, 2);
+  const predictions = (s?.predictions_primed || []).slice(0, 2);
+  const totalGrounded = beliefs.length + emphasized.length + predictions.length;
+
+  // status='ok' but everything got stripped post-LLM by the grounding
+  // floor. Show the structural reason, then fall back to whatever
+  // survived (absent + tone) without pretending it's a full card.
+  const groundedOut = totalGrounded === 0;
 
   return (
-    <div className={`${theme.borderTop} bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 flex flex-col`}>
-      {/* Header: bundle name + window */}
-      <div className="flex items-baseline justify-between">
-        <div>
-          <h3 className={`text-[18px] font-black ${theme.accent}`}>{theme.label}</h3>
-          <p className="text-[11px] text-slate-400 mt-0.5">{theme.side}</p>
-        </div>
-        <span className="text-[11px] text-slate-400">
-          {formatDateFa(card.window_start)} – {formatDateFa(card.window_end)}
-        </span>
-      </div>
+    <div className={wrapperBase}>
+      <CardHeader card={card} />
+      <ToneSignature tone={s?.tone_profile} />
 
-      {/* Core beliefs */}
+      {groundedOut && <GroundedOutCard card={card} />}
+
       {beliefs.length > 0 && (
-        <div className={`mt-4 ${theme.accent}`}>
-          <p className="text-[12px] font-bold text-slate-500 dark:text-slate-400 mb-2">
-            چه چیزی گفته شد
-          </p>
+        <>
+          <SectionLabel>چه گفتند</SectionLabel>
           <div className="space-y-3">
             {beliefs.map((b, i) => (
-              <BeliefParagraph key={`b${i}`} item={b} accent={theme.accent} />
+              <BeliefParagraph key={`b${i}`} item={b} />
             ))}
           </div>
-        </div>
+        </>
       )}
 
-      {/* Emphasized */}
       {emphasized.length > 0 && (
-        <div className={`mt-4 ${theme.accent}`}>
-          <p className="text-[12px] font-bold text-slate-500 dark:text-slate-400 mb-2">
-            چه چیزی برجسته شد
-          </p>
+        <>
+          <SectionLabel>چه برجسته کردند</SectionLabel>
           <div className="space-y-3">
             {emphasized.map((b, i) => (
-              <BeliefParagraph key={`e${i}`} item={b} accent={theme.accent} />
+              <BeliefParagraph key={`e${i}`} item={b} />
             ))}
           </div>
-        </div>
+        </>
       )}
 
-      {/* Absences */}
-      {absent.length > 0 && (
-        <div className="mt-4 text-slate-400 dark:text-slate-500">
-          <p className="text-[12px] font-bold text-slate-500 dark:text-slate-400 mb-2">
-            چه چیزی گفته نشد
-          </p>
-          <div className="space-y-3">
-            {absent.map((b, i) => (
-              <BeliefParagraph key={`a${i}`} item={b} accent="text-slate-400" />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Predictions */}
       {predictions.length > 0 && (
-        <div className={`mt-4 ${theme.accent}`}>
-          <p className="text-[12px] font-bold text-slate-500 dark:text-slate-400 mb-2">
-            چه انتظاری ساخته شد
-          </p>
+        <>
+          <SectionLabel>چه انتظاری ساختند</SectionLabel>
           <div className="space-y-3">
             {predictions.map((b, i) => (
-              <BeliefParagraph key={`p${i}`} item={b} accent={theme.accent} />
+              <BeliefParagraph key={`p${i}`} item={b} />
             ))}
           </div>
-        </div>
+        </>
       )}
 
-      {/* Tone */}
-      {s.tone_profile?.description && (
-        <p className="text-[12px] leading-5 text-slate-500 dark:text-slate-400 mt-3 italic">
-          {s.tone_profile.description}
-        </p>
+      {absent.length > 0 && (
+        <>
+          <SectionLabel>و چه نگفتند</SectionLabel>
+          <div className="space-y-3">
+            {absent.map((b, i) => (
+              <BeliefParagraph key={`a${i}`} item={b} />
+            ))}
+          </div>
+        </>
       )}
 
-      {/* Footer: detail link + unskippable caveat */}
-      <div className="mt-auto pt-3">
+      {/* Footer: detail link */}
+      <div className="mt-auto pt-4">
         <Link
           href={`/${locale}/lab/worldviews/${card.bundle}`}
-          className={`inline-flex items-center gap-1 text-[12px] font-bold ${theme.accent} hover:underline`}
+          className="text-[12.5px] font-semibold text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 underline underline-offset-4 decoration-slate-300 dark:decoration-slate-600 decoration-[1px]"
         >
-          ببین چرا ←
+          شواهد و مقالات
         </Link>
       </div>
-      <CaveatChip />
     </div>
   );
 }
@@ -284,62 +311,69 @@ export default async function WorldviewsLabPage({
   const byBundle = new Map<Bundle, WorldviewCard>(
     cards.map((c) => [c.bundle, c])
   );
+  const windowLine = data?.window_start && data?.window_end
+    ? formatDateRangeFa(data.window_start, data.window_end)
+    : null;
 
   return (
-    <div dir="rtl" className="mx-auto max-w-6xl px-4 py-8">
-      {/* Lab badge */}
-      <div className="flex items-center gap-2 mb-4">
-        <span className="px-2 py-0.5 text-[10px] font-bold border border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400">
-          آزمایشی
-        </span>
-        <span className="text-[11px] text-slate-400">
-          — این ابزار در حال آزمایش است و هنوز در صفحه اصلی نمایش داده نمی‌شود.
-        </span>
-      </div>
-
-      {/* Header with line-title-line divider, same as other sections */}
-      <div className="flex items-center gap-3 mb-3">
-        <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
-        <h1 className="text-[15px] font-black text-slate-900 dark:text-white shrink-0">
-          اگر فقط از این گروه می‌خواندید
-        </h1>
-        <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
-      </div>
-
-      {/* Window + context paragraph */}
-      <p className="text-[13px] leading-6 text-slate-500 dark:text-slate-400 mb-6 max-w-3xl">
-        چهار چکیده از آنچه رسانه‌های هر گروه در هفتهٔ گذشته به خوانندگان خود گفتند.
-        این‌ها تصویری از محیط اطلاعاتی این رسانه‌هاست، نه باورهای افراد یا گروه‌های اجتماعی.
-        هر ادعا به چند مقالهٔ منبع متکی است که با کلیک روی کارت قابل مشاهده‌اند.
-      </p>
+    <div dir="rtl" className="mx-auto max-w-6xl px-4 py-10">
+      {/* Header */}
+      <header className="mb-8">
+        <div className="flex items-center gap-3 mb-1">
+          <h1 className="text-[28px] font-bold text-slate-900 dark:text-slate-100" style={{ textWrap: "pretty" } as React.CSSProperties}>
+            اگر فقط از این گروه می‌خواندید
+          </h1>
+          <span className="px-2 py-0.5 text-[10px] font-semibold border border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-400">
+            آزمایشی
+          </span>
+        </div>
+        {windowLine && (
+          <p className="text-[12.5px] text-slate-500 dark:text-slate-500">
+            بازهٔ {windowLine}
+          </p>
+        )}
+        <p className="mt-4 text-[14px] leading-7 text-slate-600 dark:text-slate-400 max-w-3xl">
+          چهار چکیده از آنچه رسانه‌های هر گروه در هفتهٔ گذشته به خوانندگان خود گفتند.
+          هر گزاره دست‌کم به ۳ مقاله از ۲ منبع متمایز متکی است؛ کلیک روی «شواهد و مقالات»
+          زنجیرهٔ منابع را باز می‌کند.
+        </p>
+        <p className="mt-2 text-[12.5px] leading-6 text-slate-500 dark:text-slate-500 max-w-3xl">
+          این تصویری است از <em>محیط اطلاعاتی</em> این رسانه‌ها — نه باور خوانندگان آن‌ها
+          و نه برداشت یک گروه اجتماعی.
+        </p>
+      </header>
 
       {cards.length === 0 ? (
-        <div className="border border-slate-200 dark:border-slate-800 p-8 text-center">
-          <p className="text-[14px] text-slate-500 dark:text-slate-400">
+        <div className="border border-slate-200 dark:border-slate-800 p-8">
+          <p className="text-[14px] text-slate-600 dark:text-slate-400">
             هنوز چکیده‌ای تولید نشده است.
           </p>
-          <p className="text-[12px] text-slate-400 dark:text-slate-500 mt-2">
+          <p className="text-[12.5px] text-slate-500 dark:text-slate-500 mt-2">
             این فرایند هر دوشنبه اجرا می‌شود.
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-px bg-slate-200 dark:bg-slate-800 border border-slate-200 dark:border-slate-800">
           {GRID_ORDER.map((bundle) => {
             const card = byBundle.get(bundle);
             if (!card) {
-              // Rare: bundle never ran. Still show a labeled placeholder so
-              // the 2×2 grid stays symmetric.
+              const theme = BUNDLE_THEME[bundle];
               return (
                 <div
                   key={bundle}
-                  className={`${BUNDLE_THEME[bundle].borderTop} bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5`}
+                  className={`border-t-[2px] ${theme.accentBorder} bg-white dark:bg-slate-900 p-5`}
                 >
-                  <h3 className={`text-[18px] font-black ${BUNDLE_THEME[bundle].accent}`}>
-                    {BUNDLE_THEME[bundle].label}
-                  </h3>
-                  <p className="text-[11px] text-slate-400 mt-0.5">{BUNDLE_THEME[bundle].side}</p>
-                  <p className="text-[13px] leading-6 text-slate-500 dark:text-slate-400 mt-4">
-                    هنوز چکیده‌ای برای این گروه موجود نیست.
+                  <div className="flex items-center gap-2">
+                    <span className={`inline-block w-2 h-2 ${theme.accentDot}`} />
+                    <h3 className="text-[20px] font-bold text-slate-900 dark:text-slate-100">
+                      {theme.label}
+                    </h3>
+                  </div>
+                  <p className="text-[11px] tracking-wide text-slate-400 dark:text-slate-500 mt-1 ms-4">
+                    {theme.side}
+                  </p>
+                  <p className="mt-3 text-[13.5px] leading-7 text-slate-500 dark:text-slate-500">
+                    این هفته چکیده‌ای برای این گروه تولید نشد.
                   </p>
                 </div>
               );
