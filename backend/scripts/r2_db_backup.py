@@ -40,6 +40,7 @@ import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 logging.basicConfig(
     level=logging.INFO,
@@ -58,12 +59,43 @@ def _require_env(name: str) -> str:
     return val
 
 
+def _parse_db_url(url: str) -> dict:
+    """Parse DATABASE_URL into individual pg_dump args + env-var bag.
+
+    pg_dump's libpq URI parser is stricter than asyncpg/psycopg2 and chokes
+    on some Neon-style query strings (e.g. on 2026-05-06 it errored with
+    'missing key/value separator "=" in URI query parameter: "sslmo"' on a
+    URL that asyncpg parsed without complaint). Bypassing URI parsing by
+    passing host/port/user/dbname individually + PGPASSWORD/PGSSLMODE via
+    env sidesteps the issue entirely. Neon requires SSL, hardcode
+    sslmode=require.
+    """
+    p = urlparse(url)
+    if p.scheme not in ("postgres", "postgresql"):
+        raise ValueError(f"Unexpected scheme: {p.scheme!r}")
+    return {
+        "host": p.hostname or "",
+        "port": str(p.port or 5432),
+        "user": unquote(p.username) if p.username else "",
+        "password": unquote(p.password) if p.password else "",
+        "dbname": (p.path or "/").lstrip("/"),
+    }
+
+
 def _make_dump(db_url: str, out_path: Path) -> None:
     """Stream pg_dump → gzip → file. No intermediate uncompressed file."""
     log.info(f"pg_dump → {out_path}")
     if shutil.which("pg_dump") is None:
         log.error("pg_dump not found in PATH. Install postgresql-client in the Railway service.")
         sys.exit(3)
+
+    parts = _parse_db_url(db_url)
+    log.info(f"pg_dump target: host={parts['host']} port={parts['port']} dbname={parts['dbname']} user={parts['user']}")
+
+    # Pass connection details via env + individual flags. Avoids libpq URI
+    # parsing entirely (which has been finicky on Neon connection strings).
+    env = {**os.environ, "PGPASSWORD": parts["password"], "PGSSLMODE": "require"}
+
     # --no-owner + --no-privileges keep the dump portable across Postgres
     # users. --format=plain is restorable via psql, no pg_restore needed.
     cmd = [
@@ -71,10 +103,13 @@ def _make_dump(db_url: str, out_path: Path) -> None:
         "--no-owner",
         "--no-privileges",
         "--format=plain",
-        db_url,
+        "-h", parts["host"],
+        "-p", parts["port"],
+        "-U", parts["user"],
+        "-d", parts["dbname"],
     ]
     with gzip.open(out_path, "wb") as gz:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
         assert proc.stdout is not None
         try:
             shutil.copyfileobj(proc.stdout, gz)
