@@ -2041,8 +2041,15 @@ async def seed_story_manually(
             detail="Need at least 2 distinct article_ids — singletons orphan again.",
         )
 
-    # Fetch all referenced articles in one query.
-    arts = (await db.execute(_select(_Art).where(_Art.id.in_(ids)))).scalars().all()
+    # Fetch all referenced articles in one query. Eager-load `source`
+    # because the coverage-flag computation below reads `a.source` and
+    # async lazy-load on a relationship raises MissingGreenlet.
+    from sqlalchemy.orm import selectinload as _sel
+    arts = (
+        await db.execute(
+            _select(_Art).where(_Art.id.in_(ids)).options(_sel(_Art.source))
+        )
+    ).scalars().all()
     found_ids = {a.id for a in arts}
     missing = [str(i) for i in ids if i not in found_ids]
     if missing:
