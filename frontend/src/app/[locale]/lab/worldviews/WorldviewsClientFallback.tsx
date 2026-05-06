@@ -11,7 +11,6 @@
 // usually should too.
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -156,7 +155,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-function CardBox({ card, locale }: { card: WorldviewCard; locale: string }) {
+function CardBox({ card }: { card: WorldviewCard }) {
   const theme = BUNDLE_THEME[card.bundle];
   const wrapperBase = `border-t-[2px] ${theme.accentBorder} bg-white dark:bg-slate-900 border-x border-b border-slate-200 dark:border-slate-800 p-5 flex flex-col`;
 
@@ -216,14 +215,6 @@ function CardBox({ card, locale }: { card: WorldviewCard; locale: string }) {
         {absent.map((b, i) => <BeliefParagraph key={`a${i}`} item={b} />)}
       </div>
 
-      <div className="mt-auto pt-4">
-        <Link
-          href={`/${locale}/lab/worldviews/${card.bundle}`}
-          className="text-[12.5px] font-semibold text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 underline underline-offset-4 decoration-slate-300 dark:decoration-slate-600"
-        >
-          شواهد و مقالات
-        </Link>
-      </div>
     </div>
   );
 }
@@ -292,7 +283,7 @@ export default function WorldviewsClientFallback({
       {GRID_ORDER.map((bundle) => {
         const card = byBundle.get(bundle);
         if (!card) return <CardSkeleton key={bundle} bundle={bundle} />;
-        return <CardBox key={bundle} card={card} locale={locale} />;
+        return <CardBox key={bundle} card={card} />;
       })}
     </div>
   );

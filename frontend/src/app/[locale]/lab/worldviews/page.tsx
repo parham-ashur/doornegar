@@ -1,5 +1,4 @@
 import { setRequestLocale } from "next-intl/server";
-import Link from "next/link";
 import WorldviewsClientFallback from "./WorldviewsClientFallback";
 
 // Worldview cards refresh weekly (Monday FULL_PIPELINE). 5-min ISR
@@ -335,15 +334,6 @@ function WorldviewCardBox({ card, locale }: { card: WorldviewCard; locale: strin
         </>
       )}
 
-      {/* Footer: detail link */}
-      <div className="mt-auto pt-4">
-        <Link
-          href={`/${locale}/lab/worldviews/${card.bundle}`}
-          className="text-[12.5px] font-semibold text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 underline underline-offset-4 decoration-slate-300 dark:decoration-slate-600 decoration-[1px]"
-        >
-          شواهد و مقالات
-        </Link>
-      </div>
     </div>
   );
 }
@@ -386,8 +376,7 @@ export default async function WorldviewsLabPage({
         )}
         <p className="mt-4 text-[14px] leading-7 text-slate-600 dark:text-slate-400 max-w-3xl">
           چهار چکیده از آنچه رسانه‌های هر گروه در هفتهٔ گذشته به خوانندگان خود گفتند.
-          هر گزاره دست‌کم به ۳ مقاله از ۲ منبع متمایز متکی است؛ کلیک روی «شواهد و مقالات»
-          زنجیرهٔ منابع را باز می‌کند.
+          هر گزاره دست‌کم به ۳ مقاله از ۲ منبع متمایز متکی است.
         </p>
         <p className="mt-2 text-[12.5px] leading-6 text-slate-500 dark:text-slate-500 max-w-3xl">
           این تصویری است از <em>محیط اطلاعاتی</em> این رسانه‌ها — نه باور خوانندگان آن‌ها
