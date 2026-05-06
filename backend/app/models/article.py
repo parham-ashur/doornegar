@@ -68,6 +68,11 @@ class Article(Base):
         Integer, nullable=False, default=0, server_default="0"
     )
 
+    # Multi-locale rollout (Phase 0). Per-locale article-title translation
+    # populated by the utility-tier batch translator (gpt-4.1-nano).
+    # Shape: {"en": {"title": str, "translated_at": ISO8601}, "fr": {...}}
+    title_translations: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
     # Relationships
     source: Mapped["Source"] = relationship(back_populates="articles")  # noqa: F821
     story: Mapped["Story | None"] = relationship(back_populates="articles")  # noqa: F821

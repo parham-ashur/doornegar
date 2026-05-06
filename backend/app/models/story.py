@@ -119,6 +119,13 @@ class Story(Base):
     )
     review_tier: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
+    # Multi-locale rollout (Phase 0). One blob per story; per-locale slot
+    # holds title, summary, narratives, doornama, bias_explanation,
+    # plus translated_at + prompt_version + is_edited + edit_anchor.
+    # Auto-cleared on FA edit; written by step_translate_homepage_visible.
+    # Shape per locale: see project_en_fr_rollout.md JSONB schema.
+    translations: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
     # Relationships
     articles: Mapped[list["Article"]] = relationship(back_populates="story")  # noqa: F821
 

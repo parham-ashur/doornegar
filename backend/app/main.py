@@ -231,6 +231,17 @@ async def lifespan(app: FastAPI):
                 "UPDATE stories SET source_count = 0 WHERE source_count IS NULL",
                 "UPDATE stories SET priority = 0 WHERE priority IS NULL",
                 "UPDATE stories SET trending_score = 0 WHERE trending_score IS NULL",
+
+                # ── Multi-locale (EN+FR) rollout — Phase 0 (2026-05-06) ──
+                # Adds JSONB blobs for per-locale story + article translations,
+                # plus the partial indexes used by step_translate_homepage_visible
+                # to find untranslated homepage-eligible stories quickly.
+                # Shape documented in project_en_fr_rollout.md. Auto-cleared
+                # on FA edits via the Re-translate trigger map.
+                "ALTER TABLE stories ADD COLUMN IF NOT EXISTS translations JSONB",
+                "ALTER TABLE articles ADD COLUMN IF NOT EXISTS title_translations JSONB",
+                "CREATE INDEX IF NOT EXISTS idx_stories_en_missing ON stories ((translations->'en'->>'title')) WHERE translations->'en'->>'title' IS NULL",
+                "CREATE INDEX IF NOT EXISTS idx_stories_fr_missing ON stories ((translations->'fr'->>'title')) WHERE translations->'fr'->>'title' IS NULL",
             ):
                 try:
                     await db.execute(text(ddl))
