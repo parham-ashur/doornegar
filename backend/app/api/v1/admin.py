@@ -3922,9 +3922,15 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
     # they don't fire warn/error while the translation pipeline is
     # still being built. Once any translation_* row appears in
     # llm_usage_logs the canaries flip to evaluating real values.
+    #
+    # Underscore is a single-char wildcard in SQL LIKE — so plain
+    # 'translation_%' falsely matches the existing 'translation.title'
+    # purpose used by the FA-title backfill. The ESCAPE clause makes
+    # the underscore literal, matching only the Phase-2 purpose
+    # convention 'translation_en' / 'translation_fr' / etc.
     translation_active_7d = int((await db.execute(_t("""
         SELECT COUNT(*) FROM llm_usage_logs
-        WHERE purpose LIKE 'translation_%'
+        WHERE purpose LIKE 'translation\_%' ESCAPE '\'
           AND timestamp >= NOW() - INTERVAL '7 days'
     """))).scalar() or 0)
     translation_phase_active = translation_active_7d > 0
@@ -3932,13 +3938,13 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
     translation_cost_24h = float((await db.execute(_t("""
         SELECT COALESCE(SUM(total_cost), 0)
         FROM llm_usage_logs
-        WHERE purpose LIKE 'translation_%'
+        WHERE purpose LIKE 'translation\_%' ESCAPE '\'
           AND timestamp >= NOW() - INTERVAL '24 hours'
     """))).scalar() or 0.0)
 
     translation_attempts_24h = int((await db.execute(_t("""
         SELECT COUNT(*) FROM llm_usage_logs
-        WHERE purpose LIKE 'translation_%'
+        WHERE purpose LIKE 'translation\_%' ESCAPE '\'
           AND timestamp >= NOW() - INTERVAL '24 hours'
     """))).scalar() or 0)
     # A translation call that committed zero priced tokens is a strong
@@ -3947,7 +3953,7 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
     # meta->>'failed' = 'true' but this fallback works without that.
     translation_failures_24h = int((await db.execute(_t("""
         SELECT COUNT(*) FROM llm_usage_logs
-        WHERE purpose LIKE 'translation_%'
+        WHERE purpose LIKE 'translation\_%' ESCAPE '\'
           AND timestamp >= NOW() - INTERVAL '24 hours'
           AND (
               total_cost = 0
@@ -4400,7 +4406,7 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
             "error" if translation_cost_24h > 1.0 else (
                 "warn" if translation_cost_24h > 0.5 else "ok"
             ),
-            "Sum of llm_usage_logs.total_cost where purpose LIKE 'translation_%' in the last 24h. "
+            "Sum of llm_usage_logs.total_cost where purpose LIKE 'translation\_%' ESCAPE '\' in the last 24h. "
             "The translation pipeline has a $1/24h circuit breaker — exceeding it stops new "
             "translations until manual reset. Sustained > $0.50 means translation is being "
             "triggered too often (FA edits propagating in tight loops, or auto-clear hooks "
