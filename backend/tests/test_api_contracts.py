@@ -327,6 +327,72 @@ class TestDetachArticlesEndpoint:
         )
 
 
+class TestWeeklyDigestUpsertEndpoint:
+    """`/admin/weekly-digest` lets Niloofar (Claude-driven) ship the
+    weekly editorial directly from chat — without it, the homepage
+    'خلاصه هفتگی پس از اولین اجرا در دسترس خواهد بود' placeholder
+    stays forever because `step_weekly_digest` only writes a stats
+    summary that doesn't carry the section headings the frontend
+    parses.
+    """
+
+    def test_endpoint_registered(self):
+        src = (
+            Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py"
+        ).read_text()
+        assert '@router.post("/weekly-digest"' in src, (
+            "POST /admin/weekly-digest must exist so Niloofar can ship "
+            "editorials from chat without dropping to a Railway CLI."
+        )
+
+    def test_endpoint_admin_gated(self):
+        src = (
+            Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py"
+        ).read_text()
+        idx = src.find('@router.post("/weekly-digest"')
+        assert idx >= 0
+        decorator = src[idx : src.find("async def", idx)]
+        assert "Depends(require_admin)" in decorator, (
+            "/weekly-digest writes editorial copy that goes onto the "
+            "public homepage — must be admin-gated."
+        )
+
+    def test_endpoint_validates_required_sections(self):
+        """The frontend WeeklyDigest.tsx parses the markdown looking for
+        two specific section headings. If those are missing the homepage
+        renders the empty-state placeholder anyway, so a successful
+        insert with bad markdown is functionally identical to no insert.
+        Validate at the boundary."""
+        src = (
+            Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py"
+        ).read_text()
+        idx = src.find("async def upsert_weekly_digest(")
+        end = src.find("\n\n\n", idx)
+        body = src[idx : end if end > 0 else len(src)]
+        assert "روندهای کلیدی" in body and "چشم‌انداز هفته آینده" in body, (
+            "/weekly-digest must validate the markdown contains both "
+            "section headings WeeklyDigest.tsx parses. Silent inserts "
+            "of bad markdown look like success but leave the homepage "
+            "showing the placeholder."
+        )
+
+    def test_endpoint_writes_correct_status_label(self):
+        """The /api/v1/stories/weekly-digest reader filters by
+        `status='weekly_digest'` against maintenance_logs. Any other
+        label silently disappears from the homepage."""
+        src = (
+            Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py"
+        ).read_text()
+        idx = src.find("async def upsert_weekly_digest(")
+        end = src.find("\n\n\n", idx)
+        body = src[idx : end if end > 0 else len(src)]
+        assert "'weekly_digest'" in body, (
+            "/weekly-digest must INSERT with status='weekly_digest' so "
+            "/api/v1/stories/weekly-digest finds it. Any other label "
+            "becomes a silent no-op."
+        )
+
+
 class TestSchemaSerializationSmoke:
     """Construct a StoryBrief from the absolute minimum required
     fields and verify it serializes. Catches the case where someone

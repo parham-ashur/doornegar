@@ -2949,6 +2949,55 @@ async def detach_articles_from_stories(
     }
 
 
+class _WeeklyDigestRequest(_BaseModel):
+    markdown: str
+
+
+@router.post("/weekly-digest", dependencies=[Depends(require_admin)])
+async def upsert_weekly_digest(
+    request: _WeeklyDigestRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Insert a Niloofar-authored weekly editorial into maintenance_logs.
+
+    HTTP path that mirrors the tail of `scripts/niloofar_weekly.py`:
+    write a row with status='weekly_digest' so the public
+    /api/v1/stories/weekly-digest endpoint serves it (latest-by-run_at).
+
+    The frontend WeeklyDigest.tsx parses sections by Persian heading —
+    «روندهای کلیدی» and «چشم‌انداز هفته آینده» — so we validate the body
+    contains both before inserting. Anything missing those sections
+    would render as the "after first run" placeholder, defeating the
+    purpose of the call.
+    """
+    import uuid as _uuid
+    from sqlalchemy import text as _text
+
+    body = (request.markdown or "").strip()
+    if not body:
+        raise HTTPException(status_code=400, detail="markdown is empty")
+    if "روندهای کلیدی" not in body or "چشم‌انداز هفته آینده" not in body:
+        raise HTTPException(
+            status_code=400,
+            detail="markdown must include both '## ۲. روندهای کلیدی' and '## ۵. چشم‌انداز هفته آینده' headings",
+        )
+
+    row_id = _uuid.uuid4()
+    await db.execute(
+        _text(
+            "INSERT INTO maintenance_logs (id, run_at, status, results) "
+            "VALUES (:id, NOW(), 'weekly_digest', :results)"
+        ),
+        {"id": row_id, "results": body},
+    )
+    await db.commit()
+    return {
+        "status": "ok",
+        "id": str(row_id),
+        "byte_length": len(body.encode("utf-8")),
+    }
+
+
 # NOTE: a previous duplicate PATCH /stories/{story_id} handler was defined
 # here. Removed because the earlier `edit_story` handler (search for
 # _EditStoryRequest above) already owns this route and is authoritative.
