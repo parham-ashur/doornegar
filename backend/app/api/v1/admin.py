@@ -2949,6 +2949,122 @@ async def detach_articles_from_stories(
     }
 
 
+class _AttachArticlesRequest(_BaseModel):
+    article_ids: list[str]
+    story_id: str
+
+
+@router.post("/articles/attach", dependencies=[Depends(require_admin)])
+async def attach_articles_to_story(
+    request: _AttachArticlesRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Attach articles to a target story (overrides current story_id).
+
+    Mirror of `/articles/detach`. Lets Niloofar arc-curation finish
+    in chat when the auto-matcher misses related coverage — e.g. fresh
+    breaking-news beats that don't quite cross the cosine threshold to
+    join an existing pinned hero.
+
+    The cluster-size cap (max_cluster_size=30) is intentionally NOT
+    enforced here. Admin attaches are arc curation, not auto matching.
+    The `oversized_active_stories` canary will surface oversized arcs;
+    that's the right tradeoff — a manually-grown hero is signaled, not
+    blocked.
+
+    Body:
+      { "article_ids": ["uuid", ...], "story_id": "uuid" }
+
+    Response:
+      {
+        "status": "ok",
+        "attached": N,
+        "not_found": ["uuid", ...],
+        "moved_from": [{"old_story_id": "...", "count": M}],
+        "story_recount": {"story_id": "...", "old_count": M, "new_count": M+K}
+      }
+    """
+    import uuid as _uuid
+    from collections import Counter as _Counter
+    from sqlalchemy import update as _update
+    from app.models.article import Article
+    from app.models.story import Story
+    from app.services.events import log_event as _log_event
+
+    try:
+        target_story_uuid = _uuid.UUID(request.story_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail=f"Bad story_id: {request.story_id}")
+    try:
+        ids = list({_uuid.UUID(s) for s in request.article_ids})
+    except (ValueError, TypeError) as e:
+        raise HTTPException(status_code=400, detail=f"Bad article id: {e}")
+    if not ids:
+        raise HTTPException(status_code=400, detail="article_ids cannot be empty")
+
+    target_story = await db.get(Story, target_story_uuid)
+    if target_story is None:
+        raise HTTPException(status_code=404, detail="Target story not found")
+
+    rows = (await db.execute(
+        select(Article.id, Article.story_id).where(Article.id.in_(ids))
+    )).all()
+    found_ids = {r[0] for r in rows}
+    not_found = [str(i) for i in ids if i not in found_ids]
+    moved_from_counter: _Counter = _Counter()
+    for aid, prev_sid in rows:
+        moved_from_counter[str(prev_sid) if prev_sid else "ORPHAN"] += 1
+
+    if found_ids:
+        await db.execute(
+            _update(Article)
+            .where(Article.id.in_(found_ids))
+            .values(story_id=target_story_uuid)
+            .execution_options(synchronize_session=False)
+        )
+
+    live = (await db.execute(
+        select(func.count(Article.id)).where(Article.story_id == target_story_uuid)
+    )).scalar() or 0
+    old_count = int(target_story.article_count or 0)
+    target_story.article_count = live
+
+    distinct_sources = (await db.execute(
+        select(func.count(func.distinct(Article.source_id))).where(
+            Article.story_id == target_story_uuid
+        )
+    )).scalar() or 0
+    target_story.source_count = int(distinct_sources)
+
+    await _log_event(
+        db,
+        event_type="articles_attached",
+        actor="admin",
+        story_id=target_story_uuid,
+        signals={
+            "attached_article_ids": [str(a) for a in list(found_ids)[:50]],
+            "old_count": old_count,
+            "new_count": live,
+            "moved_from": dict(moved_from_counter),
+        },
+    )
+
+    await db.commit()
+    return {
+        "status": "ok",
+        "attached": len(found_ids),
+        "not_found": not_found,
+        "moved_from": [
+            {"old_story_id": k, "count": v} for k, v in moved_from_counter.items()
+        ],
+        "story_recount": {
+            "story_id": str(target_story_uuid),
+            "old_count": old_count,
+            "new_count": live,
+        },
+    }
+
+
 class _WeeklyDigestRequest(_BaseModel):
     markdown: str
 

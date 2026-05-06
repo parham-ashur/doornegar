@@ -327,6 +327,59 @@ class TestDetachArticlesEndpoint:
         )
 
 
+class TestAttachArticlesEndpoint:
+    """`/admin/articles/attach` is the mirror of /articles/detach.
+    Lets Niloofar arc-curation finish in chat when the auto-matcher
+    misses related coverage. Hand-curated arcs intentionally exceed
+    max_cluster_size — surfaces via canary, doesn't block.
+    """
+
+    def test_endpoint_registered(self):
+        src = (
+            Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py"
+        ).read_text()
+        assert '@router.post("/articles/attach"' in src, (
+            "POST /articles/attach must exist for HTTP-driven Niloofar "
+            "add-to-existing-arc fixes."
+        )
+
+    def test_endpoint_admin_gated(self):
+        src = (
+            Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py"
+        ).read_text()
+        idx = src.find('@router.post("/articles/attach"')
+        assert idx >= 0
+        decorator = src[idx : src.find("async def", idx)]
+        assert "Depends(require_admin)" in decorator, (
+            "/articles/attach mutates production data — must be admin-gated."
+        )
+
+    def test_endpoint_recounts_target_story(self):
+        src = (
+            Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py"
+        ).read_text()
+        idx = src.find("async def attach_articles_to_story(")
+        end = src.find("\n\n\n", idx)
+        body = src[idx : end if end > 0 else len(src)]
+        assert "target_story.article_count = live" in body, (
+            "/articles/attach must recount the target story so the "
+            "cached article_count + oversized_active_stories canary "
+            "stay accurate."
+        )
+
+    def test_endpoint_logs_audit_event(self):
+        src = (
+            Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py"
+        ).read_text()
+        idx = src.find("async def attach_articles_to_story(")
+        end = src.find("\n\n\n", idx)
+        body = src[idx : end if end > 0 else len(src)]
+        assert 'event_type="articles_attached"' in body, (
+            "/articles/attach must emit an articles_attached story_event "
+            "so the per-story timeline shows the manual curation move."
+        )
+
+
 class TestWeeklyDigestUpsertEndpoint:
     """`/admin/weekly-digest` lets Niloofar (Claude-driven) ship the
     weekly editorial directly from chat — without it, the homepage
