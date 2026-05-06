@@ -3,7 +3,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 
-export const revalidate = 300;
+// Same data lifecycle as the overview — weekly refresh. 30 min ISR.
+export const revalidate = 1800;
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 

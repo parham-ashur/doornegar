@@ -1,7 +1,10 @@
 import { setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 
-export const revalidate = 300;
+// Worldview cards refresh weekly (Monday FULL_PIPELINE). 5-min ISR
+// burned 6× more Fluid Active CPU than necessary. 30 min is still
+// fresher than the underlying data ever gets.
+export const revalidate = 1800;
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 

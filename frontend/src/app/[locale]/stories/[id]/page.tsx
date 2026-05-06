@@ -26,7 +26,13 @@ import { formatRelativeTime, toFa } from "@/lib/utils";
 // link params are now read client-side inside StatsPanel via
 // useSearchParams() instead. First visitor after revalidate triggers
 // one SSR; subsequent readers get the cached HTML edge-served.
-export const revalidate = 300;
+//
+// 5 min was projecting Fluid Active CPU ~3× over the Vercel free-tier
+// limit (4h/mo). Story pages are the heaviest regen — full story
+// fetch + articles + bias + telegram. New articles join at most once
+// per 6h cron, so 15 min ISR is well inside the data freshness
+// envelope. (2026-05-06 Vercel cost cut.)
+export const revalidate = 900;
 
 export async function generateMetadata({
   params,
