@@ -1234,3 +1234,36 @@ class TestEmbeddingNullCanaryEligibilityJoin:
             "emb_24h canary must exclude unclassified articles "
             "(content_type IS NULL) — they haven't reached the embed step."
         )
+
+
+class TestDedupNoLazyLoadOfDeferredContentText:
+    """The 2026-05-07 egress fix in d93fa14 added defer(Article.content_text)
+    to step_deduplicate_articles Layer 3. The length-tiebreaker on the same
+    line range still accessed `a.content_text` via attribute lookup, which
+    in async SQLAlchemy 2.0 lazy-loads the deferred column and crashes with
+    `greenlet_spawn has not been called`. Production cron failed every run
+    until the tiebreaker was rerouted through a pre-fetched length dict.
+
+    Tripwire: instance-level access of `.content_text` inside the dedup
+    function force-loads the deferred column. The class-level expression
+    `Article.content_text` is fine (used in select/defer/where).
+    """
+
+    def test_dedup_does_not_access_deferred_content_text_on_instance(self):
+        import inspect
+        import re
+
+        from auto_maintenance import step_deduplicate_articles
+
+        src = inspect.getsource(step_deduplicate_articles)
+
+        instance_pattern = re.compile(r"(?<!Article)\.content_text\b")
+        matches = instance_pattern.findall(src)
+        assert not matches, (
+            "step_deduplicate_articles accesses .content_text via instance "
+            "attribute. The column is deferred at the Layer 3 SELECT, so the "
+            "access lazy-loads via implicit await and crashes with "
+            "greenlet_spawn. Pre-fetch lengths via a single "
+            "select(Article.id, func.length(Article.content_text)) before the "
+            "dedup loop and look up by id."
+        )

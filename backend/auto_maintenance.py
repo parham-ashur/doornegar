@@ -4840,6 +4840,13 @@ async def step_deduplicate_articles():
         # named_entities. Dedup only reads id, url, embedding, story_id.
         # Loading content_text on 800 articles was ~1 MB; keywords/NE
         # another ~1 MB. Tiny per-cron but multiplies across all sites.
+        #
+        # 2026-05-07 follow-up: the length tiebreaker below previously
+        # accessed the deferred content_text attribute on each article,
+        # which lazy-loaded the column and crashed with greenlet_spawn
+        # in async mode. Lengths are pre-fetched in one cheap query
+        # (id, length) so the defer holds and the tiebreaker uses a
+        # dict lookup.
         from sqlalchemy.orm import defer as _defer_dedup
         recent = await db.execute(
             select(Article)
@@ -4863,6 +4870,11 @@ async def step_deduplicate_articles():
 
         if len(recent_articles) >= 2:
             from app.nlp.embeddings import cosine_similarity
+            length_rows = await db.execute(
+                select(Article.id, func.length(Article.content_text))
+                .where(Article.id.in_([a.id for a in recent_articles]))
+            )
+            content_lengths: dict = {row[0]: (row[1] or 0) for row in length_rows.all()}
             seen_ids = set()
             for i, a in enumerate(recent_articles):
                 if a.id in seen_ids or not a.embedding:
@@ -4880,7 +4892,7 @@ async def step_deduplicate_articles():
                                 keeper = b if a_tg else a
                             else:
                                 # Same kind — fall back to length tiebreak.
-                                keeper = a if len(a.content_text or "") >= len(b.content_text or "") else b
+                                keeper = a if content_lengths.get(a.id, 0) >= content_lengths.get(b.id, 0) else b
                             dupe = b if keeper is a else a
                             dupe.story_id = None
                             seen_ids.add(dupe.id)
