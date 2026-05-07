@@ -4893,20 +4893,41 @@ async def regenerate_translation(
     # dropping JSONB writes (verified 2026-05-07 against this story:
     # endpoint returned status=ok with full translated slot, but
     # immediate re-fetch showed translations:null). Raw UPDATE side-
-    # steps the issue entirely.
+    # steps the issue. Pass the JSONB column via psycopg2 Json adapter
+    # and verify with a SELECT-after-UPDATE round-trip — earlier
+    # `CAST(:blob AS JSONB)` syntax with `_stdlib_json.dumps(blob)`
+    # silently zeroed the column on asyncpg.
     import json as _stdlib_json
-    await db.execute(
-        _sa_text(
-            "UPDATE stories SET translations = CAST(:blob AS JSONB), "
-            "updated_at = NOW() WHERE id = :sid"
-        ),
-        {"blob": _stdlib_json.dumps(blob), "sid": str(sid)},
-    )
+    blob_json = _stdlib_json.dumps(blob, ensure_ascii=False)
+    returning_row = (
+        await db.execute(
+            _sa_text(
+                "UPDATE stories SET translations = :blob ::jsonb, "
+                "updated_at = NOW() WHERE id = :sid "
+                "RETURNING translations"
+            ),
+            {"blob": blob_json, "sid": str(sid)},
+        )
+    ).scalar_one_or_none()
     await db.commit()
-
     return {
         "status": "ok",
         "story_id": request.story_id,
         "locale": request.locale,
         "translation": slot,
+        # Debug: what the UPDATE...RETURNING actually wrote.
+        # If this is None or empty after the call, the write was
+        # silently dropped at the SQL layer; if it has the slot, the
+        # issue is downstream (trigger, async race, or aggressive
+        # auto-clear hook firing on a different request).
+        "db_returning_keys": (
+            list(returning_row.keys())
+            if isinstance(returning_row, dict)
+            else None
+        ),
+        "db_returning_locales": (
+            list(returning_row.keys())
+            if isinstance(returning_row, dict)
+            else f"type={type(returning_row).__name__}"
+        ),
     }

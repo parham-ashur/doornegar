@@ -451,11 +451,11 @@ async def step_translate_homepage_visible() -> dict[str, Any]:
                 blob[locale] = slot
                 await db.execute(
                     _sa_text(
-                        "UPDATE stories SET translations = CAST(:blob AS JSONB), "
+                        "UPDATE stories SET translations = :blob ::jsonb, "
                         "updated_at = NOW() WHERE id = :sid"
                     ),
                     {
-                        "blob": _stdlib_json.dumps(blob),
+                        "blob": _stdlib_json.dumps(blob, ensure_ascii=False),
                         "sid": str(story_id),
                     },
                 )
