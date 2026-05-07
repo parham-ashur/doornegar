@@ -4887,9 +4887,21 @@ async def regenerate_translation(
         "is_edited": False,
     }
     blob[request.locale] = slot
-    story.translations = blob
-    from sqlalchemy.orm.attributes import flag_modified as _flag_modified
-    _flag_modified(story, "translations")
+
+    # Bypass ORM mutation tracking — go straight to UPDATE. ORM-level
+    # `story.translations = blob` + `flag_modified` was silently
+    # dropping JSONB writes (verified 2026-05-07 against this story:
+    # endpoint returned status=ok with full translated slot, but
+    # immediate re-fetch showed translations:null). Raw UPDATE side-
+    # steps the issue entirely.
+    import json as _stdlib_json
+    await db.execute(
+        _sa_text(
+            "UPDATE stories SET translations = CAST(:blob AS JSONB), "
+            "updated_at = NOW() WHERE id = :sid"
+        ),
+        {"blob": _stdlib_json.dumps(blob), "sid": str(sid)},
+    )
     await db.commit()
 
     return {

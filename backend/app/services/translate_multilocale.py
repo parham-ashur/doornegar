@@ -420,28 +420,45 @@ async def step_translate_homepage_visible() -> dict[str, Any]:
         }
 
     now_iso = datetime.now(timezone.utc).isoformat()
+    # Bypass ORM mutation tracking and use raw UPDATE — ORM-level
+    # `story.translations = blob` + `flag_modified()` was still
+    # silently dropping JSONB writes (verified 2026-05-07 11:50 UTC:
+    # the regenerate endpoint returned status=ok with full slot, but
+    # re-fetch showed translations:null). Raw UPDATE side-steps the
+    # mutation-detection issue entirely. Per-row UPDATE in a small
+    # batch is fine — 30 stories × 2 locales = 60 UPDATEs / cron.
+    import json as _stdlib_json
     async with async_session() as db:
         for locale in OG_LOCALES:
             for story_id, translated in successes[locale]:
-                story = await db.get(Story, story_id)
-                if not story:
-                    continue
-                blob = dict(story.translations or {})
+                # Read current state (read-only, no mutation tracking).
+                row = (
+                    await db.execute(
+                        _sa_text(
+                            "SELECT translations FROM stories WHERE id = :sid"
+                        ),
+                        {"sid": str(story_id)},
+                    )
+                ).scalar_one_or_none()
+                blob = dict(row or {})
                 slot = dict(blob.get(locale) or {})
                 if slot.get("is_edited"):
-                    continue
+                    continue  # manual override survives
                 slot.update(translated)
                 slot["translated_at"] = now_iso
                 slot["prompt_version"] = PROMPT_VERSIONS[locale]
                 slot["is_edited"] = False
                 blob[locale] = slot
-                story.translations = blob
-                # SQLAlchemy doesn't detect mutations of JSONB dict
-                # values as dirty unless we flag them explicitly. The
-                # cron's first run silently committed nothing without
-                # this — 30 successful LLM calls produced 0 persisted
-                # rows (2026-05-07 09:00 UTC cron diagnosed).
-                flag_modified(story, "translations")
+                await db.execute(
+                    _sa_text(
+                        "UPDATE stories SET translations = CAST(:blob AS JSONB), "
+                        "updated_at = NOW() WHERE id = :sid"
+                    ),
+                    {
+                        "blob": _stdlib_json.dumps(blob),
+                        "sid": str(story_id),
+                    },
+                )
         await db.commit()
 
     return {
