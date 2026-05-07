@@ -1153,13 +1153,20 @@ async def step_summarize_newly_visible():
     stats = {"checked": 0, "generated": 0, "failed": 0, "no_articles": 0}
 
     async with async_session() as db:
-        # Mirrors homepage_eligible_filters() + adds the "no summary yet"
-        # gate. Excludes is_blindspot stories (the blindspot section uses
-        # a different surface) and the priority=-100 hidden tier.
+        # Homepage scope SSoT (Parham 2026-05-07): use homepage_story_ids
+        # so this step can never burn LLM budget on off-homepage stories.
+        # Inline predicates here previously drifted from the canonical
+        # filter — the comment claimed "mirrors homepage_eligible_filters"
+        # but the predicate let priority=-50 (demoted umbrellas) through.
         # Egress fix (Parham 2026-05-07): defer heavy article cols.
-        # step_summarize_newly_visible reads title + content_text +
-        # source — embedding/keywords/named_entities aren't used.
+        from app.services.homepage_scope import homepage_story_ids
         from sqlalchemy.orm import defer as _defer_snv
+        visible_ids = await homepage_story_ids(db)
+        if not visible_ids:
+            return stats
+        # Also: defer Article.content_text on the selectinload below was
+        # intended (docstring says "reads title + content_text + source")
+        # — keep it loaded since L1207 reads it. Defer the other 3 only.
         result = await db.execute(
             select(Story)
             .options(
@@ -1170,11 +1177,8 @@ async def step_summarize_newly_visible():
                 ).selectinload(Article.source),
             )
             .where(
-                Story.article_count >= 4,
+                Story.id.in_(visible_ids),
                 Story.summary_fa.is_(None),
-                Story.is_blindspot.is_(False),
-                Story.archived_at.is_(None),
-                Story.priority > -100,
                 # 24h backoff if a recent LLM call failed
                 (Story.llm_failed_at.is_(None)) | (Story.llm_failed_at < retry_cutoff),
                 # Don't clobber Niloofar's manual edits unless anchored

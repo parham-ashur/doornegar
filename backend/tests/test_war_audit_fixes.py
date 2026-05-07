@@ -948,16 +948,19 @@ class TestSummarizeNewlyVisibleStep:
             "stories. Refresh of existing summaries is step_summarize's "
             "job."
         )
-        # Homepage-eligible filter set
-        assert "Story.is_blindspot.is_(False)" in body, (
-            "step_summarize_newly_visible must exclude blindspots."
+        # 2026-05-07 cycle-1 audit: homepage_story_ids SSoT replaces the
+        # prior inline predicate set. The 3 filters that used to be
+        # inline (is_blindspot is False, archived_at is None,
+        # article_count >= 4) are now encapsulated by homepage_story_ids().
+        assert "homepage_story_ids" in body, (
+            "step_summarize_newly_visible must call homepage_story_ids(db) "
+            "as the canonical homepage scope filter; inline predicates "
+            "drift from the SSoT."
         )
-        assert "Story.archived_at.is_(None)" in body, (
-            "step_summarize_newly_visible must exclude archived."
-        )
-        assert "Story.article_count >= 4" in body, (
-            "step_summarize_newly_visible must enforce the >= 4 "
-            "homepage threshold."
+        assert "Story.id.in_(visible_ids)" in body, (
+            "step_summarize_newly_visible must filter by "
+            "Story.id.in_(visible_ids) where visible_ids = await "
+            "homepage_story_ids(db)."
         )
 
     def test_wired_into_full_pipeline_between_recluster_and_telegram_link(self):
@@ -1359,3 +1362,59 @@ class TestFixIssuesBoundedAndDeferred:
             ".limit() — the original implementation loaded ~30k articles "
             "to do a Python-side title filter."
         )
+
+
+class TestSummarizeNewlyVisibleHomepageScope:
+    """The 2026-05-07 cycle-1 audit (Island 4) found step_summarize_newly_
+    visible using inline predicates (article_count >= 4, priority > -100,
+    is_blindspot is False, archived_at is None) instead of the canonical
+    `homepage_story_ids` SSoT. Stories that pass the inline predicate but
+    are NOT on the homepage trending/blindspot top-N (e.g. priority=-50
+    demoted umbrellas with article_count >= 4) burned LLM budget. CLAUDE.md
+    homepage-scope rule mandates SSoT for every per-story LLM step.
+    """
+
+    def test_summarize_newly_visible_uses_homepage_story_ids(self):
+        import inspect
+
+        from auto_maintenance import step_summarize_newly_visible
+
+        src = inspect.getsource(step_summarize_newly_visible)
+        assert "homepage_story_ids" in src, (
+            "step_summarize_newly_visible must call homepage_story_ids(db) "
+            "to scope LLM spend; inline predicates drift from the canonical "
+            "filter."
+        )
+        assert "Story.id.in_(visible_ids)" in src, (
+            "step_summarize_newly_visible must filter by "
+            "Story.id.in_(visible_ids) where visible_ids = await "
+            "homepage_story_ids(db). Direct inline predicates are forbidden."
+        )
+
+
+class TestTranslateMultilocaleFlagModifiedImported:
+    """The 2026-05-07 cycle-1 audit (Island 6) caught translate_multilocale
+    calling `flag_modified(story, "translations")` at L496 without
+    importing the function. Every call to `clear_translations_for_story`
+    raised NameError, silently swallowed by admin endpoints — auto-clear
+    on FA edit was broken in production since shipping.
+    """
+
+    def test_flag_modified_is_imported(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app"
+            / "services"
+            / "translate_multilocale.py"
+        ).read_text()
+        # Either the symbol is imported, or the file no longer references it.
+        if "flag_modified(" in src:
+            assert "from sqlalchemy.orm.attributes import flag_modified" in src or (
+                "from sqlalchemy.orm import" in src and "flag_modified" in src
+            ), (
+                "translate_multilocale.py uses flag_modified() but doesn't "
+                "import it. This crashes clear_translations_for_story at "
+                "runtime, breaking auto-clear on FA edit."
+            )

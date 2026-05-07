@@ -36,6 +36,7 @@ from sqlalchemy import bindparam, select
 from sqlalchemy import text as _sa_text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 # Pre-bound UPDATE with explicit JSONB type so asyncpg doesn't
 # silently coerce the dict into TEXT (the bug that ate 30 EN
