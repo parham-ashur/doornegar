@@ -1,73 +1,73 @@
 {
   "app": {
     "name": "Doornegar",
-    "tagline": "Iranian Media Transparency",
-    "description": "Step back and see how media shapes the news"
+    "tagline": "Transparence des médias iraniens",
+    "description": "Prenez du recul et observez comment les médias façonnent l'information"
   },
   "nav": {
-    "home": "Home",
-    "stories": "Stories",
-    "sources": "Sources",
-    "blindspots": "Blind Spots",
-    "about": "About"
+    "home": "Accueil",
+    "stories": "Actualités",
+    "sources": "Médias",
+    "blindspots": "Angles morts",
+    "about": "À propos"
   },
   "home": {
-    "hero_title": "See the news from a different angle",
-    "hero_subtitle": "Compare coverage across Iranian media — inside and outside",
-    "trending": "Trending Stories",
-    "blindspot_alert": "Blind Spot Alert",
-    "blindspot_desc": "Stories only covered by one side",
-    "view_all": "View all"
+    "hero_title": "Lisez l'actualité sous un autre angle",
+    "hero_subtitle": "Comparer la couverture des médias iraniens — intérieur et exil",
+    "trending": "Actualités en tête",
+    "blindspot_alert": "Alerte angle mort",
+    "blindspot_desc": "Sujets que seul un camp couvre",
+    "view_all": "Tout voir"
   },
   "story": {
-    "sources_covered": "{count} sources",
+    "sources_covered": "{count} médias",
     "articles": "Articles",
-    "comparison": "Comparison",
-    "bias_analysis": "Bias Analysis",
-    "social_reaction": "Social Reaction",
-    "covered_by": "Covered by",
-    "state_only": "State media only",
-    "diaspora_only": "Diaspora media only",
-    "blind_spot": "Blind Spot",
-    "framing": "Framing",
-    "no_stories": "No stories yet"
+    "comparison": "Comparaison",
+    "bias_analysis": "Analyse de partialité",
+    "social_reaction": "Réactions sur les réseaux sociaux",
+    "covered_by": "Couvert par",
+    "state_only": "Médias d'État uniquement",
+    "diaspora_only": "Médias de la diaspora uniquement",
+    "blind_spot": "Angle mort",
+    "framing": "Cadrage",
+    "no_stories": "Aucune actualité pour l'instant"
   },
   "source": {
-    "state": "State",
-    "semi_state": "Semi-State",
-    "independent": "Independent",
+    "state": "État",
+    "semi_state": "Semi-étatique",
+    "independent": "Indépendant",
     "diaspora": "Diaspora",
-    "irgc": "IRGC-affiliated",
-    "inside_iran": "Inside Iran",
-    "outside_iran": "Outside Iran",
-    "credibility": "Credibility",
-    "factional": "Political faction"
+    "irgc": "Affilié aux Gardiens de la révolution",
+    "inside_iran": "En Iran",
+    "outside_iran": "Hors d'Iran",
+    "credibility": "Crédibilité",
+    "factional": "Tendance politique"
   },
   "bias": {
-    "political_alignment": "Political Alignment",
-    "pro_regime": "Pro-regime",
-    "reformist": "Reformist",
+    "political_alignment": "Orientation politique",
+    "pro_regime": "Pro-régime",
+    "reformist": "Réformateur",
     "opposition": "Opposition",
-    "center": "Center",
-    "tone": "Tone",
-    "factuality": "Factuality",
-    "emotional_language": "Emotional Language",
-    "framing": "Framing"
+    "center": "Centre",
+    "tone": "Ton",
+    "factuality": "Factualité",
+    "emotional_language": "Langage émotionnel",
+    "framing": "Cadrage"
   },
   "social": {
-    "telegram_reactions": "Telegram Reactions",
-    "posts": "posts",
-    "views": "views",
+    "telegram_reactions": "Réactions sur Telegram",
+    "posts": "publications",
+    "views": "vues",
     "sentiment": "Sentiment",
-    "positive": "Positive",
-    "negative": "Negative",
-    "neutral": "Neutral"
+    "positive": "Positif",
+    "negative": "Négatif",
+    "neutral": "Neutre"
   },
   "common": {
-    "loading": "Loading...",
-    "error": "Something went wrong",
-    "retry": "Retry",
-    "back": "Back",
-    "language": "فارسی"
+    "loading": "Chargement…",
+    "error": "Une erreur est survenue",
+    "retry": "Réessayer",
+    "back": "Retour",
+    "language": "Français"
   }
 }

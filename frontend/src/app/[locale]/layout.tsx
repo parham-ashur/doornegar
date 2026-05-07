@@ -62,7 +62,7 @@ export const metadata: Metadata = {
     description: "مقایسه پوشش خبری رسانه‌های داخل و خارج ایران. کدام رسانه چه خبری را پوشش داده؟",
     type: "website",
     locale: "fa_IR",
-    alternateLocale: ["en_US"],
+    alternateLocale: ["en_US", "fr_FR"],
     siteName: "Doornegar - دورنگر",
     url: "https://doornegar.org",
   },
@@ -90,6 +90,7 @@ export const metadata: Metadata = {
     languages: {
       fa: "https://doornegar.org/fa",
       en: "https://doornegar.org/en",
+      fr: "https://doornegar.org/fr",
       "x-default": "https://doornegar.org/fa",
     },
   },
