@@ -271,10 +271,20 @@ async def translate_story(
     parsed = _parse_structured(output, fa_payload.keys())
     if parsed is None:
         logger.warning(
-            f"Translation parse failed for story {story_id} {locale} ({len(output)} chars)"
+            f"Translation parse failed for story {story_id} {locale} ({len(output)} chars). "
+            f"Output preview: {output[:500]!r}"
         )
-        await _log_failure(
-            purpose=purpose, story_id=story_id, error="parse_failed"
+        await log_llm_usage(
+            model=EDITORIAL_MODEL,
+            purpose=purpose,
+            input_tokens=0,
+            output_tokens=0,
+            story_id=story_id,
+            meta={
+                "failed": "true",
+                "error": "parse_failed",
+                "raw_output_preview": output[:500],
+            },
         )
         return None
 
