@@ -576,9 +576,17 @@ async def force_resummarize(
     # calls on stories that no visitor sees (Parham 2026-05-03 evening:
     # 9 of 10 picked IDs were archived). Per the "every penny goes to
     # the homepage" rule, archived = retired = no spend.
+    from sqlalchemy.orm import defer as _defer_admin
     query = (
         select(Story)
-        .options(selectinload(Story.articles).selectinload(Article.source))
+        .options(
+            selectinload(Story.articles).options(
+                _defer_admin(Article.embedding),
+                _defer_admin(Article.keywords),
+                _defer_admin(Article.named_entities),
+                selectinload(Article.source),
+            )
+        )
         .where(Story.article_count >= 5)
         .where(Story.is_edited.is_(False))
         .where(Story.archived_at.is_(None))
@@ -681,9 +689,17 @@ async def _run_force_resummarize_job(story_ids: list[str], chosen_model: str) ->
     try:
         for sid in story_ids:
             async with async_session() as db:
+                from sqlalchemy.orm import defer as _defer_a
                 r = await db.execute(
                     select(Story)
-                    .options(selectinload(Story.articles).selectinload(Article.source))
+                    .options(
+                        selectinload(Story.articles).options(
+                            _defer_a(Article.embedding),
+                            _defer_a(Article.keywords),
+                            _defer_a(Article.named_entities),
+                            selectinload(Article.source),
+                        )
+                    )
                     .where(Story.id == sid)
                 )
                 story = r.scalars().first()

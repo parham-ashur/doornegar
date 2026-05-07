@@ -483,7 +483,14 @@ async def summarize_story(request: Request, story_id: uuid.UUID, db: AsyncSessio
     """Force-generate a new summary using OpenAI. Admin-only to prevent cost abuse."""
     result = await db.execute(
         select(Story)
-        .options(selectinload(Story.articles).selectinload(Article.source))
+        .options(
+            selectinload(Story.articles).options(
+                defer(Article.embedding),
+                defer(Article.keywords),
+                defer(Article.named_entities),
+                selectinload(Article.source),
+            )
+        )
         .where(Story.id == story_id)
     )
     story = result.scalar_one_or_none()

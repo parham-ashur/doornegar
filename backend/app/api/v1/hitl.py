@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import defer, selectinload
 
 from app.api.v1.admin import require_admin
 from app.config import settings
@@ -490,7 +490,14 @@ async def stories_without_image(
 
     result = await db.execute(
         select(Story)
-        .options(selectinload(Story.articles))
+        .options(
+            selectinload(Story.articles).options(
+                defer(Article.embedding),
+                defer(Article.content_text),
+                defer(Article.keywords),
+                defer(Article.named_entities),
+            )
+        )
         .where(Story.article_count >= 5)
         .order_by(Story.trending_score.desc(), Story.first_published_at.desc().nullslast())
         .limit(500)
@@ -709,7 +716,15 @@ async def story_article_images(
     rather than a generic stock photo."""
     result = await db.execute(
         select(Story)
-        .options(selectinload(Story.articles).selectinload(Article.source))
+        .options(
+            selectinload(Story.articles).options(
+                defer(Article.embedding),
+                defer(Article.content_text),
+                defer(Article.keywords),
+                defer(Article.named_entities),
+                selectinload(Article.source),
+            )
+        )
         .where(Story.id == story_id)
     )
     story = result.scalar_one_or_none()
