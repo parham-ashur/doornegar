@@ -1519,6 +1519,41 @@ class TestVisibleStoriesStatMatchesHomepageGate:
         )
 
 
+class TestTelegramPostsHashFormat:
+    """Cycle-1 audit Phase B: step_telegram_deep_analysis caches Pass-2
+    LLM results keyed on a hash of the post pool. If that hash format
+    changes (e.g. adds a field, drops the sort), every cached entry
+    becomes stale and the cron re-pays for analysis already computed —
+    silent 75% → 0% cache-hit drop with no operator signal.
+
+    Tripwire pins the format. If you intentionally change it, update
+    this test AND wipe Story.telegram_analysis['posts_hash'] across
+    the DB so old caches don't poison the new hash key.
+    """
+
+    def test_posts_hash_uses_id_and_text_length_sorted(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent / "auto_maintenance.py"
+        ).read_text()
+        idx = src.find("def _posts_hash(posts: list)")
+        assert idx >= 0, "_posts_hash helper must exist in auto_maintenance.py"
+        body = src[idx : idx + 600]
+        assert "sorted(" in body, (
+            "_posts_hash must sort the pool — without it, post-reorder "
+            "alone invalidates the cache and re-pays for unchanged work."
+        )
+        assert "p.id" in body and "len(p.text" in body, (
+            "_posts_hash format expects `{p.id}:{len(p.text or '')}` per "
+            "post. Changing it without wiping caches resets cache-hit to 0%."
+        )
+        assert "sha1" in body, (
+            "_posts_hash uses SHA-1; a change to a different digest also "
+            "invalidates every cached entry."
+        )
+
+
 class TestR2BackupSubprocessOrder:
     """Cycle-1 audit Island 13 found the R2 backup script closing
     pg_dump's stdout before calling proc.wait(). This can SIGPIPE
