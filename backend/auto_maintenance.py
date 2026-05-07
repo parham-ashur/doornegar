@@ -2967,12 +2967,16 @@ async def step_niloofar_feedback_audit():
         if not rows:
             return stats
 
-        import openai
-        from app.services.llm_helper import build_openai_params
+        # Cycle-1 audit Island 7 (Parham 2026-05-07): Niloofar runs via
+        # Claude per `project_niloofar` memory — Ashouri-style analytical
+        # voice. Switching from OpenAI to Anthropic Haiku 4.5 keeps the
+        # voice consistent with the rest of Niloofar's editorial work.
+        import anthropic
         from app.services.llm_usage import log_llm_usage
         from app.services.events import log_event as _log_event
 
-        client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
+        client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+        _niloofar_model = "claude-haiku-4-5-20251001"
 
         prompt_template = """تو نیلوفر هستی، سردبیر ارشد دورنگر.
 یک خواننده گزارش داده که این مقاله در خوشهٔ اشتباه قرار گرفته است.
@@ -3044,19 +3048,21 @@ async def step_niloofar_feedback_audit():
                     article_title=(article.title_fa or article.title_original or "")[:120],
                     article_excerpt=(article.content_fa or article.content_original or "")[:600],
                 )
-                params = build_openai_params(
-                    model=settings.translation_model,
-                    prompt=prompt,
+                response = await client.messages.create(
+                    model=_niloofar_model,
                     max_tokens=120,
-                    temperature=0.1,
+                    messages=[{"role": "user", "content": prompt}],
                 )
-                response = await client.chat.completions.create(**params)
                 await log_llm_usage(
-                    model=settings.translation_model,
+                    model=_niloofar_model,
                     purpose="feedback.niloofar_audit",
                     usage=response.usage,
                 )
-                output = (response.choices[0].message.content or "").strip()
+                output = ""
+                if response.content:
+                    block = response.content[0]
+                    output = getattr(block, "text", "") or ""
+                output = output.strip()
                 first_line = output.split("\n", 1)[0].strip().lower()
                 explanation = output.split("\n", 1)[1].strip()[:400] if "\n" in output else ""
 
