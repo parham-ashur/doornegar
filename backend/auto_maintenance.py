@@ -1975,34 +1975,44 @@ async def step_fix_images():
     pending: list[tuple] = []  # (article_id, new_image_url_or_None)
     from app.services import maintenance_state as _ms
     total_n = len(rows)
+    # Cycle-1 audit Island 8: parallelize HEAD checks via asyncio.gather
+    # in chunks of 20. Sequential 300×~500ms = 150s; chunked parallel
+    # ~7-15s with the same timeout budget per request.
     async with httpx.AsyncClient(timeout=5, follow_redirects=True) as client:
-        for idx, (art_id, art_url) in enumerate(rows):
+        async def _head_one(art_id, art_url):
             stats["checked"] += 1
-            if idx % 10 == 0:
-                await _ms.update_step_progress(idx, total_n, label="HEAD-checking images")
             if art_url and art_url.startswith("http://localhost"):
-                pending.append((art_id, None))
                 stats["nulled"] += 1
-                continue
+                return (art_id, None, True)  # null + stamp
             try:
                 r = await client.head(art_url)
-                # Cycle-1 audit Phase B (R2 image-fail sentinel-trap):
-                # only null + stamp on a permanent 4xx (404/410). On a
-                # transient 5xx, the URL might come back; leaving image_
-                # checked_at unchanged means the next cron retries.
                 if 400 <= r.status_code < 500:
-                    pending.append((art_id, None))  # null + stamp
                     stats["nulled"] += 1
+                    return (art_id, None, True)  # null + stamp
                 elif r.status_code == 200:
-                    pending.append((art_id, art_url))  # keep + stamp
+                    return (art_id, art_url, True)  # keep + stamp
                 else:
-                    # 5xx / 3xx after redirect cap → transient. Skip
-                    # entirely so image_checked_at stays unchanged and
-                    # the next cron retries.
                     stats["transient_skipped"] = stats.get("transient_skipped", 0) + 1
+                    return None
             except Exception:
-                # Network error / timeout = transient. Skip; next cron retries.
                 stats["transient_skipped"] = stats.get("transient_skipped", 0) + 1
+                return None
+
+        CHUNK = 20
+        import asyncio as _asyncio_head
+        for chunk_start in range(0, len(rows), CHUNK):
+            chunk_rows = rows[chunk_start:chunk_start + CHUNK]
+            await _ms.update_step_progress(
+                chunk_start, total_n, label="HEAD-checking images (parallel)"
+            )
+            results = await _asyncio_head.gather(
+                *[_head_one(art_id, art_url) for art_id, art_url in chunk_rows],
+                return_exceptions=False,
+            )
+            for r in results:
+                if r is None:
+                    continue
+                pending.append((r[0], r[1]))
     await _ms.update_step_progress(total_n, total_n, label="HEAD-check done")
 
     # Flush updates in chunks of 100 with a fresh session per chunk. Each
