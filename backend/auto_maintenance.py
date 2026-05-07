@@ -645,8 +645,18 @@ async def step_backfill_farsi_titles():
         return {"skipped": "no_openai_key"}
 
     async with async_session() as db:
+        # Defer 4 heavy JSONB cols (cycle-1 audit Island 1): this step
+        # only reads title_original. Loading embedding/keywords/named_
+        # entities/content_text on 300 rows = ~2 MB wasted per run.
+        from sqlalchemy.orm import defer as _defer_bf
         result = await db.execute(
             select(Article)
+            .options(
+                _defer_bf(Article.embedding),
+                _defer_bf(Article.content_text),
+                _defer_bf(Article.keywords),
+                _defer_bf(Article.named_entities),
+            )
             .where(
                 and_(
                     Article.title_fa.is_(None),

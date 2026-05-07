@@ -430,8 +430,17 @@ async def classify_unclassified_articles(
 
     Returns counts: ``{total, by_label, llm_called, llm_returned, unresolved}``.
     """
+    # Defer heavy cols (cycle-1 audit Island 1): heuristic_classify reads
+    # title/url/rss_category/content_text/summary. embedding, keywords,
+    # named_entities are never read in this batch path. ~5 MB per run saved.
+    from sqlalchemy.orm import defer as _defer_ct
     result = await db.execute(
         select(Article)
+        .options(
+            _defer_ct(Article.embedding),
+            _defer_ct(Article.keywords),
+            _defer_ct(Article.named_entities),
+        )
         .where(Article.content_type.is_(None))
         .order_by(Article.ingested_at.desc())
         .limit(batch_size)

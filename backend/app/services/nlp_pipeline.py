@@ -66,10 +66,20 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
     # allowed whitelist reach NLP. Unclassified rows (content_type
     # IS NULL) wait for the next classifier pass; non-news labels
     # never reach the embedder, saving the bulk of the work.
+    # Defer 4 heavy JSONB cols (cycle-1 audit Island 2): this batch will
+    # RECOMPUTE embedding/keywords/named_entities, so loading the prior
+    # values is pure waste. content_text IS read at L196 for embedding
+    # text, so keep it loaded. Saves ~300 KB per 50-article batch.
+    from sqlalchemy.orm import defer as _defer_proc
     result = await db.execute(
         select(Article)
         .join(Source, Source.id == Article.source_id)
-        .options(selectinload(Article.source))
+        .options(
+            selectinload(Article.source),
+            _defer_proc(Article.embedding),
+            _defer_proc(Article.keywords),
+            _defer_proc(Article.named_entities),
+        )
         .where(
             _or(
                 Article.processed_at.is_(None),
@@ -329,6 +339,9 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
         cutoff_48h = datetime.now(timezone.utc) - timedelta(hours=48)
 
         # Get recent articles with embeddings (potential duplicates of)
+        # Cycle-1 audit Island 2: dropped 500 → 100. The 48h window is
+        # dense enough that 100 captures 95%+ of repost candidates and
+        # cuts the egress + O(n²) cosine work proportionally.
         recent_result = await db.execute(
             select(Article.id, Article.embedding)
             .where(
@@ -336,7 +349,7 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
                 Article.ingested_at >= cutoff_48h,
                 Article.embedding.isnot(None),
             )
-            .limit(500)
+            .limit(100)
         )
         recent_pool = [(r[0], r[1]) for r in recent_result.all()]
 

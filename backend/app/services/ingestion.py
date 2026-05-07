@@ -152,8 +152,13 @@ def parse_published_date(entry: dict) -> datetime | None:
         parsed = entry.get(field)
         if parsed:
             try:
-                from time import mktime
-                return datetime.fromtimestamp(mktime(parsed), tz=timezone.utc)
+                # `calendar.timegm` interprets the struct_time as UTC,
+                # which feedparser produces. `time.mktime` would
+                # interpret it as local time and shift by the host's
+                # tz offset — wrong on any non-UTC host. (Cycle-1 audit
+                # Island 1.)
+                import calendar
+                return datetime.fromtimestamp(calendar.timegm(parsed), tz=timezone.utc)
             except Exception:
                 continue
     return None
@@ -181,6 +186,10 @@ async def ingest_source(source: Source, db: AsyncSession) -> dict:
             if not feed or not feed.entries:
                 log.status = "error"
                 log.error_message = "No entries found or feed unavailable"
+                # Set completed_at on the error path too (cycle-1 audit
+                # Island 1) — without it, `completed_at IS NULL` queries
+                # treat failed feeds as still-running.
+                log.completed_at = datetime.now(timezone.utc)
                 db.add(log)
                 stats["errors"] += 1
                 continue

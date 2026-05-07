@@ -66,7 +66,7 @@ CHEAP_STEPS = {
     "fix_images", "diaspora_ogimages", "migrate_images_r2",
     "niloofar_image_rescue", "snapshot_analyses", "audit_clusters",
     "detect_hourly_updates", "backfill_analyst_counts",
-    "telegram_session", "telegram_health",
+    "telegram_session",
 }
 
 # Steps that ALWAYS get skipped when the budget guard fires —
@@ -226,8 +226,9 @@ async def should_halt_for_budget(db: AsyncSession) -> tuple[bool, str, dict]:
             signals,
         )
 
-    if llm_mtd >= HALT_HARD_USD:
-        return True, f"llm_mtd_{llm_mtd:.2f}_over_hard_cap_{HALT_HARD_USD}", signals
+    # (Cycle-1 audit Island 12: removed unreachable LLM-only halt branch
+    # here. The combined_mtd check above already covers this case since
+    # combined_mtd >= llm_mtd by definition.)
 
     if combined_mtd >= MONTHLY_BUDGET_USD * HALT_FRACTION_LLM:
         return (
