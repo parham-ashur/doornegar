@@ -4888,10 +4888,6 @@ async def regenerate_translation(
     }
     blob[request.locale] = slot
 
-    # Use SQLAlchemy bindparam with explicit JSONB type. asyncpg
-    # without the type hint was silently encoding the JSON string as
-    # TEXT, which then "looked like" a JSONB cast worked but actually
-    # didn't persist. See 2026-05-07 silent-write investigation.
     from sqlalchemy import bindparam as _bindparam
     from sqlalchemy.dialects.postgresql import JSONB as _JSONB
 
@@ -4904,6 +4900,19 @@ async def regenerate_translation(
         await db.execute(stmt, {"blob": blob, "sid": str(sid)})
     ).scalar_one_or_none()
     await db.commit()
+
+    # Diagnose: open a FRESH session and re-read. If this comes back
+    # null, the commit didn't persist. If it has the data, persistence
+    # works and the read elsewhere is going to a different DB or
+    # being cached.
+    from app.database import async_session as _async_session
+    async with _async_session() as fresh_db:
+        fresh_row = (
+            await fresh_db.execute(
+                _sa_text("SELECT translations FROM stories WHERE id = :sid"),
+                {"sid": str(sid)},
+            )
+        ).scalar_one_or_none()
     return {
         "status": "ok",
         "story_id": request.story_id,
@@ -4923,5 +4932,10 @@ async def regenerate_translation(
             list(returning_row.keys())
             if isinstance(returning_row, dict)
             else f"type={type(returning_row).__name__}"
+        ),
+        "fresh_session_row_keys": (
+            list(fresh_row.keys())
+            if isinstance(fresh_row, dict)
+            else f"type={type(fresh_row).__name__}, value={fresh_row!r}"[:200]
         ),
     }
