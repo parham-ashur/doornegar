@@ -7022,6 +7022,21 @@ async def step_backfill_diaspora_ogimages():
                 if any(f in low for f in BAD_FRAGMENTS):
                     og_url = None
 
+            # Cycle-1 audit Island 8: HEAD-validate the og:image URL
+            # before writing. Otherwise broken og:image URLs (CDN gone,
+            # 404, gateway error) land in the DB and get served as
+            # broken <img> on the homepage.
+            if og_url:
+                try:
+                    import httpx as _httpx_head
+                    async with _httpx_head.AsyncClient(timeout=5, follow_redirects=True) as _client_head:
+                        head = await _client_head.head(og_url)
+                        ct = (head.headers.get("content-type") or "").lower()
+                        if head.status_code != 200 or not ct.startswith("image/"):
+                            og_url = None
+                except Exception:
+                    og_url = None
+
             if og_url:
                 stats["found_ogimage"] += 1
                 if art.image_url is None:
