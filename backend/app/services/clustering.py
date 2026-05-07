@@ -1063,6 +1063,20 @@ async def _match_to_existing_stories(
         f"(+{len(articles_without_embedding)} without embedding), "
         f"{len(articles) - pre_filtered_articles - auto_match_count} articles → new cluster"
     )
+    # Cycle-1 audit Island 3: per-source breakdown of embedding-less
+    # articles. Lets operators spot when one source's NLP pipeline is
+    # silently failing while others work fine.
+    if articles_without_embedding:
+        from collections import Counter as _Counter
+        by_source = _Counter(
+            (str(a.source_id) if a.source_id else "unknown")
+            for a in articles_without_embedding
+        )
+        if len(by_source) > 1 or any(v > 5 for v in by_source.values()):
+            logger.warning(
+                "Articles without embedding by source_id: %s",
+                dict(by_source.most_common()),
+            )
 
     # Apply deterministic auto-matches first.
     from app.services.events import log_event as _log_event

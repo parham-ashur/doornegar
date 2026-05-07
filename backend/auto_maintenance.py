@@ -4339,10 +4339,14 @@ async def step_recalculate_trending():
     stats = {"updated": 0, "first_published_backfilled": 0}
 
     async with async_session() as db:
-        # Heal any story whose first_published_at is stale or null. The
-        # per-merge path in _refresh_story_metadata fixes this going
-        # forward; this UPDATE backfills history and protects against
-        # any future code path that forgets.
+        # Heal any story whose first_published_at is NULL. The full
+        # backfill (catching drift between cached and actual MIN) lives
+        # in step_archive_stale a few steps earlier in FULL_PIPELINE.
+        # Cycle-1 audit Island 9: this redundant pass used to do the
+        # full UPDATE again, which doubled the I/O on every cron. Gate
+        # to NULL-only so we only catch stories that missed the earlier
+        # pass (rare; e.g. a story created post-archive_stale via
+        # cluster_new running later).
         backfill = await db.execute(text("""
             UPDATE stories s
             SET first_published_at = sub.min_pub
@@ -4353,7 +4357,8 @@ async def step_recalculate_trending():
                 GROUP BY story_id
             ) sub
             WHERE s.id = sub.story_id
-              AND s.first_published_at IS DISTINCT FROM sub.min_pub
+              AND s.first_published_at IS NULL
+              AND sub.min_pub IS NOT NULL
         """))
         stats["first_published_backfilled"] = backfill.rowcount or 0
         await db.commit()
