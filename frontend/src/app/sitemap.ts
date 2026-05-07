@@ -70,10 +70,13 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
   // Stories — bulk fetch, use last_updated_at for freshness. Skip
   // stories without an id or that look archived (article_count < 2).
-  // We emit up to 5000 — Google's sitemap entry cap is 50k, but we
-  // keep it leaner so the file stays small and fetchable.
+  // Cycle-1 audit Island 10: dropped page_size 5000 → 500. Sitemap
+  // hourly egress was ~90 MB before today's backend defer fixes; even
+  // with defers, the long tail of 1-article stories rarely indexes
+  // anyway. 500 covers all visible homepage stories + a healthy
+  // recently-active tail.
   const storiesPayload = await safeFetch<{ stories?: Brief[] }>(
-    `/api/v1/stories?page=1&page_size=5000`,
+    `/api/v1/stories?page=1&page_size=500`,
   );
   const stories = storiesPayload?.stories ?? [];
   for (const s of stories) {

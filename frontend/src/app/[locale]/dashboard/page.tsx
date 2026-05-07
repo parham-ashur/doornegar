@@ -283,7 +283,10 @@ export default function DashboardPage() {
     setLoading(false);
   }, [authHeaders, authed]);
 
-  useEffect(() => { fetchDashboard(); }, [fetchDashboard]);
+  // Cycle-1 audit Island 10: guard fetch on `authed` so we don't
+  // burn Neon egress on auth-less calls that always 401. Per
+  // feedback_dashboard_hooks rule, all hooks live above the auth gate.
+  useEffect(() => { if (authed) fetchDashboard(); }, [authed, fetchDashboard]);
 
   // Content-type filter rollup (last 7 days). Surfaces how much of the
   // ingest pool the classifier kept vs dropped, right next to the
@@ -645,7 +648,8 @@ export default function DashboardPage() {
     setFeedbackLoading(false);
   }, [authed, authHeaders]);
 
-  useEffect(() => { fetchFeedback(); }, [fetchFeedback]);
+  // Cycle-1 audit Island 10: guard on `authed` (feedback_dashboard_hooks).
+  useEffect(() => { if (authed) fetchFeedback(); }, [authed, fetchFeedback]);
 
   // Persona info tooltip
   const [activePersona, setActivePersona] = useState<string | null>(null);
