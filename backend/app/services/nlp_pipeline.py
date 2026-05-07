@@ -445,6 +445,25 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
         )
 
     await db.commit()
+    # Cycle-1 audit Island 2: surface Persian normalize-path counts so
+    # a fallback-only deploy (hazm missing) is visible in stats. Reset
+    # counters so the next cron sees only its own work.
+    try:
+        from app.nlp.persian import (
+            get_normalize_path_counts as _get_norm_paths,
+            reset_normalize_path_counts as _reset_norm_paths,
+        )
+        norm_paths = _get_norm_paths()
+        stats["normalize_paths"] = norm_paths
+        if norm_paths.get("hazm", 0) == 0 and norm_paths.get("fallback", 0) > 0:
+            logger.warning(
+                "Persian normalize: 100%% fallback path used (hazm "
+                "presumed missing). Embedding inputs may drift vs prior "
+                "deploys with hazm available."
+            )
+        _reset_norm_paths()
+    except Exception as e:
+        logger.debug(f"normalize-path stats unavailable: {e}")
     logger.info(f"NLP pipeline complete: {stats}")
     return stats
 
