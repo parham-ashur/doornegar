@@ -4089,14 +4089,18 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
     """))).scalar() or 0)
     translation_phase_active = translation_active_7d > 0
 
-    # Budget guard signal — cached once for the canary block below.
-    llm_mtd_cost = float(
-        (await db.execute(_t(
-            "SELECT COALESCE(SUM(total_cost), 0) FROM llm_usage_logs "
-            "WHERE timestamp >= date_trunc('month', NOW())"
-        ))).scalar() or 0.0
+    # Budget guard signal — uses the same combined LLM + Neon estimate
+    # as the cron pre-flight check. As of 2026-05-07 the LLM-only
+    # signal undercounted by 5-10x: real Neon egress was ~$18 MTD
+    # while LLM was only ~$3.6.
+    from app.services.budget_guard import (
+        get_llm_cost_mtd,
+        get_neon_egress_estimate_mtd,
     )
-    budget_guard_armed = llm_mtd_cost >= 30.0 * 0.80
+    llm_mtd_cost = await get_llm_cost_mtd(db)
+    _neon_gb_mtd, neon_cost_mtd = await get_neon_egress_estimate_mtd(db)
+    combined_mtd = llm_mtd_cost + neon_cost_mtd
+    budget_guard_armed = combined_mtd >= 30.0 * 0.80
 
     translation_cost_24h = float((await db.execute(_t("""
         SELECT COALESCE(SUM(total_cost), 0)
@@ -4487,16 +4491,24 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
             "must all filter frozen_at + archived_at + article_count >= 5.",
         ),
         _canary(
-            "budget_guard", "Budget guard halt state",
-            f"MTD ${llm_mtd_cost:.2f} ({'ARMED — next cron halts LLM steps' if budget_guard_armed else 'ok'})",
-            "MTD LLM < $24 (80% of $30 cap)",
-            "warn" if budget_guard_armed else "ok",
-            "Strict-mode rule (Parham 2026-05-07): when MTD LLM spend reaches 80% of the "
-            "$30/mo cap, the cron auto-skips LLM/egress-heavy steps (summarize, bias, "
-            "editorial, telegram analysis, translation, etc.). Website goes stale rather than "
-            "the project running out of budget mid-month. Override via "
+            "budget_guard", "Budget guard halt state (LLM + Neon combined)",
+            (
+                f"MTD ${combined_mtd:.2f} = LLM ${llm_mtd_cost:.2f} + Neon est. "
+                f"${neon_cost_mtd:.2f} ({_neon_gb_mtd:.0f} GB) — "
+                f"{'ARMED' if budget_guard_armed else 'ok'}"
+            ),
+            "Combined MTD < $24 (80% of $30 cap)",
+            "error" if combined_mtd >= 30.0 * 0.85 else (
+                "warn" if budget_guard_armed else "ok"
+            ),
+            "Strict-mode rule (Parham 2026-05-07): when combined LLM + estimated Neon egress "
+            "MTD reaches 80% of the $30/mo cap, the cron auto-skips LLM/egress-heavy steps "
+            "(summarize, bias, editorial, telegram analysis, translation, etc.). Website "
+            "goes stale rather than the project running out of budget mid-month. Override via "
             "POST /admin/budget/override?action=clear (one-shot pass) or "
-            "?action=lock (force halt). Status: GET /admin/budget/status.",
+            "?action=lock (force halt). Status: GET /admin/budget/status. "
+            "Neon estimate uses pg_stat_database.tup_returned × ~4KB/row; calibrated against "
+            "the 2026-05-07 incident (estimate $18.07 vs actual $18.15).",
         ),
         _canary(
             "unpriced_calls_7d", "Unpriced LLM calls (7d)",
