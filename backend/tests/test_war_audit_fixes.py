@@ -1267,3 +1267,29 @@ class TestDedupNoLazyLoadOfDeferredContentText:
             "select(Article.id, func.length(Article.content_text)) before the "
             "dedup loop and look up by id."
         )
+
+
+class TestArticlesListEndpointDefersHeavyJsonb:
+    """Tripwire for 2026-05-07 egress incident: ~295 GB of Neon transfer
+    bled in 1.5 hours after the d93fa14 cron-side fix. Root cause was
+    the public GET /api/v1/articles list endpoint loading embedding,
+    content_text, keywords, named_entities via select(Article) with no
+    defer — ArticleBrief never serializes those four heavy JSONB
+    columns, so every list call dropped hundreds of KB of unused data
+    on the wire. Frontend dashboards that refresh this endpoint
+    multiplied the leak.
+    """
+
+    def test_list_articles_defers_heavy_jsonb_columns(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent / "app" / "api" / "v1" / "articles.py"
+        ).read_text()
+
+        for col in ("embedding", "content_text", "keywords", "named_entities"):
+            assert f"defer(Article.{col})" in src, (
+                f"app/api/v1/articles.py must defer Article.{col} on the "
+                f"list endpoint — ArticleBrief doesn't serialize it, so "
+                f"loading it from DB just bleeds egress."
+            )
