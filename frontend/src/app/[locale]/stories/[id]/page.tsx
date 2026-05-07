@@ -42,30 +42,79 @@ export async function generateMetadata({
   const { locale, id } = await params;
   try {
     const story = await getStory(id);
-    const titleFa = story.title_fa || story.title_en || "";
-    const titleEn = story.title_en || story.title_fa || "";
-    const title = locale === "en" ? titleEn : titleFa;
-    // Prefer summary_fa (1–2 sentence editorial blurb) for the meta
-    // description; fall back to a deterministic stats line so there's
-    // always SOMETHING — empty descriptions get penalized in search.
-    const description =
-      story.summary_fa ||
-      story.summary_en ||
-      `مقایسهٔ پوشش این خبر در ${story.source_count} رسانه (${story.article_count} مقاله) — ایران درون‌مرزی vs برون‌مرزی.`;
 
-    const canonical = `https://doornegar.org/${locale}/stories/${id}`;
+    // Per-locale title preference: translations[locale].title (Phase 2)
+    // → legacy title_en for /en → title_fa fallback. The legacy field
+    // stays load-bearing until enough stories have translations
+    // populated to drop it.
+    const enTranslation = story.translations?.en;
+    const frTranslation = story.translations?.fr;
+    const enHasReal = !!enTranslation?.title && !!enTranslation?.translated_at;
+    const frHasReal = !!frTranslation?.title && !!frTranslation?.translated_at;
+
+    let title: string;
+    if (locale === "en") {
+      title = enTranslation?.title || story.title_en || story.title_fa || "";
+    } else if (locale === "fr") {
+      title = frTranslation?.title || story.title_fa || story.title_en || "";
+    } else {
+      title = story.title_fa || story.title_en || "";
+    }
+
+    // Description: prefer the translated summary for the active locale
+    // → fall back to summary_fa → deterministic stats line (empty
+    // descriptions get penalized in search).
+    let description: string;
+    if (locale === "en" && enTranslation?.summary) {
+      description = enTranslation.summary;
+    } else if (locale === "fr" && frTranslation?.summary) {
+      description = frTranslation.summary;
+    } else {
+      description =
+        story.summary_fa ||
+        story.summary_en ||
+        `مقایسهٔ پوشش این خبر در ${story.source_count} رسانه (${story.article_count} مقاله) — ایران درون‌مرزی vs برون‌مرزی.`;
+    }
+
+    // Conditional hreflang policy (project_en_fr_rollout):
+    // - If the current locale has a real translation, canonical = self,
+    //   and the languages map advertises every locale that has one
+    //   (plus x-default = /fa).
+    // - If the current locale has no translation, canonical points at
+    //   /fa (Google attributes the page to Persian), and the languages
+    //   map omits /en + /fr to avoid advertising untranslated URLs.
+    const currentLocaleHasReal =
+      locale === "fa" || (locale === "en" && enHasReal) || (locale === "fr" && frHasReal);
+
+    const canonical = currentLocaleHasReal
+      ? `https://doornegar.org/${locale}/stories/${id}`
+      : `https://doornegar.org/fa/stories/${id}`;
+
+    const languages: Record<string, string> = {
+      fa: `https://doornegar.org/fa/stories/${id}`,
+      "x-default": `https://doornegar.org/fa/stories/${id}`,
+    };
+    if (enHasReal) languages.en = `https://doornegar.org/en/stories/${id}`;
+    if (frHasReal) languages.fr = `https://doornegar.org/fr/stories/${id}`;
+
     const ogImage = story.image_url || undefined;
+    const ogLocaleMap: Record<string, string> = {
+      fa: "fa_IR",
+      en: "en_US",
+      fr: "fr_FR",
+    };
+    const ogLocale = ogLocaleMap[locale] || "fa_IR";
+    const ogAlternateLocale = Object.keys(ogLocaleMap)
+      .filter((l) => l !== locale)
+      .filter((l) => l === "fa" || (l === "en" && enHasReal) || (l === "fr" && frHasReal))
+      .map((l) => ogLocaleMap[l]);
 
     return {
       title, // root layout's template adds " — دورنگر"
       description,
       alternates: {
         canonical,
-        languages: {
-          fa: `https://doornegar.org/fa/stories/${id}`,
-          en: `https://doornegar.org/en/stories/${id}`,
-          "x-default": `https://doornegar.org/fa/stories/${id}`,
-        },
+        languages,
       },
       openGraph: {
         title,
@@ -73,8 +122,8 @@ export async function generateMetadata({
         type: "article",
         url: canonical,
         siteName: "Doornegar - دورنگر",
-        locale: locale === "en" ? "en_US" : "fa_IR",
-        alternateLocale: locale === "en" ? ["fa_IR"] : ["en_US"],
+        locale: ogLocale,
+        alternateLocale: ogAlternateLocale,
         publishedTime: story.first_published_at || undefined,
         modifiedTime: story.last_updated_at || story.updated_at || undefined,
         images: ogImage ? [{ url: ogImage, alt: title }] : undefined,

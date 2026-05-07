@@ -158,6 +158,14 @@ export interface StoryArcBrief {
   chapters: ArcChapterBrief[];
 }
 
+export interface StoryTranslationSlot {
+  title?: string | null;
+  summary?: string | null;
+  translated_at?: string | null;
+  prompt_version?: string | null;
+  is_edited?: boolean;
+}
+
 export interface StoryDetail extends StoryBrief {
   summary_en: string | null;
   summary_fa: string | null;
@@ -165,6 +173,15 @@ export interface StoryDetail extends StoryBrief {
   articles: StoryArticleWithBias[];
   arc: StoryArcBrief | null;
   covering_sources?: Source[];
+  // Per-locale translation slots (EN+FR rollout Phase 2). Null when
+  // step_translate_homepage_visible has not run on this story yet.
+  // Read by generateMetadata to set conditional canonical/hreflang
+  // (canonical-back-to-FA when no translation exists for the
+  // current locale, omitting non-existent /en /fr hreflangs).
+  translations?: {
+    en?: StoryTranslationSlot;
+    fr?: StoryTranslationSlot;
+  } | null;
 }
 
 export interface SocialSentiment {

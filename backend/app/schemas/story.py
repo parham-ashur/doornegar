@@ -99,6 +99,15 @@ class StoryDetail(StoryBrief):
     # frontend can render the political-spectrum + JSON-LD citations
     # without a second round trip to /api/v1/sources.
     covering_sources: list[SourceResponse] = []
+    # Per-locale translation slots. Shape:
+    #   {"en": {"title": str, "summary": str, "translated_at": ISO8601,
+    #           "prompt_version": str, "is_edited": bool}, "fr": {...}}
+    # NULL until step_translate_homepage_visible runs against this
+    # story. Used by the frontend's generateMetadata to set
+    # canonical-back-to-FA when no translation exists for the
+    # current locale (avoids advertising untranslated /en/X /fr/X
+    # URLs to crawlers).
+    translations: dict | None = None
 
 
 class StoryListResponse(BaseModel):

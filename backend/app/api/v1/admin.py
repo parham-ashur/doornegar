@@ -600,8 +600,13 @@ async def force_resummarize(
         return {"status": "ok", "cleared": 0, "regenerated": 0, "message": "No visible stories found"}
 
     if mode == "queue":
+        from app.services.translate_multilocale import clear_translations_for_story
         for story in stories:
             story.summary_fa = None
+            # Phase 2 auto-clear: clearing summary_fa changes what
+            # gets translated. Drop the existing EN/FR slots so the
+            # next translation cron picks up the regenerated summary.
+            await clear_translations_for_story(db, story.id)
         await db.commit()
         return {
             "status": "ok",
@@ -2918,6 +2923,12 @@ async def detach_articles_from_stories(
             .execution_options(synchronize_session=False)
         )
 
+    # Phase 2 auto-clear: detaching articles changes the narrative
+    # composition of each affected source story → invalidate EN/FR
+    # translations so the next cron re-translates from the new
+    # article set. is_edited slots (manual overrides) are preserved.
+    from app.services.translate_multilocale import clear_translations_for_story
+
     # Recount each affected story so cached article_count + the
     # `oversized_active_stories` canary stay accurate.
     recounts: list = []
@@ -2930,6 +2941,7 @@ async def detach_articles_from_stories(
             continue
         old_count = int(story.article_count or 0)
         story.article_count = live
+        await clear_translations_for_story(db, sid)
         recounts.append({
             "story_id": str(sid),
             "old_count": old_count,
@@ -3045,6 +3057,20 @@ async def attach_articles_to_story(
         )
     )).scalar() or 0
     target_story.source_count = int(distinct_sources)
+
+    # Phase 2 auto-clear: attaching articles changes the target story's
+    # narrative composition AND the source stories' (articles moved
+    # away from them). Clear EN/FR translations on all affected stories.
+    from app.services.translate_multilocale import clear_translations_for_story
+    await clear_translations_for_story(db, target_story_uuid)
+    for prev_sid_str in moved_from_counter:
+        if prev_sid_str == "ORPHAN":
+            continue
+        try:
+            prev_sid = _uuid.UUID(prev_sid_str)
+        except (ValueError, TypeError):
+            continue
+        await clear_translations_for_story(db, prev_sid)
 
     await _log_event(
         db,
@@ -4624,3 +4650,244 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
     _health_cache["data"] = response
     _health_cache["expires"] = now_ts + _HEALTH_CACHE_TTL
     return response
+
+
+# ═════════════════════════════════════════════════════════════════════
+# EN+FR rollout — Phase 4 manual override endpoints
+# ═════════════════════════════════════════════════════════════════════
+# Lets Niloofar (Claude in chat) inspect, edit, and force-regenerate
+# per-locale translations without waiting for the next cron. Endpoints
+# match the spec in project_en_fr_rollout.md.
+
+_VALID_TRANSLATION_LOCALES = {"en", "fr"}
+
+
+@router.get(
+    "/stories/{story_id}/translations/{locale}",
+    dependencies=[Depends(require_admin)],
+)
+async def get_story_translation(
+    story_id: str,
+    locale: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the current translation slot for a story+locale, or null.
+
+    Niloofar uses this to inspect what the auto-translator produced
+    before deciding whether to edit or regenerate.
+    """
+    import uuid as _uuid
+    from app.models.story import Story
+
+    if locale not in _VALID_TRANSLATION_LOCALES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"locale must be one of {_VALID_TRANSLATION_LOCALES}",
+        )
+    try:
+        sid = _uuid.UUID(story_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail=f"Bad story_id: {story_id}")
+
+    story = await db.get(Story, sid)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+
+    slot = ((story.translations or {}).get(locale)) or None
+    return {
+        "story_id": story_id,
+        "locale": locale,
+        "translation": slot,
+        "title_fa": story.title_fa,
+        "summary_fa": story.summary_fa,
+    }
+
+
+class _PatchTranslationRequest(_BaseModel):
+    title: str | None = None
+    summary: str | None = None
+
+
+@router.patch(
+    "/stories/{story_id}/translations/{locale}",
+    dependencies=[Depends(require_admin)],
+)
+async def patch_story_translation(
+    story_id: str,
+    locale: str,
+    request: _PatchTranslationRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Manually edit a story's per-locale translation.
+
+    Sets `is_edited = True` on that slot, which causes
+    step_translate_homepage_visible to skip the slot on subsequent
+    runs (the manual override survives until cleared).
+    """
+    import uuid as _uuid
+    from datetime import datetime as _dt, timezone as _tz
+    from app.models.story import Story
+
+    if locale not in _VALID_TRANSLATION_LOCALES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"locale must be one of {_VALID_TRANSLATION_LOCALES}",
+        )
+    try:
+        sid = _uuid.UUID(story_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail=f"Bad story_id: {story_id}")
+    if request.title is None and request.summary is None:
+        raise HTTPException(
+            status_code=400,
+            detail="At least one of title/summary must be provided",
+        )
+
+    story = await db.get(Story, sid)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+
+    blob = dict(story.translations or {})
+    slot = dict(blob.get(locale) or {})
+    if request.title is not None:
+        slot["title"] = request.title
+    if request.summary is not None:
+        slot["summary"] = request.summary
+    slot["translated_at"] = _dt.now(_tz.utc).isoformat()
+    slot["is_edited"] = True
+    slot.setdefault("prompt_version", "manual")
+    blob[locale] = slot
+    story.translations = blob
+    await db.commit()
+
+    return {
+        "status": "ok",
+        "story_id": story_id,
+        "locale": locale,
+        "translation": slot,
+    }
+
+
+@router.post(
+    "/stories/{story_id}/translations/{locale}/clear",
+    dependencies=[Depends(require_admin)],
+)
+async def clear_story_translation(
+    story_id: str,
+    locale: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Force-clear a story's per-locale translation slot, including
+    any manual override (is_edited=True). Next cron re-translates from
+    the current FA.
+    """
+    import uuid as _uuid
+    from app.models.story import Story
+
+    if locale not in _VALID_TRANSLATION_LOCALES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"locale must be one of {_VALID_TRANSLATION_LOCALES}",
+        )
+    try:
+        sid = _uuid.UUID(story_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail=f"Bad story_id: {story_id}")
+
+    story = await db.get(Story, sid)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+
+    blob = dict(story.translations or {})
+    had = locale in blob
+    if had:
+        del blob[locale]
+        story.translations = blob if blob else None
+        await db.commit()
+
+    return {
+        "status": "ok",
+        "story_id": story_id,
+        "locale": locale,
+        "cleared": had,
+    }
+
+
+class _RegenerateTranslationRequest(_BaseModel):
+    story_id: str
+    locale: str
+
+
+@router.post(
+    "/translation/regenerate",
+    dependencies=[Depends(require_admin)],
+)
+async def regenerate_translation(
+    request: _RegenerateTranslationRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Force-clear AND immediately re-translate a story's locale slot.
+
+    Synchronous — returns the new translation. Use this from chat
+    when Niloofar edits the FA and wants to see the EN/FR version
+    immediately, not on the next cron tick.
+
+    Always overwrites existing slot (even is_edited=True) since the
+    operator is explicitly asking for a regeneration.
+    """
+    import uuid as _uuid
+    from datetime import datetime as _dt, timezone as _tz
+    from app.models.story import Story
+    from app.services.translate_multilocale import (
+        translate_story,
+        PROMPT_VERSIONS,
+    )
+
+    if request.locale not in _VALID_TRANSLATION_LOCALES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"locale must be one of {_VALID_TRANSLATION_LOCALES}",
+        )
+    try:
+        sid = _uuid.UUID(request.story_id)
+    except (ValueError, TypeError):
+        raise HTTPException(
+            status_code=400, detail=f"Bad story_id: {request.story_id}"
+        )
+
+    story = await db.get(Story, sid)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    if not story.title_fa:
+        raise HTTPException(
+            status_code=400, detail="Story has no title_fa to translate"
+        )
+
+    fa_payload = {"title": story.title_fa, "summary": story.summary_fa or ""}
+    result = await translate_story(
+        story_id=sid, fa_payload=fa_payload, locale=request.locale  # type: ignore[arg-type]
+    )
+    if result is None:
+        return {
+            "status": "error",
+            "error": "translation_failed",
+            "message": "Translation returned None — check llm_usage_logs for the failure row.",
+        }
+
+    blob = dict(story.translations or {})
+    slot = {
+        **result,
+        "translated_at": _dt.now(_tz.utc).isoformat(),
+        "prompt_version": PROMPT_VERSIONS[request.locale],
+        "is_edited": False,
+    }
+    blob[request.locale] = slot
+    story.translations = blob
+    await db.commit()
+
+    return {
+        "status": "ok",
+        "story_id": request.story_id,
+        "locale": request.locale,
+        "translation": slot,
+    }
