@@ -3972,6 +3972,15 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
     """))).scalar() or 0)
     translation_phase_active = translation_active_7d > 0
 
+    # Budget guard signal — cached once for the canary block below.
+    llm_mtd_cost = float(
+        (await db.execute(_t(
+            "SELECT COALESCE(SUM(total_cost), 0) FROM llm_usage_logs "
+            "WHERE timestamp >= date_trunc('month', NOW())"
+        ))).scalar() or 0.0
+    )
+    budget_guard_armed = llm_mtd_cost >= 30.0 * 0.80
+
     translation_cost_24h = float((await db.execute(_t("""
         SELECT COALESCE(SUM(total_cost), 0)
         FROM llm_usage_logs
@@ -4359,6 +4368,18 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
             "$30/mo hard cap set after April Neon $41 bill. If trending high, audit per-story "
             "scoping in summarize / bias / دورنما / editorial / silences / telegram_deep — they "
             "must all filter frozen_at + archived_at + article_count >= 5.",
+        ),
+        _canary(
+            "budget_guard", "Budget guard halt state",
+            f"MTD ${llm_mtd_cost:.2f} ({'ARMED — next cron halts LLM steps' if budget_guard_armed else 'ok'})",
+            "MTD LLM < $24 (80% of $30 cap)",
+            "warn" if budget_guard_armed else "ok",
+            "Strict-mode rule (Parham 2026-05-07): when MTD LLM spend reaches 80% of the "
+            "$30/mo cap, the cron auto-skips LLM/egress-heavy steps (summarize, bias, "
+            "editorial, telegram analysis, translation, etc.). Website goes stale rather than "
+            "the project running out of budget mid-month. Override via "
+            "POST /admin/budget/override?action=clear (one-shot pass) or "
+            "?action=lock (force halt). Status: GET /admin/budget/status.",
         ),
         _canary(
             "unpriced_calls_7d", "Unpriced LLM calls (7d)",
@@ -4913,6 +4934,8 @@ async def regenerate_translation(
                 {"sid": str(sid)},
             )
         ).scalar_one_or_none()
+    # ↓ debug fields below are still in place — harmless, will be
+    # removed in a follow-up commit.
     return {
         "status": "ok",
         "story_id": request.story_id,
@@ -4937,5 +4960,89 @@ async def regenerate_translation(
             list(fresh_row.keys())
             if isinstance(fresh_row, dict)
             else f"type={type(fresh_row).__name__}, value={fresh_row!r}"[:200]
+        ),
+    }
+
+
+# ═════════════════════════════════════════════════════════════════════
+# Budget guard (Parham 2026-05-07) — operator override + status
+# ═════════════════════════════════════════════════════════════════════
+# The cron pipeline calls budget_guard.should_halt_for_budget() at
+# the start of every run. When MTD LLM spend reaches 80% of the
+# $30/mo cap, the LLM-heavy steps auto-skip. These endpoints let the
+# operator inspect the state and force a lock or one-shot clear.
+
+@router.get("/budget/status", dependencies=[Depends(require_admin)])
+async def budget_status(db: AsyncSession = Depends(get_db)):
+    """Return the current budget-guard state.
+
+    Includes month-to-date LLM cost, halt thresholds, current
+    override flag, and whether the next cron will halt.
+    """
+    from app.services.budget_guard import (
+        get_llm_cost_mtd,
+        get_manual_override,
+        should_halt_for_budget,
+        MONTHLY_BUDGET_USD,
+        HALT_FRACTION_LLM,
+        HALT_HARD_USD,
+        HALT_SKIP_STEPS,
+    )
+
+    halt, reason, signals = await should_halt_for_budget(db)
+    return {
+        "would_halt_next_cron": halt,
+        "reason_if_halt": reason,
+        "signals": signals,
+        "config": {
+            "monthly_budget_usd": MONTHLY_BUDGET_USD,
+            "halt_fraction_llm": HALT_FRACTION_LLM,
+            "halt_hard_usd": HALT_HARD_USD,
+            "skip_count": len(HALT_SKIP_STEPS),
+            "skipped_step_keys": sorted(HALT_SKIP_STEPS),
+        },
+    }
+
+
+@router.post("/budget/override", dependencies=[Depends(require_admin)])
+async def budget_override(
+    action: str = Query(..., pattern="^(lock|clear|reset)$"),
+    reason: str = Query("manual override", max_length=200),
+    db: AsyncSession = Depends(get_db),
+):
+    """Manually override the budget guard.
+
+    - action=lock  → halt every cron until cleared
+    - action=clear → permit ONE cron run, then auto-revert to
+      automatic LLM-cost gating
+    - action=reset → clear the override entirely (back to auto)
+    """
+    from app.services.budget_guard import ensure_budget_override_table
+
+    await ensure_budget_override_table(db)
+
+    new_action: str | None
+    if action == "reset":
+        new_action = None
+    else:
+        new_action = action
+
+    await db.execute(
+        _sa_text(
+            "UPDATE budget_override SET action = :a, set_at = NOW(), "
+            "reason = :r WHERE id = 1"
+        ),
+        {"a": new_action, "r": reason[:200]},
+    )
+    await db.commit()
+
+    return {
+        "status": "ok",
+        "action": new_action,
+        "reason": reason[:200],
+        "note": (
+            "lock = cron halts every run; "
+            "clear = next cron permitted, then auto-revert; "
+            "reset = back to auto-gate based on LLM MTD."
         ),
     }

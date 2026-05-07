@@ -4328,7 +4328,7 @@ async def step_niloofar_image_rescue():
     """
     import json as _json
     from sqlalchemy import select
-    from sqlalchemy.orm import selectinload
+    from sqlalchemy.orm import defer, selectinload
 
     from app.database import async_session
     from app.models.article import Article
@@ -4338,9 +4338,22 @@ async def step_niloofar_image_rescue():
     stats = {"checked": 0, "rescued": 0, "no_candidate": 0, "already_ok": 0, "tier_promoted": 0}
 
     async with async_session() as db:
+        # Egress fix (Parham 2026-05-07): defer the heavy JSONB +
+        # text columns we don't read in this step. 200 stories ×
+        # ~50 articles × ~30 KB/article was producing ~300 MB of
+        # egress per cron from this query alone. We only need
+        # image_url, published_at, source_id here — embedding,
+        # keywords, named_entities, content_text are unused.
         result = await db.execute(
             select(Story)
-            .options(selectinload(Story.articles))
+            .options(
+                selectinload(Story.articles).options(
+                    defer(Article.embedding),
+                    defer(Article.keywords),
+                    defer(Article.named_entities),
+                    defer(Article.content_text),
+                ),
+            )
             .where(Story.article_count >= 2)
             .order_by(Story.trending_score.desc())
             .limit(200)
@@ -4857,7 +4870,7 @@ async def step_quality_postprocess():
     import json as _json
 
     from sqlalchemy import select, text
-    from sqlalchemy.orm import selectinload
+    from sqlalchemy.orm import defer, selectinload
 
     from app.config import settings
     from app.database import async_session
@@ -4894,9 +4907,19 @@ async def step_quality_postprocess():
         visible_ids = await homepage_story_ids(db)
         if not visible_ids:
             return stats
+        # Egress fix (Parham 2026-05-07): defer heavy article columns.
+        # Quality post-process reviews titles + bias copy; doesn't
+        # need embedding / keywords / named_entities / content_text.
         result = await db.execute(
             select(Story)
-            .options(selectinload(Story.articles))
+            .options(
+                selectinload(Story.articles).options(
+                    defer(Article.embedding),
+                    defer(Article.keywords),
+                    defer(Article.named_entities),
+                    defer(Article.content_text),
+                ),
+            )
             .where(
                 Story.id.in_(visible_ids),
                 Story.summary_fa.isnot(None),
@@ -5246,7 +5269,7 @@ async def step_image_relevance():
     Also: for stories where the image comes from a different topic, flag it.
     """
     from sqlalchemy import select
-    from sqlalchemy.orm import selectinload
+    from sqlalchemy.orm import defer, selectinload
     from app.database import async_session
     from app.models.article import Article
     from app.models.story import Story
@@ -5254,9 +5277,19 @@ async def step_image_relevance():
     stats = {"checked": 0, "swapped": 0, "flagged": 0}
 
     async with async_session() as db:
+        # Egress fix (Parham 2026-05-07): defer heavy columns. Step
+        # only reads title/image_url/published_at to score relevance —
+        # embedding/keywords/named_entities/content_text aren't used.
         result = await db.execute(
             select(Story)
-            .options(selectinload(Story.articles))
+            .options(
+                selectinload(Story.articles).options(
+                    defer(Article.embedding),
+                    defer(Article.keywords),
+                    defer(Article.named_entities),
+                    defer(Article.content_text),
+                ),
+            )
             .where(Story.article_count >= 5)
             .limit(100)
         )
@@ -6155,9 +6188,19 @@ async def step_editorial():
         if not visible_ids:
             logger.info("Editorial: no homepage-visible stories — skipping")
             return stats
+        # Egress fix (Parham 2026-05-07): defer heavy article columns.
+        # Editorial step reads only title/source for each article.
+        from sqlalchemy.orm import defer
         result = await db.execute(
             select(Story)
-            .options(selectinload(Story.articles).selectinload(Article.source))
+            .options(
+                selectinload(Story.articles).options(
+                    defer(Article.embedding),
+                    defer(Article.keywords),
+                    defer(Article.named_entities),
+                    defer(Article.content_text),
+                ).selectinload(Article.source),
+            )
             .where(Story.id.in_(visible_ids))
             .order_by(Story.priority.desc(), Story.trending_score.desc())
             .limit(15)
@@ -7021,11 +7064,60 @@ async def run_maintenance(mode: str = "full"):
     logger.info(f"Maintenance started at {datetime.now().strftime('%Y-%m-%d %H:%M')} (mode={mode}, steps={len(pipeline)})")
     logger.info("=" * 50)
 
+    # ── Budget guard (Parham 2026-05-07): hard rule ──
+    # Before running ANY step, check whether month-to-date spend
+    # has crossed the budget threshold. If yes, skip the
+    # LLM/egress-heavy steps and ONLY run the cheap data-coherence
+    # steps. The website may go stale, but the project survives.
+    # Override via POST /admin/budget/override?action=clear (one-shot).
+    from app.database import async_session as _async_session
+    from app.services.budget_guard import (
+        should_halt_for_budget,
+        HALT_SKIP_STEPS,
+    )
+    halt = False
+    halt_reason = ""
+    halt_signals: dict = {}
+    try:
+        async with _async_session() as _bdb:
+            halt, halt_reason, halt_signals = await should_halt_for_budget(_bdb)
+    except Exception as e:
+        logger.warning(f"Budget guard check failed (allowing run): {e}")
+        halt = False
+        halt_reason = f"guard_check_failed:{e}"
+
+    if halt:
+        logger.error(
+            f"BUDGET GUARD TRIPPED — skipping LLM/egress-heavy steps. "
+            f"Reason: {halt_reason}. Signals: {halt_signals}"
+        )
+
     await maintenance_state.start_run(total_steps=len(pipeline))
     results = {}
+    if halt:
+        results["_budget_guard"] = {
+            "halt": True,
+            "reason": halt_reason,
+            "signals": halt_signals,
+            "skipped_steps": sorted(HALT_SKIP_STEPS),
+        }
 
     try:
         for key, display, func in pipeline:
+            if halt and key in HALT_SKIP_STEPS:
+                # Mark the step as deliberately skipped so the
+                # /admin/maintenance/logs view and the dashboard
+                # show the budget halt instead of looking like the
+                # step ran with empty stats.
+                err_stats = {
+                    "skipped": True,
+                    "reason": "budget_guard",
+                    "guard_reason": halt_reason,
+                }
+                results[key] = err_stats
+                await maintenance_state.begin_step(display)
+                await maintenance_state.end_step(display, "ok", err_stats)
+                continue
             await maintenance_state.begin_step(display)
             timeout = STEP_TIMEOUTS_SEC.get(key, DEFAULT_STEP_TIMEOUT_SEC)
             try:

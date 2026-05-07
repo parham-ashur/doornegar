@@ -247,6 +247,21 @@ async def lifespan(app: FastAPI):
                 # project_en_fr_rollout.md. Voice prompts fall back to
                 # name_en until then.
                 "ALTER TABLE sources ADD COLUMN IF NOT EXISTS name_fr VARCHAR(255)",
+                # Budget guard (Parham 2026-05-07) — single-row table
+                # holds the cron's manual override flag. The hard
+                # rule: if month-to-date LLM spend reaches 80% of
+                # the $30 cap, the cron auto-skips LLM-heavy steps.
+                # Operator can force a one-shot pass via
+                # POST /admin/budget/override?action=clear or hard-lock
+                # via action=lock.
+                """CREATE TABLE IF NOT EXISTS budget_override (
+                    id SMALLINT PRIMARY KEY DEFAULT 1,
+                    action VARCHAR(10),
+                    set_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    reason TEXT,
+                    CHECK (id = 1)
+                )""",
+                "INSERT INTO budget_override (id, action) VALUES (1, NULL) ON CONFLICT (id) DO NOTHING",
             ):
                 try:
                     await db.execute(text(ddl))
