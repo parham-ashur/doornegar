@@ -12,7 +12,7 @@ import logging
 import openai
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import defer, selectinload
 
 from app.config import settings
 from app.models.social import TelegramChannel, TelegramPost
@@ -442,7 +442,15 @@ async def analyze_story_telegram(
     ANALYTICAL_TYPES = ("commentary", "activist", "citizen", "political_party")
     posts_result = await db.execute(
         select(TelegramPost)
-        .options(selectinload(TelegramPost.channel))
+        .options(
+            selectinload(TelegramPost.channel),
+            # Cycle-1 audit Island 5: defer heavy JSONB cols.
+            # analyze_story_telegram only reads p.text and p.channel.*;
+            # sentiment_score/framing_labels/keywords are wasted load.
+            defer(TelegramPost.sentiment_score),
+            defer(TelegramPost.framing_labels),
+            defer(TelegramPost.keywords),
+        )
         .join(TelegramChannel, TelegramPost.channel_id == TelegramChannel.id)
         .where(TelegramPost.story_id == story_id)
         .where(TelegramPost.text.isnot(None))
@@ -497,7 +505,15 @@ async def analyze_story_telegram(
                 have_ids = {str(p.id) for p in posts}
                 borrow_result = await db.execute(
                     select(TelegramPost)
-                    .options(selectinload(TelegramPost.channel))
+                    .options(
+            selectinload(TelegramPost.channel),
+            # Cycle-1 audit Island 5: defer heavy JSONB cols.
+            # analyze_story_telegram only reads p.text and p.channel.*;
+            # sentiment_score/framing_labels/keywords are wasted load.
+            defer(TelegramPost.sentiment_score),
+            defer(TelegramPost.framing_labels),
+            defer(TelegramPost.keywords),
+        )
                     .join(
                         TelegramChannel,
                         TelegramPost.channel_id == TelegramChannel.id,
