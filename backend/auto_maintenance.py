@@ -4403,11 +4403,18 @@ async def step_telegram_link_posts():
 
 
 async def step_telegram_reassign_posts():
-    """Revisit already-linked posts and move any whose best-match story
-    has drifted since they were first attached. Same self-managed
-    session pattern as step_telegram_link_posts."""
-    from app.services.telegram_analysis import reassign_posts_by_embedding
-    return await reassign_posts_by_embedding()
+    """REMOVED from FULL_PIPELINE 2026-05-03 (intermittent ArgumentError
+    + redundant with step_telegram_link_posts now that the threshold is
+    tuned). Function intentionally raises to prevent silent re-enable
+    via cron config copy-paste — if you genuinely need this pass back,
+    revert this guard with a fresh PR + tests + a comment explaining
+    why the original removal cause is resolved.
+    """
+    raise RuntimeError(
+        "step_telegram_reassign_posts is removed as of 2026-05-03 — "
+        "use step_telegram_link_posts. If a Railway cron is calling "
+        "this, disable that schedule in the dashboard."
+    )
 
 
 async def step_niloofar_image_rescue():
@@ -4664,8 +4671,18 @@ async def step_telegram_deep_analysis():
 
                 # Fetch the live pool with the same filters analyze_story_telegram
                 # uses so the hash reflects what the analyzer would see.
+                # Cycle-1 audit Island 5: defer heavy TelegramPost JSONB
+                # cols. _posts_hash only reads id + len(text); loading
+                # sentiment_score / framing_labels / keywords on ~60 posts
+                # × ~2 KB each per top-10 story is ~1.2 MB wasted/cron.
+                from sqlalchemy.orm import defer as _defer_pool
                 pool_q = await db.execute(
                     select(TelegramPost)
+                    .options(
+                        _defer_pool(TelegramPost.sentiment_score),
+                        _defer_pool(TelegramPost.framing_labels),
+                        _defer_pool(TelegramPost.keywords),
+                    )
                     .where(TelegramPost.story_id == story_id)
                     .where(TelegramPost.text.isnot(None))
                     .where(TelegramPost.text != "")
