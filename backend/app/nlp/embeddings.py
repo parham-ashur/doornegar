@@ -150,7 +150,28 @@ def _embed_batch_with_split(client, batch: list[str]) -> list[list[float] | None
         return [d.embedding for d in sorted_data]
     except Exception as e:
         if len(batch) == 1:
-            logger.error(f"Embedding failed for single item after retries: {e}")
+            # Cycle-1 audit Island 2: classify the failure so the log
+            # surfaces a reason class (rate_limit / content_policy /
+            # auth / network / decode / other). Return signature is
+            # still [None] — adding a tuple here would ripple to all
+            # callers — but the logged class is the diagnostic signal.
+            reason = "other"
+            err_text = (str(e) or "").lower()
+            err_class = type(e).__name__.lower()
+            if "rate" in err_text or "429" in err_text or "rate" in err_class:
+                reason = "rate_limit"
+            elif "policy" in err_text or "content" in err_text and "filter" in err_text:
+                reason = "content_policy"
+            elif "auth" in err_text or "401" in err_text or "key" in err_text:
+                reason = "auth"
+            elif "timeout" in err_text or "timeout" in err_class or "connect" in err_text:
+                reason = "network"
+            elif "json" in err_text or "decode" in err_text or "parse" in err_text:
+                reason = "decode"
+            logger.error(
+                f"Embedding failed for single item after retries "
+                f"(reason={reason}): {type(e).__name__}: {e}"
+            )
             return [None]
         mid = len(batch) // 2
         logger.warning(
