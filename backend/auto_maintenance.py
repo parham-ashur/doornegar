@@ -2029,6 +2029,11 @@ async def step_fix_images():
                         stats["replaced"] += 1
                         fetched = True
                         break
+                    else:
+                        # Cycle-1 audit Island 8: track per-article
+                        # og:image fetch failure so a chronic source
+                        # outage is visible instead of disappearing.
+                        stats["og_image_fetch_failed"] = stats.get("og_image_fetch_failed", 0) + 1
             # Try 2: Telegram embed image (for Telegram-only stories)
             if not fetched:
                 for a in story.articles:
