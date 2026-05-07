@@ -2857,7 +2857,7 @@ async def audit_cluster_coherence(
                 s = _cosine_sim(sample[i][1], sample[j][1])
                 if s < min_pair:
                     min_pair = s
-                if s < pair_cosine_floor:
+                if s <= pair_cosine_floor:  # <= so a pair AT the floor still flags drift
                     pairs_below.append((s, sample[i][2] or "", sample[j][2] or ""))
 
         if pairs_below:

@@ -4347,6 +4347,7 @@ async def step_recalculate_trending():
             select(Story).where(
                 Story.article_count >= 5,
                 Story.archived_at.is_(None),
+                Story.priority > -100,  # cycle-1 audit Island 9: skip hidden tier
             )
         )
         now_utc = datetime.now(timezone.utc)
@@ -4455,6 +4456,15 @@ async def step_niloofar_image_rescue():
                     defer(Article.named_entities),
                     defer(Article.content_text),
                 ),
+                # Cycle-1 audit Island 9: defer Story-level heavy JSONB
+                # too. niloofar_image_rescue only reads title_fa, title_en,
+                # article_count, image_url — never these.
+                defer(Story.centroid_embedding),
+                defer(Story.translations),
+                defer(Story.telegram_analysis),
+                defer(Story.editorial_context_fa),
+                defer(Story.summary_anchor),
+                defer(Story.analysis_snapshot_24h),
             )
             .where(Story.article_count >= 2)
             .order_by(Story.trending_score.desc())
