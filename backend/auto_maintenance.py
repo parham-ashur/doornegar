@@ -458,7 +458,30 @@ async def step_prune_noise():
               AND NOT EXISTS (SELECT 1 FROM community_ratings WHERE article_id = articles.id)
               AND NOT EXISTS (SELECT 1 FROM rater_feedback    WHERE article_id = articles.id)
         """), {"ids": ids})
-        return getattr(result, "rowcount", 0) or 0
+        deleted = getattr(result, "rowcount", 0) or 0
+        # Cycle-1 audit Island 1: when articles were blocked by FK
+        # guards, log per-table breakdown so an upstream schema drift
+        # (one downstream table suddenly attached refs to nearly every
+        # article) is diagnosable from /admin/maintenance/logs.
+        skipped = len(ids) - deleted
+        if skipped > 0:
+            try:
+                breakdown = (await db.execute(_text("""
+                    SELECT
+                      (SELECT COUNT(*) FROM bias_scores       WHERE article_id = ANY(:ids)) AS bias,
+                      (SELECT COUNT(*) FROM topic_articles    WHERE article_id = ANY(:ids)) AS topics,
+                      (SELECT COUNT(*) FROM community_ratings WHERE article_id = ANY(:ids)) AS ratings,
+                      (SELECT COUNT(*) FROM rater_feedback    WHERE article_id = ANY(:ids)) AS feedback
+                """), {"ids": ids})).first()
+                if breakdown:
+                    logger.info(
+                        "_delete_articles_safe FK-skip breakdown for %d skipped: "
+                        "bias=%s topics=%s ratings=%s feedback=%s",
+                        skipped, breakdown[0], breakdown[1], breakdown[2], breakdown[3],
+                    )
+            except Exception as e:
+                logger.debug(f"FK breakdown query failed (non-critical): {e}")
+        return deleted
 
     async with async_session() as db:
         # Candidates: un-analyzed, unlinked Telegram posts
