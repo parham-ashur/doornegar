@@ -4888,6 +4888,8 @@ async def regenerate_translation(
     }
     blob[request.locale] = slot
     story.translations = blob
+    from sqlalchemy.orm.attributes import flag_modified as _flag_modified
+    _flag_modified(story, "translations")
     await db.commit()
 
     return {
