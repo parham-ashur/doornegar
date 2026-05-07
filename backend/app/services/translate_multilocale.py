@@ -32,10 +32,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Literal
 
-from sqlalchemy import select
+from sqlalchemy import bindparam, select
 from sqlalchemy import text as _sa_text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm.attributes import flag_modified
+
+# Pre-bound UPDATE with explicit JSONB type so asyncpg doesn't
+# silently coerce the dict into TEXT (the bug that ate 30 EN
+# translations on 2026-05-07 09:00 UTC cron).
+_jsonb_update_stmt = _sa_text(
+    "UPDATE stories SET translations = :blob, updated_at = NOW() WHERE id = :sid"
+).bindparams(bindparam("blob", type_=JSONB))
 
 from app.config import settings
 from app.database import async_session
@@ -420,14 +427,11 @@ async def step_translate_homepage_visible() -> dict[str, Any]:
         }
 
     now_iso = datetime.now(timezone.utc).isoformat()
-    # Bypass ORM mutation tracking and use raw UPDATE — ORM-level
-    # `story.translations = blob` + `flag_modified()` was still
-    # silently dropping JSONB writes (verified 2026-05-07 11:50 UTC:
-    # the regenerate endpoint returned status=ok with full slot, but
-    # re-fetch showed translations:null). Raw UPDATE side-steps the
-    # mutation-detection issue entirely. Per-row UPDATE in a small
-    # batch is fine — 30 stories × 2 locales = 60 UPDATEs / cron.
-    import json as _stdlib_json
+    # Use SQLAlchemy bindparam(type_=JSONB) (defined module-level as
+    # _jsonb_update_stmt) — asyncpg without the explicit type hint
+    # silently encoded the dict as TEXT, dropping the write. See
+    # 2026-05-07 silent-write investigation. Per-row UPDATE in a
+    # small batch is fine — 30 stories × 2 locales = 60 UPDATEs/cron.
     async with async_session() as db:
         for locale in OG_LOCALES:
             for story_id, translated in successes[locale]:
@@ -449,16 +453,7 @@ async def step_translate_homepage_visible() -> dict[str, Any]:
                 slot["prompt_version"] = PROMPT_VERSIONS[locale]
                 slot["is_edited"] = False
                 blob[locale] = slot
-                await db.execute(
-                    _sa_text(
-                        "UPDATE stories SET translations = :blob ::jsonb, "
-                        "updated_at = NOW() WHERE id = :sid"
-                    ),
-                    {
-                        "blob": _stdlib_json.dumps(blob, ensure_ascii=False),
-                        "sid": str(story_id),
-                    },
-                )
+                await db.execute(_jsonb_update_stmt, {"blob": blob, "sid": str(story_id)})
         await db.commit()
 
     return {
