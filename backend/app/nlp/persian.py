@@ -46,8 +46,10 @@ def normalize(text: str) -> str:
         return ""
 
     if HAZM_AVAILABLE:
+        _normalize_path_counts["hazm"] += 1
         text = _normalizer.normalize(text)
     else:
+        _normalize_path_counts["fallback"] += 1
         # Fallback: basic Arabic→Persian char mapping
         replacements = {
             "\u0643": "\u06A9",  # Arabic kaf → Persian kaf
@@ -61,6 +63,21 @@ def normalize(text: str) -> str:
     # Clean up whitespace
     text = re.sub(r"\s+", " ", text).strip()
     return text
+
+
+# Cycle-1 audit Island 2: per-path counter so a regression where hazm
+# becomes unavailable on a fresh deploy is observable. Stats consumers
+# (e.g. step_process) can read+reset per cron.
+_normalize_path_counts = {"hazm": 0, "fallback": 0}
+
+
+def get_normalize_path_counts() -> dict:
+    return dict(_normalize_path_counts)
+
+
+def reset_normalize_path_counts() -> None:
+    _normalize_path_counts["hazm"] = 0
+    _normalize_path_counts["fallback"] = 0
 
 
 def tokenize_sentences(text: str) -> list[str]:
