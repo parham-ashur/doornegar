@@ -358,7 +358,7 @@ export default async function WorldviewsLabPage({
     : null;
 
   return (
-    <div dir="rtl" className="mx-auto max-w-6xl px-4 py-10">
+    <div dir={locale === "fa" ? "rtl" : "ltr"} className="mx-auto max-w-6xl px-4 py-10">
       {/* Header */}
       <header className="mb-8">
         <div className="flex items-center gap-3 mb-1">

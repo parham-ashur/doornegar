@@ -75,7 +75,7 @@ function HeroCard({ topic, locale }: { topic: TopicBrief; locale: string }) {
           </div>
         )}
         {/* Left (RTL): analyst preview */}
-        <div className="lg:col-span-3 lg:border-r border-slate-200 dark:border-slate-800 lg:pr-6 flex flex-col justify-center">
+        <div className="lg:col-span-3 lg:border-s border-slate-200 dark:border-slate-800 lg:ps-6 flex flex-col justify-center">
           <h4 className="text-[11px] font-bold text-slate-400 mb-3">تحلیلگران</h4>
           <p className="text-[12px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-4">
             {topic.analysis_fa || "تحلیل در حال آماده‌سازی..."}
@@ -207,7 +207,7 @@ export default async function LabPage({
 
   if (allTopics.length === 0) {
     return (
-      <div dir="rtl" className="mx-auto max-w-7xl px-6 py-24 text-center">
+      <div dir={locale === "fa" ? "rtl" : "ltr"} className="mx-auto max-w-7xl px-6 py-24 text-center">
         <h2 className="text-xl font-bold text-slate-900 dark:text-white">هنوز موضوعی ایجاد نشده</h2>
         <p className="mt-2 text-sm text-slate-500">از طریق API یک موضوع جدید بسازید</p>
       </div>
@@ -236,7 +236,7 @@ export default async function LabPage({
   const remaining = full.slice(3);
 
   return (
-    <div dir="rtl" className="mx-auto max-w-7xl px-6 lg:px-8">
+    <div dir={locale === "fa" ? "rtl" : "ltr"} className="mx-auto max-w-7xl px-6 lg:px-8">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 py-6">
         <div>
@@ -252,7 +252,7 @@ export default async function LabPage({
       {secondary.length > 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-12 border-b border-slate-200 dark:border-slate-800 py-7 gap-6">
           {secondary[0] && (
-            <div className="lg:col-span-4 lg:border-l border-slate-200 dark:border-slate-800 lg:pl-6">
+            <div className="lg:col-span-4 lg:border-e border-slate-200 dark:border-slate-800 lg:pe-6">
               <LargeThumbCard topic={secondary[0]} locale={locale} />
             </div>
           )}
@@ -278,7 +278,7 @@ export default async function LabPage({
         <div className={`grid grid-cols-1 sm:grid-cols-${Math.min(articlesOnly.length, 3)} border-b border-slate-200 dark:border-slate-800`}>
           {articlesOnly.map((t, i) => (
             <div key={t.id}
-              className={`py-7 ${i > 0 ? "sm:pr-6 sm:border-r border-slate-200 dark:border-slate-800" : ""} ${i < articlesOnly.length - 1 ? "sm:pl-6" : ""}`}>
+              className={`py-7 ${i > 0 ? "sm:ps-6 sm:border-s border-slate-200 dark:border-slate-800" : ""} ${i < articlesOnly.length - 1 ? "sm:pe-6" : ""}`}>
               <ArticlesOnlyCard topic={t} locale={locale} />
             </div>
           ))}

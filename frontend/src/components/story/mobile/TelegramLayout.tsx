@@ -47,7 +47,7 @@ export default function TelegramLayout({ slot, isRtl = true, onOpen }: TelegramL
           {t.predictions_fa.map((p, i) => (
             <li
               key={i}
-              className="border-l-2 border-sky-500/60 bg-sky-500/5 px-3 py-2 text-[14px] leading-7"
+              className="border-e-2 border-sky-500/60 bg-sky-500/5 px-3 py-2 text-[14px] leading-7"
             >
               {p}
             </li>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useLocale } from "next-intl";
 import { CheckCircle2, AlertCircle } from "lucide-react";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -22,6 +23,7 @@ const TYPE_LABELS: Record<SubmissionType, string> = {
 };
 
 export default function SubmitPage() {
+  const locale = useLocale();
   const [type, setType] = useState<SubmissionType>("article");
   const [storyOptions, setStoryOptions] = useState<StoryOption[]>([]);
   const [suggestedStoryId, setSuggestedStoryId] = useState<string>("");
@@ -100,7 +102,7 @@ export default function SubmitPage() {
   };
 
   return (
-    <div dir="rtl" className="mx-auto max-w-3xl px-4 py-8">
+    <div dir={locale === "fa" ? "rtl" : "ltr"} className="mx-auto max-w-3xl px-4 py-8">
       <h1 className="text-2xl font-black text-slate-900 dark:text-white mb-2">
         ارسال محتوای جدید
       </h1>

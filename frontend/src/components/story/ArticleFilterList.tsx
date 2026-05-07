@@ -164,7 +164,7 @@ export default function ArticleFilterList({ articles, storyId, sidebarSync }: Ar
               }`}
             >
               {f.label}
-              <span className="mr-1 text-xs opacity-60">({count})</span>
+              <span className="ms-1 text-xs opacity-60">({count})</span>
             </button>
           );
         })}
@@ -177,7 +177,7 @@ export default function ArticleFilterList({ articles, storyId, sidebarSync }: Ar
         <div
           className={
             groups.length > 5
-              ? "overflow-y-auto scrollbar-thin pr-1"
+              ? "overflow-y-auto scrollbar-thin ps-1"
               : ""
           }
           style={
@@ -214,7 +214,7 @@ export default function ArticleFilterList({ articles, storyId, sidebarSync }: Ar
                         <Clock className="h-3 w-3" />
                         {g.dayLabel}
                         {g.items.length > 1 && (
-                          <span className="mr-1 text-slate-400">· {g.items.length} مقاله</span>
+                          <span className="ms-1 text-slate-400">· {g.items.length} مقاله</span>
                         )}
                       </span>
                     )}
@@ -244,7 +244,7 @@ export default function ArticleFilterList({ articles, storyId, sidebarSync }: Ar
                       «نامرتبط» button so feedback maps to the article
                       the reader actually clicked, not the head. */}
                   {g.items.length > 1 && (
-                    <ul className="mt-2 space-y-2 border-r-2 border-slate-200 dark:border-slate-800 pr-2.5">
+                    <ul className="mt-2 space-y-2 border-s-2 border-slate-200 dark:border-slate-800 ps-2.5">
                       {g.items.slice(1).map((a) => (
                         <li key={a.id}>
                           <a

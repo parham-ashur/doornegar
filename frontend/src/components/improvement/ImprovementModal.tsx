@@ -403,7 +403,7 @@ export default function ImprovementModal({
         </button>
 
         <div className="px-6 py-6 md:px-8 md:py-8">
-          <h2 className="text-xl font-black text-slate-900 dark:text-white mb-1 pr-8">
+          <h2 className="text-xl font-black text-slate-900 dark:text-white mb-1 ps-8">
             {schema.title}
           </h2>
           <p className="text-xs text-slate-500 mb-1">{schema.description}</p>
@@ -517,7 +517,7 @@ export default function ImprovementModal({
                       value={storySearch}
                       onChange={(e) => setStorySearch(e.target.value)}
                       placeholder="جستجوی عنوان موضوع..."
-                      className="w-full pr-8 pl-3 py-2 text-xs border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none focus:border-slate-900 dark:focus:border-white"
+                      className="w-full ps-8 pe-3 py-2 text-xs border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none focus:border-slate-900 dark:focus:border-white"
                     />
                   </div>
                   {loadingStories ? (
@@ -532,9 +532,9 @@ export default function ImprovementModal({
                             key={s.id}
                             type="button"
                             onClick={() => setSelectedMergeTarget(s.id)}
-                            className={`w-full text-right px-3 py-2 text-xs hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors ${
+                            className={`w-full text-start px-3 py-2 text-xs hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors ${
                               selectedMergeTarget === s.id
-                                ? "bg-blue-50 dark:bg-blue-950/30 border-r-2 border-blue-500"
+                                ? "bg-blue-50 dark:bg-blue-950/30 border-s-2 border-blue-500"
                                 : ""
                             }`}
                           >

@@ -85,7 +85,7 @@ export default function PublicFeedbackButton({ pagePath, storyId }: Props) {
                 type="button"
                 onClick={() => setOpen(false)}
                 aria-label="بستن"
-                className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] -mr-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] -ms-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
               >
                 <X className="h-4 w-4" />
               </button>

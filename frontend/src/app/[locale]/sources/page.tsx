@@ -41,7 +41,7 @@ export default async function SourcesPage({
   };
 
   return (
-    <div dir="rtl" className="mx-auto max-w-7xl px-4 py-8">
+    <div dir={locale === "fa" ? "rtl" : "ltr"} className="mx-auto max-w-7xl px-4 py-8">
       <div className="mb-8">
         <div className="flex items-center gap-2">
           <Radio className="h-6 w-6 text-blue-400" />

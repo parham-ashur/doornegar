@@ -51,7 +51,7 @@ function SubgroupBullets({
           {GROUP_LABELS_FA[group]}
         </h5>
       </div>
-      <ul className="space-y-1.5 pr-4">
+      <ul className="space-y-1.5 ps-4">
         {bullets.map((b, i) => (
           <li key={i} className="text-[13px] leading-6 text-slate-600 dark:text-slate-400 list-disc">
             {b}

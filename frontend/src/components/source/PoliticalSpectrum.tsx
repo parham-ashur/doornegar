@@ -221,7 +221,7 @@ export default function PoliticalSpectrum({ sources, sourceNeutrality, sourceEvi
                 <div className="hidden md:block absolute -bottom-1 left-1/2 -translate-x-1/2 translate-y-full opacity-0 group-hover:opacity-100 transition-opacity bg-slate-800 dark:bg-white text-white dark:text-slate-900 text-[12px] px-2 py-1 whitespace-nowrap pointer-events-none z-20 shadow-lg text-right" dir="rtl">
                   <div className="font-bold">
                     {s.name_fa || s.name_en}
-                    {hasNeutrality && n !== 0 && <span className="mr-1 font-mono">({n > 0 ? "+" : ""}{n.toFixed(2)})</span>}
+                    {hasNeutrality && n !== 0 && <span className="ms-1 font-mono">({n > 0 ? "+" : ""}{n.toFixed(2)})</span>}
                   </div>
                   {sourceEvidence?.[s.slug] && (
                     <div className="text-[10px] opacity-80 mt-0.5 space-y-0.5">

@@ -22,7 +22,7 @@ export default async function BlindspotsPage({
   const diasporaOnly = stories.filter((s) => s.blindspot_type === "diaspora_only");
 
   return (
-    <div dir="rtl" className="mx-auto max-w-7xl px-4 py-8">
+    <div dir={locale === "fa" ? "rtl" : "ltr"} className="mx-auto max-w-7xl px-4 py-8">
       {/* Header */}
       <div className="mb-8">
         <div className="flex items-center gap-2">

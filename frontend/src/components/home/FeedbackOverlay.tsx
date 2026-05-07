@@ -2,6 +2,7 @@
 
 import { useState, useCallback, createContext, useContext } from "react";
 import dynamic from "next/dynamic";
+import { useLocale } from "next-intl";
 import { Type, ArrowUp, ArrowDown, GitMerge } from "lucide-react";
 import ImageSuggestionButton from "@/components/story/ImageSuggestionButton";
 
@@ -39,6 +40,7 @@ const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const FeedbackCtx = createContext<(ctx: FeedbackContext) => void>(() => {});
 
 export function FeedbackProvider({ children }: { children: React.ReactNode }) {
+  const locale = useLocale();
   const [modalOpen, setModalOpen] = useState(false);
   const [context, setContext] = useState<FeedbackContext>({ targetType: "other" });
 
@@ -50,7 +52,7 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
   return (
     <FeedbackCtx.Provider value={openFeedback}>
       <RaterOnboarding />
-      <div dir="rtl" className="bg-blue-50 dark:bg-blue-950/30 border-b border-blue-200 dark:border-blue-900/50 px-4 py-3">
+      <div dir={locale === "fa" ? "rtl" : "ltr"} className="bg-blue-50 dark:bg-blue-950/30 border-b border-blue-200 dark:border-blue-900/50 px-4 py-3">
         <div className="mx-auto max-w-7xl">
           <p className="text-[13px] leading-6 text-slate-700 dark:text-slate-300">
             <span className="font-bold">حالت بازخورد</span> —

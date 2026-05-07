@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useRef } from "react";
+import { useLocale } from "next-intl";
 import type { StoryBrief } from "@/lib/types";
 import { toFa } from "@/lib/utils";
 
@@ -92,6 +93,7 @@ function mapPositionsToDots(positions: ArticlePosition[]): DotData[] {
 }
 
 export default function NarrativeMap({ stories, prefetchedPositions }: { stories: StoryBrief[]; prefetchedPositions?: Record<string, ArticlePosition[]> }) {
+  const locale = useLocale();
   const [selected, setSelected] = useState<string | null>(stories[0]?.id || null);
   const [hoveredDot, setHoveredDot] = useState<string | null>(null);
   const [clickedDot, setClickedDot] = useState<string | null>(null);
@@ -165,14 +167,14 @@ export default function NarrativeMap({ stories, prefetchedPositions }: { stories
   };
 
   return (
-    <div ref={containerRef} dir="rtl" className="grid grid-cols-12 gap-0" style={{ minHeight: 350 }}>
+    <div ref={containerRef} dir={locale === "fa" ? "rtl" : "ltr"} className="grid grid-cols-12 gap-0" style={{ minHeight: 350 }}>
       {/* Right: Story list */}
-      <div ref={listRef} className="col-span-4 border-l border-slate-200 dark:border-slate-800 pl-4 overflow-y-auto" style={{ maxHeight: 380 }}>
+      <div ref={listRef} className="col-span-4 border-e border-slate-200 dark:border-slate-800 pe-4 overflow-y-auto" style={{ maxHeight: 380 }}>
         {stories.slice(0, 15).map((s, i) => (
           <button
             key={s.id}
             onClick={() => setSelected(s.id)}
-            className={`w-full text-right block py-3 ${i > 0 ? "border-t border-slate-100 dark:border-slate-800/60" : ""} transition-colors ${
+            className={`w-full text-start block py-3 ${i > 0 ? "border-t border-slate-100 dark:border-slate-800/60" : ""} transition-colors ${
               selected === s.id
                 ? "bg-slate-50 dark:bg-slate-800/50"
                 : "hover:bg-slate-50 dark:hover:bg-slate-800/30"
@@ -193,7 +195,7 @@ export default function NarrativeMap({ stories, prefetchedPositions }: { stories
       </div>
 
       {/* Left: Scatter plot of articles */}
-      <div className="col-span-8 pr-4 relative" style={{ height: 380 }}>
+      <div className="col-span-8 ps-4 relative" style={{ height: 380 }}>
         {/* X-axis: center line */}
         <div className="absolute left-0 right-0 h-px bg-slate-200 dark:bg-slate-700/40" style={{ top: "50%" }} />
         {/* Y-axis: center line */}

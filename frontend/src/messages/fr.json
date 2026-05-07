@@ -69,5 +69,8 @@
     "retry": "Réessayer",
     "back": "Retour",
     "language": "Français"
+  },
+  "header": {
+    "subtitle": "Agrège et analyse la couverture des médias persanophones"
   }
 }

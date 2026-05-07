@@ -13,7 +13,7 @@ export default function ImproveRedirect() {
   }, [router, locale]);
 
   return (
-    <div dir="rtl" className="mx-auto max-w-2xl px-4 py-16 text-center">
+    <div dir={locale === "fa" ? "rtl" : "ltr"} className="mx-auto max-w-2xl px-4 py-16 text-center">
       <p className="text-sm text-slate-500">در حال انتقال به صفحه بازخورد...</p>
     </div>
   );

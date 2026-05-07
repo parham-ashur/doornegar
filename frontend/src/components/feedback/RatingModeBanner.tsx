@@ -11,7 +11,7 @@ export default function RatingModeBanner({ locale }: { locale: string }) {
   if (sp.get("feedback") !== "1") return null;
   return (
     <div
-      dir="rtl"
+      dir={locale === "fa" ? "rtl" : "ltr"}
       className="bg-blue-50 dark:bg-blue-950/30 border-b border-blue-200 dark:border-blue-900/50 px-4 py-3"
     >
       <div className="mx-auto max-w-7xl flex items-center justify-between gap-3">

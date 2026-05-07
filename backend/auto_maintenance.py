@@ -6840,6 +6840,19 @@ async def step_backfill_analyst_counts():
     return stats
 
 
+async def step_translate_homepage_visible():
+    """EN+FR translation pipeline step (Phase 2 of the multi-locale rollout).
+
+    Thin wrapper that delegates to app.services.translate_multilocale.
+    Lives here so the global-resolution dispatch in run_maintenance
+    (`globals()[func_name]`) finds it the same way as every other step.
+    """
+    from app.services.translate_multilocale import (
+        step_translate_homepage_visible as _impl,
+    )
+    return await _impl()
+
+
 FULL_PIPELINE = [
     ("ingest", "Ingest RSS + Telegram (may take 10-20 min)", "step_ingest"),
     ("prune_noise", "Drop too-short Telegram posts/articles before NLP", "step_prune_noise"),
@@ -6922,6 +6935,13 @@ FULL_PIPELINE = [
     ("quality_postprocess", "Quality post-processing (LLM review)", "step_quality_postprocess"),
     ("editorial", "Editorial context blurb for top stories", "step_editorial"),
     ("niloofar_polish_telegram", "Niloofar polishes Telegram predictions/claims for homepage", "step_niloofar_polish_telegram"),
+    # Translate homepage-visible stories to EN + FR. Runs AFTER all
+    # FA-side editorial steps (summarize, bias, doornama, polish) so
+    # translations capture the final FA prose. Runs AFTER archive_stale
+    # so we don't pay LLM cost on stories about to leave the homepage.
+    # Per-story conditional: skip if translations.{locale}.is_edited
+    # (manual override) or if a fresh translation already exists.
+    ("translate_homepage_visible", "Translate homepage stories to EN + FR (gpt-4o-mini)", "step_translate_homepage_visible"),
     ("snapshot_analyses", "Snapshot analysis axes for daily-change detection", "step_snapshot_analyses"),
     ("audit_clusters", "Cluster coherence audit (flag drift for Niloofar review)", "step_audit_cluster_coherence"),
     # Same hourly detection the rss-cron runs. The daily full run lands at

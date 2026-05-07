@@ -118,7 +118,7 @@ export default async function StoryDetailPage({
     relatedStories = relatedResult?.stories || [];
   } catch {
     return (
-      <div dir="rtl" className="mx-auto max-w-7xl px-4 py-16 text-center">
+      <div dir={locale === "fa" ? "rtl" : "ltr"} className="mx-auto max-w-7xl px-4 py-16 text-center">
         <p className="text-slate-500">خطا در بارگذاری</p>
         <Link href={`/${locale}/stories`} className="mt-4 inline-block text-blue-600 dark:text-blue-400 hover:underline">
           بازگشت
@@ -205,7 +205,7 @@ export default async function StoryDetailPage({
     <RatingModeBanner locale={locale} />
     <StoryFeedbackOverlay storyId={id} storyTitle={title} />
     <PublicFeedbackButton storyId={id} />
-    <div dir="rtl" className="mx-auto max-w-7xl px-4 py-8">
+    <div dir={locale === "fa" ? "rtl" : "ltr"} className="mx-auto max-w-7xl px-4 py-8">
       {/* Header */}
       <div className="mb-6 pb-6 border-b border-slate-200 dark:border-slate-800">
         <h1 className="text-2xl font-black leading-snug text-slate-900 dark:text-white md:text-3xl">
@@ -244,7 +244,7 @@ export default async function StoryDetailPage({
       {/* Two-column layout for everything below header */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 lg:items-start">
         {/* RIGHT column (RTL): bias tabs → articles */}
-        <div className="lg:pl-6 lg:border-l border-slate-200 dark:border-slate-800">
+        <div className="lg:pe-6 lg:border-e border-slate-200 dark:border-slate-800">
           {/* Editorial context — collapsed by default. Reader clicks
               the summary to expand. Uses the native <details>/<summary>
               so it works without client JS / hydration, styled with
@@ -316,7 +316,7 @@ export default async function StoryDetailPage({
 
         {/* LEFT column (desktop sidebar only): stats → spectrum. Hidden on
             mobile because the same StatsPanel is rendered inline above. */}
-        <div className="hidden lg:block lg:pr-6 lg:sticky lg:top-4 space-y-6" id="story-sidebar">
+        <div className="hidden lg:block lg:ps-6 lg:sticky lg:top-4 space-y-6" id="story-sidebar">
           <StatsPanel
             analysis={analysis}
             storyId={id}

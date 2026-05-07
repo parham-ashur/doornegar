@@ -369,7 +369,7 @@ export default async function HomeBody({
     // surface as soon as possible.
     noStore();
     return (
-      <div dir="rtl" className="mx-auto max-w-7xl px-4 py-24 text-center">
+      <div dir={locale === "fa" ? "rtl" : "ltr"} className="mx-auto max-w-7xl px-4 py-24 text-center">
         <h2 className="text-xl font-bold text-slate-900 dark:text-white">پوشش خبری در حال بروزرسانی است</h2>
         <p className="mt-2 text-sm text-slate-500">
           خط‌لولهٔ گردآوری در حال اجراست. این صفحه به‌طور خودکار هر چند دقیقه تازه می‌شود؛
@@ -786,7 +786,7 @@ export default async function HomeBody({
   }
 
   return (
-    <div dir="rtl" className="mx-auto max-w-7xl px-0 md:px-6 lg:px-8">
+    <div dir={locale === "fa" ? "rtl" : "ltr"} className="mx-auto max-w-7xl px-0 md:px-6 lg:px-8">
       {!feedbackMode && <WelcomeModal />}
 
       {/* ════════════════════════════════════════════ */}
@@ -830,7 +830,7 @@ export default async function HomeBody({
             content grow taller than the hero and pushed the whole row
             down; restoring a slightly-larger-than-700 ceiling keeps
             everything aligned. */}
-        <div className="col-span-3 py-6 pl-6 border-l border-slate-200 dark:border-slate-800 flex flex-col overflow-hidden" style={{ maxHeight: 780 }}>
+        <div className="col-span-3 py-6 pe-6 border-e border-slate-200 dark:border-slate-800 flex flex-col overflow-hidden" style={{ maxHeight: 780 }}>
           <h3 className="text-[18px] font-black text-slate-900 dark:text-white mb-3 pb-2 border-b border-slate-200 dark:border-slate-800 shrink-0">
             پیش‌بینی تحلیل‌های تلگرام
           </h3>
@@ -960,7 +960,7 @@ export default async function HomeBody({
         )}
 
         {/* LEFT: Blind spot stories (one from each side) */}
-        <div className="col-span-3 py-4 pr-6 border-r border-slate-200 dark:border-slate-800 space-y-4 flex flex-col justify-center">
+        <div className="col-span-3 py-4 ps-6 border-s border-slate-200 dark:border-slate-800 space-y-4 flex flex-col justify-center">
           <div className="flex items-center gap-3 mb-2">
             <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
             <h2 className="text-[15px] font-black text-slate-900 dark:text-white shrink-0">نگاه یک‌جانبه</h2>
@@ -1022,9 +1022,9 @@ export default async function HomeBody({
       {sorted.length > 1 && (
         <div className="grid grid-cols-12 gap-0 py-8 border-b border-slate-200 dark:border-slate-800">
           {/* Weekly briefing (8 cols) */}
-          <div className="col-span-7 pl-6 border-l border-slate-200 dark:border-slate-800">
+          <div className="col-span-7 pe-6 border-e border-slate-200 dark:border-slate-800">
             <h2 className="text-[24px] font-black text-slate-900 dark:text-white mb-6">در روزهای گذشته ...</h2>
-            <div className="mr-8">
+            <div className="ms-8">
               {leftTextStories.map((s, i) => {
                 const analysis = allAnalyses[s.id];
                 const stateSummary = analysis?.state_summary_fa;
@@ -1099,7 +1099,7 @@ export default async function HomeBody({
               split across two boxes (تقابل + بیشترین اختلاف نگاه) that
               shared ~80% of selection logic and only differed in
               visuals; consolidated 2026-04-21. */}
-          <div className="col-span-5 pr-6 flex flex-col gap-4">
+          <div className="col-span-5 ps-6 flex flex-col gap-4">
             <div className="relative flex-1 min-h-0 border border-slate-300 dark:border-slate-600 flex flex-col">
               {/* Box title sits ON the outer top border, centered, with
                   bg cutting through the border behind it. Absolute
@@ -1233,7 +1233,7 @@ export default async function HomeBody({
                       renders visually as [number][image][text] from
                       right to left, so the rank number sits to the
                       right of the image (Parham's ask). */}
-                  <span className="text-[64px] font-black text-slate-200 dark:text-slate-700 shrink-0 leading-none -mt-1 w-[72px] text-right self-start">{tabularNum(i + 1)}</span>
+                  <span className="text-[64px] font-black text-slate-200 dark:text-slate-700 shrink-0 leading-none -mt-1 w-[72px] text-start self-start">{tabularNum(i + 1)}</span>
                   <div className="w-48 shrink-0 overflow-hidden bg-slate-100 dark:bg-slate-800 self-stretch">
                     <SafeImageStatic src={s.image_url} alt={s.title_fa || ""} className="w-full h-full object-cover" />
                   </div>

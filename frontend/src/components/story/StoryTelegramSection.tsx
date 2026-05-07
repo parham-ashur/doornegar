@@ -192,7 +192,7 @@ export default function StoryTelegramSection({ storyId, initialTab, highlightTex
               const text = typeof p === "string" ? p : p.text || "";
               const isHighlighted = !!(highlightText && clean(text).includes(highlightText));
               return (
-                <div key={i} ref={isHighlighted ? highlightRef : undefined} className={isHighlighted ? "bg-blue-50 dark:bg-blue-900/20 -mx-2 px-2 py-1 border-r-2 border-blue-500" : ""}>
+                <div key={i} ref={isHighlighted ? highlightRef : undefined} className={isHighlighted ? "bg-blue-50 dark:bg-blue-900/20 -mx-2 px-2 py-1 border-s-2 border-blue-500" : ""}>
                   <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400">• {clean(text)}</p>
                 </div>
               );
@@ -202,10 +202,10 @@ export default function StoryTelegramSection({ storyId, initialTab, highlightTex
               const isHighlighted = !!(highlightText && clean(text).includes(highlightText));
               const cred = getCredLabel(text);
               return (
-                <div key={i} ref={isHighlighted ? highlightRef : undefined} className={isHighlighted ? "bg-amber-50 dark:bg-amber-900/20 -mx-2 px-2 py-1 border-r-2 border-amber-500" : ""}>
+                <div key={i} ref={isHighlighted ? highlightRef : undefined} className={isHighlighted ? "bg-amber-50 dark:bg-amber-900/20 -mx-2 px-2 py-1 border-s-2 border-amber-500" : ""}>
                   <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400">• {clean(text)}</p>
                   {cred && (
-                    <p className={`text-[15px] ${cred.color} mr-3`}>{cred.label}</p>
+                    <p className={`text-[15px] ${cred.color} ms-3`}>{cred.label}</p>
                   )}
                 </div>
               );
@@ -317,7 +317,7 @@ function ChannelGroup({ group }: { group: { username: string; title: string; typ
   const hidden = group.posts.length - visible.length;
 
   return (
-    <li className="border-r-2 border-slate-200 dark:border-slate-700 pr-3">
+    <li className="border-s-2 border-slate-200 dark:border-slate-700 ps-3">
       <div className="flex items-center gap-2 mb-1 text-[12px]">
         <span className="font-bold text-slate-700 dark:text-slate-200">{group.title}</span>
         {typeLabel && <span className="text-slate-400">{typeLabel}</span>}

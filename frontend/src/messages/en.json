@@ -69,5 +69,8 @@
     "retry": "Retry",
     "back": "Back",
     "language": "فارسی"
+  },
+  "header": {
+    "subtitle": "Aggregating and analyzing Persian-language media coverage"
   }
 }

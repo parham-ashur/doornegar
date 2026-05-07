@@ -21,14 +21,14 @@ const L = {
   unverified: "تأیید نشده",
 };
 
-export default function TelegramLayout({ data, onOpenClaimStory }: TelegramLayoutProps) {
+export default function TelegramLayout({ data, dir, onOpenClaimStory }: TelegramLayoutProps) {
   const predictions = data.predictions.slice(0, 2);
   const claims = data.claims.slice(0, 2);
 
   return (
     <div
       className="relative h-full w-full overflow-hidden"
-      dir="rtl"
+      dir={dir}
       style={{
         background: "linear-gradient(180deg, #0a0e1a 0%, #131218 40%, #1a1620 100%)",
       }}

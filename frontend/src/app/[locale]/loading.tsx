@@ -16,10 +16,12 @@
  * No client JS, no data fetch — static Tailwind with subtle
  * animate-pulse and the original SVG animation preserved.
  */
+import { getLocale } from "next-intl/server";
 
-export default function Loading() {
+export default async function Loading() {
+  const locale = await getLocale();
   return (
-    <div dir="rtl" className="mx-auto max-w-7xl px-0 md:px-6 lg:px-8">
+    <div dir={locale === "fa" ? "rtl" : "ltr"} className="mx-auto max-w-7xl px-0 md:px-6 lg:px-8">
       {/* Branded header: animated lines forming a shape — keeps the
           existing "در حال شکل‌گیری تصویر" affordance while the grid
           below teases the real homepage structure. */}
@@ -65,7 +67,7 @@ export default function Loading() {
           </div>
 
           {/* Right column: 4 stacked text cards */}
-          <div className="hidden lg:flex col-span-5 pl-6 py-6 flex-col gap-4 border-r border-slate-200 dark:border-slate-800">
+          <div className="hidden lg:flex col-span-5 pe-6 py-6 flex-col gap-4 border-s border-slate-200 dark:border-slate-800">
             {Array.from({ length: 4 }).map((_, i) => (
               <div key={i} className="border-b border-slate-100 dark:border-slate-800/60 pb-4 last:border-0">
                 <SkelLine className="h-5 w-11/12 mb-2" />
@@ -78,7 +80,7 @@ export default function Loading() {
 
         {/* Row 2 — blindspots + right column boxes */}
         <div className="grid grid-cols-12 gap-0 py-8 border-b border-slate-200 dark:border-slate-800">
-          <div className="col-span-12 lg:col-span-7 pl-6 px-4 lg:px-0">
+          <div className="col-span-12 lg:col-span-7 pe-6 px-4 lg:px-0">
             <SkelLine className="h-5 w-40 mb-5" />
             <div className="grid grid-cols-2 gap-3">
               {Array.from({ length: 4 }).map((_, i) => (
@@ -90,7 +92,7 @@ export default function Loading() {
               ))}
             </div>
           </div>
-          <div className="hidden lg:flex col-span-5 pr-6 flex-col gap-4">
+          <div className="hidden lg:flex col-span-5 ps-6 flex-col gap-4">
             {/* تقابل روایت‌ها */}
             <div className="relative flex-1 min-h-0 border border-slate-300 dark:border-slate-600 p-5 pt-8">
               <SkelLine className="h-5 w-11/12 mb-3" />

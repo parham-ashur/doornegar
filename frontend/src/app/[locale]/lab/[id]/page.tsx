@@ -179,14 +179,14 @@ export default async function TopicDetailPage({
 
   if (!topic) {
     return (
-      <div dir="rtl" className="mx-auto max-w-7xl px-6 py-20 text-center">
+      <div dir={locale === "fa" ? "rtl" : "ltr"} className="mx-auto max-w-7xl px-6 py-20 text-center">
         <h2 className="text-xl font-bold text-slate-900 dark:text-white">موضوع پیدا نشد</h2>
       </div>
     );
   }
 
   return (
-    <div dir="rtl" className="mx-auto max-w-7xl px-6 lg:px-8 py-8">
+    <div dir={locale === "fa" ? "rtl" : "ltr"} className="mx-auto max-w-7xl px-6 lg:px-8 py-8">
       {/* Breadcrumb */}
       <div className="text-[12px] text-slate-400 mb-4">
         <Link href={`/${locale}/lab`} className="hover:text-blue-600">آزمایشگاه</Link>
@@ -299,7 +299,7 @@ export default async function TopicDetailPage({
                     <p className="mt-0.5 text-[11px] text-slate-400">
                       {art.source_name_fa || "نامشخص"}
                       {art.source_state_alignment && (
-                        <span className={`mr-2 ${
+                        <span className={`ms-2 ${
                           art.source_state_alignment === "state" || art.source_state_alignment === "semi_state"
                             ? "text-red-500"
                             : art.source_state_alignment === "diaspora"

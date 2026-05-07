@@ -28,7 +28,7 @@ export default function EditableTitle({
         {saved}
         <button
           onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditing(true); }}
-          className="opacity-0 group-hover/edit:opacity-100 inline-flex items-center mr-2 p-1 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-opacity"
+          className="opacity-0 group-hover/edit:opacity-100 inline-flex items-center ms-2 p-1 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-opacity"
           title="ویرایش"
         >
           <Pencil className="h-3.5 w-3.5" />

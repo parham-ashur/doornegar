@@ -346,7 +346,7 @@ export default async function WorldviewBundlePage({
   const result = await fetchDetail(bundle);
   if (!result.ok) {
     return (
-      <div dir="rtl" className="mx-auto max-w-3xl px-4 py-16">
+      <div dir={locale === "fa" ? "rtl" : "ltr"} className="mx-auto max-w-3xl px-4 py-16">
         <div className="border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/30 p-6">
           <p className="text-[14px] font-semibold text-amber-900 dark:text-amber-200">
             دادهٔ این صفحه در این لحظه از سرور قابل دریافت نبود.
@@ -384,7 +384,7 @@ export default async function WorldviewBundlePage({
   const windowLabel = formatDateRangeFa(data.window_start, data.window_end);
 
   return (
-    <div dir="rtl" className="mx-auto max-w-3xl px-4 py-8">
+    <div dir={locale === "fa" ? "rtl" : "ltr"} className="mx-auto max-w-3xl px-4 py-8">
       {/* Top breadcrumb */}
       <Link
         href={`/${locale}/lab/worldviews`}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useLocale } from "next-intl";
 import { CheckCircle2, AlertCircle, ChevronDown, ChevronUp, ExternalLink } from "lucide-react";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -30,6 +31,7 @@ const CATEGORY_LABELS: Record<string, { label: string; color: string }> = {
 };
 
 export default function SuggestPage() {
+  const locale = useLocale();
   const [sources, setSources] = useState<TrackedSource[]>([]);
   const [channels, setChannels] = useState<TrackedChannel[]>([]);
   const [trackedOpen, setTrackedOpen] = useState(true);
@@ -118,7 +120,7 @@ export default function SuggestPage() {
   };
 
   return (
-    <div dir="rtl" className="mx-auto max-w-2xl px-4 py-10 md:py-16">
+    <div dir={locale === "fa" ? "rtl" : "ltr"} className="mx-auto max-w-2xl px-4 py-10 md:py-16">
       <h1 className="text-[26px] md:text-[32px] font-black leading-snug text-slate-900 dark:text-white mb-2">
         پیشنهاد منبع جدید
       </h1>
@@ -138,7 +140,7 @@ export default function SuggestPage() {
           >
             <span className="font-bold text-slate-900 dark:text-white">
               منابعی که در حال حاضر پوشش می‌دهیم
-              <span className="font-normal text-slate-400 mr-2">
+              <span className="font-normal text-slate-400 ms-2">
                 ({sources.length} رسانه · {channels.length} کانال تلگرام)
               </span>
             </span>

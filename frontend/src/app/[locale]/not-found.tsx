@@ -1,8 +1,10 @@
 import Link from "next/link";
+import { getLocale } from "next-intl/server";
 
-export default function NotFound() {
+export default async function NotFound() {
+  const locale = await getLocale();
   return (
-    <div dir="rtl" className="mx-auto max-w-7xl px-6 py-24 flex flex-col items-center text-center">
+    <div dir={locale === "fa" ? "rtl" : "ltr"} className="mx-auto max-w-7xl px-6 py-24 flex flex-col items-center text-center">
       <div className="text-[120px] font-black text-slate-200 dark:text-slate-800 leading-none select-none">
         ۴۰۴
       </div>

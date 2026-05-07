@@ -2278,6 +2278,16 @@ async def edit_story(story_id: str, request: _EditStoryRequest, db: AsyncSession
         # Keep is_edited=False so nightly picks the story up.
         story.is_edited = False
 
+        # EN+FR rollout Phase 2 auto-clear hook: any FA editorial edit
+        # invalidates the EN/FR translation slots so the next cron
+        # step_translate_homepage_visible re-translates from the new
+        # FA. Manual translation overrides (translations.{locale}.is_edited
+        # = True) survive this clear — operators must explicitly hit
+        # POST /admin/stories/{id}/translations/{locale}/clear to
+        # force-clear an edited slot.
+        from app.services.translate_multilocale import clear_translations_for_story
+        await clear_translations_for_story(db, story.id)
+
     await db.commit()
 
     return {

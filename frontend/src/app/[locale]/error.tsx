@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { useLocale } from "next-intl";
 
 export default function Error({
   error,
@@ -9,12 +10,13 @@ export default function Error({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const locale = useLocale();
   useEffect(() => {
     console.error(error);
   }, [error]);
 
   return (
-    <div dir="rtl" className="mx-auto max-w-7xl px-6 py-24 flex flex-col items-center text-center">
+    <div dir={locale === "fa" ? "rtl" : "ltr"} className="mx-auto max-w-7xl px-6 py-24 flex flex-col items-center text-center">
       <div className="text-[80px] leading-none select-none mb-4">
         <svg width="120" height="120" viewBox="0 0 120 120" className="mx-auto">
           {/* Scattered lines that never quite form — something went wrong */}

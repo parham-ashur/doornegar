@@ -16,7 +16,7 @@ export default async function SourceProfilePage({
     source = await getSource(slug);
   } catch {
     return (
-      <div dir="rtl" className="mx-auto max-w-7xl px-4 py-16 text-center">
+      <div dir={locale === "fa" ? "rtl" : "ltr"} className="mx-auto max-w-7xl px-4 py-16 text-center">
         <p className="text-slate-400">خطا در بارگذاری اطلاعات رسانه</p>
       </div>
     );
@@ -40,7 +40,7 @@ export default async function SourceProfilePage({
   };
 
   return (
-    <div dir="rtl" className="mx-auto max-w-3xl px-4 py-8">
+    <div dir={locale === "fa" ? "rtl" : "ltr"} className="mx-auto max-w-3xl px-4 py-8">
       <Link
         href={`/${locale}/sources`}
         className="mb-6 inline-flex items-center gap-1 text-sm text-slate-400 hover:text-blue-400"
