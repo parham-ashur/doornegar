@@ -663,6 +663,12 @@ async def _match_to_existing_stories(
     AUTO_MATCH_JACCARD = 0.35
     AUTO_MATCH_MAX_AGE_DAYS = 2
     AUTO_REJECT_MAX_AGE_DAYS = 7
+    # Cycle-1 audit Island 3: assert the band is non-degenerate. If a
+    # future tune flips them, every article would either auto-reject or
+    # auto-match with no LLM in the middle — not the intended behavior.
+    assert AUTO_REJECT_COSINE < AUTO_MATCH_COSINE, (
+        "AUTO_REJECT_COSINE must be < AUTO_MATCH_COSINE"
+    )
 
     # F4 — never attach a new article to a story that hasn't been
     # touched in 10 days. The site's editorial intent: anything older
@@ -2072,6 +2078,14 @@ async def merge_similar_visible_stories(db: AsyncSession) -> int:
 
     for i, a in enumerate(stories):
         a_words = _words(a.title_fa)
+        # Cycle-1 audit Island 3: log when centroid is non-list. The
+        # JSONB schema should always store lists; non-list = schema drift.
+        if a.centroid_embedding is not None and not isinstance(a.centroid_embedding, list):
+            logger.warning(
+                "Story %s centroid_embedding is non-list (%s); schema drift",
+                a.id,
+                type(a.centroid_embedding).__name__,
+            )
         a_centroid = a.centroid_embedding if isinstance(a.centroid_embedding, list) else None
         for b in stories[i + 1:]:
             b_words = _words(b.title_fa)

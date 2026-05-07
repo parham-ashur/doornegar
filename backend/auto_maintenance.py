@@ -971,12 +971,19 @@ async def step_recluster_orphans():
         stats["checked"] = len(orphans)
         attached_ids: dict[str, object] = {}  # article_id -> story_id
         skipped_full = 0
+        # Cycle-1 audit Island 3: split out capacity-exhausted from the
+        # generic skipped_full counter. If every story is at max_cluster_
+        # size and that's why orphans aren't attaching, the operator
+        # needs to see it (=> raise max_cluster_size or split umbrellas).
+        skipped_capacity_exhausted = 0
 
         for art_id, emb in orphans:
             best_sim = 0.0
             best_story = None
+            had_capacity_blocked = False
             for sid, cent in stories:
                 if capacity.get(sid, 0) <= 0:
+                    had_capacity_blocked = True
                     continue
                 try:
                     sim = _cs(emb, cent)
@@ -989,14 +996,18 @@ async def step_recluster_orphans():
                 attached_ids[art_id] = best_story
                 capacity[best_story] -= 1
             elif best_story is None:
-                skipped_full += 1
+                if had_capacity_blocked:
+                    skipped_capacity_exhausted += 1
+                else:
+                    skipped_full += 1
 
         for art_id, sid in attached_ids.items():
             await db.execute(
                 update(Article).where(Article.id == art_id).values(story_id=sid)
             )
         stats["attached"] = len(attached_ids)
-        stats["skipped_capacity_exhausted"] = skipped_full
+        stats["skipped_capacity_exhausted"] = skipped_capacity_exhausted
+        stats["skipped_no_candidate"] = skipped_full
         await db.commit()
 
     if stats["attached"]:
@@ -4951,8 +4962,15 @@ async def step_deduplicate_articles():
             )
             content_lengths: dict = {row[0]: (row[1] or 0) for row in length_rows.all()}
             seen_ids = set()
+            # Cycle-1 audit Island 1: track when articles were skipped
+            # because they had no embedding. A spike here echoes the
+            # April 2026 zero-vector incident shape — silent dedup
+            # degradation otherwise invisible.
+            embedding_null_skipped = 0
             for i, a in enumerate(recent_articles):
                 if a.id in seen_ids or not a.embedding:
+                    if not a.embedding:
+                        embedding_null_skipped += 1
                     continue
                 for b in recent_articles[i + 1:]:
                     if b.id in seen_ids or not b.embedding:
@@ -4979,6 +4997,12 @@ async def step_deduplicate_articles():
     total = stats["title_dupes"] + stats["url_dupes"] + stats["embedding_dupes"]
     if total > 0:
         logger.info(f"Dedup: title={stats['title_dupes']} url={stats['url_dupes']} embed={stats['embedding_dupes']} removed={stats['removed']}")
+    # Surface embedding-null skip count even on no-dupe runs so the
+    # canary trend is observable.
+    try:
+        stats["embedding_null_skipped"] = embedding_null_skipped  # type: ignore[name-defined]
+    except NameError:
+        stats["embedding_null_skipped"] = 0
     return stats
 
 
@@ -6469,7 +6493,9 @@ async def step_editorial():
             )
             .where(Story.id.in_(visible_ids))
             .order_by(Story.priority.desc(), Story.trending_score.desc())
-            .limit(15)
+            # Cycle-1 audit Island 4: matches the docstring claim of
+            # "expanded to 30 so the blurb appears on a larger slice".
+            .limit(30)
         )
         stories = list(result.scalars().all())
 
