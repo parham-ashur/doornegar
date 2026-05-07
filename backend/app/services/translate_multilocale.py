@@ -35,6 +35,7 @@ from typing import Any, Iterable, Literal
 from sqlalchemy import select
 from sqlalchemy import text as _sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.config import settings
 from app.database import async_session
@@ -104,34 +105,63 @@ async def _check_cost_breaker(db: AsyncSession) -> tuple[bool, float]:
 
 
 def _compose_user_message(payload: dict[str, str]) -> str:
-    parts: list[str] = []
-    for key, value in payload.items():
-        v = (value or "").strip()
-        if v:
-            parts.append(f"### {key}\n{v}")
+    """Compose a JSON-shaped user prompt.
+
+    The LLM is invoked with response_format={"type": "json_object"},
+    which constrains it to return valid JSON matching the requested
+    schema. The ### key block format from the first iteration was too
+    fragile — gpt-4o-mini ignored markers when prompted in French
+    (100% parse failure on FR in the 2026-05-07 09:00 UTC cron).
+    """
+    import json as _json
+    parts = ["Translate each non-empty field. Return JSON with the same keys."]
+    payload_clean = {
+        k: (v or "").strip()
+        for k, v in payload.items()
+        if (v or "").strip()
+    }
+    if not payload_clean:
+        return ""
+    parts.append("Input:")
+    parts.append(_json.dumps(payload_clean, ensure_ascii=False))
+    parts.append(
+        "Output a JSON object with exactly these keys: "
+        + ", ".join(payload_clean.keys())
+        + ". No markdown, no commentary, no extra fields."
+    )
     return "\n\n".join(parts)
 
 
 def _parse_structured(
     output: str, expected_keys: Iterable[str]
 ) -> dict[str, str] | None:
-    """Reverse of _compose_user_message — parse `### key\\n{val}` blocks."""
+    """Parse a JSON object response. With response_format=json_object
+    the LLM is constrained to valid JSON, so this is straightforward.
+    Falls back to None on any parse failure (no silent fallbacks)."""
     if not output:
         return None
-    out: dict[str, str] = {}
-    cleaned = output.replace("### **", "### ").replace("**\n", "\n")
-    parts = cleaned.split("### ")
-    for part in parts:
-        chunk = part.strip()
-        if not chunk or "\n" not in chunk:
-            continue
-        head, body = chunk.split("\n", 1)
-        key = head.strip().rstrip(":").lower()
-        value = body.strip()
-        if key and value:
-            out[key] = value
+    import json as _json
+    text = output.strip()
+    # Strip markdown code fences if the model added them despite
+    # the json_object response_format (occasional behavior).
+    if text.startswith("```"):
+        text = text.split("```", 2)[1] if text.count("```") >= 2 else text
+        if text.startswith("json"):
+            text = text[4:]
+        text = text.strip()
+    try:
+        parsed = _json.loads(text)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
     expected = {k.lower() for k in expected_keys}
-    if not (out.keys() & expected):
+    out: dict[str, str] = {}
+    for key, value in parsed.items():
+        k = str(key).strip().lower()
+        if k in expected and isinstance(value, str) and value.strip():
+            out[k] = value.strip()
+    if not out:
         return None
     return out
 
@@ -199,6 +229,7 @@ async def translate_story(
                     ],
                     temperature=0,
                     max_tokens=3000,
+                    response_format={"type": "json_object"},
                 )
                 break
             except openai.RateLimitError as e:
@@ -395,6 +426,12 @@ async def step_translate_homepage_visible() -> dict[str, Any]:
                 slot["is_edited"] = False
                 blob[locale] = slot
                 story.translations = blob
+                # SQLAlchemy doesn't detect mutations of JSONB dict
+                # values as dirty unless we flag them explicitly. The
+                # cron's first run silently committed nothing without
+                # this — 30 successful LLM calls produced 0 persisted
+                # rows (2026-05-07 09:00 UTC cron diagnosed).
+                flag_modified(story, "translations")
         await db.commit()
 
     return {
@@ -434,3 +471,4 @@ async def clear_translations_for_story(
         changed = True
     if changed:
         story.translations = blob if blob else None
+        flag_modified(story, "translations")

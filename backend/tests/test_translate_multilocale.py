@@ -55,58 +55,81 @@ class TestVoicePromptsShipped:
 # ═════════════════════════════════════════════════════════════════════
 
 
-class TestStructuredFormat:
-    """The wire format between service and LLM is `### key\\n{value}`
-    blocks. _compose_user_message writes them; _parse_structured reads
-    them back. A regression in either silently turns translation into
-    'parse_failed' for every call."""
+class TestJSONFormat:
+    """The wire format between service and LLM is JSON (response_format
+    = json_object). _compose_user_message writes a prompt asking for
+    JSON; _parse_structured reads JSON back. The earlier `### key`
+    format produced 100% parse failures on French in the 2026-05-07
+    09:00 UTC cron — gpt-4o-mini ignored markdown markers when
+    instructed in French. JSON mode constrains the output."""
 
-    def test_compose_basic(self):
+    def test_compose_includes_keys_and_values(self):
         m = _import_module()
         msg = m._compose_user_message({"title": "سلام", "summary": "خبر"})
-        assert "### title" in msg
-        assert "### summary" in msg
+        assert "title" in msg
+        assert "summary" in msg
         assert "سلام" in msg
         assert "خبر" in msg
+        assert "JSON" in msg or "json" in msg
 
     def test_compose_skips_empty(self):
         m = _import_module()
         msg = m._compose_user_message({"title": "خبر", "summary": ""})
-        assert "### title" in msg
-        assert "### summary" not in msg
+        # Only the non-empty key should appear in the requested-keys list.
+        assert "title" in msg
+        # Loose assertion — "summary" may appear in fixed prose; the
+        # key-list line should not include it.
+        keys_line = [
+            ln for ln in msg.split("\n") if "exactly these keys" in ln
+        ]
+        if keys_line:
+            assert "summary" not in keys_line[0]
 
-    def test_parse_basic(self):
+    def test_compose_empty_payload_returns_empty(self):
         m = _import_module()
-        out = "### title\nHello world\n\n### summary\nA short summary."
+        assert m._compose_user_message({}) == ""
+        assert m._compose_user_message({"title": "", "summary": None}) == ""
+
+    def test_parse_basic_json(self):
+        m = _import_module()
+        out = '{"title": "Hello world", "summary": "A short summary."}'
         result = m._parse_structured(out, ["title", "summary"])
         assert result == {"title": "Hello world", "summary": "A short summary."}
 
-    def test_parse_tolerates_markdown_bolding(self):
-        """LLMs sometimes wrap section headers in markdown bold despite
-        the prompt saying not to."""
+    def test_parse_strips_markdown_fence(self):
+        """LLMs sometimes wrap JSON in ```json ... ``` despite
+        response_format=json_object. Parser tolerates that."""
         m = _import_module()
-        out = "### **title**\nHello\n\n### **summary**\nLine."
+        out = '```json\n{"title": "Hello", "summary": "Line."}\n```'
         result = m._parse_structured(out, ["title", "summary"])
         assert result is not None
         assert result.get("title") == "Hello"
         assert result.get("summary") == "Line."
 
-    def test_parse_returns_none_on_no_expected_keys(self):
-        """Output that doesn't contain any expected key is treated as
-        a failure — we never silently substitute. Per
-        feedback_no_silent_fallbacks."""
+    def test_parse_rejects_invalid_json(self):
         m = _import_module()
-        out = "### unrelated\nNothing here matches the request."
+        result = m._parse_structured("Not JSON at all", ["title", "summary"])
+        assert result is None
+
+    def test_parse_returns_none_on_no_expected_keys(self):
+        """Output JSON without any expected key is treated as a
+        failure — we never silently substitute."""
+        m = _import_module()
+        out = '{"unrelated": "nothing matches"}'
         result = m._parse_structured(out, ["title", "summary"])
         assert result is None
 
-    def test_roundtrip(self):
+    def test_parse_skips_non_string_values(self):
         m = _import_module()
-        original = {"title": "Hello", "summary": "World"}
-        composed = m._compose_user_message(original)
-        # An ideal LLM would return composed verbatim.
-        parsed = m._parse_structured(composed, original.keys())
-        assert parsed == {"title": "Hello", "summary": "World"}
+        out = '{"title": "OK", "summary": null}'
+        result = m._parse_structured(out, ["title", "summary"])
+        assert result == {"title": "OK"}
+
+    def test_parse_skips_empty_strings(self):
+        m = _import_module()
+        out = '{"title": "OK", "summary": "   "}'
+        result = m._parse_structured(out, ["title", "summary"])
+        assert result == {"title": "OK"}
 
 
 # ═════════════════════════════════════════════════════════════════════

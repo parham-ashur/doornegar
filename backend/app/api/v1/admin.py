@@ -3959,14 +3959,15 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
     # still being built. Once any translation_* row appears in
     # llm_usage_logs the canaries flip to evaluating real values.
     #
-    # Underscore is a single-char wildcard in SQL LIKE — so plain
-    # 'translation_%' falsely matches the existing 'translation.title'
-    # purpose used by the FA-title backfill. The ESCAPE clause makes
-    # the underscore literal, matching only the Phase-2 purpose
-    # convention 'translation_en' / 'translation_fr' / etc.
+    # Explicit purpose IN (...) — earlier LIKE 'translation\_%' ESCAPE '\'
+    # rendered as ESCAPE '' in Python source-string parsing (the
+    # backslash before the closing quote got swallowed as a Python
+    # escape), so `_` was an SQL wildcard again and the canary read
+    # $0 cost even with real translation_en rows present (diagnosed
+    # 2026-05-07 after the first cron run).
     translation_active_7d = int((await db.execute(_t("""
         SELECT COUNT(*) FROM llm_usage_logs
-        WHERE purpose LIKE 'translation\_%' ESCAPE '\'
+        WHERE purpose IN ('translation_en', 'translation_fr', 'translation_en_retransform', 'translation_fr_retransform')
           AND timestamp >= NOW() - INTERVAL '7 days'
     """))).scalar() or 0)
     translation_phase_active = translation_active_7d > 0
@@ -3974,13 +3975,13 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
     translation_cost_24h = float((await db.execute(_t("""
         SELECT COALESCE(SUM(total_cost), 0)
         FROM llm_usage_logs
-        WHERE purpose LIKE 'translation\_%' ESCAPE '\'
+        WHERE purpose IN ('translation_en', 'translation_fr', 'translation_en_retransform', 'translation_fr_retransform')
           AND timestamp >= NOW() - INTERVAL '24 hours'
     """))).scalar() or 0.0)
 
     translation_attempts_24h = int((await db.execute(_t("""
         SELECT COUNT(*) FROM llm_usage_logs
-        WHERE purpose LIKE 'translation\_%' ESCAPE '\'
+        WHERE purpose IN ('translation_en', 'translation_fr', 'translation_en_retransform', 'translation_fr_retransform')
           AND timestamp >= NOW() - INTERVAL '24 hours'
     """))).scalar() or 0)
     # A translation call that committed zero priced tokens is a strong
@@ -3989,7 +3990,7 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
     # meta->>'failed' = 'true' but this fallback works without that.
     translation_failures_24h = int((await db.execute(_t("""
         SELECT COUNT(*) FROM llm_usage_logs
-        WHERE purpose LIKE 'translation\_%' ESCAPE '\'
+        WHERE purpose IN ('translation_en', 'translation_fr', 'translation_en_retransform', 'translation_fr_retransform')
           AND timestamp >= NOW() - INTERVAL '24 hours'
           AND (
               total_cost = 0
@@ -4442,7 +4443,7 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
             "error" if translation_cost_24h > 1.0 else (
                 "warn" if translation_cost_24h > 0.5 else "ok"
             ),
-            "Sum of llm_usage_logs.total_cost where purpose LIKE 'translation\_%' ESCAPE '\' in the last 24h. "
+            "Sum of llm_usage_logs.total_cost where purpose IN (translation_en, translation_fr, ...) in the last 24h. "
             "The translation pipeline has a $1/24h circuit breaker — exceeding it stops new "
             "translations until manual reset. Sustained > $0.50 means translation is being "
             "triggered too often (FA edits propagating in tight loops, or auto-clear hooks "
@@ -4758,6 +4759,8 @@ async def patch_story_translation(
     slot.setdefault("prompt_version", "manual")
     blob[locale] = slot
     story.translations = blob
+    from sqlalchemy.orm.attributes import flag_modified as _flag_modified
+    _flag_modified(story, "translations")
     await db.commit()
 
     return {
@@ -4803,6 +4806,8 @@ async def clear_story_translation(
     if had:
         del blob[locale]
         story.translations = blob if blob else None
+        from sqlalchemy.orm.attributes import flag_modified as _flag_modified
+        _flag_modified(story, "translations")
         await db.commit()
 
     return {
