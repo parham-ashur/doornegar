@@ -710,8 +710,17 @@ async def step_backfill_farsi_titles():
                     else:
                         failed += 1
             except Exception as e:
-                logger.warning(f"Title backfill batch failed: {e}")
-                failed += len(batch)
+                # Cycle-1 audit Island 2: track how much of THIS batch
+                # was already accounted for (translated or marked
+                # failed) inside the try-block before the exception
+                # fired. Without this, `failed += len(batch)` double-
+                # counts whenever the exception comes after we've
+                # already processed some lines of the response.
+                in_batch = sum(1 for a in batch if a.title_fa is not None)
+                logger.warning(
+                    f"Title backfill batch failed (had committed {in_batch}/{len(batch)} so far): {e}"
+                )
+                failed += max(0, len(batch) - in_batch)
 
         await db.commit()
     logger.info(f"Farsi title backfill: {backfilled} translated, {failed} failed")
