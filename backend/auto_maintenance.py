@@ -884,7 +884,8 @@ async def step_recluster_orphans():
       - article_count < max_cluster_size (don't extend over-cap stories)
       - frozen_at IS NULL (freeze means "no more accretion")
       - archived_at IS NULL (30d archive — never resurrect)
-      - first_published_at >= umbrella_cutoff (14d, matches matcher)
+      - first_published_at >= umbrella_cutoff (7d, matches matcher
+        and the freeze rule — see UMBRELLA_FIRST_PUB_CAP_DAYS below)
     Plus the existing article_count >= 2 and is_edited=False guards.
     """
     from sqlalchemy import func, select, update

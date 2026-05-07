@@ -385,9 +385,17 @@ async def step_translate_homepage_visible() -> dict[str, Any]:
                     )
                     if ta.tzinfo is None:
                         ta = ta.replace(tzinfo=timezone.utc)
-                    if ta < snap["updated_at"]:
-                        age_days = (now_utc - snap["updated_at"]).days
-                        if age_days <= STALE_LOOKBACK_DAYS:
+                    # Cycle-1 audit Island 6: gate on translation age,
+                    # not story-update age. The prior check
+                    # `(now - story.updated_at).days <= STALE_LOOKBACK`
+                    # would refuse to retranslate a year-old translation
+                    # if the story was recently updated, AND would
+                    # retranslate a fresh translation if the story was
+                    # ancient. Both wrong. Translation age is what
+                    # matters.
+                    if ta <= snap["updated_at"]:
+                        translation_age_days = (now_utc - ta).days
+                        if translation_age_days <= STALE_LOOKBACK_DAYS:
                             needs = True
                 except (ValueError, AttributeError):
                     needs = True
