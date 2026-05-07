@@ -94,7 +94,11 @@ export interface StoryBrief {
   // in the hero/blindspot slot when its narrative has materially shifted.
   update_signal?: {
     has_update: boolean;
-    kind: "dispute" | "coverage_shift" | "new_articles" | "side_flip" | "burst" | null;
+    // Producer (auto_maintenance.step_detect_hourly_updates) only emits
+    // these three values today. `dispute` and `new_articles` were
+    // declared here speculatively and never implemented — removed in
+    // cycle-1 audit Phase B (schema/contract drift).
+    kind: "coverage_shift" | "side_flip" | "burst" | null;
     reason_fa: string | null;
     detected_at?: string | null;
     // Number of new articles clustered in the hour the cron detected.
