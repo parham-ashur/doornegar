@@ -266,22 +266,41 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
         fa_articles = [a for a in articles if a.language == "fa" and not a.title_en]
         en_articles = [a for a in articles if a.language == "en" and not a.title_fa]
 
+        # Cycle-1 audit Island 2: track translation outcomes per-locale
+        # so silent None returns (the April 2026 zero-vector pattern
+        # shape) become visible in stats. Without per-article tracking,
+        # a chronic Helsinki batch failure looks identical to "no FA
+        # articles in batch" — invisible drift.
         if fa_articles:
             fa_titles = [a.title_original for a in fa_articles]
             en_translations = translate_batch_fa_to_en(fa_titles)
+            fa_to_en_failed = 0
             for article, translation in zip(fa_articles, en_translations):
                 if translation:
                     article.title_en = translation
                     if not article.title_fa:
                         article.title_fa = article.title_original
+                else:
+                    fa_to_en_failed += 1
+                    logger.debug(
+                        "translate_fa_to_en returned None for article "
+                        "id=%s source=%s",
+                        article.id,
+                        getattr(article.source, "slug", None) if hasattr(article, "source") else None,
+                    )
+            stats["translation_fa_to_en_failed"] = fa_to_en_failed
 
         if en_articles:
+            en_to_fa_failed = 0
             for article in en_articles:
                 fa_translation = translate_en_to_fa(article.title_original)
                 if fa_translation:
                     article.title_fa = fa_translation
+                else:
+                    en_to_fa_failed += 1
                 if not article.title_en:
                     article.title_en = article.title_original
+            stats["translation_en_to_fa_failed"] = en_to_fa_failed
 
     except Exception as e:
         logger.warning(f"Translation step failed (non-critical): {e}")
