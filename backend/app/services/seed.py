@@ -300,20 +300,10 @@ INITIAL_SOURCES = [
         "description_en": "Leading domestic reformist daily (Khatami-era lineage). Published inside Iran; periodically suspended by judiciary.",
         "description_fa": "روزنامه اصلی اصلاح‌طلب داخلی (میراث دوره خاتمی). داخل ایران منتشر می‌شود؛ گاه توسط قوه قضائیه تعلیق شده است.",
     },
-    {
-        "name_en": "Deutsche Welle Persian",
-        "name_fa": "دویچه وله فارسی",
-        "slug": "dw-persian",
-        "website_url": "https://www.dw.com/fa-ir",
-        "rss_urls": ["https://rss.dw.com/xml/rss-per-all"],
-        "state_alignment": "diaspora",
-        "irgc_affiliated": False,
-        "production_location": "outside_iran",
-        "factional_alignment": None,
-        "language": "fa",
-        "description_en": "German public broadcaster's Persian-language service. Bonn-based, mainstream European coverage.",
-        "description_fa": "سرویس فارسی رسانهٔ عمومی آلمان (دویچه وله). مستقر در بن آلمان؛ پوشش اصلی‌جریان اروپایی.",
-    },
+    # (Cycle-1 audit Island 13: removed duplicate dw-persian entry that
+    # used to live here. Idempotency check on slug means the duplicate
+    # never persisted; the rss-per-all URL it carried is patched into
+    # production via app/main.py's startup DDL anyway.)
     {
         "name_en": "Independent Persian",
         "name_fa": "ایندیپندنت فارسی",

@@ -41,7 +41,7 @@ async def scrape_source(slug: str) -> list[dict]:
 
 async def scrape_dw_persian() -> list[dict]:
     """Scrape DW Persian homepage for articles."""
-    async with httpx.AsyncClient(timeout=30, follow_redirects=True, headers=HEADERS) as client:
+    async with httpx.AsyncClient(timeout=settings.ingestion_timeout_seconds, follow_redirects=True, headers=HEADERS) as client:
         resp = await client.get("https://www.dw.com/fa-ir")
         resp.raise_for_status()
 
@@ -79,7 +79,7 @@ async def scrape_dw_persian() -> list[dict]:
 
 async def scrape_radio_zamaneh() -> list[dict]:
     """Scrape Radio Zamaneh for articles."""
-    async with httpx.AsyncClient(timeout=30, follow_redirects=True, headers=HEADERS) as client:
+    async with httpx.AsyncClient(timeout=settings.ingestion_timeout_seconds, follow_redirects=True, headers=HEADERS) as client:
         resp = await client.get("https://www.radiozamaneh.com/")
         resp.raise_for_status()
 
@@ -112,7 +112,7 @@ async def scrape_radio_zamaneh() -> list[dict]:
 
 async def scrape_press_tv() -> list[dict]:
     """Scrape Press TV for articles."""
-    async with httpx.AsyncClient(timeout=30, follow_redirects=True, headers=HEADERS) as client:
+    async with httpx.AsyncClient(timeout=settings.ingestion_timeout_seconds, follow_redirects=True, headers=HEADERS) as client:
         resp = await client.get("https://www.presstv.ir/")
         resp.raise_for_status()
 
