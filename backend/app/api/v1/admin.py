@@ -4497,9 +4497,12 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
                 f"${neon_cost_mtd:.2f} ({_neon_gb_mtd:.0f} GB) — "
                 f"{'ARMED' if budget_guard_armed else 'ok'}"
             ),
-            "Combined MTD < $24 (80% of $30 cap)",
-            "error" if combined_mtd >= 30.0 * 0.85 else (
-                "warn" if budget_guard_armed else "ok"
+            "Combined MTD < $18 (60% of $30 cap = healthy buffer)",
+            (
+                "error" if combined_mtd >= 30.0 * 0.85 else (  # halt-tripping
+                "error" if combined_mtd >= 30.0 * 0.80 else (  # cron auto-skips
+                "warn"  if combined_mtd >= 30.0 * 0.60 else "ok"  # early warning
+                ))
             ),
             "Strict-mode rule (Parham 2026-05-07): when combined LLM + estimated Neon egress "
             "MTD reaches 80% of the $30/mo cap, the cron auto-skips LLM/egress-heavy steps "
