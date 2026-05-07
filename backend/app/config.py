@@ -140,10 +140,28 @@ class Settings(BaseSettings):
         # Cycle-1 audit Island 13: secret_key default is "" but ALL
         # crypto/JWT operations need it non-empty. Without this gate, a
         # fresh deploy with the env var unset starts up fine and
-        # crashes only when crypto fires. Skip the check during pytest
-        # collection (PYTEST_CURRENT_TEST is set) so the suite can
-        # import settings without a real env.
-        if not v and not os.environ.get("PYTEST_CURRENT_TEST"):
+        # crashes only when crypto fires.
+        #
+        # Cycle-2 audit (2026-05-07): PYTEST_CURRENT_TEST is set
+        # PER-TEST by pytest, NOT during collection or conftest
+        # imports. tests/conftest.py imports app.main which imports
+        # app.config and triggers Settings() at module level — so a
+        # fresh checkout / CI without SECRET_KEY in env crashes during
+        # collection. Use PYTEST_VERSION (set as soon as pytest starts)
+        # OR `pytest` in sys.argv[0] as the more reliable test signal.
+        if v:
+            return v
+        # Recognize pytest in any of these forms:
+        #   - pytest sets PYTEST_VERSION at process start (>=8.0)
+        #   - pytest sets PYTEST_CURRENT_TEST per-test
+        #   - sys.argv[0] points to a pytest binary
+        import sys
+        in_pytest = (
+            os.environ.get("PYTEST_VERSION")
+            or os.environ.get("PYTEST_CURRENT_TEST")
+            or "pytest" in (sys.argv[0] or "")
+        )
+        if not in_pytest:
             raise ValueError(
                 "SECRET_KEY env var must be set and non-empty. "
                 "Generate with `python -c 'import secrets; "

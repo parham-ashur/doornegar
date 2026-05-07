@@ -427,6 +427,12 @@ async def step_translate_homepage_visible() -> dict[str, Any]:
 
     successes: dict[str, list[tuple[Any, dict[str, str]]]] = {"en": [], "fr": []}
     failures = 0
+    # Cycle-2 audit (2026-05-07): race_skipped distinct from failures.
+    # When a concurrent FA edit invalidates a snapshot mid-batch, we
+    # skip the merge — that's not an LLM failure, just a stale write
+    # avoided. Lumping them inflates the dashboard's "translation
+    # failure" rate and hides the real failure signal.
+    race_skipped = 0
     failure_lock = asyncio.Lock()
 
     async def _do_one(snap, locale):
@@ -496,7 +502,9 @@ async def step_translate_homepage_visible() -> dict[str, Any]:
                     if hasattr(snap_ts, "tzinfo") and snap_ts.tzinfo is None:
                         snap_ts = snap_ts.replace(tzinfo=timezone.utc)
                     if current_updated_at > snap_ts:
-                        failures += 1
+                        # Concurrent FA edit invalidated this snapshot.
+                        # Track separately from LLM failures.
+                        race_skipped += 1
                         continue
                 blob = dict(current_translations or {})
                 slot = dict(blob.get(locale) or {})
@@ -514,6 +522,7 @@ async def step_translate_homepage_visible() -> dict[str, Any]:
         "checked": len(snapshots),
         "translated": {"en": len(successes["en"]), "fr": len(successes["fr"])},
         "failed": failures,
+        "race_skipped": race_skipped,
         "cost_breaker": False,
         "cost_24h_usd_before": round(current_cost, 4),
     }

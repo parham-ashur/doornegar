@@ -160,7 +160,12 @@ def _embed_batch_with_split(client, batch: list[str]) -> list[list[float] | None
             err_class = type(e).__name__.lower()
             if "rate" in err_text or "429" in err_text or "rate" in err_class:
                 reason = "rate_limit"
-            elif "policy" in err_text or "content" in err_text and "filter" in err_text:
+            # Cycle-2 audit (2026-05-07): parens added — without them
+            # `and` binds tighter than `or` and the whole branch became
+            # `("policy" in t) or ("content" in t and "filter" in t)`,
+            # which mislabels generic "billing policy" / "usage policy"
+            # errors as content-moderation rejections.
+            elif ("policy" in err_text and "content" in err_text) or "content_filter" in err_text:
                 reason = "content_policy"
             elif "auth" in err_text or "401" in err_text or "key" in err_text:
                 reason = "auth"

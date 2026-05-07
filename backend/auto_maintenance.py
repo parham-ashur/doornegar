@@ -441,7 +441,7 @@ async def step_prune_noise():
 
     stats = {"tg_checked": 0, "tg_deleted": 0, "articles_checked": 0, "articles_deleted": 0}
 
-    async def _delete_articles_safe(db, ids: list) -> int:
+    async def _delete_articles_safe(db, ids: list) -> tuple[int, dict | None]:
         """Delete articles, skipping any with FK references in dependent
         tables (bias_scores / topics / ratings / feedback). Without this
         guard the DELETE raises ForeignKeyViolationError and rolls back
@@ -449,7 +449,7 @@ async def step_prune_noise():
         "near-zero-value" anymore — preserving them is intentional.
         """
         if not ids:
-            return 0
+            return 0, None
         result = await db.execute(_text("""
             DELETE FROM articles
             WHERE id = ANY(:ids)
@@ -463,7 +463,11 @@ async def step_prune_noise():
         # guards, log per-table breakdown so an upstream schema drift
         # (one downstream table suddenly attached refs to nearly every
         # article) is diagnosable from /admin/maintenance/logs.
+        # Cycle-2 audit (2026-05-07): also return the breakdown so
+        # callers can surface it in the stats dict — the dashboard
+        # reads JSON, not Railway log lines.
         skipped = len(ids) - deleted
+        breakdown_dict: dict | None = None
         if skipped > 0:
             try:
                 breakdown = (await db.execute(_text("""
@@ -479,9 +483,15 @@ async def step_prune_noise():
                         "bias=%s topics=%s ratings=%s feedback=%s",
                         skipped, breakdown[0], breakdown[1], breakdown[2], breakdown[3],
                     )
+                    breakdown_dict = {
+                        "bias_scores": int(breakdown[0] or 0),
+                        "topic_articles": int(breakdown[1] or 0),
+                        "community_ratings": int(breakdown[2] or 0),
+                        "rater_feedback": int(breakdown[3] or 0),
+                    }
             except Exception as e:
                 logger.debug(f"FK breakdown query failed (non-critical): {e}")
-        return deleted
+        return deleted, breakdown_dict
 
     async with async_session() as db:
         # Candidates: un-analyzed, unlinked Telegram posts
@@ -526,9 +536,11 @@ async def step_prune_noise():
                 continue  # not enough signal to decide; skip this run
             if is_noise(body, []):
                 art_to_delete.append(row.id)
-        deleted_n = await _delete_articles_safe(db, art_to_delete)
+        deleted_n, fk_breakdown = await _delete_articles_safe(db, art_to_delete)
         stats["articles_deleted"] = deleted_n
         stats["articles_skipped_fk"] = len(art_to_delete) - deleted_n
+        if fk_breakdown:
+            stats["articles_skipped_fk_breakdown"] = fk_breakdown
 
         # Second pass — RSS-origin orphans with content_text < 400 chars.
         # These are usually feed stubs (nav fragments, "click to read",
@@ -554,9 +566,11 @@ async def step_prune_noise():
         stats["rss_short_checked"] = len(rss_short_rows)
         if rss_short_rows:
             ids = [row.id for row in rss_short_rows]
-            deleted_n = await _delete_articles_safe(db, ids)
+            deleted_n, fk_breakdown = await _delete_articles_safe(db, ids)
             stats["rss_short_deleted"] = deleted_n
             stats["rss_short_skipped_fk"] = len(ids) - deleted_n
+            if fk_breakdown:
+                stats["rss_short_skipped_fk_breakdown"] = fk_breakdown
 
         await db.commit()
 
@@ -2094,11 +2108,29 @@ async def step_fix_images():
             if has_image:
                 continue
             # Try 1: og:image from non-Telegram article URLs
+            # Cycle-2 audit (2026-05-07): HEAD-validate the og:image URL
+            # before writing — symmetric with step_backfill_diaspora_ogimages.
+            # Pass 2 here previously wrote unvalidated og:images, which
+            # then forced step_migrate_images_to_r2 to download, fail,
+            # and stamp the new R2 sentinel — wasting a slot per dead URL.
             fetched = False
             for a in story.articles:
                 if a.url and "t.me/" not in a.url:
                     from app.services.nlp_pipeline import _fetch_og_image
                     img = await _fetch_og_image(a.url)
+                    if img:
+                        # HEAD-validate before commit
+                        try:
+                            import httpx as _httpx_h
+                            async with _httpx_h.AsyncClient(
+                                timeout=5, follow_redirects=True
+                            ) as _hc:
+                                _h = await _hc.head(img)
+                                _ct = (_h.headers.get("content-type") or "").lower()
+                                if _h.status_code != 200 or not _ct.startswith("image/"):
+                                    img = None
+                        except Exception:
+                            img = None
                     if img:
                         a.image_url = img
                         a.image_checked_at = now_ts
@@ -7049,62 +7081,66 @@ async def step_backfill_diaspora_ogimages():
     # Process in small batches with short sessions so a long run doesn't
     # hold one Neon connection for 10+ minutes and get killed.
     BATCH = 20
-    for i in range(0, len(articles), BATCH):
-        chunk = articles[i : i + BATCH]
-        updates: list[tuple[str, str | None]] = []  # (article_id, new_url)
+    # Cycle-2 audit (2026-05-07): hoist one httpx.AsyncClient outside the
+    # per-article loop and reuse it across all 200 HEAD checks. The
+    # cycle-1 inline `async with httpx.AsyncClient()` per iteration cost
+    # one TCP+TLS handshake per HEAD; ~3-5s cumulative wall-clock saved.
+    import httpx as _httpx_head
+    async with _httpx_head.AsyncClient(timeout=5, follow_redirects=True) as _head_client:
+        for i in range(0, len(articles), BATCH):
+            chunk = articles[i : i + BATCH]
+            updates: list[tuple[str, str | None]] = []  # (article_id, new_url)
 
-        for art in chunk:
-            stats["checked"] += 1
-            try:
-                og_url = await _fetch_og_image(art.url)
-            except Exception:
-                stats["errors"] += 1
-                og_url = None
-
-            if og_url:
-                # Reject obvious icons / broken patterns from the og:image too
-                low = og_url.lower()
-                if any(f in low for f in BAD_FRAGMENTS):
+            for art in chunk:
+                stats["checked"] += 1
+                try:
+                    og_url = await _fetch_og_image(art.url)
+                except Exception:
+                    stats["errors"] += 1
                     og_url = None
 
-            # Cycle-1 audit Island 8: HEAD-validate the og:image URL
-            # before writing. Otherwise broken og:image URLs (CDN gone,
-            # 404, gateway error) land in the DB and get served as
-            # broken <img> on the homepage.
-            if og_url:
-                try:
-                    import httpx as _httpx_head
-                    async with _httpx_head.AsyncClient(timeout=5, follow_redirects=True) as _client_head:
-                        head = await _client_head.head(og_url)
+                if og_url:
+                    # Reject obvious icons / broken patterns from the og:image too
+                    low = og_url.lower()
+                    if any(f in low for f in BAD_FRAGMENTS):
+                        og_url = None
+
+                # Cycle-1 audit Island 8: HEAD-validate the og:image URL
+                # before writing. Otherwise broken og:image URLs (CDN gone,
+                # 404, gateway error) land in the DB and get served as
+                # broken <img> on the homepage.
+                if og_url:
+                    try:
+                        head = await _head_client.head(og_url)
                         ct = (head.headers.get("content-type") or "").lower()
                         if head.status_code != 200 or not ct.startswith("image/"):
                             og_url = None
-                except Exception:
-                    og_url = None
+                    except Exception:
+                        og_url = None
 
-            if og_url:
-                stats["found_ogimage"] += 1
-                if art.image_url is None:
-                    stats["replaced_null"] += 1
+                if og_url:
+                    stats["found_ogimage"] += 1
+                    if art.image_url is None:
+                        stats["replaced_null"] += 1
+                    else:
+                        stats["replaced_bad"] += 1
+                    updates.append((str(art.id), og_url))
                 else:
-                    stats["replaced_bad"] += 1
-                updates.append((str(art.id), og_url))
-            else:
-                stats["no_ogimage"] += 1
-                # Stamp the checked_at anyway so we don't re-try tomorrow
-                updates.append((str(art.id), None))
+                    stats["no_ogimage"] += 1
+                    # Stamp the checked_at anyway so we don't re-try tomorrow
+                    updates.append((str(art.id), None))
 
-        async with async_session() as db:
-            from sqlalchemy import update as _upd
+            async with async_session() as db:
+                from sqlalchemy import update as _upd
 
-            for article_id, new_url in updates:
-                values: dict = {"image_checked_at": now_ts}
-                if new_url:
-                    values["image_url"] = new_url
-                await db.execute(
-                    _upd(Article).where(Article.id == article_id).values(**values)
-                )
-            await db.commit()
+                for article_id, new_url in updates:
+                    values: dict = {"image_checked_at": now_ts}
+                    if new_url:
+                        values["image_url"] = new_url
+                    await db.execute(
+                        _upd(Article).where(Article.id == article_id).values(**values)
+                    )
+                await db.commit()
 
     logger.info(f"Diaspora og:image backfill: {stats}")
     return stats

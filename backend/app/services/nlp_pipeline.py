@@ -62,6 +62,19 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
     from sqlalchemy import or_ as _or
     retry_cutoff = datetime.now(timezone.utc) - _td(days=14)
 
+    # Cycle-2 audit (2026-05-07): reset normalize-path counter at the
+    # START as well as the END. The module-global counter accumulates
+    # increments from non-NLP callers (telegram_service, admin
+    # endpoints) between cron runs; resetting only at the end means
+    # the next run's stats include that pollution. Reset both ends.
+    try:
+        from app.nlp.persian import (
+            reset_normalize_path_counts as _reset_norm_paths_pre,
+        )
+        _reset_norm_paths_pre()
+    except Exception:
+        pass
+
     # Gate: only articles whose content_type is in the source's
     # allowed whitelist reach NLP. Unclassified rows (content_type
     # IS NULL) wait for the next classifier pass; non-news labels
