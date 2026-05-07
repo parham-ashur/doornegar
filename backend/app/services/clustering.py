@@ -1477,17 +1477,33 @@ async def _refresh_stories_metadata_batch(
             story.summary_fa = None
             story.summary_en = None
 
-    # 5. Recompute centroid embeddings for affected stories (batch query)
-    for sid in id_list:
-        story = stories_by_id.get(sid)
-        if not story:
-            continue
-        emb_result = await db.execute(
-            select(Article.embedding)
-            .where(Article.story_id == sid, Article.embedding.isnot(None))
+    # 5. Recompute centroid embeddings for affected stories.
+    # Cycle-1 audit Island 3: bulk-fetch all embeddings in ONE query
+    # then group by story_id in Python. Prior implementation fired one
+    # SELECT per story (N+1), each loading every article.embedding for
+    # that story. With 40-60 stories × 5-10 embeddings × 3 KB = 600 KB
+    # to 3 MB per refresh, plus N+1 round-trip latency.
+    if id_list:
+        bulk_emb = await db.execute(
+            select(Article.story_id, Article.embedding)
+            .where(
+                Article.story_id.in_(id_list),
+                Article.embedding.isnot(None),
+            )
         )
-        embeddings = [row[0] for row in emb_result.all() if row[0]]
-        story.centroid_embedding = _compute_centroid(embeddings)
+        embeddings_by_story: dict = {}
+        for row in bulk_emb.all():
+            sid_, emb = row[0], row[1]
+            if not emb:
+                continue
+            embeddings_by_story.setdefault(sid_, []).append(emb)
+        for sid in id_list:
+            story = stories_by_id.get(sid)
+            if not story:
+                continue
+            story.centroid_embedding = _compute_centroid(
+                embeddings_by_story.get(sid, [])
+            )
 
 
 def _compute_centroid(embeddings: list[list[float] | None]) -> list[float] | None:

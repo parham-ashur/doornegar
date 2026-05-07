@@ -291,6 +291,9 @@ async def get_story_analysis(request: Request, story_id: uuid.UUID, db: AsyncSes
     return StoryAnalysisResponse(
         story_id=story.id,
         summary_fa=story.summary_fa,
+        # Cycle-1 audit Phase B: expose llm_failed_at so the frontend
+        # can render a "retrying" state instead of a blank card.
+        llm_failed_at=story.llm_failed_at.isoformat() if story.llm_failed_at else None,
         state_summary_fa=extra.get("state_summary_fa"),
         diaspora_summary_fa=extra.get("diaspora_summary_fa"),
         independent_summary_fa=extra.get("independent_summary_fa"),

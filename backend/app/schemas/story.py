@@ -130,6 +130,11 @@ class StoryAnalysisResponse(BaseModel):
     diaspora_summary_fa: str | None = None
     independent_summary_fa: str | None = None
     bias_explanation_fa: str | None = None
+    # Cycle-1 audit Phase B: when the LLM analysis call last failed.
+    # Frontend uses this to distinguish "summary pending" (no field at
+    # all OR llm_failed_at is None) from "summary failed, will retry"
+    # (llm_failed_at is set). 24h backoff is built into step_summarize.
+    llm_failed_at: str | None = None
     scores: dict[str, BiasScores | None] | None = None
     # Per-source neutrality scores (mean of per-article scores) for 2D spectrum (-1.0 to +1.0)
     source_neutrality: dict[str, float] | None = None
