@@ -316,7 +316,7 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
             from app.services.llm_helper import build_openai_params
             client = OpenAI(api_key=settings.openai_api_key)
             # Batch translate up to 30 at a time
-            for batch_start in range(0, len(still_en), 30):
+            for batch_start in range(0, len(still_en), settings.nlp_translation_batch_size):
                 batch = still_en[batch_start:batch_start + 30]
                 titles = "\n".join(f"{i+1}. {a.title_original}" for i, a in enumerate(batch))
                 params = build_openai_params(
@@ -379,7 +379,7 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
                 if recent_id == article.id:
                     continue
                 sim = cosine_similarity(article.embedding, recent_emb)
-                if sim > 0.92:
+                if sim > settings.nlp_dedup_cosine_threshold:
                     # Near-duplicate — don't cluster this one
                     article.story_id = None  # ensure it stays unclustered
                     dedup_count += 1

@@ -677,8 +677,9 @@ async def step_backfill_farsi_titles():
 
         backfilled = 0
         failed = 0
-        for batch_start in range(0, len(articles), 30):
-            batch = articles[batch_start:batch_start + 30]
+        _bs = settings.nlp_translation_batch_size
+        for batch_start in range(0, len(articles), _bs):
+            batch = articles[batch_start:batch_start + _bs]
             titles = "\n".join(f"{i+1}. {a.title_original}" for i, a in enumerate(batch))
             try:
                 params = build_openai_params(
@@ -5937,8 +5938,9 @@ async def step_fix_issues():
             from app.services.llm_helper import build_openai_params
             client = OpenAI(api_key=settings.openai_api_key)
             fixed = 0
-            for batch_start in range(0, len(english_in_fa), 30):
-                batch = english_in_fa[batch_start:batch_start + 30]
+            _bs = settings.nlp_translation_batch_size
+            for batch_start in range(0, len(english_in_fa), _bs):
+                batch = english_in_fa[batch_start:batch_start + _bs]
                 titles = "\n".join(f"{i+1}. {a.title_fa}" for i, a in enumerate(batch))
                 try:
                     params = build_openai_params(

@@ -126,6 +126,12 @@ class Settings(BaseSettings):
     # Unsplash API (stock-image picker in admin dashboard)
     unsplash_access_key: str = ""  # get one free at unsplash.com/developers
 
+    # NLP tunables (cycle-1 audit Island 2): pulled out of nlp_pipeline.py
+    # so cost/quality knobs are visible in /admin/dashboard and tunable
+    # without code change.
+    nlp_translation_batch_size: int = 30
+    nlp_dedup_cosine_threshold: float = 0.92
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
     @field_validator("secret_key", mode="after")
