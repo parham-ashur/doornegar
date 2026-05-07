@@ -889,18 +889,27 @@ async def step_recluster_orphans():
     MAX_PER_RUN = 500
     UMBRELLA_FIRST_PUB_CAP_DAYS = 7  # mirrors clustering.py + freeze rule
 
-    stats = {"checked": 0, "attached": 0}
+    stats = {"checked": 0, "attached": 0, "skipped_aged_out": 0}
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(hours=MIN_ORPHAN_AGE_HOURS)
     umbrella_cutoff = now - timedelta(days=UMBRELLA_FIRST_PUB_CAP_DAYS)
+    # 7-day cap (Parham 2026-05-07): orphans older than 7 days are
+    # not retried — they're retired. Per "we don't care about
+    # articles or posts older than 7 days, so they shouldn't be
+    # reused again." Without this cap, every cron was re-checking
+    # weeks-old orphans that had no chance of matching anything
+    # fresh, burning embedding-comparison work.
+    aged_out_cutoff = now - timedelta(days=7)
 
     async with async_session() as db:
         # Candidates: orphan articles with embeddings, old enough
+        # but not too old.
         orphans = (await db.execute(
             select(Article.id, Article.embedding).where(
                 Article.story_id.is_(None),
                 Article.embedding.isnot(None),
                 Article.ingested_at < cutoff,
+                Article.ingested_at >= aged_out_cutoff,  # ← 7-day floor
             ).limit(MAX_PER_RUN)
         )).all()
 

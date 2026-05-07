@@ -814,27 +814,31 @@ async def link_posts_by_embedding(
         # Unlinked posts — pull only the columns we'll touch downstream.
         # Newest first + capped at batch_limit so the function returns
         # inside its 1800s step timeout when the backlog is large.
-        # Older unlinked posts get retried on the next run; very old
-        # ones eventually reach reassign_posts_by_embedding for a
-        # second attachment pass.
+        # 7-day cap (Parham 2026-05-07): posts older than 7 days are
+        # not retried for linking. They're retired. The backlog count
+        # below excludes aged-out posts so the dashboard reflects only
+        # actionable work.
+        post_recency_cutoff = datetime.now(timezone.utc) - _td(days=7)
         post_result = await db.execute(
             select(TelegramPost.id, TelegramPost.text)
             .where(
                 TelegramPost.story_id.is_(None),
                 TelegramPost.text.isnot(None),
                 TelegramPost.text != "",
+                TelegramPost.created_at >= post_recency_cutoff,
             )
             .order_by(TelegramPost.created_at.desc())
             .limit(batch_limit)
         )
         post_tuples = [(pid, txt) for pid, txt in post_result.all()]
-        # Also count the total unlinked backlog so the caller can see
-        # whether we're catching up or falling behind.
+        # Backlog count uses the same 7-day cutoff so it reflects
+        # actionable work, not historical artifacts.
         unlinked_total_result = await db.execute(
             select(func.count(TelegramPost.id)).where(
                 TelegramPost.story_id.is_(None),
                 TelegramPost.text.isnot(None),
                 TelegramPost.text != "",
+                TelegramPost.created_at >= post_recency_cutoff,
             )
         )
         unlinked_total = int(unlinked_total_result.scalar() or 0)
@@ -1038,7 +1042,12 @@ async def reassign_posts_by_embedding(
             return None
         return v
 
-    cutoff = datetime.now(timezone.utc) - timedelta(days=60)
+    # 7-day cutoff (Parham 2026-05-07): posts older than 7 days
+    # are not reused. Was 60 days — would have re-scored 8x more
+    # historical posts every run. This function is currently
+    # disabled in FULL_PIPELINE per CLAUDE.md, but the cutoff
+    # change keeps it correct if re-enabled.
+    cutoff = datetime.now(timezone.utc) - timedelta(days=7)
 
     story_data: dict[str, list[float]] = {}
     story_article_embs: dict[str, list[list[float]]] = {}
