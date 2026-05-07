@@ -1033,7 +1033,10 @@ async def step_recompute_centroids():
     from app.models.story import Story
     from app.services.clustering import _compute_centroid
 
-    stats = {"updated_null": 0, "updated_drift": 0, "skipped": 0}
+    stats = {
+        "updated_null": 0, "updated_drift": 0,
+        "skipped_no_articles": 0, "skipped_no_valid_centroid": 0,
+    }
 
     async with async_session() as db:
         # Read live article counts per story so we can detect drift
@@ -1094,7 +1097,14 @@ async def step_recompute_centroids():
                 else:
                     stats["updated_drift"] += 1
             else:
-                stats["skipped"] += 1
+                # Cycle-1 audit Island 3: split skipped reason so a
+                # spike in "no valid centroid" (zero-vector damage) is
+                # distinguishable from "no articles" (legit hidden-tier
+                # story with all articles dropped).
+                if not embeddings:
+                    stats["skipped_no_articles"] = stats.get("skipped_no_articles", 0) + 1
+                else:
+                    stats["skipped_no_valid_centroid"] = stats.get("skipped_no_valid_centroid", 0) + 1
 
         await db.commit()
 
