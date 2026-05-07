@@ -41,8 +41,19 @@ from sqlalchemy.orm.attributes import flag_modified
 # Pre-bound UPDATE with explicit JSONB type so asyncpg doesn't
 # silently coerce the dict into TEXT (the bug that ate 30 EN
 # translations on 2026-05-07 09:00 UTC cron).
+#
+# CRON path: do NOT bump `updated_at` when only writing translations.
+# Cycle-2 audit (2026-05-07): bumping updated_at to NOW() with the
+# `translated_at <= updated_at` staleness gate (cycle-1 commit 19c8b20)
+# created an infinite-retranslation loop — sub-second clock skew between
+# Python's `now_iso` and Postgres `NOW()` made every freshly translated
+# row look stale on the very next cron, retranslating each story 14×
+# before the STALE_LOOKBACK_DAYS=14 ceiling kicked in. Translations
+# are a DERIVED artifact; updated_at must only move when source FA
+# content changes (FA editors do bump it explicitly via
+# clear_translations_for_story / admin edit endpoints).
 _jsonb_update_stmt = _sa_text(
-    "UPDATE stories SET translations = :blob, updated_at = NOW() WHERE id = :sid"
+    "UPDATE stories SET translations = :blob WHERE id = :sid"
 ).bindparams(bindparam("blob", type_=JSONB))
 
 from app.config import settings
@@ -385,18 +396,22 @@ async def step_translate_homepage_visible() -> dict[str, Any]:
                     )
                     if ta.tzinfo is None:
                         ta = ta.replace(tzinfo=timezone.utc)
-                    # Cycle-1 audit Island 6: gate on translation age,
-                    # not story-update age. The prior check
-                    # `(now - story.updated_at).days <= STALE_LOOKBACK`
-                    # would refuse to retranslate a year-old translation
-                    # if the story was recently updated, AND would
-                    # retranslate a fresh translation if the story was
-                    # ancient. Both wrong. Translation age is what
-                    # matters.
+                    # Cycle-2 audit (2026-05-07): the inner
+                    # `translation_age_days <= STALE_LOOKBACK_DAYS` gate
+                    # was inverted — it refused to retranslate
+                    # legitimately-stale translations whenever the
+                    # translation was older than 14 days. Combined with
+                    # the cycle-1 `<=` flip and `updated_at = NOW()`
+                    # write, it drove an infinite-retranslation loop
+                    # for the first 14 days, then a permanent freeze
+                    # after that. Both directions wrong. The right gate
+                    # is just: retranslate if the translation predates
+                    # the story's current FA content. The DB filter at
+                    # L341-344 already enforces `translated_at <=
+                    # updated_at`; this Python check is the redundant
+                    # belt-and-braces for hot-path snapshot consistency.
                     if ta <= snap["updated_at"]:
-                        translation_age_days = (now_utc - ta).days
-                        if translation_age_days <= STALE_LOOKBACK_DAYS:
-                            needs = True
+                        needs = True
                 except (ValueError, AttributeError):
                     needs = True
             if needs:

@@ -335,9 +335,15 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
             from openai import AsyncOpenAI
             from app.services.llm_helper import build_openai_params
             client = AsyncOpenAI(api_key=settings.openai_api_key)
-            # Batch translate up to 30 at a time
-            for batch_start in range(0, len(still_en), settings.nlp_translation_batch_size):
-                batch = still_en[batch_start:batch_start + 30]
+            # Batch translate using the hoisted setting. Cycle-2 audit
+            # (2026-05-07): the slice was hard-coded to `+30` while the
+            # range stride used the setting — raising the setting to 50
+            # would have skipped articles 30-50 in every iteration; lowering
+            # it to 20 would have processed 20-30 twice. Use the setting
+            # for both sides.
+            _batch_size = settings.nlp_translation_batch_size
+            for batch_start in range(0, len(still_en), _batch_size):
+                batch = still_en[batch_start:batch_start + _batch_size]
                 titles = "\n".join(f"{i+1}. {a.title_original}" for i, a in enumerate(batch))
                 params = build_openai_params(
                     model=settings.translation_model,
@@ -381,6 +387,11 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
         # Cycle-1 audit Island 2: dropped 500 → 100. The 48h window is
         # dense enough that 100 captures 95%+ of repost candidates and
         # cuts the egress + O(n²) cosine work proportionally.
+        # Cycle-2 audit (2026-05-07): added explicit ORDER BY ingested_at
+        # DESC. Without it, Postgres returned arbitrary heap-order rows
+        # within the 48h window, so on dense traffic days the pool
+        # silently dropped the most-recent repost candidates the dedup
+        # is meant to catch.
         recent_result = await db.execute(
             select(Article.id, Article.embedding)
             .where(
@@ -388,6 +399,7 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
                 Article.ingested_at >= cutoff_48h,
                 Article.embedding.isnot(None),
             )
+            .order_by(Article.ingested_at.desc())
             .limit(100)
         )
         recent_pool = [(r[0], r[1]) for r in recent_result.all()]

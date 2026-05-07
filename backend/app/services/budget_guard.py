@@ -58,7 +58,7 @@ CHEAP_STEPS = {
     "recluster_orphans", "telegram_link", "merge_similar",
     "recalc_trending_pre_summarize", "recalc_trending",
     "dedup_articles", "fixes", "flag_unrelated", "image_relevance",
-    "rater_feedback", "summary_corrections", "niloofar_feedback_audit",
+    "rater_feedback",
     "age_out_stale_feedback", "source_trust", "feedback_health",
     "telegram_health", "visual", "uptime", "disk", "cost_tracking",
     "backup", "retention_audit", "archive_stale", "prune_stagnant",
@@ -73,6 +73,13 @@ CHEAP_STEPS = {
 # these are the LLM/egress-heavy ones. Skipping them lets the
 # pipeline still keep ingest + classification fresh while saving
 # the bulk of the spend.
+#
+# Cycle-2 audit (2026-05-07): moved `summary_corrections` and
+# `niloofar_feedback_audit` from CHEAP_STEPS to HALT_SKIP_STEPS.
+# Both call OpenAI/Anthropic respectively; capping them at 20
+# stories/run × ~$0.005 still costs ~$0.30/day under halt — small
+# but contradicts the kill-switch invariant ("website goes stale
+# before project dies"). When the cap arms, ALL LLM spend halts.
 HALT_SKIP_STEPS = {
     "summarize", "summarize_newly_visible", "bias_score",
     "editorial", "niloofar_polish_telegram", "detect_silences",
@@ -80,6 +87,7 @@ HALT_SKIP_STEPS = {
     "analyst_takes", "quality_postprocess",
     "weekly_digest", "worldview_digests",
     "translate_homepage_visible",  # the new step
+    "summary_corrections", "niloofar_feedback_audit",
 }
 
 

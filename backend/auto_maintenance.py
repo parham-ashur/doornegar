@@ -1467,8 +1467,15 @@ async def step_summarize():
         # Egress fix (Parham 2026-05-07): defer embedding, keywords,
         # named_entities. step_summarize uses content_text + title +
         # source on each article, but never the embedding fields.
-        # Cycle-1 audit Island 9: also defer Story.centroid_embedding
-        # (~3 KB × N=15-30 stories) — never read in summarize path.
+        #
+        # Cycle-2 audit (2026-05-07): the cycle-1 attempt to also defer
+        # Story.centroid_embedding (commit 12076f9) was a defer-then-
+        # access trap — step_summarize reads s.centroid_embedding /
+        # story.centroid_embedding at 8 later sites (cosine drift
+        # checks, title-cohesion gate, refile-on-drift logic). Each
+        # access in async SQLAlchemy = MissingGreenlet crash. Story
+        # defer removed; the ~3 KB × 15-30 = ~60 KB egress saving is
+        # not worth the breakage risk on every cron.
         from sqlalchemy.orm import defer as _defer_summ
         result = await db.execute(
             select(Story)
@@ -1478,7 +1485,6 @@ async def step_summarize():
                     _defer_summ(Article.keywords),
                     _defer_summ(Article.named_entities),
                 ),
-                _defer_summ(Story.centroid_embedding),
             )
             .where(
                 *homepage_eligible,

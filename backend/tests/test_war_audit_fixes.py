@@ -1663,3 +1663,143 @@ class TestR2MigrationSentinelBackoff:
             "app/main.py lifespan self-heal must add the new column "
             "(parallel idempotent path to the alembic migration)"
         )
+
+
+class TestTranslationDoesNotBumpUpdatedAt:
+    """Cycle-2 audit: cron-only translation writes must NOT set
+    `updated_at = NOW()`. Doing so combined with the cycle-1
+    `<=` staleness gate to drive infinite-retranslation: each fresh
+    translation looked stale on the next cron because Python's
+    translated_at and Postgres NOW() differ by a few ms.
+    """
+
+    def test_jsonb_update_stmt_omits_updated_at(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "translate_multilocale.py"
+        ).read_text()
+        # Find the pre-bound stmt definition.
+        idx = src.find("_jsonb_update_stmt = _sa_text(")
+        assert idx >= 0, "_jsonb_update_stmt must exist"
+        end = src.find(")", idx)
+        block = src[idx:end + 1]
+        assert "translations = :blob" in block
+        assert "updated_at = NOW()" not in block, (
+            "_jsonb_update_stmt is the CRON path; it must not bump "
+            "updated_at. Translations are derived; bumping creates an "
+            "infinite re-translation loop with the <= staleness gate."
+        )
+
+
+class TestTranslationAgeGateRemoved:
+    """Cycle-2 audit: the inner `translation_age_days <= STALE_LOOKBACK_DAYS`
+    gate inside translate_homepage_visible was inverted — refused to
+    retranslate stale-vs-FA translations whenever the translation was
+    >14 days old. Removed.
+    """
+
+    def test_no_translation_age_inner_gate(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "translate_multilocale.py"
+        ).read_text()
+        # Find the gate region.
+        idx = src.find("if ta <= snap[\"updated_at\"]:")
+        assert idx >= 0, "Outer FA-vs-translated_at check must exist"
+        following = src[idx:idx + 600]
+        assert "translation_age_days <= STALE_LOOKBACK_DAYS" not in following, (
+            "Inner translation_age_days <= STALE_LOOKBACK_DAYS gate was "
+            "inverted — it dropped legitimately-stale translations older "
+            "than 14d. The DB-level filter at the SQL WHERE already "
+            "gates correctly."
+        )
+
+
+class TestNlpTranslationBatchSizeUsedConsistently:
+    """Cycle-2 audit: nlp_pipeline.py:339-340 used the hoisted setting
+    for the range stride but a hard-coded `+30` for the slice. Operator
+    raising the setting to 50 would have skipped articles 30-50 in
+    every iteration; lowering to 20 would double-process 20-30. Both
+    sides must reference the same value.
+    """
+
+    def test_batch_loop_uses_setting_for_slice(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "nlp_pipeline.py"
+        ).read_text()
+        idx = src.find("nlp_translation_batch_size")
+        assert idx >= 0, "Setting must be referenced"
+        # Find the EN→FA OpenAI translation block (Step 4b).
+        block_start = src.find("if still_en and settings.openai_api_key")
+        assert block_start >= 0
+        block = src[block_start:block_start + 2000]
+        # Hard-coded slice must not appear inside the EN→FA loop.
+        assert "+ 30]" not in block, (
+            "Slice in EN→FA translation loop must use the hoisted "
+            "setting, not a hard-coded literal. See cycle-2 audit."
+        )
+
+
+class TestStepSummarizeNoCentroidDefer:
+    """Cycle-2 audit (CRITICAL): cycle-1 commit 12076f9 added
+    `defer(Story.centroid_embedding)` to step_summarize's main
+    select(Story). The function reads `s.centroid_embedding` /
+    `story.centroid_embedding` at 8 later sites (cosine drift,
+    title-cohesion gate, refile logic). In async SQLAlchemy, each
+    deferred-then-accessed read raises `sqlalchemy.exc.MissingGreenlet`,
+    crashing step_summarize on every cron. Defer removed.
+    """
+
+    def test_step_summarize_does_not_defer_centroid_embedding(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent / "auto_maintenance.py"
+        ).read_text()
+        # Locate the step_summarize main candidate select.
+        idx = src.find("step_summarize uses content_text + title +")
+        assert idx >= 0, (
+            "step_summarize comment block must remain to anchor this test"
+        )
+        # Look at the next ~600 chars (the select + options block).
+        block = src[idx:idx + 1500]
+        # The article-level defers are required; the Story-level defer
+        # of centroid_embedding is the trap.
+        assert "_defer_summ(Story.centroid_embedding)" not in block, (
+            "step_summarize must NOT defer Story.centroid_embedding — "
+            "the function reads it at 8 later sites and async lazy-load "
+            "raises MissingGreenlet. See cycle-2 audit."
+        )
+
+
+class TestDedupPoolOrderedByRecency:
+    """Cycle-2 audit: cycle-1 dropped pool 500→100 (commit a540c7a)
+    but the query has no ORDER BY. Postgres returns arbitrary heap-
+    order rows; on dense days the most-recent repost candidates can
+    fall outside the 100-row sample. Add ORDER BY ingested_at DESC.
+    """
+
+    def test_dedup_pool_query_orders_by_ingested_at(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "nlp_pipeline.py"
+        ).read_text()
+        # Locate the recent_result query (Step 4c, embedding dedup pool).
+        idx = src.find("# Cycle-1 audit Island 2: dropped 500 → 100")
+        assert idx >= 0, (
+            "Cycle-1 dedup-pool comment must remain to anchor this test"
+        )
+        block = src[idx:idx + 1200]
+        assert "Article.ingested_at.desc()" in block, (
+            "Dedup pool must ORDER BY ingested_at DESC so the 100-row "
+            "sample is the most-recent — not arbitrary heap order."
+        )
