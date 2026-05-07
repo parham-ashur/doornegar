@@ -126,11 +126,20 @@ def translate_batch_fa_to_en(texts: list[str]) -> list[str | None]:
             truncation=True, padding=True,
         )
         outputs = model.generate(**inputs, max_length=512)
-        translations = [
-            tokenizer.decode(out, skip_special_tokens=True)
-            for out in outputs
-        ]
-        return translations
     except Exception as e:
-        logger.error(f"Batch FA→EN translation failed: {e}")
+        # Tokenizer / model.generate exception affects the whole batch
+        # — no partial work to preserve.
+        logger.error(f"Batch FA→EN translation failed at generate: {e}")
         return [None] * len(texts)
+    # Cycle-1 audit Island 2: decode each output independently so a
+    # single malformed tensor doesn't poison the whole batch. Prior
+    # implementation wrapped the whole list-comp in try/except,
+    # discarding all successful decodes if any one raised.
+    translations: list[str | None] = []
+    for out in outputs:
+        try:
+            translations.append(tokenizer.decode(out, skip_special_tokens=True))
+        except Exception as e:
+            logger.warning(f"FA→EN single-item decode failed: {e}")
+            translations.append(None)
+    return translations
