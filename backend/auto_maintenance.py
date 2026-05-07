@@ -670,9 +670,11 @@ async def step_backfill_farsi_titles():
         if not articles:
             return {"backfilled": 0}
 
-        from openai import OpenAI
+        # Cycle-1 audit Island 2: AsyncOpenAI + await so the LLM call
+        # doesn't block the event loop ~1-2s per call.
+        from openai import AsyncOpenAI
         from app.services.llm_helper import build_openai_params
-        client = OpenAI(api_key=settings.openai_api_key)
+        client = AsyncOpenAI(api_key=settings.openai_api_key)
         import re as _re
 
         backfilled = 0
@@ -688,7 +690,7 @@ async def step_backfill_farsi_titles():
                     max_tokens=2500,
                     temperature=0,
                 )
-                resp = client.chat.completions.create(**params)
+                resp = await client.chat.completions.create(**params)
                 from app.services.llm_usage import log_llm_usage
                 await log_llm_usage(
                     model=settings.translation_model,
@@ -3569,10 +3571,11 @@ async def step_extract_analyst_takes():
         story_id_map = {str(s.id)[:8]: s.id for s in stories}
 
         # 5. Process each post with LLM
-        from openai import OpenAI
+        # Cycle-1 audit Island 2: AsyncOpenAI + await.
+        from openai import AsyncOpenAI
         from app.services.llm_helper import build_openai_params
 
-        client = OpenAI(api_key=settings.openai_api_key)
+        client = AsyncOpenAI(api_key=settings.openai_api_key)
 
         EXTRACT_PROMPT = """You are analyzing a Telegram post by an Iranian political analyst.
 
@@ -3611,7 +3614,7 @@ Analyst post:
                     max_tokens=500,
                     temperature=0.2,
                 )
-                resp = client.chat.completions.create(**params)
+                resp = await client.chat.completions.create(**params)
                 from app.services.llm_usage import log_llm_usage
                 await log_llm_usage(
                     model=settings.bias_scoring_model,
@@ -5693,10 +5696,11 @@ async def step_detect_silences():
         # Generate LLM hypotheses for top 5 silences only
         top_silences = silences[:5]
         if top_silences and settings.openai_api_key:
-            from openai import OpenAI
+            # Cycle-1 audit Island 2: AsyncOpenAI + await.
+            from openai import AsyncOpenAI
             from app.services.llm_helper import build_openai_params
 
-            client = OpenAI(api_key=settings.openai_api_key)
+            client = AsyncOpenAI(api_key=settings.openai_api_key)
 
             for story, silent_side, loud_count, extra in top_silences:
                 side_label = "دولتی" if silent_side == "state" else "اپوزیسیون/مستقل"
@@ -5715,7 +5719,7 @@ async def step_detect_silences():
                         max_tokens=200,
                         temperature=0.3,
                     )
-                    resp = client.chat.completions.create(**params)
+                    resp = await client.chat.completions.create(**params)
                     from app.services.llm_usage import log_llm_usage
                     await log_llm_usage(
                         model=settings.translation_model,
@@ -5968,9 +5972,10 @@ async def step_fix_issues():
                 english_in_fa.append(a)
 
         if english_in_fa and settings.openai_api_key:
-            from openai import OpenAI
+            # Cycle-1 audit Island 2: AsyncOpenAI + await.
+            from openai import AsyncOpenAI
             from app.services.llm_helper import build_openai_params
-            client = OpenAI(api_key=settings.openai_api_key)
+            client = AsyncOpenAI(api_key=settings.openai_api_key)
             fixed = 0
             _bs = settings.nlp_translation_batch_size
             for batch_start in range(0, len(english_in_fa), _bs):
@@ -5983,7 +5988,7 @@ async def step_fix_issues():
                         max_tokens=2000,
                         temperature=0,
                     )
-                    resp = client.chat.completions.create(**params)
+                    resp = await client.chat.completions.create(**params)
                     from app.services.llm_usage import log_llm_usage
                     await log_llm_usage(
                         model=settings.translation_model,

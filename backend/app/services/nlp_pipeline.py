@@ -318,9 +318,11 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
     try:
         still_en = [a for a in articles if a.language == "en" and not a.title_fa and a.title_original]
         if still_en and settings.openai_api_key:
-            from openai import OpenAI
+            # Cycle-1 audit Island 2: AsyncOpenAI + await so the LLM
+            # call doesn't block the event loop ~1-2s per batch.
+            from openai import AsyncOpenAI
             from app.services.llm_helper import build_openai_params
-            client = OpenAI(api_key=settings.openai_api_key)
+            client = AsyncOpenAI(api_key=settings.openai_api_key)
             # Batch translate up to 30 at a time
             for batch_start in range(0, len(still_en), settings.nlp_translation_batch_size):
                 batch = still_en[batch_start:batch_start + 30]
@@ -331,7 +333,7 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
                     max_tokens=2000,
                     temperature=0,
                 )
-                resp = client.chat.completions.create(**params)
+                resp = await client.chat.completions.create(**params)
                 from app.services.llm_usage import log_llm_usage
                 await log_llm_usage(
                     model=settings.translation_model,
