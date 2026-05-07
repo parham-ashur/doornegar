@@ -7165,6 +7165,14 @@ FULL_PIPELINE = [
     ("dedup_articles", "Dedup articles", "step_deduplicate_articles"),
     ("fixes", "Auto-fix common issues", "step_fix_issues"),
     ("flag_unrelated", "Auto-flag unrelated articles", "step_flag_unrelated_articles"),
+    # Second recount (Parham 2026-05-07 audit Phase B): the early
+    # `recount` at the top of the pipeline cleans drift inherited from
+    # the prior cron. But `step_deduplicate_articles` and
+    # `step_flag_unrelated_articles` both null out `article.story_id`
+    # on detached rows — mutating the just-fixed counts. Without this
+    # second pass, every cron leaves `article_count` drifted by N (where
+    # N = number of detachments). Trending decays incorrectly.
+    ("recount_after_dedup", "Recount after dedup/flag detachments", "step_recount_stories"),
     ("image_relevance", "Image relevance check", "step_image_relevance"),
     ("analyst_takes", "Extract analyst takes from Telegram", "step_extract_analyst_takes"),
     ("verify_predictions", "Verify analyst predictions", "step_verify_predictions"),
