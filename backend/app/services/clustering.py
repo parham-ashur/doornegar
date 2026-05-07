@@ -1266,6 +1266,44 @@ async def _match_to_existing_stories(
 
     # Flush article assignments
     if matched_article_ids:
+        # Cycle-1 audit Phase B (admin-freeze race): the LLM phase
+        # took several minutes during which an admin may have manually
+        # frozen one of the candidate stories via /admin/hitl/.../freeze.
+        # Without a re-check, those assignments would resurrect a frozen
+        # story (bumping last_updated_at, putting it back on the home-
+        # page). Verify with one bulk SELECT and drop affected pairs.
+        story_ids_in_flight = {sid for _aid, sid in matched_pairs if sid is not None}
+        if story_ids_in_flight:
+            still_open = await db.execute(
+                select(Story.id).where(
+                    Story.id.in_(story_ids_in_flight),
+                    Story.frozen_at.is_(None),
+                    Story.archived_at.is_(None),
+                )
+            )
+            open_set = {row[0] for row in still_open.all()}
+            stale_pairs = [
+                (aid, sid) for aid, sid in matched_pairs
+                if sid not in open_set
+            ]
+            if stale_pairs:
+                logger.warning(
+                    "match_existing: dropping %d article→story matches "
+                    "where the story was frozen/archived mid-phase: %s",
+                    len(stale_pairs),
+                    [str(sid) for _, sid in stale_pairs[:5]],
+                )
+                stale_article_ids = {aid for aid, _ in stale_pairs}
+                # Roll back the in-memory assignments — set story_id = None
+                # so the flush doesn't write them.
+                for art in articles:
+                    if art.id in stale_article_ids:
+                        art.story_id = None
+                matched_pairs = [
+                    (aid, sid) for aid, sid in matched_pairs
+                    if sid in open_set
+                ]
+                matched_article_ids = {aid for aid, _ in matched_pairs}
         await db.flush()
 
         # Collect affected story IDs from the matched_pairs we tracked

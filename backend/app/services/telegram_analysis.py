@@ -647,11 +647,17 @@ async def analyze_story_telegram(
 
         result = json.loads(text)
 
-        # Normalize key_claims to strings for frontend compatibility
+        # Normalize key_claims to strings for frontend compatibility.
+        # Cycle-1 audit Phase B: log when the dict-branch fires (legacy
+        # cached shape from an older prompt version). When zero hits
+        # land in the logs for ~2 weeks, we can drop the dict branch
+        # entirely and treat dicts as malformed.
         if "key_claims" in result and result["key_claims"]:
             normalized_claims = []
+            dict_branch_hits = 0
             for c in result["key_claims"]:
                 if isinstance(c, dict):
+                    dict_branch_hits += 1
                     claim_text = c.get("claim", "")
                     source = c.get("source", "")
                     cred = c.get("credibility", "")
@@ -659,6 +665,12 @@ async def analyze_story_telegram(
                 else:
                     normalized_claims.append(str(c))
             result["key_claims"] = normalized_claims
+            if dict_branch_hits:
+                logger.warning(
+                    "telegram_analysis.key_claims dict-shape legacy "
+                    "branch fired %d time(s); plan to drop after 2w of "
+                    "zero hits.", dict_branch_hits
+                )
 
         # Resolve supporter names → real analyst channels so the UI can
         # render "N از T تحلیلگر" instead of the hallucinated pct the
