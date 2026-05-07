@@ -4114,6 +4114,17 @@ async def step_archive_stale():
     soft_cutoff = now - timedelta(days=30)
     hard_cutoff = now - timedelta(days=60)
 
+    # Umbrella size gate (Parham 2026-05-07): a story whose first_published_at
+    # is recent but whose article_count has crossed a high threshold has
+    # become a generic centroid that match_existing keeps feeding into
+    # instead of seeding new clusters for fresh events. Story 745b6edd
+    # reached 107 articles, 20 sources before being frozen manually. The
+    # 7d age rule alone misses these because their articles are recent.
+    # 100 is conservative — current trending has a legitimate 90-article
+    # single-event cluster (Hezbollah drone attack) that should NOT auto-
+    # freeze. Lower to 80 if umbrella growth keeps slipping past 100.
+    UMBRELLA_ARTICLE_COUNT_FREEZE = 100
+
     # Pre-freeze backfill: rederive first_published_at from each story's
     # actual articles BEFORE the freeze query reads it. Without this,
     # step_recluster_orphans (which runs earlier in the pipeline) can
@@ -4162,11 +4173,14 @@ async def step_archive_stale():
                     Story.first_published_at < freeze_cutoff,
                     (Story.first_published_at.is_(None))
                         & (Story.created_at < freeze_cutoff),
+                    Story.article_count > UMBRELLA_ARTICLE_COUNT_FREEZE,
                 ),
             )
         )
         for story in freeze_result.scalars().all():
             story.frozen_at = now
+            ac = int(story.article_count or 0)
+            reason = "size_100" if ac > UMBRELLA_ARTICLE_COUNT_FREEZE else "age_7d"
             await _log_event(
                 db,
                 event_type="story_auto_frozen",
@@ -4175,9 +4189,9 @@ async def step_archive_stale():
                 signals={
                     "first_published_at": story.first_published_at.isoformat() if story.first_published_at else None,
                     "last_updated_at": story.last_updated_at.isoformat() if story.last_updated_at else None,
-                    "article_count": int(story.article_count or 0),
+                    "article_count": ac,
                     "title_fa": (story.title_fa or "")[:120],
-                    "reason": "age_7d",
+                    "reason": reason,
                 },
             )
             stats["auto_frozen"] += 1

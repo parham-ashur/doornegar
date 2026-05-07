@@ -1293,3 +1293,35 @@ class TestArticlesListEndpointDefersHeavyJsonb:
                 f"list endpoint — ArticleBrief doesn't serialize it, so "
                 f"loading it from DB just bleeds egress."
             )
+
+
+class TestAutoFreezeOnUmbrellaSize:
+    """Story 745b6edd-95f6-4f39-b6e9-d67972ebed86 reached 107 articles
+    and 20 sources before being manually frozen on 2026-05-07. The 7-day
+    age gate in step_archive_stale missed it because first_published_at
+    was recent — the cluster centroid had become so generic that
+    match_existing kept attaching new fresh-dated articles instead of
+    seeding new clusters for distinct events.
+
+    Tripwire: step_archive_stale's freeze condition must include a
+    size-based trigger (Story.article_count > N) alongside the age
+    trigger, so future umbrellas auto-freeze without a human in the loop.
+    """
+
+    def test_freeze_condition_includes_article_count_threshold(self):
+        import inspect
+
+        from auto_maintenance import step_archive_stale
+
+        src = inspect.getsource(step_archive_stale)
+
+        assert "UMBRELLA_ARTICLE_COUNT_FREEZE" in src, (
+            "step_archive_stale must define UMBRELLA_ARTICLE_COUNT_FREEZE "
+            "and use it as a size-based freeze gate."
+        )
+        assert "Story.article_count > UMBRELLA_ARTICLE_COUNT_FREEZE" in src, (
+            "step_archive_stale's freeze WHERE clause must include "
+            "`Story.article_count > UMBRELLA_ARTICLE_COUNT_FREEZE` so "
+            "oversized active umbrellas auto-freeze even when their "
+            "first_published_at is recent."
+        )
