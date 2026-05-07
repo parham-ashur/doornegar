@@ -7124,13 +7124,24 @@ async def step_migrate_images_to_r2():
     drains in ~2× the time vs the old 300/run cap, but each run
     completes within budget and partial progress survives.
     """
-    from sqlalchemy import select, not_, update
+    from sqlalchemy import select, not_, or_, update
     from app.config import settings
     from app.database import async_session
     from app.models.article import Article
     from app.services.image_downloader import download_image, LOCAL_IMAGE_BASE
 
-    stats = {"migrated": 0, "skipped": 0, "failed": 0, "no_config": 0}
+    stats = {
+        "migrated": 0,
+        "skipped": 0,
+        "failed": 0,
+        "no_config": 0,
+        # Articles attempted within the last 24h are excluded by the
+        # query, so they never reach the loop. The retry-backoff log
+        # below counts how many articles match `image_url NOT LIKE r2`
+        # but were excluded by the sentinel — exposes "we have N broken
+        # URLs we keep skipping" so the dashboard can flag dead CDNs.
+        "retry_backoff_skipped": 0,
+    }
 
     if not settings.r2_public_url:
         logger.warning("R2 not configured — skipping migrate_images_r2")
@@ -7138,37 +7149,70 @@ async def step_migrate_images_to_r2():
         return stats
 
     r2_prefix = settings.r2_public_url.rstrip("/")
+    now = datetime.now(timezone.utc)
+    backoff_floor = now - timedelta(hours=24)
 
     # Pull the work list in a short read session, then close it. Downloading
     # 300 images takes ~15 min, and Neon/asyncpg close the connection well
     # before that — a single long-held session + deferred commit loses the
     # whole batch (as happened 2026-04-18: 249 R2 uploads, 0 DB updates).
     async with async_session() as db:
+        # Eligible: not yet on R2, and either never attempted or last
+        # attempt is older than 24h. Sentinel column shipped 2026-05-07
+        # (migration y0t1u2v3w4x5) — see project_r2_migrate_sentinel.md.
+        candidate_filter = [
+            Article.image_url.isnot(None),
+            Article.image_url != "",
+            not_(Article.image_url.like(f"{r2_prefix}%")),
+            not_(Article.image_url.like(f"{LOCAL_IMAGE_BASE}%")),
+        ]
         result = await db.execute(
             select(Article.id, Article.image_url)
             .where(
-                Article.image_url.isnot(None),
-                Article.image_url != "",
-                not_(Article.image_url.like(f"{r2_prefix}%")),
-                not_(Article.image_url.like(f"{LOCAL_IMAGE_BASE}%")),
+                *candidate_filter,
+                or_(
+                    Article.last_r2_migration_attempt_at.is_(None),
+                    Article.last_r2_migration_attempt_at < backoff_floor,
+                ),
             )
             .order_by(Article.ingested_at.desc())
             .limit(150)
         )
         work = [(row.id, row.image_url) for row in result.all()]
 
+        # Observability: how many candidate articles are sitting in
+        # backoff right now? Counts the rows that match the not-yet-on-R2
+        # filter AND were attempted in the last 24h. A growing number =
+        # broken CDN somewhere; surface it on the dashboard.
+        from sqlalchemy import func as sa_func
+        backoff_result = await db.execute(
+            select(sa_func.count())
+            .select_from(Article)
+            .where(
+                *candidate_filter,
+                Article.last_r2_migration_attempt_at.isnot(None),
+                Article.last_r2_migration_attempt_at >= backoff_floor,
+            )
+        )
+        stats["retry_backoff_skipped"] = int(backoff_result.scalar() or 0)
+
     # Commit in small batches so partial progress survives a mid-run crash,
     # and no session stays idle while the network does the heavy lifting.
+    # Each row records the attempt timestamp regardless of outcome — the
+    # retry gate above relies on that stamp to back off broken URLs.
     BATCH = 25
-    pending: list[tuple] = []  # (article_id, new_url)
+    pending: list[tuple] = []  # (article_id, new_url_or_None)
 
     async def _flush():
         if not pending:
             return
         async with async_session() as db:
             for article_id, new_url in pending:
+                values = {"last_r2_migration_attempt_at": datetime.now(timezone.utc)}
+                if new_url:
+                    values["image_url"] = new_url
                 await db.execute(
-                    update(Article).where(Article.id == article_id).values(image_url=new_url)
+                    update(Article).where(Article.id == article_id).values(**values)
                 )
             await db.commit()
         pending.clear()
@@ -7182,12 +7226,17 @@ async def step_migrate_images_to_r2():
         if stored and stored != old_url:
             pending.append((article_id, stored))
             stats["migrated"] += 1
-            if len(pending) >= BATCH:
-                await _flush()
         elif stored:
+            # Same URL came back — already in target format. Stamp anyway
+            # so we don't re-check this article tomorrow's batch.
+            pending.append((article_id, None))
             stats["skipped"] += 1
         else:
+            # Failed: stamp the attempt so the 24h backoff kicks in.
+            pending.append((article_id, None))
             stats["failed"] += 1
+        if len(pending) >= BATCH:
+            await _flush()
 
     await _flush()
     await _ms.update_step_progress(total_n, total_n, label="R2 migration done")

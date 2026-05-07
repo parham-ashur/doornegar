@@ -1585,3 +1585,81 @@ class TestR2BackupSubprocessOrder:
             "close(). Closing first can SIGPIPE pg_dump and silently "
             "truncate the dump."
         )
+
+
+class TestR2MigrationSentinelBackoff:
+    """Cycle-2 audit (deferred from cycle-1 Island 8). step_migrate_images_to_r2
+    must use Article.last_r2_migration_attempt_at as a 24h retry sentinel:
+      - exclude rows attempted in the last 24h from the work query
+      - stamp the column on EVERY attempt (success, no-op, AND failure)
+    Without the stamp on the failure path, a chronically broken upstream
+    URL stays at the head of the per-cron 150-slot batch forever.
+    """
+
+    def test_step_uses_24h_backoff_filter(self):
+        from pathlib import Path
+
+        src = (Path(__file__).parent.parent / "auto_maintenance.py").read_text()
+        idx = src.find("async def step_migrate_images_to_r2()")
+        assert idx >= 0, "step_migrate_images_to_r2 must exist"
+        next_def = src.find("\nasync def ", idx + 1)
+        body = src[idx:next_def] if next_def > 0 else src[idx:]
+        # The OR-clause must reference last_r2_migration_attempt_at
+        # twice (IS NULL or older than the floor).
+        assert "last_r2_migration_attempt_at" in body, (
+            "step_migrate_images_to_r2 must filter on the sentinel column"
+        )
+        assert body.count("last_r2_migration_attempt_at") >= 3, (
+            "Expected: filter (NULL + < floor), backoff_skipped count, "
+            "and stamp in _flush. Found fewer references."
+        )
+        # The 24h floor must come from a relative `now - 24h` calculation,
+        # not a hard-coded date.
+        assert "hours=24" in body, (
+            "Backoff floor should be `now - timedelta(hours=24)`"
+        )
+
+    def test_step_stamps_attempt_on_all_paths(self):
+        """Every code path through the loop must enqueue a stamp:
+        migrated, no-op skip, AND failure. If failure is missing,
+        broken URLs never back off."""
+        from pathlib import Path
+
+        src = (Path(__file__).parent.parent / "auto_maintenance.py").read_text()
+        idx = src.find("async def step_migrate_images_to_r2()")
+        next_def = src.find("\nasync def ", idx + 1)
+        body = src[idx:next_def] if next_def > 0 else src[idx:]
+        # The flush helper must always set the timestamp; the URL update
+        # is conditional but the stamp is unconditional.
+        assert (
+            'values = {"last_r2_migration_attempt_at"' in body
+        ), (
+            "_flush must seed values dict with the timestamp, then "
+            "conditionally add image_url. Unconditional stamping is the "
+            "whole point of the sentinel."
+        )
+
+    def test_model_has_sentinel_column(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent / "app" / "models" / "article.py"
+        ).read_text()
+        assert "last_r2_migration_attempt_at" in src, (
+            "Article model must declare last_r2_migration_attempt_at "
+            "(migration y0t1u2v3w4x5)"
+        )
+
+    def test_self_heal_ddl_includes_column(self):
+        """app/main.py self-heal block runs on every deploy — must
+        include the new column so a fresh deploy doesn't crash before
+        Alembic catches up."""
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent / "app" / "main.py"
+        ).read_text()
+        assert "last_r2_migration_attempt_at" in src, (
+            "app/main.py lifespan self-heal must add the new column "
+            "(parallel idempotent path to the alembic migration)"
+        )

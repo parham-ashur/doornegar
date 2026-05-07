@@ -60,6 +60,13 @@ class Article(Base):
     # Set when step_fix_images last HEAD-checked this article's image_url;
     # checks within the last 24h are skipped to avoid wasted HTTP calls
     image_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Set on every step_migrate_images_to_r2 attempt (success OR failure).
+    # Articles attempted within the last 24h are skipped — prevents a
+    # chronically broken upstream URL from burning the 150-slot batch
+    # cap every cron. See migration y0t1u2v3w4x5.
+    last_r2_migration_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     # How many times this article has been sent to cluster_new without
     # joining a viable (≥5-article) group. Articles at the max (3) are
     # skipped on future runs — prevents orphan articles from being
