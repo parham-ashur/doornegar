@@ -496,9 +496,20 @@ def _find_new_story_subclusters(
     """
     from app.nlp.embeddings import cosine_similarity as _cosine_sim
 
-    # Only consider articles that actually have embeddings; the rest
-    # fall through to the matcher's normal conservative path.
-    embedded = [a for a in articles if a.embedding and any(v != 0.0 for v in a.embedding[:5])]
+    # Only consider articles that actually have non-trivial embeddings.
+    # Cycle-1 audit Phase B: the prior `any(v != 0.0 for v in e[:5])`
+    # check could be fooled by a vector with first 5 dims zero but rest
+    # non-zero. Using L2-norm > epsilon catches all-near-zero vectors
+    # regardless of which dimensions hold the residual noise.
+    def _is_nontrivial_embedding(e):
+        if not e:
+            return False
+        try:
+            s = sum(v * v for v in e)
+        except (TypeError, ValueError):
+            return False
+        return s > 0.01  # ~0.1 magnitude floor; real embeddings are ~1
+    embedded = [a for a in articles if _is_nontrivial_embedding(a.embedding)]
     if len(embedded) < min_cluster_size:
         return set()
 

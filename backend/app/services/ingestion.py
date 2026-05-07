@@ -82,6 +82,46 @@ def _is_icon_like(url: str | None) -> bool:
     return any(p.search(url) for p in _ICON_URL_PATTERNS)
 
 
+# Tracking parameters that change with every share but don't change
+# the article identity. Strip them at upsert so foo.com/a?utm_source=
+# fb and foo.com/a?utm_source=tw don't enter the DB as two articles.
+# (Cycle-1 audit Island 1.)
+_TRACKING_QUERY_KEYS = (
+    "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term",
+    "fbclid", "gclid", "mc_cid", "mc_eid", "ref", "ref_src", "yclid",
+)
+
+
+def _normalize_url(url: str) -> str:
+    """Canonicalize an article URL for upsert + dedup matching.
+
+    - Lowercase host (URLs are case-insensitive on host).
+    - Strip tracking params (utm_*, fbclid, gclid, ...).
+    - Strip trailing slash on path so /a and /a/ collide.
+    - Drop fragment (#section is a sub-page anchor, not a different
+      article).
+
+    Conservative: leaves the path itself case-sensitive (some sites
+    DO have case-significant paths) and keeps non-tracking query
+    params untouched.
+    """
+    if not url:
+        return url
+    try:
+        from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+        parts = urlsplit(url.strip())
+        host = parts.netloc.lower()
+        path = parts.path.rstrip("/") or "/"
+        kept = [
+            (k, v) for k, v in parse_qsl(parts.query, keep_blank_values=False)
+            if k.lower() not in _TRACKING_QUERY_KEYS
+        ]
+        query = urlencode(kept) if kept else ""
+        return urlunsplit((parts.scheme, host, path, query, ""))
+    except Exception:
+        return url
+
+
 async def fetch_feed(feed_url: str) -> feedparser.FeedParserDict | None:
     """Fetch and parse an RSS feed."""
     try:
@@ -93,8 +133,13 @@ async def fetch_feed(feed_url: str) -> feedparser.FeedParserDict | None:
             response = await client.get(feed_url)
             response.raise_for_status()
             return feedparser.parse(response.text)
+    except httpx.HTTPStatusError as e:
+        # Cycle-1 audit Island 1: log status code so geo-block (403)
+        # is distinguishable from outage (500/503) in maintenance logs.
+        logger.error(f"Failed to fetch feed {feed_url}: HTTP {e.response.status_code} {e}")
+        return None
     except Exception as e:
-        logger.error(f"Failed to fetch feed {feed_url}: {e}")
+        logger.error(f"Failed to fetch feed {feed_url}: {type(e).__name__}: {e}")
         return None
 
 
@@ -212,7 +257,7 @@ async def ingest_source(source: Source, db: AsyncSession) -> dict:
             new_count = 0
             skipped_url = 0
             for entry in entries:
-                url = entry.get("link", "").strip()
+                url = _normalize_url(entry.get("link", "").strip())
                 if not url:
                     stats["skipped_no_url"] += 1
                     continue

@@ -177,6 +177,12 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
             article.keywords = extract_keywords(text)
 
         except Exception as e:
+            # Cycle-1 audit Island 2: count text-processing failures so
+            # a regression in normalize / detect / extract_keywords
+            # shows up in stats. Without this, the trap fires silently:
+            # processed_at gets stamped at L383 because embed_ok=True
+            # even though keywords/title_original may be unchanged.
+            stats["text_processing_errors"] = stats.get("text_processing_errors", 0) + 1
             logger.error(f"Text processing failed for article {article.id}: {e}")
 
     # Step 3: Generate embeddings in batch

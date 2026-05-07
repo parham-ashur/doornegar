@@ -3731,7 +3731,7 @@ async def feedback_impact_source_trust(db: AsyncSession = Depends(get_db)):
 # ─────────────────────────────────────────────────────────────────────
 
 _health_cache: dict = {"data": None, "expires": 0.0}
-_HEALTH_CACHE_TTL = 60
+_HEALTH_CACHE_TTL = 300  # cycle-1 audit Phase B: bumped 60→300 to cut canary fan-out under dashboard polling
 
 
 @router.get("/debug/egress-audit", dependencies=[Depends(require_admin)])
