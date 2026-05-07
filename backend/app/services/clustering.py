@@ -919,6 +919,16 @@ async def _match_to_existing_stories(
     auto_reject_count = 0
     negative_block_count = 0
     low_trust_block_count = 0
+    # Cycle-1 audit Island 3: count which threshold tier was selected
+    # for each candidate pair so the dashboard can spot tier-distribution
+    # drift (e.g. all candidates suddenly land in the strict
+    # near_freeze tier = stories aging out faster than expected).
+    threshold_tier_counts: dict = {
+        "small_story": 0,    # target.article_count < 10 → 0.45
+        "near_freeze": 0,    # age_days >= NEAR_FREEZE_CANDIDATE_DAYS
+        "aged": 0,           # age_days > AGED_CANDIDATE_DAYS
+        "fresh": 0,          # default tier
+    }
     negative_blocks: list[tuple[uuid.UUID, uuid.UUID]] = []  # (article_id, story_id)
     low_trust_blocks: list[tuple[uuid.UUID, uuid.UUID, float, float]] = []  # (article_id, story_id, sim, threshold)
 
@@ -1024,13 +1034,17 @@ async def _match_to_existing_stories(
             if target_small:
                 # Small-story rule wins — already a stricter gate.
                 base_threshold = 0.45
+                threshold_tier_counts["small_story"] += 1
             elif age_days >= NEAR_FREEZE_CANDIDATE_DAYS:
                 # 5-7d band: tightest accretion gate before freeze.
                 base_threshold = EMBEDDING_SIM_THRESHOLD_NEAR_FREEZE
+                threshold_tier_counts["near_freeze"] += 1
             elif age_days > AGED_CANDIDATE_DAYS:
                 base_threshold = EMBEDDING_SIM_THRESHOLD_AGED
+                threshold_tier_counts["aged"] += 1
             else:
                 base_threshold = EMBEDDING_SIM_THRESHOLD
+                threshold_tier_counts["fresh"] += 1
             effective_threshold = min(base_threshold * trust_factor, 0.95)
             if sim >= effective_threshold:
                 if target_small:
@@ -1063,6 +1077,9 @@ async def _match_to_existing_stories(
         f"(+{len(articles_without_embedding)} without embedding), "
         f"{len(articles) - pre_filtered_articles - auto_match_count} articles → new cluster"
     )
+    # Cycle-1 audit Island 3: surface threshold-tier distribution.
+    if any(threshold_tier_counts.values()):
+        logger.info(f"Threshold tiers: {threshold_tier_counts}")
     # Cycle-1 audit Island 3: per-source breakdown of embedding-less
     # articles. Lets operators spot when one source's NLP pipeline is
     # silently failing while others work fine.
