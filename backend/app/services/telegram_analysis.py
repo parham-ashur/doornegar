@@ -382,11 +382,17 @@ async def enrich_predictions_with_analyst_counts(
             continue
         supporters = pred.get("supporters") or []
         matched_ids = set()
+        matched_names = []
         for s in supporters:
             m = _match(s if isinstance(s, str) else str(s))
-            if m is not None:
+            if m is not None and m.id not in matched_ids:
                 matched_ids.add(m.id)
+                matched_names.append(m.title or "")
         count = len(matched_ids)
+        # Cycle-1 audit Phase B: replace LLM's free-text supporter
+        # names with DB-grounded channel titles so the frontend has
+        # ONE source of truth instead of two competing lists.
+        pred["supporters"] = matched_names
         pred["supporter_count"] = count
         pred["analysts_total"] = total
         pred["pct"] = round(count / total * 100) if total else 0
