@@ -111,11 +111,15 @@ def _make_dump(db_url: str, out_path: Path) -> None:
     with gzip.open(out_path, "wb") as gz:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
         assert proc.stdout is not None
+        # Order matters: copy until EOF, wait for pg_dump to finish on
+        # its own (so we get the real exit code), THEN close stdout.
+        # Closing stdout before wait() can SIGPIPE pg_dump and silently
+        # truncate the dump while reporting rc=0 (or rc=141 SIGPIPE).
         try:
             shutil.copyfileobj(proc.stdout, gz)
+            rc = proc.wait()
         finally:
             proc.stdout.close()
-        rc = proc.wait()
         if rc != 0:
             stderr = proc.stderr.read().decode("utf-8", errors="replace") if proc.stderr else ""
             log.error(f"pg_dump exited {rc}. stderr:\n{stderr}")

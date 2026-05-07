@@ -228,10 +228,14 @@ function buildTelegramData(
       }
     }
 
+    // Defensive title fallback (Parham 2026-05-07 audit Island 10):
+    // story.title_fa can be NULL if NLP failed; .slice() on null crashes
+    // the entire stories carousel. Fall back to title_en, then "—".
+    const fallbackSource = (story.title_fa || story.title_en || "—").slice(0, 40);
     for (const c of analysis.key_claims ?? []) {
       if (typeof c === "string") {
         claims.push({
-          source: story.title_fa.slice(0, 40),
+          source: fallbackSource,
           text: c,
           verified: false,
           story: asStoryCore(story, null, null),
@@ -240,7 +244,7 @@ function buildTelegramData(
         const text = normalizeText(c);
         if (!text) continue;
         claims.push({
-          source: c.source ?? story.title_fa.slice(0, 40),
+          source: c.source ?? fallbackSource,
           text,
           verified: c.verified ?? false,
           story: asStoryCore(story, null, null),

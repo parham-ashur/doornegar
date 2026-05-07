@@ -1418,3 +1418,135 @@ class TestTranslateMultilocaleFlagModifiedImported:
                 "import it. This crashes clear_translations_for_story at "
                 "runtime, breaking auto-clear on FA edit."
             )
+
+
+class TestClusterMergeFunctionsDeferHeavyJsonb:
+    """Cycle-1 audit Island 3 found 3 cluster-merge functions loading
+    full Story rows including 7 heavy JSONB columns the merge logic
+    never reads (translations, telegram_analysis, editorial_context_fa,
+    summary_anchor, analysis_snapshot_24h, hourly_update_signal,
+    summary_en). With ~1000 tiny stories per cron, the wasted egress
+    was ~210-280 MB per maintenance run. The defers are now applied;
+    this tripwire fails if any merge function regresses the pattern.
+    """
+
+    def test_merge_tiny_by_cosine_defers_heavy_story_jsonb(self):
+        import inspect
+
+        from app.services.clustering import _merge_tiny_by_cosine
+
+        src = inspect.getsource(_merge_tiny_by_cosine)
+        for col in (
+            "translations",
+            "telegram_analysis",
+            "editorial_context_fa",
+            "summary_anchor",
+            "analysis_snapshot_24h",
+            "hourly_update_signal",
+            "summary_en",
+        ):
+            assert f"Story.{col}" in src and "defer" in src, (
+                f"_merge_tiny_by_cosine must defer Story.{col} on its "
+                f"select(Story) — this column is never read by the merge "
+                f"logic and at ~10-20 KB × 1000 tiny stories represents "
+                f"~10-20 MB of avoidable egress per cron."
+            )
+
+    def test_merge_hidden_stories_defers_heavy_story_jsonb(self):
+        import inspect
+
+        from app.services.clustering import _merge_hidden_stories
+
+        src = inspect.getsource(_merge_hidden_stories)
+        for col in (
+            "translations",
+            "telegram_analysis",
+            "editorial_context_fa",
+            "summary_anchor",
+            "hourly_update_signal",
+        ):
+            assert f"Story.{col}" in src and "defer" in src, (
+                f"_merge_hidden_stories must defer Story.{col} on its "
+                f"select(Story)."
+            )
+
+    def test_merge_similar_visible_stories_defers_heavy_story_jsonb(self):
+        import inspect
+
+        from app.services.clustering import merge_similar_visible_stories
+
+        src = inspect.getsource(merge_similar_visible_stories)
+        for col in (
+            "translations",
+            "telegram_analysis",
+            "editorial_context_fa",
+            "summary_anchor",
+            "hourly_update_signal",
+        ):
+            assert f"Story.{col}" in src and "defer" in src, (
+                f"merge_similar_visible_stories must defer Story.{col} "
+                f"on its select(Story)."
+            )
+
+
+class TestVisibleStoriesStatMatchesHomepageGate:
+    """Cycle-1 audit Island 11 found a canary/stat mismatch: the
+    `article_count_drift` canary correctly filters `archived_at IS NULL`
+    (matching the public trending API's filter), but the dashboard's
+    `visible_stories` stat at admin.py L159 did not. Result: the stat
+    over-reported homepage visibility by counting archived stories
+    that don't appear on /api/v1/stories/trending. The fix aligns the
+    stat to the gate.
+    """
+
+    def test_visible_stories_filters_archived(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py"
+        ).read_text()
+        idx = src.find("visible_stories = ")
+        assert idx >= 0, "visible_stories assignment must exist in admin.py"
+        # Grab the surrounding ~400 chars (the SQL query body).
+        window = src[idx : idx + 400]
+        assert "Story.article_count >= 5" in window, (
+            "visible_stories must keep the >= 5 article gate."
+        )
+        assert "Story.archived_at.is_(None)" in window, (
+            "visible_stories stat must filter archived_at IS NULL to "
+            "match the public trending API. Otherwise it over-reports "
+            "homepage visibility."
+        )
+
+
+class TestR2BackupSubprocessOrder:
+    """Cycle-1 audit Island 13 found the R2 backup script closing
+    pg_dump's stdout before calling proc.wait(). This can SIGPIPE
+    pg_dump while it's still flushing — silently corrupting the backup
+    while reporting rc=0 (or rc=141 SIGPIPE). The fix: wait first,
+    then close.
+    """
+
+    def test_backup_script_waits_before_closing_stdout(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "scripts"
+            / "r2_db_backup.py"
+        ).read_text()
+        # Find the backup function body (around the gzip+Popen block).
+        idx = src.find("with gzip.open(out_path")
+        assert idx >= 0, "Expected backup gzip+Popen block."
+        block = src[idx : idx + 800]
+        # The wait() must happen inside the try (or before the close()).
+        # Bad: copyfileobj → close → wait
+        # Good: copyfileobj → wait → close (or wait inside try)
+        wait_pos = block.find("proc.wait(")
+        close_pos = block.find("proc.stdout.close(")
+        assert wait_pos >= 0 and close_pos >= 0
+        assert wait_pos < close_pos, (
+            "pg_dump backup must call proc.wait() BEFORE proc.stdout."
+            "close(). Closing first can SIGPIPE pg_dump and silently "
+            "truncate the dump."
+        )

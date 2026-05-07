@@ -1770,8 +1770,26 @@ async def _merge_tiny_by_cosine(db: AsyncSession, threshold: float = 0.60) -> in
     from app.models.social import TelegramPost, SocialSentimentSnapshot
     from app.models.feedback import RaterFeedback
 
+    # Egress fix (Parham 2026-05-07): defer the heavy Story JSONB columns
+    # this function never reads. Tiny-merge only needs id, article_count,
+    # centroid_embedding (for cosine), title_fa (for log), last_updated_at.
+    # Loading translations / telegram_analysis / editorial_context_fa /
+    # summary_anchor / analysis_snapshot_24h / hourly_update_signal /
+    # summary_en is pure waste at ~10-20 KB per row × ~1000 tiny stories.
+    from sqlalchemy.orm import defer as _defer_merge
+    _MERGE_STORY_DEFERS = (
+        _defer_merge(Story.translations),
+        _defer_merge(Story.telegram_analysis),
+        _defer_merge(Story.editorial_context_fa),
+        _defer_merge(Story.summary_anchor),
+        _defer_merge(Story.analysis_snapshot_24h),
+        _defer_merge(Story.hourly_update_signal),
+        _defer_merge(Story.summary_en),
+    )
     rows = (await db.execute(
-        select(Story).where(
+        select(Story)
+        .options(*_MERGE_STORY_DEFERS)
+        .where(
             Story.article_count <= 4,
             Story.centroid_embedding.isnot(None),
             Story.is_edited.is_(False),
@@ -1856,8 +1874,21 @@ async def _merge_hidden_stories(db: AsyncSession) -> int:
 
     Returns number of stories that were merged (absorbed into others).
     """
+    # Egress fix (Parham 2026-05-07): same defer pattern as
+    # _merge_tiny_by_cosine. Hidden-story merge reads id, article_count,
+    # title_fa, title_en, slug, centroid_embedding (for cosine).
+    from sqlalchemy.orm import defer as _defer_merge_h
     result = await db.execute(
         select(Story)
+        .options(
+            _defer_merge_h(Story.translations),
+            _defer_merge_h(Story.telegram_analysis),
+            _defer_merge_h(Story.editorial_context_fa),
+            _defer_merge_h(Story.summary_anchor),
+            _defer_merge_h(Story.analysis_snapshot_24h),
+            _defer_merge_h(Story.hourly_update_signal),
+            _defer_merge_h(Story.summary_en),
+        )
         .where(Story.article_count < 5, Story.frozen_at.is_(None))
         .order_by(Story.article_count.desc())
     )
@@ -1998,8 +2029,21 @@ async def merge_similar_visible_stories(db: AsyncSession) -> int:
     # cluster and bumped its timestamp. Verified 2026-05-06 against
     # story f06af369 (245 articles, first_published_at = 2026-04-06).
     umbrella_cutoff = datetime.now(timezone.utc) - timedelta(days=UMBRELLA_FIRST_PUB_CAP_DAYS)
+    # Egress fix (Parham 2026-05-07): defer heavy Story JSONB cols. This
+    # function only reads title_fa, title_en, centroid_embedding (cosine),
+    # article_count, last_updated_at, trending_score, first_published_at.
+    from sqlalchemy.orm import defer as _defer_merge_v
     result = await db.execute(
         select(Story)
+        .options(
+            _defer_merge_v(Story.translations),
+            _defer_merge_v(Story.telegram_analysis),
+            _defer_merge_v(Story.editorial_context_fa),
+            _defer_merge_v(Story.summary_anchor),
+            _defer_merge_v(Story.analysis_snapshot_24h),
+            _defer_merge_v(Story.hourly_update_signal),
+            _defer_merge_v(Story.summary_en),
+        )
         .where(
             Story.article_count >= 5,
             Story.article_count < settings.max_cluster_size,

@@ -156,8 +156,15 @@ async def get_dashboard(db: AsyncSession = Depends(get_db)):
     without_fa_title = total_articles - with_fa_title
 
     total_stories = (await db.execute(select(func.count(Story.id)))).scalar() or 0
+    # archived_at filter (Parham 2026-05-07 audit Island 11): public
+    # trending API filters archived stories out, so dashboard's "visible
+    # stories" stat must match — otherwise it over-reports homepage
+    # visibility by counting stories that don't appear there.
     visible_stories = (await db.execute(
-        select(func.count(Story.id)).where(Story.article_count >= 5)
+        select(func.count(Story.id)).where(
+            Story.article_count >= 5,
+            Story.archived_at.is_(None),
+        )
     )).scalar() or 0
     stories_with_summary = (await db.execute(
         select(func.count(Story.id)).where(Story.summary_fa.isnot(None))
