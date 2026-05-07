@@ -940,6 +940,7 @@ async def get_story(
         articles=articles_with_bias,
         arc=arc_brief,
         covering_sources=covering_sources,
+        translations=story.translations,
     )
 
     # Bump view_count AFTER the response is built, in a background task so
