@@ -5848,7 +5848,30 @@ async def step_fix_issues():
 
     async with async_session() as db:
         # Fix 1: Translate English title_fa
-        result = await db.execute(select(Article).where(Article.title_fa.isnot(None)))
+        # Egress fix (Parham 2026-05-07): the original query loaded every
+        # row in the articles table (~30k × 4 heavy JSONB cols ≈ 200 MB
+        # per cron) just to do a Python-side ASCII-density filter. Defer
+        # the heavy columns, scope to title_fa (the only column read), and
+        # cap at the last 14 days of ingest — old titles that survived
+        # without translation aren't going to get retranslated by this
+        # fallback step anyway.
+        from sqlalchemy.orm import defer as _defer_fix
+        from datetime import timedelta as _td_fix
+        fix1_cutoff = datetime.now(timezone.utc) - _td_fix(days=14)
+        result = await db.execute(
+            select(Article)
+            .options(
+                _defer_fix(Article.embedding),
+                _defer_fix(Article.content_text),
+                _defer_fix(Article.keywords),
+                _defer_fix(Article.named_entities),
+            )
+            .where(
+                Article.title_fa.isnot(None),
+                Article.ingested_at >= fix1_cutoff,
+            )
+            .limit(5000)
+        )
         english_in_fa = []
         for a in result.scalars().all():
             if a.title_fa and sum(1 for c in a.title_fa if c.isascii() and c.isalpha()) > len(a.title_fa) * 0.5:
@@ -5893,7 +5916,19 @@ async def step_fix_issues():
 
         # Fix 2: Clean source names from Telegram titles
         result = await db.execute(
-            select(Article).where(Article.url.contains("t.me/"), Article.title_fa.contains("|"))
+            select(Article)
+            .options(
+                _defer_fix(Article.embedding),
+                _defer_fix(Article.content_text),
+                _defer_fix(Article.keywords),
+                _defer_fix(Article.named_entities),
+            )
+            .where(
+                Article.url.contains("t.me/"),
+                Article.title_fa.contains("|"),
+                Article.ingested_at >= fix1_cutoff,
+            )
+            .limit(2000)
         )
         cleaned = 0
         for a in result.scalars().all():

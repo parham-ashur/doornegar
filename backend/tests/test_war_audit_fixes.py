@@ -1325,3 +1325,37 @@ class TestAutoFreezeOnUmbrellaSize:
             "oversized active umbrellas auto-freeze even when their "
             "first_published_at is recent."
         )
+
+
+class TestFixIssuesBoundedAndDeferred:
+    """The 2026-05-07 cycle-1 redo audit caught step_fix_issues loading
+    the entire articles table (no LIMIT, no defer) just to do a Python-
+    side ASCII-density filter on title_fa. With ~30k rows × 4 heavy
+    JSONB columns, that's ~200 MB of egress per cron — the largest
+    single cron-side leak after d93fa14 patched the obvious sites.
+
+    Tripwire: both select(Article) queries inside step_fix_issues must
+    defer the 4 heavy JSONB columns AND have a LIMIT clause.
+    """
+
+    def test_fix_issues_select_article_is_bounded_and_deferred(self):
+        import inspect
+
+        from auto_maintenance import step_fix_issues
+
+        src = inspect.getsource(step_fix_issues)
+
+        # Both selects against Article must defer the four heavy cols.
+        for col in ("embedding", "content_text", "keywords", "named_entities"):
+            assert src.count(f"Article.{col}") >= 2, (
+                f"step_fix_issues must defer Article.{col} on every "
+                f"select(Article) site (currently 2 sites). Without "
+                f"defer, the full articles table is fetched into memory."
+            )
+
+        # Must have at least one .limit() — never load the full table.
+        assert ".limit(" in src, (
+            "step_fix_issues must bound its select(Article) queries with "
+            ".limit() — the original implementation loaded ~30k articles "
+            "to do a Python-side title filter."
+        )
