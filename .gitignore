@@ -81,6 +81,11 @@ backend/scripts/embed_comparison_*.json
 DEVLOG.md
 docs/
 project-management/
+# But: critical operational runbooks MUST live in git so a
+# successor has access in <24h emergencies. Whitelist them
+# explicitly; secrets stay in `memory/` (also gitignored).
+!project-management/BUS_FACTOR_RUNBOOK.md
+!project-management/audit/
 
 # Local-only design + agent skill artifacts (never on GitHub)
 PRODUCT.md

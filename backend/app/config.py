@@ -1,3 +1,6 @@
+import os
+
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -124,6 +127,23 @@ class Settings(BaseSettings):
     unsplash_access_key: str = ""  # get one free at unsplash.com/developers
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+
+    @field_validator("secret_key", mode="after")
+    @classmethod
+    def _check_secret_key(cls, v: str) -> str:
+        # Cycle-1 audit Island 13: secret_key default is "" but ALL
+        # crypto/JWT operations need it non-empty. Without this gate, a
+        # fresh deploy with the env var unset starts up fine and
+        # crashes only when crypto fires. Skip the check during pytest
+        # collection (PYTEST_CURRENT_TEST is set) so the suite can
+        # import settings without a real env.
+        if not v and not os.environ.get("PYTEST_CURRENT_TEST"):
+            raise ValueError(
+                "SECRET_KEY env var must be set and non-empty. "
+                "Generate with `python -c 'import secrets; "
+                "print(secrets.token_urlsafe(32))'`."
+            )
+        return v
 
     @property
     def async_database_url(self) -> str:
