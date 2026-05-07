@@ -1035,11 +1035,22 @@ async def step_recluster_orphans():
         for art_id, emb in orphans:
             best_sim = 0.0
             best_story = None
-            had_capacity_blocked = False
+            # Cycle-2 audit (2026-05-07): track *all-stories-full* vs
+            # *some-stories-blocked-but-others-checked*. Pre-this-fix
+            # `had_capacity_blocked = True` if even ONE story was at
+            # cap, so the counter overcounted whenever the only stories
+            # we could check were the full ones AND best_story stayed
+            # None for unrelated reasons (low sim, _cs exceptions). Now
+            # we increment skipped_capacity_exhausted only when EVERY
+            # candidate hit the capacity guard — i.e. `available_count`
+            # for this orphan was 0.
+            blocked_by_capacity = 0
+            available_count = 0
             for sid, cent in stories:
                 if capacity.get(sid, 0) <= 0:
-                    had_capacity_blocked = True
+                    blocked_by_capacity += 1
                     continue
+                available_count += 1
                 try:
                     sim = _cs(emb, cent)
                 except Exception:
@@ -1051,7 +1062,9 @@ async def step_recluster_orphans():
                 attached_ids[art_id] = best_story
                 capacity[best_story] -= 1
             elif best_story is None:
-                if had_capacity_blocked:
+                # Only attribute to capacity exhaustion when no story
+                # was even available to compare against.
+                if available_count == 0 and blocked_by_capacity > 0:
                     skipped_capacity_exhausted += 1
                 else:
                     skipped_full += 1
@@ -1375,7 +1388,7 @@ async def step_summarize():
     """
     import json as _json
 
-    from sqlalchemy import select, text
+    from sqlalchemy import func, select, text
     from sqlalchemy.orm import selectinload
 
     from app.config import settings
@@ -1507,7 +1520,20 @@ async def step_summarize():
                 # untouched manual edits, lets anchored ones refresh.
                 (Story.is_edited.is_(False)) | (Story.summary_anchor.isnot(None)),
             )
-            .order_by(Story.priority.desc(), Story.trending_score.desc().nullslast())
+            # Cycle-2 audit (2026-05-07): align with /stories/trending
+            # ordering exactly so spend-priority matches display-priority.
+            # Pre-this-fix the API used 3-key sort (priority,
+            # coalesce(frozen_at, first_published_at), trending_score)
+            # but step_summarize used 2-key (priority, trending_score),
+            # so on quiet days the slot-1 homepage card could be without
+            # a summary while slot-2 had one — spend went to slot-2.
+            .order_by(
+                Story.priority.desc(),
+                func.coalesce(
+                    Story.frozen_at, Story.first_published_at
+                ).desc().nullslast(),
+                Story.trending_score.desc().nullslast(),
+            )
             .limit(HOMEPAGE_POOL_SIZE)
         )
         scan_candidates = list(result.scalars().all())
