@@ -153,13 +153,18 @@ class TestPipelineOrdering:
         m = _import_pipelines()
         assert self._idx(m, "summarize") < self._idx(m, "bias_score")
 
-    def test_demote_before_archive(self):
-        """Per the 2026-05-03 demote-on-freeze model, demote runs
-        BEFORE archive_stale so a freshly-frozen story gets demoted
-        in the same cron tick. If archive ran first, demote would
-        skip the just-archived stories (filter excludes them)."""
+    def test_archive_before_demote(self):
+        """Cycle-1 audit Phase B reordering (2026-05-07): archive_stale
+        runs BEFORE demote so a story FRESHLY frozen by archive_stale's
+        freeze pass (day-7 age trigger or article_count > 100 trigger)
+        gets demoted in the same cron tick. Prior ordering left a 6h
+        window where newly-frozen umbrellas stayed at priority=0 on
+        the homepage. Day-30 stories that go from frozen → archived
+        in archive_stale were already demoted on a prior cron's
+        day-7 freeze, so demote correctly skips them now (archived_at
+        filter excludes archived stories)."""
         m = _import_pipelines()
-        assert self._idx(m, "demote_umbrellas") < self._idx(m, "archive_stale")
+        assert self._idx(m, "archive_stale") < self._idx(m, "demote_umbrellas")
 
     def test_archive_before_late_recalc_trending(self):
         """The late recalc_trending must see archived_at flags so

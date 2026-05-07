@@ -4099,15 +4099,20 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
     # still being built. Once any translation_* row appears in
     # llm_usage_logs the canaries flip to evaluating real values.
     #
-    # Explicit purpose IN (...) — earlier LIKE 'translation\_%' ESCAPE '\'
-    # rendered as ESCAPE '' in Python source-string parsing (the
-    # backslash before the closing quote got swallowed as a Python
-    # escape), so `_` was an SQL wildcard again and the canary read
-    # $0 cost even with real translation_en rows present (diagnosed
-    # 2026-05-07 after the first cron run).
-    translation_active_7d = int((await db.execute(_t("""
+    # Cycle-1 audit Island 11: pulled the purpose tuple out so adding a
+    # locale (e.g. translation_de in Phase 3) is one edit, not five.
+    # The earlier LIKE 'translation\_%' ESCAPE '\' approach broke when
+    # Python parsed the escape (rendered as ESCAPE '') so `_` became
+    # an SQL wildcard — caught 2026-05-07.
+    _TRANSLATION_PURPOSES = (
+        "translation_en", "translation_fr",
+        "translation_en_retransform", "translation_fr_retransform",
+    )
+    _purposes_sql = ", ".join(f"'{p}'" for p in _TRANSLATION_PURPOSES)
+
+    translation_active_7d = int((await db.execute(_t(f"""
         SELECT COUNT(*) FROM llm_usage_logs
-        WHERE purpose IN ('translation_en', 'translation_fr', 'translation_en_retransform', 'translation_fr_retransform')
+        WHERE purpose IN ({_purposes_sql})
           AND timestamp >= NOW() - INTERVAL '7 days'
     """))).scalar() or 0)
     translation_phase_active = translation_active_7d > 0
@@ -4125,25 +4130,25 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
     combined_mtd = llm_mtd_cost + neon_cost_mtd
     budget_guard_armed = combined_mtd >= 30.0 * 0.80
 
-    translation_cost_24h = float((await db.execute(_t("""
+    translation_cost_24h = float((await db.execute(_t(f"""
         SELECT COALESCE(SUM(total_cost), 0)
         FROM llm_usage_logs
-        WHERE purpose IN ('translation_en', 'translation_fr', 'translation_en_retransform', 'translation_fr_retransform')
+        WHERE purpose IN ({_purposes_sql})
           AND timestamp >= NOW() - INTERVAL '24 hours'
     """))).scalar() or 0.0)
 
-    translation_attempts_24h = int((await db.execute(_t("""
+    translation_attempts_24h = int((await db.execute(_t(f"""
         SELECT COUNT(*) FROM llm_usage_logs
-        WHERE purpose IN ('translation_en', 'translation_fr', 'translation_en_retransform', 'translation_fr_retransform')
+        WHERE purpose IN ({_purposes_sql})
           AND timestamp >= NOW() - INTERVAL '24 hours'
     """))).scalar() or 0)
     # A translation call that committed zero priced tokens is a strong
     # signal of failure (LLM-refusal sentinel detected, JSON parse
     # failed, etc.). Phase 2 will additionally tag failures via
     # meta->>'failed' = 'true' but this fallback works without that.
-    translation_failures_24h = int((await db.execute(_t("""
+    translation_failures_24h = int((await db.execute(_t(f"""
         SELECT COUNT(*) FROM llm_usage_logs
-        WHERE purpose IN ('translation_en', 'translation_fr', 'translation_en_retransform', 'translation_fr_retransform')
+        WHERE purpose IN ({_purposes_sql})
           AND timestamp >= NOW() - INTERVAL '24 hours'
           AND (
               total_cost = 0

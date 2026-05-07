@@ -7308,8 +7308,14 @@ FULL_PIPELINE = [
     ("detect_coordination", "Detect coordinated messaging", "step_detect_coordination"),
     ("source_health", "Source health", "step_source_health"),
     ("prune_stagnant", "Prune 1-article (>48h) and 2-4-article (>14d) stagnant stories", "step_prune_stagnant"),
-    ("demote_umbrellas", "Demote umbrella stories (>21d old + >100 articles)", "step_demote_umbrella_stories"),
+    # Cycle-1 audit Phase B: archive_stale must run BEFORE demote.
+    # archive_stale sets `frozen_at` on newly-aged stories and on
+    # umbrellas crossing article_count > 100; demote requires
+    # `frozen_at IS NOT NULL`. With the prior order (demote → archive),
+    # newly-frozen stories stayed at priority 0 on the homepage for
+    # the 6h window between this cron and the next.
     ("archive_stale", "Archive stale stories", "step_archive_stale"),
+    ("demote_umbrellas", "Demote umbrella stories (>21d old + >100 articles)", "step_demote_umbrella_stories"),
     ("recalc_trending", "Recalculate trending", "step_recalculate_trending"),
     ("dedup_articles", "Dedup articles", "step_deduplicate_articles"),
     ("fixes", "Auto-fix common issues", "step_fix_issues"),
