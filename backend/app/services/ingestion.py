@@ -169,7 +169,19 @@ async def ingest_source(source: Source, db: AsyncSession) -> dict:
 
     Returns dict with counts: {found, new, errors}.
     """
-    stats = {"found": 0, "new": 0, "errors": 0}
+    # Cycle-1 audit Island 1: stats now break out silent-skip categories
+    # (no_url / no_title / by_exclusion / duplicates) so a structural
+    # change in a source's RSS schema is visible in /admin/maintenance/
+    # logs instead of disappearing into a quiet "found: 0".
+    stats = {
+        "found": 0,
+        "new": 0,
+        "errors": 0,
+        "skipped_no_url": 0,
+        "skipped_no_title": 0,
+        "skipped_by_exclusion": 0,
+        "duplicates_skipped": 0,
+    }
     rss_urls = source.rss_urls if isinstance(source.rss_urls, list) else []
 
     for feed_url in rss_urls:
@@ -202,6 +214,7 @@ async def ingest_source(source: Source, db: AsyncSession) -> dict:
             for entry in entries:
                 url = entry.get("link", "").strip()
                 if not url:
+                    stats["skipped_no_url"] += 1
                     continue
 
                 # Skip sections we don't cover (sport/entertainment/
@@ -214,6 +227,7 @@ async def ingest_source(source: Source, db: AsyncSession) -> dict:
 
                 title = entry.get("title", "").strip()
                 if not title:
+                    stats["skipped_no_title"] += 1
                     continue
 
                 summary = entry.get("summary", entry.get("description", "")).strip()
@@ -275,10 +289,16 @@ async def ingest_source(source: Source, db: AsyncSession) -> dict:
                 result = await db.execute(stmt)
                 if result.scalar_one_or_none() is not None:
                     new_count += 1
+                else:
+                    # on_conflict_do_nothing fired — URL already in DB.
+                    # Tracked so a source republishing old content (signal
+                    # of upstream CMS staleness) is visible in stats.
+                    stats["duplicates_skipped"] += 1
 
             log.articles_new = new_count
             stats["found"] += log.articles_found
             stats["new"] += new_count
+            stats["skipped_by_exclusion"] += skipped_url
             if skipped_url:
                 logger.info(f"  {source.slug}: skipped {skipped_url} URLs matching exclusion patterns")
 
@@ -304,7 +324,12 @@ async def ingest_all_sources(db: AsyncSession) -> dict:
     )
     sources = result.scalars().all()
 
-    total_stats = {"found": 0, "new": 0, "errors": 0, "scraped": 0, "sources": len(sources)}
+    total_stats = {
+        "found": 0, "new": 0, "errors": 0, "scraped": 0,
+        "sources": len(sources),
+        "skipped_no_url": 0, "skipped_no_title": 0,
+        "skipped_by_exclusion": 0, "duplicates_skipped": 0,
+    }
     for source in sources:
         logger.info(f"Ingesting source: {source.slug}")
         try:
@@ -316,6 +341,8 @@ async def ingest_all_sources(db: AsyncSession) -> dict:
         total_stats["found"] += source_stats["found"]
         total_stats["new"] += source_stats["new"]
         total_stats["errors"] += source_stats["errors"]
+        for k in ("skipped_no_url", "skipped_no_title", "skipped_by_exclusion", "duplicates_skipped"):
+            total_stats[k] += source_stats.get(k, 0)
 
         # Fallback: if RSS failed, try scraping
         if source_stats["found"] == 0 and source_stats["errors"] > 0:
