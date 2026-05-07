@@ -761,29 +761,48 @@ async def link_posts_by_embedding(
                 except Exception:
                     pass
 
-        # Pass-2 input: stories + centroids + last_updated_at
+        # Pass-2 input: stories + centroids + last_updated_at.
+        # Egress fix (Parham 2026-05-07 Neon $18 incident): pull only
+        # the columns we read here. Previous full select(Story) was
+        # loading every JSONB column — telegram_analysis (up to 50KB),
+        # editorial_context_fa, summary_anchor, analysis_snapshot_24h,
+        # hourly_update_signal, translations — for ~1000+ stories per
+        # cron, even though we only read id + centroid + last_updated.
+        # Bounded scope: only stories updated in last 14 days are
+        # candidates anyway (older stories' Telegram window has
+        # passed). Drops query weight from ~30 MB to ~3 MB per cron.
+        from datetime import timedelta as _td
+        story_recency_cutoff = datetime.now(timezone.utc) - _td(days=14)
         story_result = await db.execute(
-            select(Story).where(
+            select(Story.id, Story.centroid_embedding, Story.last_updated_at).where(
                 Story.centroid_embedding.isnot(None),
                 Story.article_count >= 3,
+                Story.last_updated_at >= story_recency_cutoff,
+                Story.archived_at.is_(None),
             )
         )
-        for s in story_result.scalars().all():
-            c = _clean_vec(s.centroid_embedding)
+        for sid, centroid, last_upd in story_result.all():
+            c = _clean_vec(centroid)
             if c is not None:
-                story_centroids[str(s.id)] = c
-                if s.last_updated_at is not None:
-                    story_last_updated[str(s.id)] = s.last_updated_at
+                story_centroids[str(sid)] = c
+                if last_upd is not None:
+                    story_last_updated[str(sid)] = last_upd
 
         if not story_centroids:
             return {"linked": 0, "reason": "no stories with centroids"}
 
-        # Per-article embeddings (rescues broad clusters with diluted centroids)
+        # Per-article embeddings (rescues broad clusters with diluted centroids).
+        # 7-day window (Parham 2026-05-07): articles older than 7 days
+        # are not reused for matching. Without this filter, we pulled
+        # ~30K embeddings × 3.7 KB each = 110 MB per cron run, even
+        # though only the recent slice can match new posts.
+        article_recency_cutoff = datetime.now(timezone.utc) - _td(days=7)
         article_result = await db.execute(
             select(Article.story_id, Article.embedding)
             .where(
                 Article.story_id.in_(list(story_centroids.keys())),
                 Article.embedding.isnot(None),
+                Article.ingested_at >= article_recency_cutoff,
             )
         )
         for sid, emb in article_result.all():

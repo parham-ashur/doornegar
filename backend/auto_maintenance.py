@@ -1027,8 +1027,25 @@ async def step_recompute_centroids():
         )
         live_counts = {sid: c for sid, c in live_counts_q.all()}
 
+        # Egress fix (Parham 2026-05-07): defer heavy JSONB columns
+        # we don't read in this step. Previous full select(Story)
+        # was loading translations, telegram_analysis,
+        # editorial_context_fa, summary_anchor, analysis_snapshot_24h,
+        # hourly_update_signal — ~30 MB per cron to recompute
+        # centroids that only need centroid_embedding + article_count.
+        from sqlalchemy.orm import defer as _defer
         result = await db.execute(
-            select(Story).where(
+            select(Story)
+            .options(
+                _defer(Story.translations),
+                _defer(Story.telegram_analysis),
+                _defer(Story.editorial_context_fa),
+                _defer(Story.summary_anchor),
+                _defer(Story.analysis_snapshot_24h),
+                _defer(Story.hourly_update_signal),
+                _defer(Story.summary_en),
+            )
+            .where(
                 Story.article_count >= 2,
                 Story.frozen_at.is_(None),
                 Story.archived_at.is_(None),
@@ -1130,9 +1147,19 @@ async def step_summarize_newly_visible():
         # Mirrors homepage_eligible_filters() + adds the "no summary yet"
         # gate. Excludes is_blindspot stories (the blindspot section uses
         # a different surface) and the priority=-100 hidden tier.
+        # Egress fix (Parham 2026-05-07): defer heavy article cols.
+        # step_summarize_newly_visible reads title + content_text +
+        # source — embedding/keywords/named_entities aren't used.
+        from sqlalchemy.orm import defer as _defer_snv
         result = await db.execute(
             select(Story)
-            .options(selectinload(Story.articles).selectinload(Article.source))
+            .options(
+                selectinload(Story.articles).options(
+                    _defer_snv(Article.embedding),
+                    _defer_snv(Article.keywords),
+                    _defer_snv(Article.named_entities),
+                ).selectinload(Article.source),
+            )
             .where(
                 Story.article_count >= 4,
                 Story.summary_fa.is_(None),
@@ -1350,9 +1377,19 @@ async def step_summarize():
         # the active priority=0 stories at the top of the page stay blank
         # (Parham 2026-05-03: top story 42 articles, NO summary; budget
         # burned on 2461-article umbrella sunk to slot 8).
+        # Egress fix (Parham 2026-05-07): defer embedding, keywords,
+        # named_entities. step_summarize uses content_text + title +
+        # source on each article, but never the embedding fields.
+        from sqlalchemy.orm import defer as _defer_summ
         result = await db.execute(
             select(Story)
-            .options(selectinload(Story.articles))
+            .options(
+                selectinload(Story.articles).options(
+                    _defer_summ(Article.embedding),
+                    _defer_summ(Article.keywords),
+                    _defer_summ(Article.named_entities),
+                ),
+            )
             .where(
                 *homepage_eligible,
                 (Story.llm_failed_at.is_(None)) | (Story.llm_failed_at < retry_cutoff),
@@ -1919,8 +1956,20 @@ async def step_fix_images():
     # commit at the end (200-row cap means each session is short-lived,
     # so the same Neon-reaper risk doesn't apply here).
     async with async_session() as db, httpx.AsyncClient(timeout=5, follow_redirects=True) as client:
+        # Egress fix (Parham 2026-05-07): defer embedding, keywords,
+        # named_entities, content_text. step_fix_images only reads
+        # article.image_url + url — never the heavy fields. Saves
+        # ~65 MB per cron (200 stories × ~50 articles × 6.5 KB).
+        from sqlalchemy.orm import defer as _defer_fix
         result = await db.execute(
-            select(Story).options(selectinload(Story.articles))
+            select(Story).options(
+                selectinload(Story.articles).options(
+                    _defer_fix(Article.embedding),
+                    _defer_fix(Article.keywords),
+                    _defer_fix(Article.named_entities),
+                    _defer_fix(Article.content_text),
+                ),
+            )
             .where(Story.article_count >= 5)
             .limit(200)  # cap to avoid loading all stories into memory
         )
@@ -2003,9 +2052,22 @@ async def step_story_quality():
         if not homepage_ids:
             # Nothing on the homepage right now — skip the whole step.
             return stats
+        # Egress fix (Parham 2026-05-07): defer ALL heavy article
+        # columns. This phase only reads len(story.articles) — doesn't
+        # touch any article column values. Selectinload drops to
+        # essentially metadata only.
+        from sqlalchemy.orm import defer as _defer_sq
         result = await db.execute(
             select(Story)
-            .options(selectinload(Story.articles).selectinload(Article.source))
+            .options(
+                selectinload(Story.articles).options(
+                    _defer_sq(Article.embedding),
+                    _defer_sq(Article.keywords),
+                    _defer_sq(Article.named_entities),
+                    _defer_sq(Article.content_text),
+                    _defer_sq(Article.summary),
+                ).selectinload(Article.source),
+            )
             .where(
                 Story.id.in_(homepage_ids),
                 Story.summary_fa.isnot(None),
@@ -4765,8 +4827,18 @@ async def step_deduplicate_articles():
         # day's ingest. The O(n²) pairwise check is bounded by
         # `same story_id` so the practical work is n × avg_cluster_size.
         cutoff = datetime.now(timezone.utc) - timedelta(hours=48)
+        # Egress fix (Parham 2026-05-07): defer content_text, keywords,
+        # named_entities. Dedup only reads id, url, embedding, story_id.
+        # Loading content_text on 800 articles was ~1 MB; keywords/NE
+        # another ~1 MB. Tiny per-cron but multiplies across all sites.
+        from sqlalchemy.orm import defer as _defer_dedup
         recent = await db.execute(
             select(Article)
+            .options(
+                _defer_dedup(Article.content_text),
+                _defer_dedup(Article.keywords),
+                _defer_dedup(Article.named_entities),
+            )
             .where(
                 Article.ingested_at >= cutoff,
                 Article.embedding.isnot(None),
@@ -5203,14 +5275,34 @@ async def step_flag_unrelated_articles():
         )
         stats["legacy_cleaned"] = cleanup.rowcount or 0
 
-        # Get visible stories with centroids
+        # Egress fix (Parham 2026-05-07): defer Story JSONBs we don't
+        # read here. Need only id + centroid_embedding + article_count.
+        # Plus per Parham's "we don't care about articles older than
+        # 7 days" rule: limit to recently-active stories so we don't
+        # re-scan an article that's already been judged.
+        from sqlalchemy.orm import defer as _defer_unrelated
         result = await db.execute(
-            select(Story).where(
+            select(Story)
+            .options(
+                _defer_unrelated(Story.translations),
+                _defer_unrelated(Story.telegram_analysis),
+                _defer_unrelated(Story.editorial_context_fa),
+                _defer_unrelated(Story.summary_anchor),
+                _defer_unrelated(Story.analysis_snapshot_24h),
+                _defer_unrelated(Story.hourly_update_signal),
+                _defer_unrelated(Story.summary_en),
+            )
+            .where(
                 Story.article_count >= 5,
                 Story.centroid_embedding.isnot(None),
+                Story.archived_at.is_(None),
             )
         )
         stories = list(result.scalars().all())
+
+        # Articles older than this don't get flagged-unrelated. They're
+        # historical artifacts; their cluster judgment is final.
+        article_recency_cutoff = datetime.now(timezone.utc) - timedelta(days=7)
 
         detached_ids: list = []
         for story in stories:
@@ -5221,10 +5313,20 @@ async def step_flag_unrelated_articles():
                 stats["skipped_no_centroid"] += 1
                 continue
 
+            # Defer heavy text/JSONB on Article — we only read
+            # id + embedding + story_id here. 7-day filter caps the
+            # blast radius per Parham's rule.
             art_result = await db.execute(
-                select(Article).where(
+                select(Article)
+                .options(
+                    _defer_unrelated(Article.content_text),
+                    _defer_unrelated(Article.keywords),
+                    _defer_unrelated(Article.named_entities),
+                )
+                .where(
                     Article.story_id == story.id,
                     Article.embedding.isnot(None),
+                    Article.ingested_at >= article_recency_cutoff,
                 )
             )
             articles = list(art_result.scalars().all())
@@ -5377,9 +5479,20 @@ async def step_detect_silences():
         if not visible_ids:
             logger.info("Detect silences: no homepage-visible stories — skipping")
             return stats
+        # Egress fix (Parham 2026-05-07): defer all heavy article cols.
+        # silence detection only counts articles per side via source —
+        # never reads embedding/keywords/named_entities/content_text.
+        from sqlalchemy.orm import defer as _defer_sil
         result = await db.execute(
             select(Story)
-            .options(selectinload(Story.articles).selectinload(Article.source))
+            .options(
+                selectinload(Story.articles).options(
+                    _defer_sil(Article.embedding),
+                    _defer_sil(Article.keywords),
+                    _defer_sil(Article.named_entities),
+                    _defer_sil(Article.content_text),
+                ).selectinload(Article.source),
+            )
             .where(Story.id.in_(visible_ids))
             .order_by(Story.priority.desc(), Story.trending_score.desc())
             .limit(50)
@@ -6077,12 +6190,33 @@ async def step_snapshot_analyses():
         # except block below silently caught, zeroing every snapshot
         # (and later making every story falsely flag "پوشش ... آغاز شد"
         # on the homepage).
-        from sqlalchemy.orm import selectinload
+        # MASSIVE egress fix (Parham 2026-05-07): this was the worst
+        # query in the pipeline — NO LIMIT, all stories with
+        # article_count >= 2, full article rows including heavy JSONB.
+        # ~1500 stories × 20 articles × 6.5 KB = 194 MB per cron.
+        # 4+ GB/week from this query alone. Defer all heavy columns
+        # AND limit to active (non-archived) stories — archived
+        # stories don't get their analysis snapshotted anyway because
+        # their snapshot is frozen at archive time.
+        from sqlalchemy.orm import defer as _defer_snap, selectinload
         from app.models.article import Article
         result = await db.execute(
             select(Story)
-            .options(selectinload(Story.articles).selectinload(Article.source))
-            .where(Story.article_count >= 2)
+            .options(
+                selectinload(Story.articles).options(
+                    _defer_snap(Article.embedding),
+                    _defer_snap(Article.keywords),
+                    _defer_snap(Article.named_entities),
+                    _defer_snap(Article.content_text),
+                    _defer_snap(Article.summary),
+                ).selectinload(Article.source),
+                _defer_snap(Story.translations),
+                _defer_snap(Story.telegram_analysis),
+                _defer_snap(Story.editorial_context_fa),
+                _defer_snap(Story.summary_anchor),
+                _defer_snap(Story.hourly_update_signal),
+            )
+            .where(Story.article_count >= 2, Story.archived_at.is_(None))
         )
         stories = list(result.scalars().all())
 

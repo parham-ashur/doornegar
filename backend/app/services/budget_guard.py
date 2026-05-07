@@ -100,6 +100,55 @@ async def get_llm_cost_mtd(db: AsyncSession) -> float:
     return cost
 
 
+async def get_neon_egress_estimate_mtd(db: AsyncSession) -> tuple[float, float]:
+    """Return (estimated_egress_gb_mtd, estimated_cost_usd_mtd).
+
+    Uses pg_stat_database.tup_returned × average row width as a proxy
+    for Neon's billed data transfer. This is approximate — Neon's
+    official metric is bytes-on-the-wire which includes protocol
+    overhead — but it's the best signal available from inside the DB.
+
+    Calibration anchor: 2026-05-07 incident showed 281 GB egress in
+    7 days at $18.15. That's $0.065/GB. Neon's documented data
+    transfer price is around that range.
+    """
+    GB = 1024 * 1024 * 1024
+    BYTES_PER_GB_USD = 0.065
+
+    try:
+        row = (await db.execute(_sa_text(
+            """
+            SELECT
+              tup_returned,
+              EXTRACT(EPOCH FROM (NOW() - GREATEST(
+                stats_reset, date_trunc('month', NOW())
+              ))) AS seconds_since_anchor
+            FROM pg_stat_database
+            WHERE datname = current_database()
+            """
+        ))).mappings().one_or_none()
+        if not row:
+            return 0.0, 0.0
+
+        # tup_returned counts rows scanned (including index scans that
+        # don't touch heap). Each row averages roughly the table heap
+        # size / row count. Conservative: assume average row weight of
+        # 4 KB (between articles ~10 KB and stories ~22 KB and
+        # llm_usage_logs ~360 B and bias_scores ~1 KB). Calibration
+        # via the 2026-05-07 incident confirms this is in the right
+        # order of magnitude.
+        AVG_ROW_BYTES = 4 * 1024
+
+        tup_returned_mtd = int(row["tup_returned"] or 0)
+        bytes_estimate = tup_returned_mtd * AVG_ROW_BYTES
+        gb_estimate = bytes_estimate / GB
+        cost_estimate = gb_estimate * BYTES_PER_GB_USD
+        return gb_estimate, cost_estimate
+    except Exception:
+        logger.exception("get_neon_egress_estimate_mtd failed")
+        return 0.0, 0.0
+
+
 async def get_manual_override(db: AsyncSession) -> Optional[str]:
     """Returns the manual override action ('lock'|'clear'|None).
 
@@ -134,10 +183,15 @@ async def should_halt_for_budget(db: AsyncSession) -> tuple[bool, str, dict]:
     Returns (halt: bool, reason: str, signals: dict).
     """
     llm_mtd = await get_llm_cost_mtd(db)
+    egress_gb, egress_cost = await get_neon_egress_estimate_mtd(db)
     override = await get_manual_override(db)
+    combined_mtd = llm_mtd + egress_cost
 
     signals = {
         "llm_cost_mtd_usd": round(llm_mtd, 4),
+        "neon_egress_estimate_gb_mtd": round(egress_gb, 2),
+        "neon_cost_estimate_usd_mtd": round(egress_cost, 4),
+        "combined_cost_estimate_usd_mtd": round(combined_mtd, 4),
         "monthly_budget_usd": MONTHLY_BUDGET_USD,
         "halt_fraction_llm": HALT_FRACTION_LLM,
         "halt_hard_usd": HALT_HARD_USD,
@@ -162,8 +216,25 @@ async def should_halt_for_budget(db: AsyncSession) -> tuple[bool, str, dict]:
             logger.exception("Failed to clear budget_override")
         return False, "manual_clear_one_shot", signals
 
+    # Neon egress alone can blow the budget without LLM spend rising
+    # (the 2026-05-07 incident: $18.15 of pure data transfer in 7
+    # days). The combined check catches both.
+    if combined_mtd >= HALT_HARD_USD:
+        return (
+            True,
+            f"combined_mtd_{combined_mtd:.2f}_over_hard_cap_{HALT_HARD_USD}",
+            signals,
+        )
+
     if llm_mtd >= HALT_HARD_USD:
         return True, f"llm_mtd_{llm_mtd:.2f}_over_hard_cap_{HALT_HARD_USD}", signals
+
+    if combined_mtd >= MONTHLY_BUDGET_USD * HALT_FRACTION_LLM:
+        return (
+            True,
+            f"combined_mtd_{combined_mtd:.2f}_over_{HALT_FRACTION_LLM:.0%}_of_{MONTHLY_BUDGET_USD}",
+            signals,
+        )
 
     if llm_mtd >= MONTHLY_BUDGET_USD * HALT_FRACTION_LLM:
         return (
