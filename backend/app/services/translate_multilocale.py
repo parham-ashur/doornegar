@@ -331,13 +331,17 @@ async def step_translate_homepage_visible() -> dict[str, Any]:
                     Story.id.in_(homepage_ids),
                     Story.title_fa.is_not(None),
                     _sa_text(
+                        # `<=` (not `<`) so a translation timestamped
+                        # at the same second as the story's updated_at
+                        # is treated as stale and re-translated. Off-by-
+                        # one fix from cycle-1 audit Island 6.
                         "(translations IS NULL "
                         " OR translations->'en' IS NULL "
                         " OR translations->'fr' IS NULL "
                         " OR (translations->'en'->>'translated_at')::timestamptz "
-                        "    < COALESCE(updated_at, created_at) "
+                        "    <= COALESCE(updated_at, created_at) "
                         " OR (translations->'fr'->>'translated_at')::timestamptz "
-                        "    < COALESCE(updated_at, created_at)) "
+                        "    <= COALESCE(updated_at, created_at)) "
                     ),
                 )
                 .order_by(Story.priority.desc(), Story.trending_score.desc())
