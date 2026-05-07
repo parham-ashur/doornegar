@@ -3711,6 +3711,123 @@ _health_cache: dict = {"data": None, "expires": 0.0}
 _HEALTH_CACHE_TTL = 60
 
 
+@router.get("/debug/egress-audit", dependencies=[Depends(require_admin)])
+async def egress_audit(db: AsyncSession = Depends(get_db)):
+    """Per-column byte-size measurement for the egress investigation.
+
+    Reports avg/max/sum bytes for the JSONB and TEXT columns most
+    likely to drive Neon data transfer. Pairs row-counts with row-byte
+    estimates so the 281GB/week number can be reconciled to specific
+    queries.
+    """
+    out: dict = {"tables": {}}
+
+    # Per-table totals
+    table_sizes = (await db.execute(_sa_text("""
+        SELECT
+            relname AS table_name,
+            pg_total_relation_size(C.oid) AS total_bytes,
+            pg_table_size(C.oid) AS heap_bytes,
+            pg_indexes_size(C.oid) AS index_bytes,
+            (SELECT reltuples::bigint FROM pg_class WHERE oid = C.oid) AS approx_rows
+        FROM pg_class C
+        WHERE relkind = 'r'
+          AND relname IN ('articles', 'stories', 'telegram_posts', 'sources',
+                          'llm_usage_logs', 'bias_scores', 'story_events')
+        ORDER BY pg_total_relation_size(C.oid) DESC
+    """))).mappings().all()
+    out["table_totals"] = [dict(r) for r in table_sizes]
+
+    # Per-column avg/max bytes for the suspected offenders.
+    # Sample 5000 rows so the query is bounded but representative.
+    article_cols = await db.execute(_sa_text("""
+        WITH sample AS (
+            SELECT * FROM articles
+            ORDER BY ingested_at DESC NULLS LAST
+            LIMIT 5000
+        )
+        SELECT
+            COUNT(*) AS sample_n,
+            ROUND(AVG(pg_column_size(embedding)::numeric)) AS avg_embedding_bytes,
+            MAX(pg_column_size(embedding)) AS max_embedding_bytes,
+            ROUND(AVG(pg_column_size(content_text)::numeric)) AS avg_content_text_bytes,
+            MAX(pg_column_size(content_text)) AS max_content_text_bytes,
+            ROUND(AVG(pg_column_size(keywords)::numeric)) AS avg_keywords_bytes,
+            ROUND(AVG(pg_column_size(named_entities)::numeric)) AS avg_named_entities_bytes,
+            ROUND(AVG(pg_column_size(title_translations)::numeric)) AS avg_title_translations_bytes,
+            ROUND(AVG(pg_column_size(summary)::numeric)) AS avg_summary_bytes,
+            ROUND(AVG(pg_column_size(title_original)::numeric)) AS avg_title_original_bytes
+        FROM sample
+    """))
+    out["articles_per_column"] = dict(article_cols.mappings().one() or {})
+
+    story_cols = await db.execute(_sa_text("""
+        SELECT
+            COUNT(*) AS total_stories,
+            ROUND(AVG(pg_column_size(centroid_embedding)::numeric)) AS avg_centroid_embedding_bytes,
+            MAX(pg_column_size(centroid_embedding)) AS max_centroid_embedding_bytes,
+            ROUND(AVG(pg_column_size(telegram_analysis)::numeric)) AS avg_telegram_analysis_bytes,
+            MAX(pg_column_size(telegram_analysis)) AS max_telegram_analysis_bytes,
+            ROUND(AVG(pg_column_size(translations)::numeric)) AS avg_translations_bytes,
+            ROUND(AVG(pg_column_size(summary_anchor)::numeric)) AS avg_summary_anchor_bytes,
+            ROUND(AVG(pg_column_size(editorial_context_fa)::numeric)) AS avg_editorial_context_bytes,
+            ROUND(AVG(pg_column_size(analysis_snapshot_24h)::numeric)) AS avg_analysis_snapshot_bytes,
+            ROUND(AVG(pg_column_size(hourly_update_signal)::numeric)) AS avg_hourly_update_bytes,
+            ROUND(AVG(pg_column_size(summary_fa)::numeric)) AS avg_summary_fa_bytes,
+            ROUND(AVG(pg_column_size(summary_en)::numeric)) AS avg_summary_en_bytes
+        FROM stories
+    """))
+    out["stories_per_column"] = dict(story_cols.mappings().one() or {})
+
+    # Estimate per-row total weight so we can compute "what does
+    # SELECT * cost per row × row count = total bytes per scan"
+    arts = out["articles_per_column"]
+    stories_ = out["stories_per_column"]
+    out["row_weight_estimate"] = {
+        "article_heavy_jsonb_bytes": int(
+            (arts.get("avg_embedding_bytes") or 0)
+            + (arts.get("avg_keywords_bytes") or 0)
+            + (arts.get("avg_named_entities_bytes") or 0)
+            + (arts.get("avg_content_text_bytes") or 0)
+        ),
+        "story_heavy_jsonb_bytes": int(
+            (stories_.get("avg_centroid_embedding_bytes") or 0)
+            + (stories_.get("avg_telegram_analysis_bytes") or 0)
+            + (stories_.get("avg_translations_bytes") or 0)
+            + (stories_.get("avg_analysis_snapshot_bytes") or 0)
+            + (stories_.get("avg_summary_anchor_bytes") or 0)
+            + (stories_.get("avg_editorial_context_bytes") or 0)
+        ),
+    }
+
+    # Row counts for the headline tables
+    for tname in ("articles", "stories", "telegram_posts", "llm_usage_logs"):
+        try:
+            n = int(
+                (
+                    await db.execute(_sa_text(f"SELECT COUNT(*) FROM {tname}"))
+                ).scalar()
+                or 0
+            )
+            out["tables"][tname] = {"row_count": n}
+        except Exception as e:
+            out["tables"][tname] = {"error": str(e)[:200]}
+
+    # Finally — pg_stat_database for cumulative tup_returned (proxy for egress)
+    try:
+        stat = (
+            await db.execute(_sa_text(
+                "SELECT tup_returned, blks_read, stats_reset "
+                "FROM pg_stat_database WHERE datname = current_database()"
+            ))
+        ).mappings().one_or_none()
+        out["pg_stat_database"] = dict(stat) if stat else None
+    except Exception as e:
+        out["pg_stat_database"] = {"error": str(e)[:200]}
+
+    return out
+
+
 @router.get("/health/overview")
 async def health_overview(db: AsyncSession = Depends(get_db)):
     """Comprehensive health snapshot for the /dashboard/health page.
