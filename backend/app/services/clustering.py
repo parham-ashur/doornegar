@@ -2835,6 +2835,9 @@ async def cluster_articles(db: AsyncSession, *, deadline_ts: float | None = None
 
     await db.commit()
 
+    # Cycle-1 audit Island 3: surface LLM phase conversion rate so a
+    # drop in match-rate (prompt drift, model regression) shows up in
+    # stats instead of needing log inspection.
     stats = {
         "matched_to_existing": matched_count,
         "new_stories_created": new_published,
@@ -2843,6 +2846,10 @@ async def cluster_articles(db: AsyncSession, *, deadline_ts: float | None = None
         "unclustered": unclustered_count,
         "aged_orphans": aged_orphans,
         "retired_orphans": retired_orphans,
+        # Conversion-rate signal from the match phase. Sent_to_llm is
+        # the input pool, matched_to_existing is the outcome. Rejected
+        # = sent_to_llm - matched_to_existing (when sent > 0).
+        "llm_candidates_sent": int(len(article_candidates)),
     }
     logger.info(f"Incremental clustering complete: {stats}")
     return stats
