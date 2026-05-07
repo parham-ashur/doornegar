@@ -445,6 +445,14 @@ async def step_translate_homepage_visible() -> dict[str, Any]:
     # silently encoded the dict as TEXT, dropping the write. See
     # 2026-05-07 silent-write investigation. Per-row UPDATE in a
     # small batch is fine — 30 stories × 2 locales = 60 UPDATEs/cron.
+    # Cycle-1 audit Phase B (snapshot-vs-re-read race): FA editors can
+    # call clear_translations_for_story DURING the multi-minute LLM
+    # phase. Without a freshness check, the merge below would resurrect
+    # the just-deleted translation by writing the LLM result on top of
+    # the empty slot. Build a snapshot lookup so we can compare the
+    # CURRENT story.updated_at to the snapshot taken before the LLM ran.
+    snap_by_id = {str(s["id"]): s for s in snapshots}
+
     async with async_session() as db:
         for locale in OG_LOCALES:
             for story_id, translated in successes[locale]:
@@ -452,12 +460,30 @@ async def step_translate_homepage_visible() -> dict[str, Any]:
                 row = (
                     await db.execute(
                         _sa_text(
-                            "SELECT translations FROM stories WHERE id = :sid"
+                            "SELECT translations, updated_at FROM stories WHERE id = :sid"
                         ),
                         {"sid": str(story_id)},
                     )
-                ).scalar_one_or_none()
-                blob = dict(row or {})
+                ).first()
+                if row is None:
+                    continue
+                current_translations = row[0]
+                current_updated_at = row[1]
+                # Concurrent FA-edit detection: if the story's updated_
+                # at moved forward since the snapshot, the editor's
+                # clear_translations_for_story has already fired (or
+                # the FA content changed and the next cron will re-
+                # translate). Either way, do NOT write our stale LLM
+                # result on top of the new state.
+                snap = snap_by_id.get(str(story_id))
+                if snap and current_updated_at and snap.get("updated_at"):
+                    snap_ts = snap["updated_at"]
+                    if hasattr(snap_ts, "tzinfo") and snap_ts.tzinfo is None:
+                        snap_ts = snap_ts.replace(tzinfo=timezone.utc)
+                    if current_updated_at > snap_ts:
+                        failures += 1
+                        continue
+                blob = dict(current_translations or {})
                 slot = dict(blob.get(locale) or {})
                 if slot.get("is_edited"):
                     continue  # manual override survives
