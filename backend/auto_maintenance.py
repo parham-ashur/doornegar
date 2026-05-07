@@ -489,11 +489,18 @@ async def step_prune_noise():
         )).all()
         stats["articles_checked"] = len(art_rows)
         art_to_delete = []
+        # Cycle-1 audit Island 1: only consider an article "noise" if
+        # we have ENOUGH text to judge. An article with all-NULL or
+        # short text fields is more likely mid-extraction (NLP / scraper
+        # hasn't finished) than truly noisy. Refuse to prune until the
+        # combined-body has at least 10 chars; the loop will revisit on
+        # the next cron after extraction completes.
         for row in art_rows:
-            # Combine whatever text we have; any of these can be the meat
             body = " ".join(
                 p for p in (row.title_fa, row.title_original, row.content_text) if p
             )
+            if len(body) < 10:
+                continue  # not enough signal to decide; skip this run
             if is_noise(body, []):
                 art_to_delete.append(row.id)
         deleted_n = await _delete_articles_safe(db, art_to_delete)
