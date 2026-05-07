@@ -1986,15 +1986,23 @@ async def step_fix_images():
                 continue
             try:
                 r = await client.head(art_url)
-                if r.status_code != 200:
-                    pending.append((art_id, None))
+                # Cycle-1 audit Phase B (R2 image-fail sentinel-trap):
+                # only null + stamp on a permanent 4xx (404/410). On a
+                # transient 5xx, the URL might come back; leaving image_
+                # checked_at unchanged means the next cron retries.
+                if 400 <= r.status_code < 500:
+                    pending.append((art_id, None))  # null + stamp
                     stats["nulled"] += 1
+                elif r.status_code == 200:
+                    pending.append((art_id, art_url))  # keep + stamp
                 else:
-                    # URL is healthy — only update image_checked_at, not URL.
-                    pending.append((art_id, art_url))  # leave URL unchanged
+                    # 5xx / 3xx after redirect cap → transient. Skip
+                    # entirely so image_checked_at stays unchanged and
+                    # the next cron retries.
+                    stats["transient_skipped"] = stats.get("transient_skipped", 0) + 1
             except Exception:
-                pending.append((art_id, None))
-                stats["nulled"] += 1
+                # Network error / timeout = transient. Skip; next cron retries.
+                stats["transient_skipped"] = stats.get("transient_skipped", 0) + 1
     await _ms.update_step_progress(total_n, total_n, label="HEAD-check done")
 
     # Flush updates in chunks of 100 with a fresh session per chunk. Each
