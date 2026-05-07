@@ -489,14 +489,23 @@ async def classify_unclassified_articles(
 
     await db.commit()
 
+    # Cycle-1 audit Island 1: surface unresolved_ratio so a runaway
+    # LLM failure rate is visible without scraping the full log.
+    unresolved_ratio = (unresolved / llm_called) if llm_called else 0.0
     logger.info(
-        "Content-type classifier: total=%d heuristic-keep=%d llm=%d unresolved=%d by_label=%s",
+        "Content-type classifier: total=%d heuristic-keep=%d llm=%d unresolved=%d unresolved_ratio=%.2f by_label=%s",
         len(articles),
         len(articles) - len(pending),
         llm_called,
         unresolved,
+        unresolved_ratio,
         by_label,
     )
+    if llm_called >= 10 and unresolved_ratio > 0.30:
+        logger.warning(
+            "Content-type LLM unresolved_ratio %.0f%% (>30%%) — possible LLM degradation",
+            unresolved_ratio * 100,
+        )
     return {
         "total": len(articles),
         "by_label": by_label,

@@ -245,6 +245,10 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
                 logger.debug(f"Embedding cost log failed: {_e}")
 
             skipped = 0
+            # Cycle-1 audit Island 2: per-source breakdown of embedding
+            # skips so one source's NLP pipeline silently failing is
+            # distinguishable from a blanket OpenAI outage.
+            skipped_by_source: dict = {}
             for article, embedding in zip(embeddable_articles, embeddings):
                 # Treat None as "unknown" — leave any existing embedding
                 # intact. Never overwrite with zero vectors: a zeroed
@@ -253,13 +257,21 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
                 # pushing every article into cluster_new.
                 if embedding is None:
                     skipped += 1
+                    src_key = (
+                        getattr(article.source, "slug", None)
+                        if hasattr(article, "source") and article.source
+                        else "unknown"
+                    )
+                    skipped_by_source[src_key] = skipped_by_source.get(src_key, 0) + 1
                     continue
                 article.embedding = embedding
             if skipped:
                 logger.warning(
                     f"Embedding: skipped {skipped}/{len(embeddings)} articles "
-                    f"after retries — their embedding column was left unchanged"
+                    f"after retries — their embedding column was left unchanged. "
+                    f"By source: {skipped_by_source}"
                 )
+                stats["embedding_skipped_by_source"] = skipped_by_source
 
     except Exception as e:
         logger.error(f"Embedding generation failed: {e}")
