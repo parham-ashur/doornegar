@@ -44,6 +44,25 @@ class TelegramNotAuthority(RuntimeError):
     pass
 
 
+class TelegramFloodHalt(RuntimeError):
+    """Sentinel: Telegram returned a FloodWaitError longer than the
+    threshold. Cycle-5 C3 (2026-05-08): when a single channel hits a
+    long FloodWait (server says "wait 14 minutes"), continuing to hit
+    other channels in the same run compounds the offense and risks a
+    full session ban. ingest_all_channels catches this and stops
+    iterating channels for the rest of the cron run.
+    """
+
+    def __init__(self, channel_username: str, seconds: int):
+        super().__init__(
+            f"FloodWait on @{channel_username}: server requested "
+            f"{seconds}s. Halting Telegram ingestion for the rest of "
+            f"this run."
+        )
+        self.channel_username = channel_username
+        self.seconds = seconds
+
+
 def is_telegram_authority() -> bool:
     """True iff this container is allowed to open a Telethon connection.
 
@@ -85,10 +104,17 @@ async def _get_telegram_client():
             logger.info("Using file-based session (doornegar_session.session)")
             session = "doornegar_session"
 
+        # Cycle-5 C3 (2026-05-08): cap auto-sleep at 300s so brief
+        # FloodWaits are absorbed transparently; longer waits raise
+        # FloodWaitError and we short-circuit the run. The default 60s
+        # was too low — many FloodWaits land in the 60-300s range and
+        # surfaced as opaque exceptions that ingest_all_channels couldn't
+        # classify.
         _client = TelegramClient(
             session,
             settings.telegram_api_id,
             settings.telegram_api_hash,
+            flood_sleep_threshold=300,
         )
         await _client.connect()
         if not await _client.is_user_authorized():
@@ -138,12 +164,23 @@ async def fetch_channel_posts(
     """Fetch recent posts from a public Telegram channel.
 
     Returns list of dicts with post data.
+
+    Cycle-5 C3: FloodWaitError above the 300s auto-sleep threshold
+    propagates as TelegramFloodHalt, which ingest_all_channels treats
+    as a stop-the-world signal. Continuing to hit other channels
+    after a long FloodWait compounds the offense and risks a session
+    ban. Auth-class errors and ordinary fetch failures still surface
+    as their original exception types so ingest_all_channels can
+    classify them.
     """
     client = await _get_telegram_client()
 
     try:
-        from telethon.tl.functions.messages import GetHistoryRequest
+        from telethon.errors import FloodWaitError
+    except ImportError:
+        FloodWaitError = None  # type: ignore[assignment]
 
+    try:
         entity = await client.get_entity(channel_username)
         posts = []
 
@@ -178,6 +215,13 @@ async def fetch_channel_posts(
         return posts
 
     except Exception as e:
+        if FloodWaitError is not None and isinstance(e, FloodWaitError):
+            seconds = int(getattr(e, "seconds", 0) or 0)
+            logger.error(
+                f"FloodWait on @{channel_username}: {seconds}s. "
+                f"Halting Telegram ingestion for this run."
+            )
+            raise TelegramFloodHalt(channel_username, seconds) from e
         logger.error(f"Failed to fetch posts from @{channel_username}: {e}")
         return []
 
@@ -275,7 +319,20 @@ async def ingest_all_channels(db: AsyncSession) -> dict:
     quiet or the session was dead. We now classify failures: if every channel
     fails with the same auth-class error, surface "session_dead" so the
     return dict matches reality and maintenance_logs makes the cause obvious.
+
+    Cycle-5 C3 (2026-05-08): catches TelegramFloodHalt and stops
+    iterating channels for the rest of this run. Continuing past a
+    long FloodWait compounds the offense and risks a session ban.
+
+    Cycle-5 H20 (2026-05-08): try/finally disconnect + reset
+    module-global _client. The previous design kept a single client
+    alive across all cron runs of the container's lifetime — fine in
+    theory, but Telethon's internal state (resolved entities, last
+    seen update IDs, transient FloodWait state) accumulates and the
+    sessions DB file grows unbounded. Reset between runs.
     """
+    global _client
+
     if not is_telegram_authority():
         logger.info("ingest_all_channels: skipping (not Telegram authority)")
         return {"channels": 0, "found": 0, "new": 0, "linked": 0, "skipped": True,
@@ -286,7 +343,7 @@ async def ingest_all_channels(db: AsyncSession) -> dict:
     )
     channels = result.scalars().all()
 
-    total_stats = {
+    total_stats: dict = {
         "channels": len(channels), "found": 0, "new": 0, "linked": 0,
         "channels_succeeded": 0, "channels_failed": 0, "auth_failures": 0,
     }
@@ -294,32 +351,68 @@ async def ingest_all_channels(db: AsyncSession) -> dict:
     auth_error_keywords = ("auth_key", "authkey", "authorization key", "unauthorized",
                            "not authorized", "session", "phone_number_invalid")
 
-    for channel in channels:
+    flood_halt_seconds: int | None = None
+    flood_halt_channel: str | None = None
+    try:
+        for channel in channels:
+            try:
+                channel_stats = await ingest_channel(channel, db)
+                total_stats["found"] += channel_stats["found"]
+                total_stats["new"] += channel_stats["new"]
+                total_stats["linked"] += channel_stats["linked"]
+                total_stats["channels_succeeded"] += 1
+            except TelegramFloodHalt as fh:
+                flood_halt_seconds = fh.seconds
+                flood_halt_channel = fh.channel_username
+                total_stats["channels_failed"] += 1
+                logger.warning(
+                    f"Telegram FloodWait halt at @{fh.channel_username} "
+                    f"({fh.seconds}s). Skipping remaining channels."
+                )
+                break
+            except Exception as e:
+                total_stats["channels_failed"] += 1
+                msg = str(e).lower()
+                if any(k in msg for k in auth_error_keywords):
+                    total_stats["auth_failures"] += 1
+                logger.error(
+                    f"Failed to ingest @{channel.username}: "
+                    f"{type(e).__name__}: {e}"
+                )
+
+        if (total_stats["channels"] > 0
+                and total_stats["channels_succeeded"] == 0
+                and total_stats["auth_failures"] >= max(1, total_stats["channels"] // 2)):
+            total_stats["session_dead"] = True
+            total_stats["reason"] = (
+                f"all {total_stats['channels']} channels failed, "
+                f"{total_stats['auth_failures']} with auth-class errors — "
+                f"session string is invalid; re-auth required"
+            )
+
+        if flood_halt_seconds is not None:
+            total_stats["flood_halt"] = True
+            total_stats["flood_halt_channel"] = flood_halt_channel
+            total_stats["flood_halt_seconds"] = flood_halt_seconds
+            total_stats["reason"] = (
+                f"FloodWait on @{flood_halt_channel} requested "
+                f"{flood_halt_seconds}s; halted remaining channels"
+            )
+
+        logger.info(f"Telegram ingestion complete: {total_stats}")
+        return total_stats
+    finally:
+        # Cycle-5 H20: best-effort disconnect. Always reset module
+        # global so the next cron starts from a clean slate.
         try:
-            channel_stats = await ingest_channel(channel, db)
-            total_stats["found"] += channel_stats["found"]
-            total_stats["new"] += channel_stats["new"]
-            total_stats["linked"] += channel_stats["linked"]
-            total_stats["channels_succeeded"] += 1
-        except Exception as e:
-            total_stats["channels_failed"] += 1
-            msg = str(e).lower()
-            if any(k in msg for k in auth_error_keywords):
-                total_stats["auth_failures"] += 1
-            logger.error(f"Failed to ingest @{channel.username}: {type(e).__name__}: {e}")
-
-    if (total_stats["channels"] > 0
-            and total_stats["channels_succeeded"] == 0
-            and total_stats["auth_failures"] >= max(1, total_stats["channels"] // 2)):
-        total_stats["session_dead"] = True
-        total_stats["reason"] = (
-            f"all {total_stats['channels']} channels failed, "
-            f"{total_stats['auth_failures']} with auth-class errors — "
-            f"session string is invalid; re-auth required"
-        )
-
-    logger.info(f"Telegram ingestion complete: {total_stats}")
-    return total_stats
+            if _client is not None:
+                await _client.disconnect()
+        except Exception as disc_err:
+            logger.warning(
+                f"Telegram client disconnect failed: {type(disc_err).__name__}: "
+                f"{disc_err}"
+            )
+        _client = None
 
 
 async def link_unlinked_posts(db: AsyncSession) -> int:

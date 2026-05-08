@@ -2476,3 +2476,120 @@ class TestAnthropicFallbacksLogToBudgetLedger:
             "llm_utils._call_anthropic must call log_llm_usage "
             "after every Anthropic call. Cycle-5 C6 regression."
         )
+
+
+class TestTelethonFloodWaitHandled:
+    """Cycle-5 C3 (CRITICAL 2026-05-08): Telethon used to raise
+    FloodWaitError as a generic exception. ingest_all_channels
+    caught the broad exception, logged an error, and moved on to
+    the NEXT channel. Continuing to hit the API after a long
+    FloodWait compounds the offense and risks a session ban —
+    which would invalidate the prod session and require Parham
+    to redo phone-SMS auth. The fix: cap auto-sleep at 300s,
+    raise a sentinel TelegramFloodHalt for waits longer than
+    that, stop the run.
+    """
+
+    def test_telegram_client_uses_300s_flood_threshold(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "telegram_service.py"
+        ).read_text()
+        idx = src.find("_client = TelegramClient(")
+        assert idx >= 0
+        # Look at the next ~600 chars (the constructor call).
+        block = src[idx:idx + 600]
+        assert "flood_sleep_threshold=300" in block, (
+            "TelegramClient ctor must pass flood_sleep_threshold=300. "
+            "Without it, FloodWaits in the 60-300s range surface as "
+            "opaque exceptions instead of being absorbed transparently. "
+            "Cycle-5 C3 regression."
+        )
+
+    def test_fetch_channel_posts_raises_flood_halt(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "telegram_service.py"
+        ).read_text()
+        idx = src.find("async def fetch_channel_posts")
+        assert idx >= 0
+        next_def = src.find("\nasync def ", idx + 1)
+        body = src[idx:next_def if next_def > 0 else len(src)]
+        assert "FloodWaitError" in body, (
+            "fetch_channel_posts must explicitly catch FloodWaitError. "
+            "Cycle-5 C3 regression."
+        )
+        assert "TelegramFloodHalt" in body, (
+            "fetch_channel_posts must raise TelegramFloodHalt on "
+            "FloodWait so ingest_all_channels short-circuits the run."
+        )
+
+    def test_ingest_all_channels_short_circuits_on_flood(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "telegram_service.py"
+        ).read_text()
+        idx = src.find("async def ingest_all_channels")
+        assert idx >= 0
+        next_def = src.find("\nasync def ", idx + 1)
+        body = src[idx:next_def if next_def > 0 else len(src)]
+        assert "except TelegramFloodHalt" in body, (
+            "ingest_all_channels must catch TelegramFloodHalt and "
+            "break out of the channel loop. Cycle-5 C3 regression."
+        )
+        # The loop must actually break, not just log + continue.
+        # Locate the except clause and look at the next ~500 chars.
+        ex_idx = body.find("except TelegramFloodHalt")
+        ex_block = body[ex_idx:ex_idx + 500]
+        assert "break" in ex_block, (
+            "TelegramFloodHalt handler must `break` out of the channel "
+            "loop. Continuing risks a session ban."
+        )
+
+
+class TestTelegramClientDisconnectsBetweenRuns:
+    """Cycle-5 H20 (HIGH 2026-05-08): module-global _client survived
+    across cron runs but never disconnected. Telethon's internal
+    state (resolved-entity cache, last-seen update IDs, transient
+    FloodWait counters) accumulates; sessions DB file grows; memory
+    risk on Railway 8GB hobby plan. Fix: try/finally in
+    ingest_all_channels disconnects + resets _client = None.
+    """
+
+    def test_ingest_all_channels_disconnects_in_finally(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "telegram_service.py"
+        ).read_text()
+        idx = src.find("async def ingest_all_channels")
+        assert idx >= 0
+        next_def = src.find("\nasync def ", idx + 1)
+        body = src[idx:next_def if next_def > 0 else len(src)]
+        # The function body must declare global _client.
+        assert "global _client" in body, (
+            "ingest_all_channels must declare global _client so it can "
+            "reset it in the finally block."
+        )
+        # finally clause must be present.
+        assert "finally:" in body, (
+            "ingest_all_channels must wrap the channel loop in "
+            "try/finally to disconnect on every exit path. Cycle-5 H20."
+        )
+        # finally block must call disconnect AND reset _client.
+        f_idx = body.find("finally:")
+        f_block = body[f_idx:f_idx + 600]
+        assert "disconnect" in f_block, (
+            "finally block must call _client.disconnect()."
+        )
+        assert "_client = None" in f_block, (
+            "finally block must reset _client = None so the next cron "
+            "run starts from a clean slate."
+        )
