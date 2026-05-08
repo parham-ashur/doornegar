@@ -479,24 +479,43 @@ async def analyze_story_telegram(
     NEIGHBOR_CENTROID_THRESHOLD = 0.65
     NEIGHBOR_POST_BUDGET = 30
     DIRECT_POOL_FLOOR = 20  # skip neighbor borrow once the direct pool is rich
+    # Cycle-5 H21 (2026-05-08): the original query loaded full Story
+    # ORM rows for every trending story with article_count >= 3 — each
+    # row pulls ~22 KB of JSONB (telegram_analysis, analysis_snapshot_24h,
+    # summary_anchor) just so we could read centroid_embedding off it.
+    # Same shape as the May 2026 $18 Neon egress incident.
+    # Two fixes: (1) lean SELECT id + centroid_embedding only,
+    # (2) 14-day freshness filter + LIMIT 200. Old/cold stories are
+    # not interesting neighbors anyway.
+    NEIGHBOR_FRESHNESS_DAYS = 14
+    NEIGHBOR_QUERY_LIMIT = 200
     if len(posts) < DIRECT_POOL_FLOOR and story.centroid_embedding:
         from app.nlp.embeddings import cosine_similarity as _cs
         own_centroid = story.centroid_embedding
         if isinstance(own_centroid, list) and all(
             isinstance(v, (int, float)) for v in own_centroid
         ):
-            # Find neighbor stories by centroid similarity
+            # Find neighbor stories by centroid similarity. Lean SELECT
+            # to keep egress small.
+            from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+            neighbor_cutoff = (
+                _dt.now(_tz.utc) - _td(days=NEIGHBOR_FRESHNESS_DAYS)
+            )
             neighbors_result = await db.execute(
-                select(Story).where(
+                select(Story.id, Story.centroid_embedding)
+                .where(
                     Story.id != story.id,
                     Story.centroid_embedding.isnot(None),
                     Story.article_count >= 3,
                     Story.trending_score > 0,
+                    Story.last_updated_at.isnot(None),
+                    Story.last_updated_at >= neighbor_cutoff,
                 )
+                .order_by(Story.trending_score.desc())
+                .limit(NEIGHBOR_QUERY_LIMIT)
             )
             neighbor_ids: list[str] = []
-            for neighbor in neighbors_result.scalars().all():
-                c = neighbor.centroid_embedding
+            for nid, c in neighbors_result.all():
                 if not isinstance(c, list) or not c:
                     continue
                 if any(v is None or not isinstance(v, (int, float)) for v in c):
@@ -506,7 +525,7 @@ async def analyze_story_telegram(
                 except Exception:
                     continue
                 if sim >= NEIGHBOR_CENTROID_THRESHOLD:
-                    neighbor_ids.append(str(neighbor.id))
+                    neighbor_ids.append(str(nid))
             if neighbor_ids:
                 have_ids = {str(p.id) for p in posts}
                 borrow_result = await db.execute(

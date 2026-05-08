@@ -147,8 +147,12 @@ async function fetchCurrent(): Promise<FetchResult> {
   let lastError = "fetch failed: unknown";
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
+      // Cycle-5 H7 (2026-05-08): cache for 30 min on the ISR side.
+      // Worldview bundles only refresh once per cron run; no-store
+      // forced every page-render to pay a fresh Railway round-trip,
+      // driving Vercel CPU + Neon egress for no real freshness gain.
       const res = await fetch(`${API}/api/v1/worldviews/current`, {
-        cache: "no-store",
+        next: { revalidate: 1800 },
       });
       if (res.ok) {
         const data = (await res.json()) as CurrentResponse;

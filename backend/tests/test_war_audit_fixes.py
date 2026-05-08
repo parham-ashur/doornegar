@@ -2690,3 +2690,52 @@ class TestImageDownloaderHasByteCaps:
             "Pillow MAX_IMAGE_PIXELS must be set explicitly to defend "
             "against decompression-bomb attacks. Cycle-5 C4."
         )
+
+
+class TestTelegramDeepNeighborPoolBounded:
+    """Cycle-5 H21 (HIGH 2026-05-08): the neighbor-borrow query in
+    analyze_story_telegram used to load every Story with
+    article_count >= 3 AND trending_score > 0 — full ORM rows
+    including JSONB telegram_analysis (~22 KB/row). Same pattern as
+    the May 2026 $18 Neon egress incident.
+
+    Two fixes:
+    1. SELECT only id + centroid_embedding (no full row).
+    2. last_updated_at >= NOW() - 14d freshness filter + LIMIT 200.
+    """
+
+    def test_neighbor_query_uses_lean_select_and_freshness_limit(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "telegram_analysis.py"
+        ).read_text()
+        # Locate the neighbor-borrow block by an anchor comment.
+        idx = src.find("Cycle-5 H21")
+        assert idx >= 0, (
+            "Cycle-5 H21 anchor comment must remain to scope this test."
+        )
+        block = src[idx:idx + 3500]
+        # Must NOT load full Story rows.
+        assert "select(Story).where(" not in block, (
+            "Neighbor query must use a lean SELECT (id + "
+            "centroid_embedding only), not select(Story). Loading full "
+            "rows pulls the 22 KB JSONB columns we don't read."
+        )
+        # Must select only id + centroid_embedding.
+        assert "select(Story.id, Story.centroid_embedding)" in block, (
+            "Neighbor query must SELECT only Story.id, "
+            "Story.centroid_embedding. Cycle-5 H21."
+        )
+        # Must apply 14-day freshness filter.
+        assert "NEIGHBOR_FRESHNESS_DAYS" in block, (
+            "Neighbor query must filter by Story.last_updated_at >= "
+            "NOW() - 14d so cold stories don't bloat egress."
+        )
+        # Must apply hard row limit.
+        assert "NEIGHBOR_QUERY_LIMIT" in block and ".limit(NEIGHBOR_QUERY_LIMIT)" in block, (
+            "Neighbor query must end with .limit(NEIGHBOR_QUERY_LIMIT). "
+            "Without LIMIT, the query is unbounded — same shape as the "
+            "May 2026 $18 incident."
+        )

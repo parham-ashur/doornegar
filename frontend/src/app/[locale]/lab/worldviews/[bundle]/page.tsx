@@ -126,8 +126,11 @@ async function fetchDetail(bundle: string): Promise<FetchResult> {
   let lastError = "fetch failed: unknown";
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
+      // Cycle-5 H7 (2026-05-08): cache 30 min. Bundle pages refresh
+      // at most once per cron run; no-store forced every render to
+      // hit Railway. See worldviews/page.tsx for the rationale.
       const res = await fetch(`${API}/api/v1/worldviews/${bundle}`, {
-        cache: "no-store",
+        next: { revalidate: 1800 },
       });
       if (res.ok) {
         const data = (await res.json()) as WorldviewDetail;
