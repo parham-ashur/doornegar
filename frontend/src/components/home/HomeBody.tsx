@@ -679,9 +679,20 @@ export default async function HomeBody({
     if (telegramByStoryId[s.id]) mostViewedTelegramById[s.id] = telegramByStoryId[s.id];
   }
 
+  // Cycle-4 Phase 2-a (2026-05-08): prefer the translated story-level
+  // summary (gpt-5-mini Niloofar NYT/Le Monde voice) over the FA
+  // analysis summary when locale != fa. The translation lives on the
+  // story brief now (cycle-4 backend exposed translations on
+  // StoryBrief). Fall back to FA only if the locale's translation is
+  // missing — better Persian than empty.
+  const briefById: Record<string, StoryBrief> = {};
+  for (const s of sorted) {
+    briefById[s.id] = s;
+  }
   const allSummaries: Record<string, string | null> = {};
   for (const id of sortedIds) {
-    allSummaries[id] = allAnalyses[id]?.summary_fa || null;
+    const tl = locale !== "fa" ? briefById[id]?.translations?.[locale]?.summary : null;
+    allSummaries[id] = tl || allAnalyses[id]?.summary_fa || null;
   }
 
   // Re-sort disputed candidates by dispute_score (higher = more disputed), falling back to pct gap
