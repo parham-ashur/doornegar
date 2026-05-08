@@ -449,6 +449,26 @@ async def step_translate_homepage_visible() -> dict[str, Any]:
                         needs = True
                 except (ValueError, AttributeError):
                     needs = True
+            # Cycle-4 Phase 2-b (2026-05-08): also re-translate when
+            # the slot is missing 2-b fields that the source story has
+            # in FA. Without this, the SQL gate's `translated_at <=
+            # updated_at` check sees the slot as "fresh" (because Phase
+            # 2-a/old runs wrote translated_at after only title+summary)
+            # and the new long-form fields never get translated. Compares
+            # what the SOURCE has (snap.get("..._fa")) against what's in
+            # the slot — only flag as needing if the source field exists.
+            if not needs:
+                _phase2b_pairs = [
+                    ("state_summary_fa", "state_summary"),
+                    ("diaspora_summary_fa", "diaspora_summary"),
+                    ("independent_summary_fa", "independent_summary"),
+                    ("bias_explanation_fa", "bias_explanation"),
+                    ("editorial_context_fa", "editorial_context"),
+                ]
+                for src_key, slot_key in _phase2b_pairs:
+                    if (snap.get(src_key) or "").strip() and not (existing.get(slot_key) or "").strip():
+                        needs = True
+                        break
             if needs:
                 work.append((snap, locale))
 

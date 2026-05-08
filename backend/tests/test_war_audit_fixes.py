@@ -1707,6 +1707,27 @@ class TestTranslationPhase2BPayloadIncludesLongFormFields:
                 f"editorial blurb render in target voice on /en + /fr."
             )
 
+    def test_phase2b_missing_fields_trigger_retranslation(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "translate_multilocale.py"
+        ).read_text()
+        # The work-loop must include a "phase 2-b fields missing"
+        # branch — otherwise stories that already have title+summary
+        # translated never get the bias panel + editorial blurb
+        # translated, even when those FA fields exist.
+        assert "_phase2b_pairs" in src, (
+            "work-loop must check for missing 2-b fields so the SQL "
+            "freshness gate (which doesn't know about 2-b) doesn't "
+            "skip catch-up translations."
+        )
+        assert "(snap.get(src_key) or" in src and "not (existing.get(slot_key)" in src, (
+            "Missing-field check must compare snapshot FA value to "
+            "existing slot value before flagging as needing translation."
+        )
+
     def test_snapshot_pulls_summary_en_blob(self):
         from pathlib import Path
 
