@@ -74,14 +74,21 @@ export interface StoryBrief {
   title_en: string;
   title_fa: string;
   // Cycle-4 (2026-05-08): per-locale story-level translations exposed
-  // on the brief. Shape: {en?: {title, summary, translated_at, ...},
-  // fr?: {...}}. Frontend prefers translations[locale].title over the
-  // flat title_en. See `localizedStoryTitle` in HomeBody.tsx.
+  // on the brief. Shape: {en?: {title, summary, ...}, fr?: {...}}.
+  // Frontend prefers translations[locale].{field} over the flat FA
+  // fields. Phase 2-b added 5 long-form fields (narratives,
+  // bias_explanation, editorial_context) to the cron payload.
   translations?: Record<
     string,
     {
       title?: string | null;
       summary?: string | null;
+      // Phase 2-b additions — bias panel paragraphs + editorial blurb.
+      state_summary?: string | null;
+      diaspora_summary?: string | null;
+      independent_summary?: string | null;
+      bias_explanation?: string | null;
+      editorial_context?: string | null;
       is_edited?: boolean;
       translated_at?: string | null;
     } | null
@@ -178,6 +185,14 @@ export interface StoryArcBrief {
 export interface StoryTranslationSlot {
   title?: string | null;
   summary?: string | null;
+  // Cycle-4 Phase 2-b (2026-05-08): long-form fields for the bias
+  // panel + editorial blurb. Populated by step_translate_homepage_
+  // visible when the corresponding FA fields exist on the story.
+  state_summary?: string | null;
+  diaspora_summary?: string | null;
+  independent_summary?: string | null;
+  bias_explanation?: string | null;
+  editorial_context?: string | null;
   translated_at?: string | null;
   prompt_version?: string | null;
   is_edited?: boolean;

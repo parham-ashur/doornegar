@@ -689,6 +689,28 @@ export default async function HomeBody({
   for (const s of sorted) {
     briefById[s.id] = s;
   }
+  // Cycle-4 Phase 2-c (2026-05-08): override the FA narrative fields
+  // in `allAnalyses` with the locale-translated values when present.
+  // Single-point patch keeps all ~15 downstream render sites unchanged.
+  // Phase 2-b cron now writes translations.{locale}.{state_summary,
+  // diaspora_summary, independent_summary, bias_explanation,
+  // editorial_context}; this loop hoists those onto the analysis
+  // shape so every render site reading {field}_fa gets the translated
+  // string transparently. FA pages are no-op (locale === "fa").
+  if (locale !== "fa") {
+    for (const id of sortedIds) {
+      const tl = briefById[id]?.translations?.[locale];
+      const a = allAnalyses[id];
+      if (!tl || !a) continue;
+      if (tl.state_summary) a.state_summary_fa = tl.state_summary;
+      if (tl.diaspora_summary) a.diaspora_summary_fa = tl.diaspora_summary;
+      if (tl.bias_explanation) a.bias_explanation_fa = tl.bias_explanation;
+      // independent_summary_fa isn't on the analysis shape today;
+      // omit until/unless the analysis API exposes it. The bias-panel
+      // 4-subgroup taxonomy uses inside/outside_border_pct, not the
+      // independent narrative paragraph.
+    }
+  }
   const allSummaries: Record<string, string | null> = {};
   for (const id of sortedIds) {
     const tl = locale !== "fa" ? briefById[id]?.translations?.[locale]?.summary : null;

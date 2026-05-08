@@ -298,24 +298,46 @@ export default async function StoryDetailPage({
               the summary to expand. Uses the native <details>/<summary>
               so it works without client JS / hydration, styled with
               Tailwind + open:rotate-180 for the chevron. */}
-          {story.editorial_context_fa?.context && (
-            <details className="group mb-4 border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50">
-              <summary className="flex items-center justify-between cursor-pointer list-none px-4 py-2.5 select-none">
-                <span className="text-[15px] font-bold text-slate-500 dark:text-slate-400">
-                  زمینه خبر
-                </span>
-                <span
-                  aria-hidden="true"
-                  className="text-slate-400 text-[12px] transition-transform group-open:rotate-90"
-                >
-                  ◀
-                </span>
-              </summary>
-              <p className="text-[15px] leading-6 text-slate-700 dark:text-slate-300 px-4 pb-3 pt-1">
-                {story.editorial_context_fa.context}
-              </p>
-            </details>
-          )}
+          {(() => {
+            // Cycle-4 Phase 2-c (2026-05-08): prefer the translated
+            // editorial blurb for the active locale (gpt-5-mini Niloofar
+            // NYT/Le Monde voice via Phase 2-b cron). Fall back to the
+            // FA blurb only if no translation exists.
+            const slot = locale === "en"
+              ? story.translations?.en
+              : locale === "fr"
+                ? story.translations?.fr
+                : null;
+            const tlContext = slot?.editorial_context;
+            const ecText = tlContext || story.editorial_context_fa?.context || "";
+            if (!ecText) return null;
+            // The collapsed-summary label is also locale-aware. The chevron
+            // direction matches reading direction (◀ for RTL, ▶ for LTR).
+            const ecLabel = locale === "fa"
+              ? "زمینه خبر"
+              : locale === "fr"
+                ? "Contexte"
+                : "Context";
+            const chevron = locale === "fa" ? "◀" : "▶";
+            return (
+              <details className="group mb-4 border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50">
+                <summary className="flex items-center justify-between cursor-pointer list-none px-4 py-2.5 select-none">
+                  <span className="text-[15px] font-bold text-slate-500 dark:text-slate-400">
+                    {ecLabel}
+                  </span>
+                  <span
+                    aria-hidden="true"
+                    className="text-slate-400 text-[12px] transition-transform group-open:rotate-90"
+                  >
+                    {chevron}
+                  </span>
+                </summary>
+                <p className="text-[15px] leading-6 text-slate-700 dark:text-slate-300 px-4 pb-3 pt-1">
+                  {ecText}
+                </p>
+              </details>
+            );
+          })()}
           {/* دورنما — at-a-glance prose synthesis. Only renders for top-N
               trending stories where the backend doornama step has run. */}
           <DoornamaBriefing briefing={analysis?.briefing_fa} />
