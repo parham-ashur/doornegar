@@ -1676,6 +1676,55 @@ class TestR2MigrationSentinelBackoff:
         )
 
 
+class TestTranslationPhase2BPayloadIncludesLongFormFields:
+    """Cycle-4 Phase 2-b (2026-05-08): the cron's fa_payload must
+    include narratives + bias_explanation + editorial_context so /en
+    and /fr can render the bias panel and editorial blurb in the
+    target voice (NYT/Le Monde) instead of falling back to FA. Strict
+    homepage-scope only (per Parham's 2026-05-08 cost guardrail).
+    """
+
+    def test_fa_payload_includes_long_form_fields(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "translate_multilocale.py"
+        ).read_text()
+        idx = src.find("async def _do_one(snap, locale):")
+        assert idx >= 0
+        next_def = src.find("\n    async def ", idx + 1)
+        body = src[idx:next_def] if next_def > idx else src[idx:idx + 2000]
+        for key in (
+            '"state_summary"',
+            '"diaspora_summary"',
+            '"independent_summary"',
+            '"bias_explanation"',
+            '"editorial_context"',
+        ):
+            assert key in body, (
+                f"fa_payload MUST include {key} so the bias panel + "
+                f"editorial blurb render in target voice on /en + /fr."
+            )
+
+    def test_snapshot_pulls_summary_en_blob(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "translate_multilocale.py"
+        ).read_text()
+        # Snapshot loop must extract the bias narrative blob.
+        assert "narrative_blob = _json_pl.loads(s.summary_en)" in src or \
+               "narrative_blob.get(\"state_summary_fa\")" in src, (
+            "Snapshot must parse summary_en JSON to extract bias "
+            "narratives (state_summary_fa et al)."
+        )
+        assert "editorial_context_fa.get(\"context\")" in src, (
+            "Snapshot must extract editorial_context_fa.context"
+        )
+
+
 class TestTranslationDoesNotBumpUpdatedAt:
     """Cycle-2 audit: cron-only translation writes must NOT set
     `updated_at = NOW()`. Doing so combined with the cycle-1

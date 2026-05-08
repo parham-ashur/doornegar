@@ -335,9 +335,22 @@ async def step_translate_homepage_visible() -> dict[str, Any]:
                 "cost_breaker": False,
             }
 
+        # Cycle-4 Phase 2-b (2026-05-08): defer heavy JSONB columns we
+        # don't read in the snapshot. Loading 30 full Story rows with
+        # ~80 KB of heavy JSONB each is wasted egress when we only need
+        # title_fa + summary_fa + summary_en + editorial_context_fa +
+        # translations + updated_at. Defer the rest. Saves ~2 MB/cron.
+        from sqlalchemy.orm import defer as _defer_tr
         candidates = (
             await db.execute(
                 select(Story)
+                .options(
+                    _defer_tr(Story.telegram_analysis),
+                    _defer_tr(Story.analysis_snapshot_24h),
+                    _defer_tr(Story.hourly_update_signal),
+                    _defer_tr(Story.summary_anchor),
+                    _defer_tr(Story.centroid_embedding),
+                )
                 .where(
                     Story.id.in_(homepage_ids),
                     Story.title_fa.is_not(None),
@@ -360,16 +373,38 @@ async def step_translate_homepage_visible() -> dict[str, Any]:
             )
         ).scalars().all()
 
-        snapshots = [
-            {
+        # Cycle-4 Phase 2-b: extend the snapshot to also pull the long-
+        # form FA narratives that the bias panel renders. The narrative
+        # paragraphs (state/diaspora/independent + bias_explanation)
+        # live as a JSON blob inside `Story.summary_en` (legacy column
+        # name; the actual FA content is in there). `editorial_context_fa`
+        # is a JSONB blob with shape {context: "..."}. Pull both safely;
+        # missing data → empty string → translate_story skips that key.
+        import json as _json_pl
+        snapshots: list[dict] = []
+        for s in candidates:
+            # Bias narratives live in the summary_en JSON blob.
+            narrative_blob: dict = {}
+            if s.summary_en:
+                try:
+                    narrative_blob = _json_pl.loads(s.summary_en) or {}
+                except (ValueError, TypeError):
+                    narrative_blob = {}
+            ec_text = ""
+            if isinstance(s.editorial_context_fa, dict):
+                ec_text = (s.editorial_context_fa.get("context") or "").strip()
+            snapshots.append({
                 "id": s.id,
                 "title_fa": s.title_fa or "",
                 "summary_fa": s.summary_fa or "",
+                "state_summary_fa": (narrative_blob.get("state_summary_fa") or "").strip(),
+                "diaspora_summary_fa": (narrative_blob.get("diaspora_summary_fa") or "").strip(),
+                "independent_summary_fa": (narrative_blob.get("independent_summary_fa") or "").strip(),
+                "bias_explanation_fa": (narrative_blob.get("bias_explanation_fa") or "").strip(),
+                "editorial_context_fa": ec_text,
                 "translations": dict(s.translations or {}),
                 "updated_at": s.updated_at or s.created_at,
-            }
-            for s in candidates
-        ]
+            })
 
     if not snapshots:
         return {
@@ -437,7 +472,20 @@ async def step_translate_homepage_visible() -> dict[str, Any]:
 
     async def _do_one(snap, locale):
         nonlocal failures
-        fa_payload = {"title": snap["title_fa"], "summary": snap["summary_fa"]}
+        # Cycle-4 Phase 2-b (2026-05-08): include all long-form FA
+        # fields in the payload. _compose_user_message + _parse_structured
+        # already accept arbitrary keys; the voice prompt is generic
+        # (no per-key formatting). Empty values are dropped by the
+        # composer so cost stays proportional to actual content.
+        fa_payload = {
+            "title": snap["title_fa"],
+            "summary": snap["summary_fa"],
+            "state_summary": snap.get("state_summary_fa", ""),
+            "diaspora_summary": snap.get("diaspora_summary_fa", ""),
+            "independent_summary": snap.get("independent_summary_fa", ""),
+            "bias_explanation": snap.get("bias_explanation_fa", ""),
+            "editorial_context": snap.get("editorial_context_fa", ""),
+        }
         result = await translate_story(
             story_id=snap["id"], fa_payload=fa_payload, locale=locale
         )
