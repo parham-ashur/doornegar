@@ -73,6 +73,19 @@ export interface StoryBrief {
   id: string;
   title_en: string;
   title_fa: string;
+  // Cycle-4 (2026-05-08): per-locale story-level translations exposed
+  // on the brief. Shape: {en?: {title, summary, translated_at, ...},
+  // fr?: {...}}. Frontend prefers translations[locale].title over the
+  // flat title_en. See `localizedStoryTitle` in HomeBody.tsx.
+  translations?: Record<
+    string,
+    {
+      title?: string | null;
+      summary?: string | null;
+      is_edited?: boolean;
+      translated_at?: string | null;
+    } | null
+  > | null;
   slug: string;
   article_count: number;
   source_count: number;

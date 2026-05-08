@@ -23,6 +23,14 @@ class StoryBrief(BaseModel):
     id: uuid.UUID
     title_en: str
     title_fa: str
+    # Cycle-4 (2026-05-08): expose the per-locale story-level
+    # translations on the brief shape so /fr and /en can render the
+    # higher-quality NYT/Le Monde voice (gpt-5-mini) when it exists,
+    # not just the article-level title_en (gpt-4.1-nano). Frontend
+    # falls back: translations[locale]?.title || title_en || title_fa.
+    # Pre-this-fix /fr rendered EN because title_fr never existed and
+    # the translations blob was detail-only.
+    translations: dict | None = None
     slug: str
     article_count: int
     source_count: int

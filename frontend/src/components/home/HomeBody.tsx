@@ -122,23 +122,31 @@ async function fetchTelegramAnalysesBatch(storyIds: string[]): Promise<Record<st
  * Pick the display title for a story based on the active locale.
  *
  * Cycle-4 (2026-05-08): pre-this-fix, HomeBody rendered `s.title_fa`
- * unconditionally for all 30+ title sites — so /en showed Persian
- * even though the API populated `title_en` correctly via gpt-4.1-nano
- * translation (and `translations.en.title` via the higher-quality NYT-
- * voice gpt-5-mini route). The trending list endpoint only returns
- * the flat `title_en` / `title_fa` fields (the `translations` blob is
- * detail-only), so this helper picks `title_en` for `en`/`fr` locales
- * and `title_fa` for `fa`. FR temporarily falls back to EN until the
- * trending API exposes `title_fr` or the `translations` blob.
+ * unconditionally — so /en showed Persian even though the API
+ * populated `title_en` (gpt-4.1-nano article-level) and
+ * `translations.{en,fr}.title` (gpt-5-mini story-level NYT/Le Monde
+ * voice). Preference order:
+ *   1. translations[locale].title — the higher-quality voice-tuned
+ *      story-level translation when it exists.
+ *   2. title_{en|fa} — flat per-language fields (article-level).
+ *   3. The other locale as a last resort so the page never goes empty.
+ *
+ * The trending API now exposes `translations` on the brief (cycle-4
+ * backend fix); pre-this-fix the blob was detail-only, so /fr rendered
+ * the EN article-level translation as a fallback.
  */
 function localizedStoryTitle(
-  story: { title_fa?: string | null; title_en?: string | null },
+  story: {
+    title_fa?: string | null;
+    title_en?: string | null;
+    translations?: Record<string, { title?: string | null } | null> | null;
+  },
   locale: string,
 ): string {
+  const tl = story.translations?.[locale]?.title;
+  if (tl) return tl;
   if (locale === "fa") return story.title_fa || story.title_en || "";
-  // en, fr — prefer EN (or FR when API exposes it). Fall back to FA
-  // only if absolutely no translation exists, so the page never shows
-  // the empty state.
+  // en, fr — prefer flat title_en (article-level), fall back to FA.
   return story.title_en || story.title_fa || "";
 }
 
