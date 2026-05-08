@@ -118,6 +118,30 @@ async function fetchTelegramAnalysesBatch(storyIds: string[]): Promise<Record<st
   }
 }
 
+/**
+ * Pick the display title for a story based on the active locale.
+ *
+ * Cycle-4 (2026-05-08): pre-this-fix, HomeBody rendered `s.title_fa`
+ * unconditionally for all 30+ title sites — so /en showed Persian
+ * even though the API populated `title_en` correctly via gpt-4.1-nano
+ * translation (and `translations.en.title` via the higher-quality NYT-
+ * voice gpt-5-mini route). The trending list endpoint only returns
+ * the flat `title_en` / `title_fa` fields (the `translations` blob is
+ * detail-only), so this helper picks `title_en` for `en`/`fr` locales
+ * and `title_fa` for `fa`. FR temporarily falls back to EN until the
+ * trending API exposes `title_fr` or the `translations` blob.
+ */
+function localizedStoryTitle(
+  story: { title_fa?: string | null; title_en?: string | null },
+  locale: string,
+): string {
+  if (locale === "fa") return story.title_fa || story.title_en || "";
+  // en, fr — prefer EN (or FR when API exposes it). Fall back to FA
+  // only if absolutely no translation exists, so the page never shows
+  // the empty state.
+  return story.title_en || story.title_fa || "";
+}
+
 function Meta({ story }: { story: StoryBrief }) {
   // Fall back through the date chain so a story always shows at least
   // one timestamp. Some stories arrive with a null first_published_at
@@ -745,7 +769,7 @@ export default async function HomeBody({
       if (cw.length && ow.length) {
         battleItems.push({
           storyId: story.id,
-          title: story.title_fa || "",
+          title: localizedStoryTitle(story, locale) || "",
           conservativeWords: cw,
           oppositionWords: ow,
           stateSummary,
@@ -766,7 +790,7 @@ export default async function HomeBody({
         if (cw.length && ow.length) {
           battleItems.push({
             storyId: story.id,
-            title: story.title_fa || "",
+            title: localizedStoryTitle(story, locale) || "",
             conservativeWords: cw,
             oppositionWords: ow,
             stateSummary,
@@ -842,7 +866,7 @@ export default async function HomeBody({
         {/* CENTER: Hero story — image + title below */}
         {hero && (
           <div className="col-span-6 py-6 px-5">
-            {wrapStory({ storyId: hero.id, title: hero.title_fa, imageUrl: hero.image_url }, (
+            {wrapStory({ storyId: hero.id, title: localizedStoryTitle(hero, locale), imageUrl: hero.image_url }, (
               <Link href={storyHref(hero.id)} className="group block">
                 <div className="aspect-[16/9] overflow-hidden bg-slate-100 dark:bg-slate-800">
                   <SafeImage
@@ -853,7 +877,7 @@ export default async function HomeBody({
                   />
                 </div>
                 <h1 className="mt-4 text-[28px] font-black leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-3">
-                  {hero.title_fa}
+                  {localizedStoryTitle(hero, locale)}
                 </h1>
               </Link>
             ))}
@@ -966,14 +990,14 @@ export default async function HomeBody({
             <h2 className="text-[15px] font-black text-slate-900 dark:text-white shrink-0">نگاه یک‌جانبه</h2>
             <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
           </div>
-          {conservativeBlind && wrapStory({ storyId: conservativeBlind.id, title: conservativeBlind.title_fa, imageUrl: conservativeBlind.image_url }, (
+          {conservativeBlind && wrapStory({ storyId: conservativeBlind.id, title: localizedStoryTitle(conservativeBlind, locale), imageUrl: conservativeBlind.image_url }, (
             <Link
               href={storyHref(conservativeBlind.id)}
-              aria-label={`نگاه یک‌جانبهٔ درون‌مرزی: ${conservativeBlind.title_fa}`}
+              aria-label={`نگاه یک‌جانبهٔ درون‌مرزی: ${localizedStoryTitle(conservativeBlind, locale)}`}
               className="group block border border-inside-border transition-shadow hover:shadow-md"
             >
               <div className="relative aspect-[4/3] overflow-hidden bg-slate-100 dark:bg-slate-800">
-                <SafeImageStatic src={conservativeBlind.image_url} alt={conservativeBlind.title_fa} className="h-full w-full object-cover" />
+                <SafeImageStatic src={conservativeBlind.image_url} alt={localizedStoryTitle(conservativeBlind, locale)} className="h-full w-full object-cover" />
                 {isUpdateBadgeFresh(conservativeBlind.update_signal) && (
                   <span className="absolute bottom-2 right-2 border border-orange-300 dark:border-orange-700 bg-orange-50/95 dark:bg-orange-900/80 px-1.5 py-0.5 text-[10px] font-bold text-orange-700 dark:text-orange-200 backdrop-blur-sm">
                     بروزرسانی{formatUpdateReason(conservativeBlind.update_signal!) ? ` · ${formatUpdateReason(conservativeBlind.update_signal!)}` : ""}
@@ -982,7 +1006,7 @@ export default async function HomeBody({
               </div>
               <div className="p-3">
                 <h3 className="text-[18px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
-                  {conservativeBlind.title_fa}
+                  {localizedStoryTitle(conservativeBlind, locale)}
                 </h3>
                 <p className="mt-1.5 text-[15px] text-slate-400">
                   {conservativeBlind.diaspora_pct > 0 ? "بیشتر" : "فقط"} روایت درون‌مرزی · {conservativeBlind.article_count} مقاله
@@ -990,14 +1014,14 @@ export default async function HomeBody({
               </div>
             </Link>
           ))}
-          {oppositionBlind && wrapStory({ storyId: oppositionBlind.id, title: oppositionBlind.title_fa, imageUrl: oppositionBlind.image_url }, (
+          {oppositionBlind && wrapStory({ storyId: oppositionBlind.id, title: localizedStoryTitle(oppositionBlind, locale), imageUrl: oppositionBlind.image_url }, (
             <Link
               href={storyHref(oppositionBlind.id)}
-              aria-label={`نگاه یک‌جانبهٔ برون‌مرزی: ${oppositionBlind.title_fa}`}
+              aria-label={`نگاه یک‌جانبهٔ برون‌مرزی: ${localizedStoryTitle(oppositionBlind, locale)}`}
               className="group block border border-outside-border transition-shadow hover:shadow-md"
             >
               <div className="relative aspect-[4/3] overflow-hidden bg-slate-100 dark:bg-slate-800">
-                <SafeImageStatic src={oppositionBlind.image_url} alt={oppositionBlind.title_fa} className="h-full w-full object-cover" />
+                <SafeImageStatic src={oppositionBlind.image_url} alt={localizedStoryTitle(oppositionBlind, locale)} className="h-full w-full object-cover" />
                 {isUpdateBadgeFresh(oppositionBlind.update_signal) && (
                   <span className="absolute bottom-2 right-2 border border-orange-300 dark:border-orange-700 bg-orange-50/95 dark:bg-orange-900/80 px-1.5 py-0.5 text-[10px] font-bold text-orange-700 dark:text-orange-200 backdrop-blur-sm">
                     بروزرسانی{formatUpdateReason(oppositionBlind.update_signal!) ? ` · ${formatUpdateReason(oppositionBlind.update_signal!)}` : ""}
@@ -1006,7 +1030,7 @@ export default async function HomeBody({
               </div>
               <div className="p-3">
                 <h3 className="text-[18px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
-                  {oppositionBlind.title_fa}
+                  {localizedStoryTitle(oppositionBlind, locale)}
                 </h3>
                 <p className="mt-1.5 text-[15px] text-orange-500">
                   {oppositionBlind.state_pct > 0 ? "بیشتر" : "فقط"} روایت برون‌مرزی · {oppositionBlind.article_count} مقاله
@@ -1032,10 +1056,10 @@ export default async function HomeBody({
                 const tg = leftTextTelegramById[s.id];
                 return (
                   <div key={s.id} className={`py-5 ${i > 0 ? "border-t border-slate-100 dark:border-slate-800/60" : ""}`}>
-                    {wrapStory({ storyId: s.id, title: s.title_fa, imageUrl: s.image_url }, (
+                    {wrapStory({ storyId: s.id, title: localizedStoryTitle(s, locale), imageUrl: s.image_url }, (
                       <Link href={storyHref(s.id)} className="group block">
                         <h3 className="text-[22px] font-black leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
-                          {s.title_fa}
+                          {localizedStoryTitle(s, locale)}
                         </h3>
                       </Link>
                     ))}
@@ -1227,7 +1251,7 @@ export default async function HomeBody({
                 {i > 0 && (
                   <div className="my-4 mx-auto w-1/2 h-px bg-slate-200/60 dark:bg-slate-700/40" />
                 )}
-                {wrapStory({ storyId: s.id, title: s.title_fa, imageUrl: s.image_url }, (
+                {wrapStory({ storyId: s.id, title: localizedStoryTitle(s, locale), imageUrl: s.image_url }, (
                 <Link href={storyHref(s.id)} className="group flex items-stretch gap-6 py-5">
                   {/* DOM order: number → image → text. In RTL that
                       renders visually as [number][image][text] from
@@ -1235,11 +1259,11 @@ export default async function HomeBody({
                       right of the image (Parham's ask). */}
                   <span className="text-[64px] font-black text-slate-200 dark:text-slate-700 shrink-0 leading-none -mt-1 w-[72px] text-start self-start">{tabularNum(i + 1)}</span>
                   <div className="w-48 shrink-0 overflow-hidden bg-slate-100 dark:bg-slate-800 self-stretch">
-                    <SafeImageStatic src={s.image_url} alt={s.title_fa || ""} className="w-full h-full object-cover" />
+                    <SafeImageStatic src={s.image_url} alt={localizedStoryTitle(s, locale)} className="w-full h-full object-cover" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <h3 className="text-[22px] font-black leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
-                      {s.title_fa}
+                      {localizedStoryTitle(s, locale)}
                     </h3>
                     <UpdateBadge story={s} className="mt-1" />
                     <p className="text-[15px] text-slate-400 mt-1">
@@ -1383,7 +1407,7 @@ function MobileHome({
 
       {/* ── 1. Hero story — image, title, bias comparison, telegram strip ── */}
       <div className="border-b border-slate-200 dark:border-slate-800">
-        {wrapStory({ storyId: hero.id, title: hero.title_fa, imageUrl: hero.image_url }, (
+        {wrapStory({ storyId: hero.id, title: localizedStoryTitle(hero, locale), imageUrl: hero.image_url }, (
           <Link href={storyHref(hero.id)} className="block">
             <div className="aspect-[16/9] overflow-hidden bg-slate-100 dark:bg-slate-800">
               <SafeImage
@@ -1395,7 +1419,7 @@ function MobileHome({
             </div>
             <div className="px-4 pt-4">
               <h1 className="text-[24px] font-black leading-snug text-slate-900 dark:text-white line-clamp-3">
-                {hero.title_fa}
+                {localizedStoryTitle(hero, locale)}
               </h1>
               <p className="mt-2 text-[15px] text-slate-400 dark:text-slate-500">
                 {tabularNum(hero.source_count)} رسانه · {tabularNum(hero.article_count)} مقاله
@@ -1485,15 +1509,15 @@ function MobileHome({
             <div className="flex-1 h-[2px] bg-slate-300 dark:bg-slate-600" />
           </div>
           <div className="space-y-4">
-            {conservativeBlind && wrapStory({ storyId: conservativeBlind.id, title: conservativeBlind.title_fa, imageUrl: conservativeBlind.image_url }, (
+            {conservativeBlind && wrapStory({ storyId: conservativeBlind.id, title: localizedStoryTitle(conservativeBlind, locale), imageUrl: conservativeBlind.image_url }, (
               <Link
                 href={storyHref(conservativeBlind.id)}
-                aria-label={`نگاه یک‌جانبهٔ درون‌مرزی: ${conservativeBlind.title_fa}`}
+                aria-label={`نگاه یک‌جانبهٔ درون‌مرزی: ${localizedStoryTitle(conservativeBlind, locale)}`}
                 className="group block border border-inside-border transition-shadow hover:shadow-md"
               >
                 <div className="flex gap-3 p-3">
                   <div className="relative w-20 h-20 shrink-0 overflow-hidden bg-slate-100 dark:bg-slate-800">
-                    <SafeImageStatic src={conservativeBlind.image_url} alt={conservativeBlind.title_fa} className="h-full w-full object-cover" />
+                    <SafeImageStatic src={conservativeBlind.image_url} alt={localizedStoryTitle(conservativeBlind, locale)} className="h-full w-full object-cover" />
                     {isUpdateBadgeFresh(conservativeBlind.update_signal) && (
                       <span className="absolute bottom-0 inset-x-0 bg-orange-500/95 text-white text-center text-[9px] font-bold py-0.5">
                         بروزرسانی
@@ -1502,7 +1526,7 @@ function MobileHome({
                   </div>
                   <div className="flex-1 min-w-0">
                     <h3 className="text-[18px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
-                      {conservativeBlind.title_fa}
+                      {localizedStoryTitle(conservativeBlind, locale)}
                     </h3>
                     <p className="mt-1 text-[15px] text-slate-400">
                       {conservativeBlind.diaspora_pct > 0 ? "بیشتر" : "فقط"} روایت درون‌مرزی · {conservativeBlind.article_count} مقاله
@@ -1511,15 +1535,15 @@ function MobileHome({
                 </div>
               </Link>
             ))}
-            {oppositionBlind && wrapStory({ storyId: oppositionBlind.id, title: oppositionBlind.title_fa, imageUrl: oppositionBlind.image_url }, (
+            {oppositionBlind && wrapStory({ storyId: oppositionBlind.id, title: localizedStoryTitle(oppositionBlind, locale), imageUrl: oppositionBlind.image_url }, (
               <Link
                 href={storyHref(oppositionBlind.id)}
-                aria-label={`نگاه یک‌جانبهٔ برون‌مرزی: ${oppositionBlind.title_fa}`}
+                aria-label={`نگاه یک‌جانبهٔ برون‌مرزی: ${localizedStoryTitle(oppositionBlind, locale)}`}
                 className="group block border border-outside-border transition-shadow hover:shadow-md"
               >
                 <div className="flex gap-3 p-3">
                   <div className="relative w-20 h-20 shrink-0 overflow-hidden bg-slate-100 dark:bg-slate-800">
-                    <SafeImageStatic src={oppositionBlind.image_url} alt={oppositionBlind.title_fa} className="h-full w-full object-cover" />
+                    <SafeImageStatic src={oppositionBlind.image_url} alt={localizedStoryTitle(oppositionBlind, locale)} className="h-full w-full object-cover" />
                     {isUpdateBadgeFresh(oppositionBlind.update_signal) && (
                       <span className="absolute bottom-0 inset-x-0 bg-orange-500/95 text-white text-center text-[9px] font-bold py-0.5">
                         بروزرسانی
@@ -1528,7 +1552,7 @@ function MobileHome({
                   </div>
                   <div className="flex-1 min-w-0">
                     <h3 className="text-[18px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
-                      {oppositionBlind.title_fa}
+                      {localizedStoryTitle(oppositionBlind, locale)}
                     </h3>
                     <p className="mt-1 text-[15px] text-orange-500">
                       {oppositionBlind.state_pct > 0 ? "بیشتر" : "فقط"} روایت برون‌مرزی · {oppositionBlind.article_count} مقاله
@@ -1551,13 +1575,13 @@ function MobileHome({
           </div>
           <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
             {mobileMostCovered.map((s, i) => wrapStory(
-              { storyId: s.id, title: s.title_fa, imageUrl: s.image_url },
+              { storyId: s.id, title: localizedStoryTitle(s, locale), imageUrl: s.image_url },
               (
                 <Link href={storyHref(s.id)} className="group flex items-start gap-3 py-3">
                   <span className="text-[44px] font-black text-slate-200 dark:text-slate-700 shrink-0 w-12 text-center leading-none -mt-1">{tabularNum(i + 1)}</span>
                   <div className="flex-1 min-w-0">
                     <h3 className="text-[18px] font-bold leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
-                      {s.title_fa}
+                      {localizedStoryTitle(s, locale)}
                     </h3>
                     <UpdateBadge story={s} className="mt-0.5" />
                     <p className="text-[15px] text-slate-400 mt-0.5">
@@ -1644,11 +1668,11 @@ function MobileHome({
               const bias = allAnalyses[s.id]?.bias_explanation_fa;
               const firstPoint = splitBiasPoints(bias)[0];
               return wrapStory(
-                { storyId: s.id, title: s.title_fa, imageUrl: s.image_url },
+                { storyId: s.id, title: localizedStoryTitle(s, locale), imageUrl: s.image_url },
                 (
                   <Link href={storyHref(s.id)} className="group block py-4">
                     <h3 className="text-[22px] font-black leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-2">
-                      {s.title_fa}
+                      {localizedStoryTitle(s, locale)}
                     </h3>
                     <UpdateBadge story={s} className="mt-1" />
                     <p className="mt-1 text-[15px] text-slate-400 dark:text-slate-500">
