@@ -254,10 +254,13 @@ async def _merge_into_story(db: AsyncSession, story: Story, articles: list[Artic
 
 
 def _compute_trending(article_count: int, first_published: datetime | None) -> float:
-    count_factor = min(article_count / 10.0, 1.0)
-    if first_published:
-        hours_ago = (datetime.now(timezone.utc) - first_published).total_seconds() / 3600
-        recency_factor = max(0, 1.0 - (hours_ago / 72.0))
-    else:
-        recency_factor = 0.5
-    return (count_factor * 0.6) + (recency_factor * 0.4)
+    """Cycle-4 (2026-05-08): delegate to canonical helper. Pre-this-fix
+    this module had a THIRD divergent formula (linear, capped at 1.0)
+    while clustering.py used `0.5^(hours/48)` and step_recalculate_
+    trending used `0.85^days`. Three writers, three scales, same column.
+    Now all delegate to app.services.trending."""
+    from app.services.trending import compute_trending_score
+    return compute_trending_score(
+        article_count=article_count,
+        first_published_at=first_published,
+    )

@@ -1758,6 +1758,218 @@ class TestNlpTranslationBatchSizeUsedConsistently:
         )
 
 
+class TestMaintenanceLockFailsClosed:
+    """Cycle-4 (2026-05-08): _try_acquire_lock_async used to return
+    True on any DB error — meaning a Neon hiccup during lock check
+    let two cron firings proceed in parallel without holding a real
+    lock. Now fails CLOSED (returns False) so a transient DB error
+    skips ONE cycle (harmless given 6h cadence) instead of running
+    parallel unlocked writes.
+    """
+
+    def test_lock_acquire_fails_closed_on_exception(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent / "auto_maintenance.py"
+        ).read_text()
+        idx = src.find("async def _try_acquire_lock_async(")
+        assert idx >= 0
+        nxt = src.find("\nasync def ", idx + 1)
+        body = src[idx:nxt] if nxt > idx else src[idx:idx + 2500]
+        # The except path must return False, not True. The block has a
+        # multi-line comment explaining the fail-closed rationale; allow
+        # the whole rest of the function body for the search.
+        ex_idx = body.find("except Exception")
+        assert ex_idx >= 0
+        ex_block = body[ex_idx:]
+        assert "return False" in ex_block, (
+            "Lock-acquire exception path must return False (fail "
+            "closed). Returning True allowed parallel cron runs to "
+            "proceed without a confirmed lock — racy writes."
+        )
+        # The except path must not silently fail open.
+        # Look only at the immediate handler before any subsequent
+        # function starts (next `async def` already cut by `nxt` above).
+        assert "return True" not in ex_block, (
+            "The exception path must NOT return True — that's the "
+            "fail-open regression we're guarding against."
+        )
+
+
+class TestAdminTranslationEditsBumpUpdatedAt:
+    """Cycle-4 (2026-05-08): patch_story_translation and
+    clear_story_translation MUST bump Story.updated_at. The cron's
+    snapshot-vs-re-read race-check at translate_multilocale.py:504
+    only fires when current_updated_at > snap_ts — pre-this-fix admin
+    edits/clears mid-cron-batch passed the check silently and the
+    cron's stale LLM result OVERWROTE the just-edited slot.
+
+    The cron-path _jsonb_update_stmt deliberately does NOT bump
+    updated_at (cycle-2 infinite-retranslation-loop fix). Admin edits
+    ARE state changes that must invalidate snapshots.
+    """
+
+    def test_patch_story_translation_bumps_updated_at(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py"
+        ).read_text()
+        idx = src.find("async def patch_story_translation(")
+        assert idx >= 0, "patch_story_translation must exist"
+        # Find next function boundary
+        nxt = src.find("\n@router.", idx + 1)
+        body = src[idx:nxt] if nxt > idx else src[idx:idx + 4000]
+        assert "story.updated_at = " in body, (
+            "patch_story_translation MUST bump story.updated_at so "
+            "the cron's snapshot-vs-re-read race detection works."
+        )
+
+    def test_clear_story_translation_bumps_updated_at(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py"
+        ).read_text()
+        idx = src.find("async def clear_story_translation(")
+        assert idx >= 0, "clear_story_translation must exist"
+        nxt = src.find("\n@router.", idx + 1)
+        body = src[idx:nxt] if nxt > idx else src[idx:idx + 4000]
+        assert "story.updated_at = " in body, (
+            "clear_story_translation MUST bump story.updated_at so "
+            "mid-cron clears aren't silently resurrected by the stale "
+            "LLM write."
+        )
+
+
+class TestTrendingScoreSingleSourceOfTruth:
+    """Cycle-4 (2026-05-08): pre-this-cycle, two divergent formulas
+    wrote to `Story.trending_score` — clustering.py used `0.5^(hours/48)`
+    anchored on first_published_at; auto_maintenance.step_recalculate_
+    trending used `0.85^days` anchored on frozen_at??last_updated_at.
+    For the same 10-article 7-day-old story they produced 0.88 vs 3.2.
+    Homepage rank flickered between cron passes (canonical formula)
+    and interim writes (clustering helper).
+
+    Fix: extract a single canonical helper at app/services/trending.py
+    and have BOTH writers delegate to it.
+    """
+
+    def test_canonical_helper_module_exists(self):
+        from pathlib import Path
+
+        p = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "trending.py"
+        )
+        assert p.exists(), (
+            "app/services/trending.py must exist as the single "
+            "source of truth for Story.trending_score."
+        )
+        src = p.read_text()
+        assert "def compute_trending_score(" in src
+
+    def test_step_recalculate_trending_uses_canonical_helper(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent / "auto_maintenance.py"
+        ).read_text()
+        idx = src.find("async def step_recalculate_trending(")
+        assert idx >= 0
+        next_def = src.find("\nasync def ", idx + 1)
+        body = src[idx:next_def] if next_def > 0 else src[idx:idx + 6000]
+        assert "from app.services.trending import compute_trending_score" in body, (
+            "step_recalculate_trending MUST use the canonical helper"
+        )
+        # The inline formula must be GONE.
+        assert "0.85 ** max(0.0, days_ago)" not in body, (
+            "step_recalculate_trending must NOT contain the old "
+            "inline 0.85^days formula — delegate to compute_trending_"
+            "score in app/services/trending.py instead."
+        )
+
+    def test_clustering_compute_trending_uses_canonical_helper(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "clustering.py"
+        ).read_text()
+        idx = src.find("def _compute_trending_score(")
+        assert idx >= 0
+        next_def = src.find("\ndef ", idx + 1)
+        body = src[idx:next_def] if next_def > 0 else src[idx:idx + 2000]
+        assert "from app.services.trending import compute_trending_score" in body, (
+            "clustering._compute_trending_score MUST delegate to the "
+            "canonical helper. The 0.5^(hours/48) formula is gone."
+        )
+        assert "math.pow(0.5, hours_ago / half_life_hours)" not in body, (
+            "clustering._compute_trending_score must NOT contain the "
+            "old inline 0.5^(hours/48) formula."
+        )
+
+    def test_only_canonical_writers_to_story_trending_score(self):
+        """Defense-in-depth: any write to `story.trending_score` (a
+        Story object — NOT Source.trending_score, that's a different
+        column) must go through `compute_trending_score` or the local
+        `_compute_trending_score` shim. Approximate by string-matching
+        across backend Python files.
+        """
+        from pathlib import Path
+
+        backend = Path(__file__).parent.parent
+        suspect = []
+        for f in backend.rglob("*.py"):
+            if "test" in str(f) or "trending.py" in str(f):
+                continue
+            text = f.read_text()
+            for i, line in enumerate(text.splitlines(), 1):
+                # Only Story.trending_score (story-prefixed). Source.
+                # trending_score in scripts is a different column.
+                if "story.trending_score = " not in line:
+                    continue
+                # Allow writes that route through the canonical helper
+                # (or the local shim that delegates to it).
+                if "compute_trending_score" in line:
+                    continue
+                if "_compute_trending_score" in line:
+                    continue
+                if "_compute_trending(" in line:
+                    # topic_clustering's helper now delegates internally.
+                    continue
+                suspect.append(
+                    f"{f.relative_to(backend)}:{i}: {line.strip()[:120]}"
+                )
+        assert not suspect, (
+            f"Unexpected direct writes to Story.trending_score "
+            f"(must go through canonical helper): {suspect}"
+        )
+
+
+class TestPipelineTotalStepsMatchesActual:
+    """Cycle-4 (2026-05-08): pre-this-fix, total_steps was set to
+    len(FULL_PIPELINE) = 58 but full mode runs an EXTRA 'Update
+    project docs' step after the loop. Dashboard progress bar
+    showed 58/58 then jumped to 59/58. Match the actual count.
+    """
+
+    def test_total_steps_includes_docs_step_for_full_mode(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent / "auto_maintenance.py"
+        ).read_text()
+        idx = src.find("await maintenance_state.start_run(total_steps=")
+        assert idx >= 0
+        line = src[idx:idx + 200]
+        assert "len(pipeline) + _extra_steps" in line, (
+            "total_steps must add 1 for full mode to account for the "
+            "trailing 'Update project docs' step."
+        )
+
+
 class TestAuditClusterCoherenceScopedToRecent:
     """Cycle-3 audit (2026-05-08): audit_cluster_coherence loaded ALL
     stories with article_count >= 10 (561 in production), including
@@ -1903,14 +2115,23 @@ class TestClusterStepNameError:
     the matcher.
     """
 
-    def test_match_to_existing_stories_returns_tuple(self):
+    def test_match_to_existing_stories_all_returns_are_tuple(self):
+        """Cycle-4 (2026-05-08) hardened from cycle-3: scan EVERY
+        `return` inside _match_to_existing_stories. The cycle-3 fix
+        (`0f3a383`) only updated the final return; two early-exit
+        paths (no visible stories; all articles auto-match/reject)
+        kept the old `return articles` shape. Caller's tuple unpack
+        crashed under those triggers — and triggers fire often
+        (test envs have empty existing_stories; many production cron
+        batches fall fully outside the LLM band).
+        """
         from pathlib import Path
+        import re
 
         src = (
             Path(__file__).parent.parent
             / "app" / "services" / "clustering.py"
         ).read_text()
-        # Locate the matcher's return path.
         idx = src.find("async def _match_to_existing_stories(")
         assert idx >= 0
         end_marker = src.find(
@@ -1918,14 +2139,39 @@ class TestClusterStepNameError:
         )
         assert end_marker > idx, "Function boundary must be findable"
         body = src[idx:end_marker]
-        # Look for the final return statement
+        # Every `return` outside comments + nested defs in this
+        # function must produce a 2-tuple. Approximate by checking
+        # the line text directly: must have a comma-separated
+        # expression OR the variable named `unmatched_ids` followed
+        # by `, len(article_candidates)`.
+        lines = body.splitlines()
+        bad_returns = []
+        for i, line in enumerate(lines):
+            stripped = line.lstrip()
+            if not stripped.startswith("return "):
+                continue
+            # Tolerate `return None` and bare `return` only if both don't
+            # appear (they shouldn't in this fn). The valid shapes:
+            #   return article_ids_eager, 0
+            #   return unmatched_ids, len(article_candidates)
+            #   return X, Y  (any 2-tuple)
+            payload = stripped[len("return "):].rstrip()
+            # A scalar (no comma at top level) is the bug.
+            if "," not in payload:
+                bad_returns.append((i, line.strip()))
+        assert not bad_returns, (
+            "All returns in _match_to_existing_stories MUST be "
+            "2-tuples (unmatched_ids, candidate_count). Found scalar "
+            f"return(s): {bad_returns}"
+        )
+        # And the canonical final return must still reference
+        # len(article_candidates) so the count hooks survive future
+        # refactors.
         ret_idx = body.rfind("return ")
-        assert ret_idx >= 0
         ret_line = body[ret_idx:ret_idx + 200]
         assert "len(article_candidates)" in ret_line, (
-            "_match_to_existing_stories must return both unmatched_ids "
-            "and len(article_candidates) so the caller can include the "
-            "count in cluster stats. See cycle-3 audit (NameError fix)."
+            "Final return must include len(article_candidates) so "
+            "cluster stats see the candidate count."
         )
 
     def test_cluster_articles_unpacks_tuple(self):

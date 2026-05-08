@@ -127,10 +127,18 @@ async def _try_acquire_lock_async(label: str) -> bool:
             await db.commit()
             return (result.rowcount or 0) > 0
     except Exception as e:
-        logger.warning(
-            "Could not check maintenance lock: %s — proceeding without lock", e
+        # Cycle-4 (2026-05-08): fail CLOSED. Pre-this-fix this returned
+        # True ("lock acquired") on any DB error — meaning a Neon hiccup
+        # during lock check let TWO cron firings proceed in parallel
+        # without holding a real lock. Both runs would race on
+        # _refresh_stories_metadata_batch UPSERTs and merge UPDATEs.
+        # Cron runs every 6h; losing one cycle to a transient DB error
+        # is harmless. Running parallel writes without a lock is not.
+        logger.error(
+            "Could not check maintenance lock: %s — refusing to run "
+            "without a confirmed lock (failing closed for safety)", e
         )
-        return True
+        return False
 
 
 async def _release_lock_async() -> None:
@@ -1190,9 +1198,18 @@ async def step_recompute_centroids():
 
     total = stats["updated_null"] + stats["updated_drift"]
     if total:
+        # Cycle-4 (2026-05-08): cycle-1 split `skipped` into two keys
+        # but the log line still referenced the old single key, so any
+        # non-empty recompute (every flood) crashed here with KeyError
+        # — though the centroid writes had committed first, the step
+        # got marked errored on the dashboard. Sum the split keys.
+        skipped_total = (
+            stats.get("skipped_no_articles", 0)
+            + stats.get("skipped_no_valid_centroid", 0)
+        )
         logger.info(
             f"Centroid recompute: {stats['updated_null']} from-null, "
-            f"{stats['updated_drift']} composition-drift, {stats['skipped']} skipped"
+            f"{stats['updated_drift']} composition-drift, {skipped_total} skipped"
         )
     return stats
 
@@ -2068,11 +2085,38 @@ async def step_fix_images():
                 return None
 
         CHUNK = 20
+        # Cycle-4 (2026-05-08): cap concurrent HEADs per HOST to avoid
+        # rate-limiting our own requests. War-news days have many
+        # articles from the same outlet — a chunk of 20 from a single
+        # CDN triggers 4xx → silent null-out via the `400-499` branch
+        # below → live images destroyed by our own coincidence. Limit
+        # to MAX_PER_HOST simultaneous in-flight per host.
+        from urllib.parse import urlparse as _urlparse_head
+        from collections import defaultdict as _ddict_head
+        MAX_PER_HOST = 5
+        host_buckets: dict[str, list] = _ddict_head(list)
+        for art_id, art_url in rows:
+            try:
+                host = _urlparse_head(art_url or "").hostname or "_"
+            except Exception:
+                host = "_"
+            host_buckets[host].append((art_id, art_url))
+        # Build chunks that have AT MOST MAX_PER_HOST entries from any
+        # single host. Round-robin draw from each host bucket.
+        rebalanced: list = []
+        while any(host_buckets.values()):
+            for host, bucket in list(host_buckets.items()):
+                drawn = 0
+                while bucket and drawn < MAX_PER_HOST:
+                    rebalanced.append(bucket.pop(0))
+                    drawn += 1
+                if not bucket:
+                    del host_buckets[host]
         import asyncio as _asyncio_head
-        for chunk_start in range(0, len(rows), CHUNK):
-            chunk_rows = rows[chunk_start:chunk_start + CHUNK]
+        for chunk_start in range(0, len(rebalanced), CHUNK):
+            chunk_rows = rebalanced[chunk_start:chunk_start + CHUNK]
             await _ms.update_step_progress(
-                chunk_start, total_n, label="HEAD-checking images (parallel)"
+                chunk_start, total_n, label="HEAD-checking images (parallel, host-throttled)"
             )
             results = await _asyncio_head.gather(
                 *[_head_one(art_id, art_url) for art_id, art_url in chunk_rows],
@@ -4513,35 +4557,22 @@ async def step_recalculate_trending():
                 Story.priority > -100,  # cycle-1 audit Island 9: skip hidden tier
             )
         )
-        now_utc = datetime.now(timezone.utc)
+        # Cycle-4 (2026-05-08): delegate to the canonical formula in
+        # `app.services.trending`. Pre-this-fix this loop's inline
+        # `0.85^days` formula diverged from clustering._compute_
+        # trending_score's `0.5^(hours/48)` formula — same Story column,
+        # different formulas (3.6× scale gap), homepage rank flickered
+        # between cron passes and interim writes.
+        from app.services.trending import compute_trending_score
         for story in result.scalars().all():
             old_score = story.trending_score
-            # Anchor selection (Parham 2026-05-03): for frozen stories
-            # the decay clock starts at `frozen_at`, not the prior
-            # `last_updated_at OR first_published_at` fallback. Without
-            # this, a 75d-old frozen umbrella whose last_updated_at
-            # happened yesterday (because step_recluster_orphans or any
-            # other touch bumped it) keeps a giant trending_score and
-            # outranks newly-frozen sibling stories on the homepage.
-            # With frozen_at as the anchor, a story's homepage shelf
-            # life is bounded by the freeze date — exactly what the
-            # "freeze closes the chapter" rule means.
-            if story.frozen_at:
-                anchor = story.frozen_at
-            else:
-                anchor = story.last_updated_at or story.first_published_at
-            if anchor:
-                if anchor.tzinfo is None:
-                    anchor = anchor.replace(tzinfo=timezone.utc)
-                days_ago = (now_utc - anchor).total_seconds() / 86400.0
-                recency = 0.85 ** max(0.0, days_ago)
-                # Floor so a 30+ day story without an anchor doesn't
-                # math.expDown to zero and drop entirely from
-                # admin-facing /api/v1/stories listings.
-                recency = max(recency, 0.005)
-            else:
-                recency = 0.05
-            story.trending_score = story.article_count * recency
+            story.trending_score = compute_trending_score(
+                article_count=story.article_count,
+                last_updated_at=story.last_updated_at,
+                frozen_at=story.frozen_at,
+                first_published_at=story.first_published_at,
+                source_count=story.source_count,
+            )
             if abs(story.trending_score - old_score) > 0.1:
                 stats["updated"] += 1
 
@@ -4968,8 +4999,28 @@ async def step_telegram_health():
     except ImportError:
         return {"skipped": True, "reason": "telethon not installed"}
     except Exception as e:
+        # Cycle-4 (2026-05-08): classify the failure so the operator
+        # can distinguish recoverable rate-limits (`FloodWaitError`,
+        # just wait N seconds) from non-recoverable session breaks
+        # (`AuthKeyDuplicatedError`, needs SMS re-auth). Pre-this-fix,
+        # both surfaced as identical-looking dashboard rows during
+        # war-mode flood — operator would either deaden the canary
+        # by ignoring "rate-limited again" or panic-respond to a
+        # genuine auth break by burning the session string.
         logger.warning(f"Telegram health check failed: {e}")
         stats["error"] = str(e)[:100]
+        err_class = type(e).__name__
+        stats["error_class"] = err_class
+        if err_class == "FloodWaitError":
+            stats["recoverable"] = True
+            stats["flood_wait_seconds"] = getattr(e, "seconds", None)
+        elif err_class in ("AuthKeyDuplicatedError", "SessionPasswordNeededError",
+                           "AuthKeyError", "AuthKeyUnregisteredError",
+                           "PhoneNumberInvalidError"):
+            stats["recoverable"] = False
+            stats["needs_reauth"] = True
+        else:
+            stats["recoverable"] = None  # unknown — operator inspect
 
     if stats["channels_failing"]:
         logger.warning(f"Telegram: {len(stats['channels_failing'])} channels failing")
@@ -7614,7 +7665,13 @@ async def run_maintenance(mode: str = "full"):
             f"Reason: {halt_reason}. Signals: {halt_signals}"
         )
 
-    await maintenance_state.start_run(total_steps=len(pipeline))
+    # Cycle-4 (2026-05-08): full mode runs an extra "Update project
+    # docs" step AFTER the pipeline loop (see L7666-7683). The dashboard
+    # progress bar pinned to `len(pipeline)` showed 58/58 then jumped
+    # to 59/58 at the end. Match the actual run count so the bar reads
+    # cleanly all the way through.
+    _extra_steps = 1 if mode == "full" else 0
+    await maintenance_state.start_run(total_steps=len(pipeline) + _extra_steps)
     results = {}
     if halt:
         results["_budget_guard"] = {

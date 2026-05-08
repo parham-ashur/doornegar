@@ -53,7 +53,7 @@ HALT_HARD_USD = MONTHLY_BUDGET_USD * 0.85  # $25.50
 # tiers below let us continue ingest+classify (which keep the
 # pipeline data coherent) while shutting off LLM-heavy work.
 CHEAP_STEPS = {
-    "ingest", "prune_noise", "recount", "classify_content_type",
+    "ingest", "prune_noise", "recount", "recount_after_dedup",
     "process", "backfill_farsi_titles", "cluster", "centroids",
     "recluster_orphans", "telegram_link", "merge_similar",
     "recalc_trending_pre_summarize", "recalc_trending",
@@ -88,6 +88,11 @@ HALT_SKIP_STEPS = {
     "weekly_digest", "worldview_digests",
     "translate_homepage_visible",  # the new step
     "summary_corrections", "niloofar_feedback_audit",
+    # Cycle-4 (2026-05-08): classify_content_type calls
+    # gpt-4.1-nano on ambiguous articles. Heuristics catch most,
+    # but stress-mode flood proportion stays the same → 2-5×
+    # LLM calls vs steady-state. Was leaking through CHEAP_STEPS.
+    "classify_content_type",
 }
 
 

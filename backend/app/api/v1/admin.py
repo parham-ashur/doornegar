@@ -4940,6 +4940,15 @@ async def patch_story_translation(
     slot.setdefault("prompt_version", "manual")
     blob[locale] = slot
     story.translations = blob
+    # Cycle-4 (2026-05-08): bump updated_at on admin patch. The
+    # cron's snapshot-vs-re-read race-check at translate_multilocale.py
+    # only fires when current_updated_at > snap_ts. Without this bump,
+    # an admin patch landing mid-cron-batch passes the race check
+    # silently and the cron's stale LLM result OVERWRITES the just-
+    # patched slot. Cron path deliberately doesn't bump (cycle-2 fix
+    # for the infinite-retranslation loop), but admin paths MUST —
+    # admin edits ARE state changes that should invalidate snapshots.
+    story.updated_at = _dt.now(_tz.utc)
     from sqlalchemy.orm.attributes import flag_modified as _flag_modified
     _flag_modified(story, "translations")
     await db.commit()
@@ -4966,6 +4975,7 @@ async def clear_story_translation(
     the current FA.
     """
     import uuid as _uuid
+    from datetime import datetime as _dt2, timezone as _tz2
     from app.models.story import Story
 
     if locale not in _VALID_TRANSLATION_LOCALES:
@@ -4987,6 +4997,10 @@ async def clear_story_translation(
     if had:
         del blob[locale]
         story.translations = blob if blob else None
+        # Cycle-4 (2026-05-08): bump updated_at so the cron's snapshot-
+        # vs-re-read race-check sees the clear and skips the stale LLM
+        # write. Without this, mid-cron clears get silently resurrected.
+        story.updated_at = _dt2.now(_tz2.utc)
         from sqlalchemy.orm.attributes import flag_modified as _flag_modified
         _flag_modified(story, "translations")
         await db.commit()

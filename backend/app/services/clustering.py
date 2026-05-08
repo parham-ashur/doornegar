@@ -277,42 +277,37 @@ def _compute_trending_score(
     article_count: int,
     first_published: datetime | None,
     source_count: int | None = None,
+    *,
+    last_updated_at: datetime | None = None,
+    frozen_at: datetime | None = None,
 ) -> float:
-    """Compute a trending score based on article count, recency, and
-    plurality of sources.
+    """Cycle-4 (2026-05-08): now a thin shim around the canonical
+    `app.services.trending.compute_trending_score`. Pre-this-fix,
+    this function used `0.5^(hours/48)` (2-day half-life, anchored on
+    first_published_at) while `step_recalculate_trending` used
+    `0.85^days` (~4.3-day half-life, anchored on
+    frozen_at??last_updated_at??first_published_at). Same Story column,
+    different formulas, 3.6x divergence in scale — homepage rank
+    flickered between cron passes (which used the canonical formula)
+    and interim writes from `_refresh_stories_metadata_batch` /
+    `match_existing` / `merge_similar` / HITL ops.
 
-    Score = article_count * recency_factor * plurality_factor
+    The canonical formula is now the second one (matches scheduled
+    recalc, anchors on the editorial-intent fields). See
+    `app/services/trending.py` for design rationale.
 
-    Plurality: a "story" with only one source is by definition not
-    plural coverage — it's a single outlet's feed. We zero it out of
-    the trending ranking so it can't ride to the top of the homepage
-    on volume alone. The story still exists and is reachable by direct
-    link, and it's also flagged in the HITL review queue for merge /
-    freeze decisions.
-
-    Recency uses exponential decay with half-life of 2 days:
-    - 0 hours ago: 1.0x
-    - 24 hours:    0.71x
-    - 48 hours:    0.50x
-    - 72 hours:    0.35x
-    - 7 days:      0.09x
-    - 14 days:     0.008x (essentially gone)
+    Most callers in this module pass only article_count and
+    first_published — the keyword args are for the few sites that
+    have the richer story state.
     """
-    import math
-    if first_published:
-        hours_ago = (datetime.now(timezone.utc) - first_published).total_seconds() / 3600
-        half_life_hours = 48  # 2 days
-        recency_factor = max(0.01, math.pow(0.5, hours_ago / half_life_hours))
-    else:
-        recency_factor = 0.1
-
-    # Single-source demotion: hard zero for trending. Visible stories
-    # always have article_count >= 5, so single-source means a large
-    # bulletin dump from one outlet — never pluralism.
-    if source_count is not None and source_count <= 1 and article_count >= 5:
-        return 0.0
-
-    return article_count * recency_factor
+    from app.services.trending import compute_trending_score
+    return compute_trending_score(
+        article_count=article_count,
+        last_updated_at=last_updated_at,
+        frozen_at=frozen_at,
+        first_published_at=first_published,
+        source_count=source_count,
+    )
 
 
 def _parse_llm_response(response_text: str) -> dict:
@@ -753,7 +748,11 @@ async def _match_to_existing_stories(
 
     if not existing_stories:
         logger.info("No existing visible stories to match against")
-        return articles
+        # Cycle-4 (2026-05-08): tuple return — cycle-3 fix `0f3a383`
+        # forgot the early-exit paths and only updated the final
+        # return. Callers do `unmatched_ids, count = await ...` and
+        # would crash with ValueError on a list-shaped return.
+        return article_ids_eager, 0
 
     # ── Phase 1: Embedding pre-filter ─────────────────────────────
     story_by_id = {row[0]: row for row in existing_stories}
@@ -1157,7 +1156,16 @@ async def _match_to_existing_stories(
 
     if not articles_to_check:
         logger.info("No articles to send to LLM for matching (all filtered out by embeddings)")
-        return articles
+        # Cycle-4 (2026-05-08): tuple return for the same reason as
+        # the L751 early-exit. `auto_match_pairs` already moved some
+        # articles into matched_article_ids, so unmatched is the
+        # complement. Articles that didn't make article_candidates
+        # AND aren't in articles_without_embedding fell through entirely
+        # — they're "unmatched" too.
+        unmatched_ids = [
+            aid for aid in article_ids_eager if aid not in matched_article_ids
+        ]
+        return unmatched_ids, len(article_candidates)
 
     # Collect the union of candidate story IDs across all articles
     candidate_story_ids = set()
@@ -1431,8 +1439,15 @@ async def _refresh_story_metadata(db: AsyncSession, story_id: uuid.UUID) -> None
     )
     story.first_published_at = min_pub_result.scalar()
 
+    # Cycle-4: pass last_updated_at + frozen_at so the canonical
+    # formula (anchored on the editorial-intent fields) doesn't see
+    # a diverged value here.
     story.trending_score = _compute_trending_score(
-        story.article_count, story.first_published_at, story.source_count
+        story.article_count,
+        story.first_published_at,
+        story.source_count,
+        last_updated_at=story.last_updated_at,
+        frozen_at=story.frozen_at,
     )
 
     # Recompute centroid embedding from DB (avoid stale lazy-loaded relationship)
@@ -1551,8 +1566,14 @@ async def _refresh_stories_metadata_batch(
         )
         story.coverage_diversity_score = len(groups_present) / 4.0
         story.last_updated_at = now
+        # Cycle-4: pass the editorial-intent anchors so this batch
+        # write produces the SAME score as the scheduled recalc would.
         story.trending_score = _compute_trending_score(
-            story.article_count, story.first_published_at, story.source_count
+            story.article_count,
+            story.first_published_at,
+            story.source_count,
+            last_updated_at=story.last_updated_at,
+            frozen_at=story.frozen_at,
         )
         # Clear summary so it gets regenerated by step_summarize — UNLESS the
         # story has been hand-edited by an admin, in which case we preserve
