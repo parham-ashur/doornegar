@@ -6,18 +6,19 @@ export type Locale = (typeof locales)[number];
 export const defaultLocale: Locale = "fa";
 
 // Locales advertised in the language switcher, sitemap, and hreflang
-// annotations. All three locales now ship — fr.json was replaced with
-// a proper Le Monde-register translation in Phase 1 (commit lands
-// alongside this file change), and the methodology page at
-// /[locale]/about/ has per-locale content.
+// annotations.
 //
-// Note: per-story translations (story-detail body, narratives, doornama)
-// still rely on Phase 2's translation pipeline. Until Phase 2 ships, the
-// per-locale story pages render Persian content with an English/French
-// UI chrome. Hreflang per-story should remain conservative (canonical
-// to /fa/X when no per-story translation exists) — that conditional
-// logic lives in `[locale]/stories/[id]/page.tsx` generateMetadata.
-export const advertisedLocales: readonly Locale[] = ["fa", "en", "fr"] as const;
+// 2026-05-08 (Parham): EN + FR HIDDEN from the navbar pending the
+// Neon-egress structural fix. The pages still render at /en + /fr
+// (so existing inbound links work and search-engine snapshots stay
+// fresh), but the locale switcher only offers FA. Re-add "en" and
+// "fr" here when egress is back under control AND the pgvector
+// migration (or alternative) has shipped + validated.
+//
+// Why hidden, not removed: removing the routes would 404 every
+// existing /en + /fr URL. Hiding from the switcher just stops new
+// visitor traffic from being routed there.
+export const advertisedLocales: readonly Locale[] = ["fa"] as const;
 
 export default getRequestConfig(async ({ requestLocale }) => {
   let locale = await requestLocale;
