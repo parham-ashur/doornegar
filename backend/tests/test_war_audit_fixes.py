@@ -2692,6 +2692,88 @@ class TestImageDownloaderHasByteCaps:
         )
 
 
+class TestEditStoryRequestAcceptsAllNarrativeFields:
+    """Cycle-5 H6+ (2026-05-08 evening): the chat-driven editorial
+    workflow needs to set the same long-form FA fields the cron does:
+    title_fa, summary_fa, state_summary_fa, diaspora_summary_fa,
+    independent_summary_fa, bias_explanation_fa, editorial_context_fa,
+    and briefing_fa (the doornama hero prose). Without all 8, the
+    operator can't fully replace a cron-generated story package and
+    the homepage shows mismatched coverage.
+
+    This test pins the PATCH /admin/stories/{id} model surface so a
+    future cycle doesn't drop a field and silently break the workflow.
+    """
+
+    EXPECTED_FIELDS = (
+        "title_fa", "title_en", "summary_fa", "priority",
+        "state_summary_fa", "diaspora_summary_fa",
+        "independent_summary_fa", "bias_explanation_fa",
+        "editorial_context_fa", "briefing_fa",
+    )
+
+    def test_request_model_includes_all_editorial_fields(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "api" / "v1" / "admin.py"
+        ).read_text()
+        idx = src.find("class _EditStoryRequest")
+        assert idx >= 0
+        # Look at next ~800 chars (pydantic model body).
+        block = src[idx:idx + 1200]
+        for field in self.EXPECTED_FIELDS:
+            assert f"{field}:" in block, (
+                f"_EditStoryRequest missing `{field}` field — chat-"
+                f"driven editorial workflow needs all 8 narrative "
+                f"fields to fully replace a cron story package."
+            )
+
+    def test_blob_writer_covers_all_long_form_fields(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "api" / "v1" / "admin.py"
+        ).read_text()
+        # The blob_writers dict in edit_story must list all 6 long-form
+        # fields (the ones written into summary_en JSON).
+        idx = src.find("blob_writers = {")
+        assert idx >= 0, (
+            "edit_story must use a blob_writers dict so all narrative "
+            "fields are written uniformly. Cycle-5 follow-up."
+        )
+        block = src[idx:idx + 800]
+        for key in (
+            "state_summary_fa", "diaspora_summary_fa",
+            "independent_summary_fa", "bias_explanation_fa",
+            "editorial_context_fa", "briefing_fa",
+        ):
+            assert f'"{key}"' in block, (
+                f"blob_writers must include `{key}` key. Without it "
+                f"the chat-driven workflow can't set that field."
+            )
+
+    def test_anchor_writer_preserves_briefing_fa(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "api" / "v1" / "admin.py"
+        ).read_text()
+        # The anchor_writers dict must include briefing_fa so the
+        # next cron's doornama step picks it up as prior_brief_anchor.
+        idx = src.find("anchor_writers = {")
+        assert idx >= 0
+        block = src[idx:idx + 800]
+        assert '"briefing_fa"' in block, (
+            "anchor_writers must include briefing_fa. Without it the "
+            "next doornama cron step regenerates fresh prose, "
+            "ignoring the operator's chat-drafted briefing."
+        )
+
+
 class TestTelegramDeepNeighborPoolBounded:
     """Cycle-5 H21 (HIGH 2026-05-08): the neighbor-borrow query in
     analyze_story_telegram used to load every Story with

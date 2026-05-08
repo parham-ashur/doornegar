@@ -1984,7 +1984,14 @@ class _EditStoryRequest(_BaseModel):
     # Narrative fields — live inside the JSON blob stored in story.summary_en
     state_summary_fa: str | None = None
     diaspora_summary_fa: str | None = None
+    independent_summary_fa: str | None = None
     bias_explanation_fa: str | None = None
+    editorial_context_fa: str | None = None
+    # Doornama hero briefing (top-N stories only). Same JSON blob; same
+    # summary_anchor preservation pattern. Lets the chat-driven editorial
+    # workflow set the hero prose without round-tripping through the
+    # gpt-5-mini cron step.
+    briefing_fa: str | None = None
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -2333,21 +2340,26 @@ async def edit_story(story_id: str, request: _EditStoryRequest, db: AsyncSession
         story.priority = request.priority
 
     # Narrative fields live inside the JSON blob in summary_en.
-    if (
-        request.state_summary_fa is not None
-        or request.diaspora_summary_fa is not None
-        or request.bias_explanation_fa is not None
-    ):
+    # All five long-form FA fields share this storage; the doornama
+    # briefing (hero-only prose paragraph) lives here too so the
+    # frontend's `extra.get('briefing_fa')` read picks it up without a
+    # schema migration.
+    blob_writers = {
+        "state_summary_fa": request.state_summary_fa,
+        "diaspora_summary_fa": request.diaspora_summary_fa,
+        "independent_summary_fa": request.independent_summary_fa,
+        "bias_explanation_fa": request.bias_explanation_fa,
+        "editorial_context_fa": request.editorial_context_fa,
+        "briefing_fa": request.briefing_fa,
+    }
+    if any(v is not None for v in blob_writers.values()):
         try:
             blob = _json.loads(story.summary_en) if story.summary_en else {}
         except Exception:
             blob = {}
-        if request.state_summary_fa is not None:
-            blob["state_summary_fa"] = request.state_summary_fa
-        if request.diaspora_summary_fa is not None:
-            blob["diaspora_summary_fa"] = request.diaspora_summary_fa
-        if request.bias_explanation_fa is not None:
-            blob["bias_explanation_fa"] = request.bias_explanation_fa
+        for key, value in blob_writers.items():
+            if value is not None:
+                blob[key] = value
         story.summary_en = _json.dumps(blob, ensure_ascii=False)
         editorial_change = True
 
@@ -2360,16 +2372,22 @@ async def edit_story(story_id: str, request: _EditStoryRequest, db: AsyncSession
         # nightly maintenance picks the story up.
         from datetime import datetime as _dt
         anchor = dict(story.summary_anchor or {})
-        if request.title_fa is not None:
-            anchor["title_fa"] = request.title_fa
-        if request.summary_fa is not None:
-            anchor["summary_fa"] = request.summary_fa
-        if request.state_summary_fa is not None:
-            anchor["state_summary_fa"] = request.state_summary_fa
-        if request.diaspora_summary_fa is not None:
-            anchor["diaspora_summary_fa"] = request.diaspora_summary_fa
-        if request.bias_explanation_fa is not None:
-            anchor["bias_explanation_fa"] = request.bias_explanation_fa
+        anchor_writers = {
+            "title_fa": request.title_fa,
+            "summary_fa": request.summary_fa,
+            "state_summary_fa": request.state_summary_fa,
+            "diaspora_summary_fa": request.diaspora_summary_fa,
+            "independent_summary_fa": request.independent_summary_fa,
+            "bias_explanation_fa": request.bias_explanation_fa,
+            "editorial_context_fa": request.editorial_context_fa,
+            # briefing_fa lives in summary_anchor too so the next
+            # doornama cron step picks it up as `prior_brief_anchor`
+            # and instructs the LLM to preserve the operator's prose.
+            "briefing_fa": request.briefing_fa,
+        }
+        for key, value in anchor_writers.items():
+            if value is not None:
+                anchor[key] = value
         anchor["anchored_at"] = _dt.utcnow().isoformat() + "Z"
         story.summary_anchor = anchor
         # Keep is_edited=False so nightly picks the story up.
