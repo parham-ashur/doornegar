@@ -29,6 +29,24 @@ async def require_admin(authorization: str = Header("")) -> None:
     token = authorization.replace("Bearer ", "").strip()
     if token != admin_token:
         raise HTTPException(status_code=401, detail="Invalid admin token")
+
+
+async def enforce_budget(db: AsyncSession = Depends(get_db)) -> None:
+    """FastAPI dependency: 403 the request when the budget guard halts.
+
+    Cycle-5 C1 fix: admin LLM trigger endpoints used to bypass the
+    cron pre-flight entirely. With manual_lock active, a click on
+    /admin/force-resummarize could still drain $10 of LLM spend.
+    Apply this dependency to every endpoint that fans out into LLM
+    calls (force-resummarize, bias/trigger, nlp/trigger,
+    cluster/trigger, pipeline/run-all, cluster-llm/trigger, plus
+    /lab/topics/{id}/{analyze,generate-analysts}).
+
+    `consume_override=False` so dashboard polling never eats the
+    operator's one-shot `clear`.
+    """
+    from app.services.budget_guard import enforce_budget_or_403_dep
+    await enforce_budget_or_403_dep(db)
 from app.models.article import Article
 from app.models.bias_score import BiasScore
 from app.models.ingestion_log import IngestionLog
@@ -538,7 +556,7 @@ async def get_dashboard(db: AsyncSession = Depends(get_db)):
     return response
 
 
-@router.post("/force-resummarize")
+@router.post("/force-resummarize", dependencies=[Depends(enforce_budget)])
 async def force_resummarize(
     limit: int = Query(5, ge=1, le=200),
     mode: str = Query("immediate", pattern="^(immediate|queue)$"),
@@ -675,6 +693,12 @@ async def _run_force_resummarize_job(story_ids: list[str], chosen_model: str) ->
     point). Dies if the backend restarts — next status poll returns idle.
     At the end, writes a durable row into maintenance_logs so the result
     (including per-story failures) outlives a Railway redeploy.
+
+    Cycle-5 C2 fix (2026-05-08): per-story budget guard. The endpoint
+    dependency `enforce_budget` catches the click, but a job that started
+    while budget was OK can still cross the 80% threshold mid-loop (e.g.
+    a separate cron run lands while this is processing 200 stories).
+    Re-check before every story and short-circuit the rest.
     """
     import json as _json
     from datetime import datetime, timezone
@@ -684,6 +708,7 @@ async def _run_force_resummarize_job(story_ids: list[str], chosen_model: str) ->
     from app.models.article import Article
     from app.models.story import Story
     from app.services import force_resummarize_state as _frs
+    from app.services.budget_guard import should_halt_for_budget
     from app.services.story_analysis import generate_story_analysis
 
     # Collect detailed per-story outcomes so we can write them to
@@ -692,10 +717,45 @@ async def _run_force_resummarize_job(story_ids: list[str], chosen_model: str) ->
     story_results: list[dict] = []
     started_at = datetime.now(timezone.utc)
     fatal_error: str | None = None
+    budget_halt_reason: str | None = None
 
     try:
         for sid in story_ids:
             async with async_session() as db:
+                # Per-story budget check. consume_override=False so a
+                # one-shot `clear` set for this manual run isn't burned
+                # on the first story.
+                halt, reason, _signals = await should_halt_for_budget(
+                    db, consume_override=False
+                )
+                if halt:
+                    budget_halt_reason = reason
+                    _frs.mark_story_done(
+                        success=False,
+                        error_msg=f"{sid[:8]}: budget_halt:{reason}",
+                    )
+                    story_results.append({
+                        "story_id": sid,
+                        "title": None,
+                        "article_count": 0,
+                        "status": "budget_halt",
+                        "error": f"budget_halt:{reason}",
+                    })
+                    # Drain remaining ids as budget_halt so the totals
+                    # reflect why we stopped, then break.
+                    for rest_sid in story_ids[story_ids.index(sid) + 1:]:
+                        _frs.mark_story_done(
+                            success=False,
+                            error_msg=f"{rest_sid[:8]}: budget_halt:{reason}",
+                        )
+                        story_results.append({
+                            "story_id": rest_sid,
+                            "title": None,
+                            "article_count": 0,
+                            "status": "budget_halt",
+                            "error": f"budget_halt:{reason}",
+                        })
+                    break
                 from sqlalchemy.orm import defer as _defer_a
                 r = await db.execute(
                     select(Story)
@@ -841,14 +901,25 @@ async def _run_force_resummarize_job(story_ids: list[str], chosen_model: str) ->
             total = len(story_ids)
             regenerated = sum(1 for r in story_results if r.get("status") == "ok")
             failed = sum(1 for r in story_results if r.get("status") in ("failed", "not_found"))
+            halted = sum(1 for r in story_results if r.get("status") == "budget_halt")
             results_payload = {
                 "mode": "force_resummarize",
                 "model": chosen_model,
                 "total": total,
                 "regenerated": regenerated,
                 "failed": failed,
+                "budget_halted": halted,
+                "budget_halt_reason": budget_halt_reason,
                 "stories": story_results,
             }
+            if budget_halt_reason:
+                status = "force_resummarize_budget_halt"
+            elif fatal_error:
+                status = "force_resummarize_error"
+            elif failed > 0:
+                status = "force_resummarize_partial"
+            else:
+                status = "force_resummarize_ok"
             await db.execute(
                 text(
                     "INSERT INTO maintenance_logs (id, run_at, status, elapsed_s, results, error) "
@@ -856,12 +927,10 @@ async def _run_force_resummarize_job(story_ids: list[str], chosen_model: str) ->
                 ),
                 {
                     "run_at": started_at,
-                    "status": "force_resummarize_error" if fatal_error else (
-                        "force_resummarize_partial" if failed > 0 else "force_resummarize_ok"
-                    ),
+                    "status": status,
                     "elapsed_s": elapsed_s,
                     "results": _json.dumps(results_payload, ensure_ascii=False),
-                    "error": fatal_error,
+                    "error": fatal_error or budget_halt_reason,
                 },
             )
             await db.commit()
@@ -1460,7 +1529,7 @@ async def trigger_ingestion(db: AsyncSession = Depends(get_db)):
         return {"status": "error", "error": str(e), "detail": "Check server logs"}
 
 
-@router.post("/nlp/trigger")
+@router.post("/nlp/trigger", dependencies=[Depends(enforce_budget)])
 async def trigger_nlp_processing(db: AsyncSession = Depends(get_db)):
     """Manually trigger NLP processing on unprocessed articles."""
     try:
@@ -1472,7 +1541,7 @@ async def trigger_nlp_processing(db: AsyncSession = Depends(get_db)):
         return {"status": "error", "error": str(e), "detail": "Check server logs"}
 
 
-@router.post("/cluster/trigger")
+@router.post("/cluster/trigger", dependencies=[Depends(enforce_budget)])
 async def trigger_clustering(db: AsyncSession = Depends(get_db)):
     """Manually trigger story clustering."""
     try:
@@ -1484,7 +1553,7 @@ async def trigger_clustering(db: AsyncSession = Depends(get_db)):
         return {"status": "error", "error": str(e), "detail": "Check server logs"}
 
 
-@router.post("/bias/trigger")
+@router.post("/bias/trigger", dependencies=[Depends(enforce_budget)])
 async def trigger_bias_scoring(
     batch_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -1746,7 +1815,7 @@ async def get_ingestion_log(
     }
 
 
-@router.post("/pipeline/run-all")
+@router.post("/pipeline/run-all", dependencies=[Depends(enforce_budget)])
 async def run_full_pipeline(db: AsyncSession = Depends(get_db)):
     """Run the full pipeline: ingest → NLP → cluster → score."""
     results = {}
@@ -3177,7 +3246,7 @@ async def upsert_weekly_digest(
 # here. Removed because the earlier `edit_story` handler (search for
 # _EditStoryRequest above) already owns this route and is authoritative.
 
-@router.post("/cluster-llm/trigger")
+@router.post("/cluster-llm/trigger", dependencies=[Depends(enforce_budget)])
 async def trigger_llm_clustering(db: AsyncSession = Depends(get_db)):
     """Cluster articles using LLM topic extraction (more accurate, costs ~$0.001/article)."""
     try:

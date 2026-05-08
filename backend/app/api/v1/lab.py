@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.v1.admin import require_admin
+from app.api.v1.admin import enforce_budget, require_admin
 from app.database import get_db
 from app.rate_limit import limiter as _limiter
 from app.models.article import Article
@@ -224,7 +224,11 @@ async def trigger_match(
     return {"matched": linked, "total_articles": topic.article_count}
 
 
-@router.post("/topics/{topic_id}/analyze", response_model=TopicDetail, dependencies=[Depends(require_admin)])
+@router.post(
+    "/topics/{topic_id}/analyze",
+    response_model=TopicDetail,
+    dependencies=[Depends(require_admin), Depends(enforce_budget)],
+)
 @_limiter.limit("10/hour")
 async def trigger_analysis(request: Request, topic_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
@@ -274,7 +278,10 @@ async def trigger_analysis(request: Request, topic_id: uuid.UUID, db: AsyncSessi
     return await get_topic(topic_id, db)
 
 
-@router.post("/topics/{topic_id}/generate-analysts", dependencies=[Depends(require_admin)])
+@router.post(
+    "/topics/{topic_id}/generate-analysts",
+    dependencies=[Depends(require_admin), Depends(enforce_budget)],
+)
 @_limiter.limit("10/hour")
 async def generate_analysts(request: Request, topic_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Topic).where(Topic.id == topic_id))

@@ -275,6 +275,33 @@ async def should_halt_for_budget(
     return False, "ok", signals
 
 
+async def enforce_budget_or_403_dep(db: AsyncSession) -> None:
+    """Inner check: raise HTTPException(403) when budget halts.
+
+    Split out so non-FastAPI callers (background tasks, manage.py)
+    can reuse the same logic without dragging in HTTP dependencies.
+    """
+    from fastapi import HTTPException
+
+    halt, reason, signals = await should_halt_for_budget(
+        db, consume_override=False
+    )
+    if halt:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "budget_halt",
+                "reason": reason,
+                "signals": signals,
+                "hint": (
+                    "Cron + admin LLM endpoints are halted. Clear "
+                    "with POST /admin/budget/override?action=clear "
+                    "(one-shot) or wait for next billing month."
+                ),
+            },
+        )
+
+
 async def ensure_budget_override_table(db: AsyncSession) -> None:
     """Idempotent DDL for the override table. Called from
     self-heal at app startup so the lock-clear admin endpoint

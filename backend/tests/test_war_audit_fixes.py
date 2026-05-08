@@ -2329,3 +2329,150 @@ class TestDedupPoolOrderedByRecency:
             "Dedup pool must ORDER BY ingested_at DESC so the 100-row "
             "sample is the most-recent — not arbitrary heap order."
         )
+
+
+class TestAdminLLMEndpointsHaveBudgetGuard:
+    """Cycle-5 C1 (CRITICAL 2026-05-08): admin trigger endpoints used
+    to bypass `should_halt_for_budget` entirely. The cron pre-flight
+    was the only choke point. With manual_lock active, a click on
+    /admin/force-resummarize could still fan out 200 gpt-5-mini
+    calls = $10 of LLM spend.
+
+    This test pins the dependency wiring (source-text inspection so
+    no DB or app boot needed). If a future cycle removes
+    `Depends(enforce_budget)` from any of these endpoints, the test
+    fails — drawing attention to a regression that would otherwise
+    only show up as another billing surprise.
+    """
+
+    GUARDED_ENDPOINTS = (
+        ("/force-resummarize", "app/api/v1/admin.py"),
+        ("/nlp/trigger", "app/api/v1/admin.py"),
+        ("/cluster/trigger", "app/api/v1/admin.py"),
+        ("/bias/trigger", "app/api/v1/admin.py"),
+        ("/pipeline/run-all", "app/api/v1/admin.py"),
+        ("/cluster-llm/trigger", "app/api/v1/admin.py"),
+        ("/topics/{topic_id}/analyze", "app/api/v1/lab.py"),
+        ("/topics/{topic_id}/generate-analysts", "app/api/v1/lab.py"),
+    )
+
+    def test_each_endpoint_wires_enforce_budget(self):
+        from pathlib import Path
+
+        for route, relpath in self.GUARDED_ENDPOINTS:
+            src = (
+                Path(__file__).parent.parent / relpath
+            ).read_text()
+            idx = src.find(f'"{route}"')
+            assert idx >= 0, (
+                f"Endpoint {route} not found in {relpath} — test "
+                f"anchor is stale"
+            )
+            # The decorator block ends at the `async def` that follows
+            # it. Inspect only that window.
+            block_end = src.find("async def", idx)
+            assert block_end > idx
+            decorator_block = src[idx:block_end]
+            assert "Depends(enforce_budget)" in decorator_block, (
+                f"Endpoint {route} in {relpath} is missing "
+                f"Depends(enforce_budget). Cycle-5 C1 regression — "
+                f"manual_lock will not protect this endpoint."
+            )
+
+    def test_enforce_budget_uses_consume_override_false(self):
+        """Dashboard polling /budget/status should never burn a one-shot
+        clear. The shared dep must pass consume_override=False.
+        """
+        from pathlib import Path
+
+        bg_src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "budget_guard.py"
+        ).read_text()
+        # Find enforce_budget_or_403_dep body.
+        idx = bg_src.find("async def enforce_budget_or_403_dep")
+        assert idx >= 0, "enforce_budget_or_403_dep must exist in budget_guard.py"
+        # Look at the next ~500 chars (function body).
+        body = bg_src[idx:idx + 1000]
+        assert "consume_override=False" in body, (
+            "enforce_budget_or_403_dep must call should_halt_for_budget "
+            "with consume_override=False so dashboard polling doesn't "
+            "burn the operator's one-shot clear."
+        )
+
+
+class TestForceResummarizeJobChecksBudgetPerStory:
+    """Cycle-5 C2 (CRITICAL 2026-05-08): the endpoint dependency
+    catches the click, but a job that started while budget was
+    healthy can keep running for 30+ minutes processing 200 stories.
+    If MTD crosses 80% mid-loop (e.g. a separate cron run lands),
+    the remaining stories should NOT be processed.
+    """
+
+    def test_per_story_budget_check_present(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "api" / "v1" / "admin.py"
+        ).read_text()
+        idx = src.find("async def _run_force_resummarize_job")
+        assert idx >= 0
+        # Body of the function up to the next top-level def
+        next_def = src.find("\nasync def ", idx + 1)
+        body = src[idx:next_def if next_def > 0 else len(src)]
+        assert "should_halt_for_budget" in body, (
+            "_run_force_resummarize_job must check should_halt_for_budget "
+            "before each story so a 200-story batch can short-circuit "
+            "when budget crosses 80% mid-loop. Cycle-5 C2 regression."
+        )
+        # The check must use consume_override=False so a one-shot
+        # operator clear isn't burned on the very first story.
+        assert "consume_override=False" in body, (
+            "_run_force_resummarize_job per-story budget check must use "
+            "consume_override=False so the operator's clear isn't burned "
+            "on the first story of a long manual run."
+        )
+
+
+class TestAnthropicFallbacksLogToBudgetLedger:
+    """Cycle-5 C6 (CRITICAL 2026-05-08): the budget guard reads MTD
+    from llm_usage_logs.total_cost. Anthropic fallback paths in
+    bias_scoring._call_anthropic and llm_utils._call_anthropic
+    used to call the API but never wrote to the ledger. Result:
+    when OpenAI rate-limits force fallback for hours, MTD reads
+    too low and the kill-switch never fires. Defeats the
+    invariant entirely.
+    """
+
+    def test_bias_scoring_call_anthropic_logs(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "bias_scoring.py"
+        ).read_text()
+        idx = src.find("async def _call_anthropic")
+        assert idx >= 0
+        next_def = src.find("\nasync def ", idx + 1)
+        body = src[idx:next_def if next_def > 0 else idx + 2000]
+        assert "log_llm_usage" in body, (
+            "bias_scoring._call_anthropic must call log_llm_usage "
+            "after every Anthropic call. Cycle-5 C6 regression."
+        )
+
+    def test_llm_utils_call_anthropic_logs(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "llm_utils.py"
+        ).read_text()
+        idx = src.find("async def _call_anthropic")
+        assert idx >= 0
+        next_def = src.find("\nasync def ", idx + 1)
+        body = src[idx:next_def if next_def > 0 else idx + 2000]
+        assert "log_llm_usage" in body, (
+            "llm_utils._call_anthropic must call log_llm_usage "
+            "after every Anthropic call. Cycle-5 C6 regression."
+        )

@@ -119,9 +119,19 @@ async def _call_openai(
 async def _call_anthropic(
     prompt: str, system: str | None, max_tokens: int, temperature: float
 ) -> LLMResponse:
+    """Generic Anthropic call. Cycle-5 C6 fix (2026-05-08): the budget
+    guard reads llm_usage_logs.total_cost as MTD. Without explicit
+    log_llm_usage here, every fallback call (when OpenAI is rate-
+    limited) runs invisible to the kill-switch. Defeats the budget
+    invariant.
+    """
     import anthropic
 
+    from app.services.llm_usage import log_llm_usage
+
     model = settings.bias_scoring_model
+    if not model.startswith("claude-"):
+        model = "claude-haiku-4-5-20251001"
     client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
     kwargs = {
@@ -133,6 +143,11 @@ async def _call_anthropic(
         kwargs["system"] = system
 
     msg = await client.messages.create(**kwargs)
+    await log_llm_usage(
+        model=model,
+        purpose="llm_utils.anthropic_fallback",
+        usage=msg.usage,
+    )
 
     text = msg.content[0].text
     input_tokens = msg.usage.input_tokens

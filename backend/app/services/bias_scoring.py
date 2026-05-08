@@ -419,16 +419,26 @@ async def _call_llm(prompt: str, *, article_id=None) -> str:
     if settings.openai_api_key:
         return await _call_openai(prompt, article_id=article_id)
     elif settings.anthropic_api_key:
-        return await _call_anthropic(prompt)
+        return await _call_anthropic(prompt, article_id=article_id)
     else:
         raise RuntimeError(
             "No LLM API key configured. Set OPENAI_API_KEY or ANTHROPIC_API_KEY."
         )
 
 
-async def _call_anthropic(prompt: str) -> str:
-    """Call Anthropic Claude API (fallback only — primary path is OpenAI)."""
+async def _call_anthropic(prompt: str, *, article_id=None) -> str:
+    """Call Anthropic Claude API (fallback only — primary path is OpenAI).
+
+    Cycle-5 C6 fix (2026-05-08): every Anthropic call must be logged
+    to llm_usage_logs. Without this, the budget guard's MTD reading
+    is computed from llm_usage_logs alone and silently under-counts
+    Anthropic spend. When OpenAI rate-limits force fallback to
+    Anthropic for hours, the kill-switch never fires. Defeats the
+    entire $30/mo invariant.
+    """
     import anthropic
+
+    from app.services.llm_usage import log_llm_usage
 
     # bias_scoring_model may be an OpenAI model name; fall back to a
     # reasonable Claude default if so.
@@ -441,6 +451,12 @@ async def _call_anthropic(prompt: str) -> str:
         model=model,
         max_tokens=1024,
         messages=[{"role": "user", "content": prompt}],
+    )
+    await log_llm_usage(
+        model=model,
+        purpose="bias_scoring.anthropic_fallback",
+        usage=message.usage,
+        article_id=article_id,
     )
     return message.content[0].text
 
