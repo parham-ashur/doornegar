@@ -185,10 +185,24 @@ async def get_manual_override(db: AsyncSession) -> Optional[str]:
         return None
 
 
-async def should_halt_for_budget(db: AsyncSession) -> tuple[bool, str, dict]:
+async def should_halt_for_budget(
+    db: AsyncSession, *, consume_override: bool = True
+) -> tuple[bool, str, dict]:
     """Decide whether to halt the cron.
 
     Returns (halt: bool, reason: str, signals: dict).
+
+    `consume_override`: when True (cron pre-flight default), a `clear`
+    override is reset to NULL after this call — that's what makes
+    `clear` a one-shot. When False (read-only callers like
+    /admin/budget/status), the override is preserved so dashboard
+    polling doesn't accidentally consume the operator's one-shot.
+
+    Cycle-3 fix (2026-05-08): pre-this-fix every call to
+    should_halt_for_budget consumed the override, including reads from
+    the dashboard's /budget/status polling. This caused the 2026-05-08
+    morning cron to halt despite the operator clearing the override
+    7h before — some intermediate /budget/status call ate it.
     """
     llm_mtd = await get_llm_cost_mtd(db)
     egress_gb, egress_cost = await get_neon_egress_estimate_mtd(db)
@@ -210,18 +224,19 @@ async def should_halt_for_budget(db: AsyncSession) -> tuple[bool, str, dict]:
     if override == "lock":
         return True, "manual_lock", signals
     if override == "clear":
-        # One-shot pass — clear the override after this read so the
-        # next cron is back under normal rules.
-        try:
-            await db.execute(
-                _sa_text(
-                    "UPDATE budget_override SET action = NULL, "
-                    "set_at = NOW() WHERE id = 1"
+        # One-shot pass. Only consume the flag when the cron is
+        # actually pre-flighting; read-only callers leave it in place.
+        if consume_override:
+            try:
+                await db.execute(
+                    _sa_text(
+                        "UPDATE budget_override SET action = NULL, "
+                        "set_at = NOW() WHERE id = 1"
+                    )
                 )
-            )
-            await db.commit()
-        except Exception:
-            logger.exception("Failed to clear budget_override")
+                await db.commit()
+            except Exception:
+                logger.exception("Failed to clear budget_override")
         return False, "manual_clear_one_shot", signals
 
     # Neon egress alone can blow the budget without LLM spend rising

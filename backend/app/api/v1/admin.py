@@ -5149,7 +5149,11 @@ async def budget_status(db: AsyncSession = Depends(get_db)):
         HALT_SKIP_STEPS,
     )
 
-    halt, reason, signals = await should_halt_for_budget(db)
+    # Cycle-3 fix (2026-05-08): consume_override=False so dashboard
+    # polling does NOT consume the operator's one-shot clear. Pre-this-
+    # fix, /budget/status calls were eating the override before the
+    # cron got to it.
+    halt, reason, signals = await should_halt_for_budget(db, consume_override=False)
     return {
         "would_halt_next_cron": halt,
         "reason_if_halt": reason,

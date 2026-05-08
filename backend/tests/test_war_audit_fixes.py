@@ -1747,6 +1747,68 @@ class TestNlpTranslationBatchSizeUsedConsistently:
         )
 
 
+class TestBudgetStatusDoesNotConsumeOverride:
+    """Cycle-3 audit (2026-05-08): /admin/budget/status used to call
+    should_halt_for_budget without `consume_override=False`, so any
+    dashboard polling between override-set and the next cron pre-flight
+    would burn the one-shot. The 2026-05-08 morning cron halted
+    despite the operator clearing the override 7h before — some
+    intermediate /budget/status call ate it. Fix: status endpoint
+    passes consume_override=False; cron pre-flight keeps default True.
+    """
+
+    def test_status_endpoint_uses_consume_override_false(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py"
+        ).read_text()
+        # Find the /budget/status endpoint body.
+        idx = src.find("async def budget_status(")
+        assert idx >= 0
+        end = src.find("@router.", idx + 1)
+        body = src[idx:end] if end > idx else src[idx:idx + 2000]
+        assert "consume_override=False" in body, (
+            "/budget/status MUST pass consume_override=False so dashboard "
+            "polling doesn't burn the operator's one-shot clear."
+        )
+
+    def test_should_halt_accepts_consume_override_kwarg(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "budget_guard.py"
+        ).read_text()
+        # Signature must accept the kwarg, default True. Signature spans
+        # multiple lines; find the closing `) -> ` of the def.
+        idx = src.find("async def should_halt_for_budget(")
+        assert idx >= 0
+        close_paren = src.find(")", idx)
+        sig = src[idx:close_paren + 1]
+        assert "consume_override: bool = True" in sig, (
+            "should_halt_for_budget signature must accept "
+            "consume_override kwarg (default True)."
+        )
+
+    def test_clear_branch_only_consumes_when_flag_set(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "budget_guard.py"
+        ).read_text()
+        # The override-clearing UPDATE must be guarded by consume_override.
+        update_idx = src.find('UPDATE budget_override SET action = NULL')
+        assert update_idx >= 0
+        # Look back 300 chars to find the conditional gate.
+        gate_window = src[max(0, update_idx - 300):update_idx]
+        assert "if consume_override:" in gate_window, (
+            "The clearing UPDATE must be wrapped in `if "
+            "consume_override:` so read-only callers preserve the flag."
+        )
+
+
 class TestClusterStepNameError:
     """Cycle-3 audit (2026-05-08): cycle-1 commit 6abc775 referenced
     `article_candidates` in cluster_articles.stats but the variable
