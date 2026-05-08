@@ -33,6 +33,31 @@ LOCAL_IMAGE_BASE = "/images"
 REHOST_MAX_WIDTH = 1600
 REHOST_WEBP_QUALITY = 75
 
+# Cycle-5 C4 (2026-05-08): hard cap on download bytes. Iranian sources
+# occasionally serve a 50MB hero PNG or — worse — redirect an image URL
+# to an MP4 video (got bitten by this once). Buffering the full body
+# into memory before handing to Pillow is OOM-class on Railway 8GB
+# Hobby. Stream + abort once the threshold is exceeded.
+MAX_IMAGE_BYTES = 8 * 1024 * 1024  # 8 MB
+
+# Cycle-5 C5 (2026-05-08): pass-through cap. When _recompress_to_webp
+# returns None (animated GIF, SVG, corrupted, large), we used to
+# upload the ORIGINAL uncapped bytes to R2 unchanged. ~5-10% of
+# upstream images fail recompression; one cron run could shovel
+# 100 MB of un-recompressed assets into R2 at full source size.
+# Reject anything above 1 MB on the pass-through branch.
+MAX_PASSTHROUGH_BYTES = 1 * 1024 * 1024  # 1 MB
+
+# Pillow pixel-bomb defense. Default is None (warn only). 25 megapixel
+# is enough for 5000×5000 images (way past anything legitimate hits a
+# news site) and stops decompression-bomb attacks dead.
+try:  # pragma: no cover — guarded so import doesn't fail without Pillow
+    from PIL import Image as _PIL_Image
+
+    _PIL_Image.MAX_IMAGE_PIXELS = 25_000_000
+except ImportError:
+    pass
+
 
 def _is_r2_configured() -> bool:
     return bool(
@@ -158,22 +183,37 @@ async def download_image(url: str) -> str | None:
         if await _object_exists_in_r2(webp_filename):
             return f"{settings.r2_public_url.rstrip('/')}/{webp_filename}"
 
-        # Download source image
+        # Download source image (Cycle-5 C4: streamed with hard byte cap).
         try:
             async with httpx.AsyncClient(
                 timeout=15,
                 follow_redirects=True,
                 headers={"User-Agent": "Mozilla/5.0 (compatible; Doornegar/1.0)"},
             ) as client:
-                response = await client.get(url)
-                if response.status_code != 200:
-                    return None
-                content_type = response.headers.get("content-type", "image/jpeg")
-                if not content_type.startswith("image/"):
-                    return None
-                content = response.content
-                if len(content) < 1000:  # Too small, probably a placeholder
-                    return None
+                async with client.stream("GET", url) as response:
+                    if response.status_code != 200:
+                        return None
+                    content_type = response.headers.get("content-type", "image/jpeg")
+                    if not content_type.startswith("image/"):
+                        return None
+                    chunks: list[bytes] = []
+                    total = 0
+                    over_cap = False
+                    async for chunk in response.aiter_bytes():
+                        total += len(chunk)
+                        if total > MAX_IMAGE_BYTES:
+                            over_cap = True
+                            break
+                        chunks.append(chunk)
+                    if over_cap:
+                        logger.warning(
+                            f"Image exceeds {MAX_IMAGE_BYTES} bytes "
+                            f"(downloaded {total}, aborting): {url[:80]}"
+                        )
+                        return None
+                    content = b"".join(chunks)
+                    if len(content) < 1000:  # Too small, probably a placeholder
+                        return None
         except Exception as e:
             logger.debug(f"Download failed {url[:60]}: {e}")
             return None
@@ -187,6 +227,17 @@ async def download_image(url: str) -> str | None:
             return await _upload_to_r2(webp_filename, new_bytes, new_content_type)
 
         # Pass-through path: keep the original bytes + ext.
+        # Cycle-5 C5: cap pass-through at 1 MB. Recompression failure
+        # is the long-tail of upstream image weirdness; one bad source
+        # file in a cron run could shovel a 30 MB GIF into R2 at full
+        # original size and bust the egress budget.
+        if len(content) > MAX_PASSTHROUGH_BYTES:
+            logger.warning(
+                f"Pass-through skipped — original is "
+                f"{len(content)} bytes > {MAX_PASSTHROUGH_BYTES} cap: "
+                f"{url[:80]}"
+            )
+            return None
         ext = ".jpg"
         for e in [".jpg", ".jpeg", ".png", ".webp", ".gif"]:
             if e in url.lower():

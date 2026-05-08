@@ -2593,3 +2593,100 @@ class TestTelegramClientDisconnectsBetweenRuns:
             "finally block must reset _client = None so the next cron "
             "run starts from a clean slate."
         )
+
+
+class TestImageDownloaderHasByteCaps:
+    """Cycle-5 C4 + C5 (CRITICAL 2026-05-08): image_downloader had no
+    byte caps. A 50 MB hero PNG (or worse, a video URL that 200s with
+    image/jpeg content-type) was buffered into memory then handed to
+    Pillow → OOM on Railway 8GB Hobby. The pass-through branch
+    (recompression failed: GIF, SVG, etc.) wrote the ORIGINAL uncapped
+    bytes to R2 — turning a single bad source into a $$ R2 bill.
+
+    Two caps:
+    - MAX_IMAGE_BYTES (8 MB): streamed download abort when exceeded
+    - MAX_PASSTHROUGH_BYTES (1 MB): reject pass-through R2 upload when
+      recompression failed AND original is large
+    """
+
+    def test_max_byte_constants_defined(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "image_downloader.py"
+        ).read_text()
+        assert "MAX_IMAGE_BYTES" in src, (
+            "image_downloader must define MAX_IMAGE_BYTES. Cycle-5 C4."
+        )
+        assert "MAX_PASSTHROUGH_BYTES" in src, (
+            "image_downloader must define MAX_PASSTHROUGH_BYTES. "
+            "Cycle-5 C5."
+        )
+        # Sanity-check the actual values (don't allow a future cycle to
+        # weaken to e.g. 100 MB without explicit review).
+        assert "MAX_IMAGE_BYTES = 8 * 1024 * 1024" in src, (
+            "MAX_IMAGE_BYTES must stay 8 MB. Larger weakens OOM "
+            "protection on Railway 8GB containers."
+        )
+        assert "MAX_PASSTHROUGH_BYTES = 1 * 1024 * 1024" in src, (
+            "MAX_PASSTHROUGH_BYTES must stay 1 MB. Larger weakens R2 "
+            "egress / cost protection."
+        )
+
+    def test_download_uses_streaming_with_cap(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "image_downloader.py"
+        ).read_text()
+        # Locate the R2-branch download (the production path).
+        idx = src.find("# Download source image")
+        assert idx >= 0
+        block = src[idx:idx + 2000]
+        # Must use httpx.stream — `client.get()` reads full body into
+        # memory which is the OOM trap.
+        assert 'client.stream("GET"' in block, (
+            "R2 image download must use httpx client.stream so the "
+            "8 MB cap can abort early. Cycle-5 C4."
+        )
+        # Must check against MAX_IMAGE_BYTES inside the stream loop.
+        assert "MAX_IMAGE_BYTES" in block, (
+            "R2 image download must abort when total > MAX_IMAGE_BYTES."
+        )
+
+    def test_passthrough_branch_rejects_oversize(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "image_downloader.py"
+        ).read_text()
+        # Locate the pass-through branch (recompression failed).
+        idx = src.find("# Pass-through path:")
+        assert idx >= 0
+        block = src[idx:idx + 1500]
+        assert "MAX_PASSTHROUGH_BYTES" in block, (
+            "Pass-through branch must check MAX_PASSTHROUGH_BYTES "
+            "before uploading the original bytes to R2. Cycle-5 C5."
+        )
+        # Must return None on oversize — not silently truncate.
+        check_idx = block.find("MAX_PASSTHROUGH_BYTES")
+        check_block = block[check_idx:check_idx + 400]
+        assert "return None" in check_block, (
+            "Pass-through oversize must return None (drop the image), "
+            "not silently truncate or fall through."
+        )
+
+    def test_pillow_pixel_bomb_guard(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "image_downloader.py"
+        ).read_text()
+        assert "MAX_IMAGE_PIXELS" in src, (
+            "Pillow MAX_IMAGE_PIXELS must be set explicitly to defend "
+            "against decompression-bomb attacks. Cycle-5 C4."
+        )
