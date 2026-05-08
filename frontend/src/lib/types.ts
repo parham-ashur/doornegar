@@ -193,6 +193,9 @@ export interface StoryTranslationSlot {
   independent_summary?: string | null;
   bias_explanation?: string | null;
   editorial_context?: string | null;
+  // Phase 2-d (cycle-4 2026-05-08): doornama hero briefing prose.
+  // Only populated for top-N trending stories per cron.
+  doornama?: string | null;
   translated_at?: string | null;
   prompt_version?: string | null;
   is_edited?: boolean;

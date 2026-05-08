@@ -402,6 +402,12 @@ async def step_translate_homepage_visible() -> dict[str, Any]:
                 "independent_summary_fa": (narrative_blob.get("independent_summary_fa") or "").strip(),
                 "bias_explanation_fa": (narrative_blob.get("bias_explanation_fa") or "").strip(),
                 "editorial_context_fa": ec_text,
+                # Phase 2-d (cycle-4 2026-05-08): the doornama hero
+                # briefing prose (4-8 Farsi sentences) is also stored
+                # inside summary_en JSON. Only top-N stories have it
+                # populated — for stories without one, this is empty
+                # and the composer drops the empty key.
+                "briefing_fa": (narrative_blob.get("briefing_fa") or "").strip(),
                 "translations": dict(s.translations or {}),
                 "updated_at": s.updated_at or s.created_at,
             })
@@ -464,6 +470,8 @@ async def step_translate_homepage_visible() -> dict[str, Any]:
                     ("independent_summary_fa", "independent_summary"),
                     ("bias_explanation_fa", "bias_explanation"),
                     ("editorial_context_fa", "editorial_context"),
+                    # Phase 2-d (cycle-4): doornama hero briefing.
+                    ("briefing_fa", "doornama"),
                 ]
                 for src_key, slot_key in _phase2b_pairs:
                     if (snap.get(src_key) or "").strip() and not (existing.get(slot_key) or "").strip():
@@ -505,6 +513,9 @@ async def step_translate_homepage_visible() -> dict[str, Any]:
             "independent_summary": snap.get("independent_summary_fa", ""),
             "bias_explanation": snap.get("bias_explanation_fa", ""),
             "editorial_context": snap.get("editorial_context_fa", ""),
+            # Phase 2-d: hero-only briefing (top-N stories — empty for
+            # the rest, composer drops empties).
+            "doornama": snap.get("briefing_fa", ""),
         }
         result = await translate_story(
             story_id=snap["id"], fa_payload=fa_payload, locale=locale

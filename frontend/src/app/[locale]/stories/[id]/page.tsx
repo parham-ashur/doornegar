@@ -339,8 +339,21 @@ export default async function StoryDetailPage({
             );
           })()}
           {/* دورنما — at-a-glance prose synthesis. Only renders for top-N
-              trending stories where the backend doornama step has run. */}
-          <DoornamaBriefing briefing={analysis?.briefing_fa} />
+              trending stories where the backend doornama step has run.
+              Cycle-4 Phase 2-d: prefer the locale-translated briefing
+              (gpt-5-mini Niloofar voice via translate cron) over FA. */}
+          {(() => {
+            const slot = locale === "en"
+              ? story.translations?.en
+              : locale === "fr"
+                ? story.translations?.fr
+                : null;
+            // The translation slot stores the briefing under the key
+            // "doornama" (so the LLM sees a clean key in the JSON
+            // schema), even though the FA source field is briefing_fa.
+            const localized = (slot as { doornama?: string | null } | undefined)?.doornama;
+            return <DoornamaBriefing briefing={localized || analysis?.briefing_fa} />;
+          })()}
           {/* Bias comparison */}
           <StoryAnalysisPanel analysis={analysis} />
 
