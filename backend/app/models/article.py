@@ -1,7 +1,6 @@
 import uuid
 from datetime import datetime
 
-from pgvector.sqlalchemy import Vector
 from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -43,15 +42,8 @@ class Article(Base):
     content_type_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     # NLP outputs
-    # embedding stored as JSON array for MVP (pgvector not required).
-    # Cycle-4 (2026-05-08): embedding_v migrates to pgvector binary
-    # vector(384). ~60% byte reduction per row, plus enables Postgres-
-    # side cosine via the `<=>` operator. Dual-write phase in progress;
-    # readers will switch in a later commit. See migration z1u2v3w4x5y6.
+    # embedding stored as JSON array for MVP (pgvector not required)
     embedding: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    embedding_v: Mapped[list[float] | None] = mapped_column(
-        Vector(384), nullable=True
-    )
     keywords: Mapped[dict] = mapped_column(JSONB, default=list)
     named_entities: Mapped[dict] = mapped_column(JSONB, default=list)
     sentiment_score: Mapped[float | None] = mapped_column(Float, nullable=True)

@@ -3734,64 +3734,6 @@ _health_cache: dict = {"data": None, "expires": 0.0}
 _HEALTH_CACHE_TTL = 300  # cycle-1 audit Phase B: bumped 60→300 to cut canary fan-out under dashboard polling
 
 
-@router.post(
-    "/debug/pgvector-backfill", dependencies=[Depends(require_admin)]
-)
-async def pgvector_backfill(
-    batch_size: int = Query(2000, ge=100, le=10000),
-    db: AsyncSession = Depends(get_db),
-):
-    """One-shot backfill: copy JSONB embeddings into the new pgvector
-    columns for all existing rows. Idempotent — re-running only fills
-    rows that are still NULL on the `_v` side. Returns counts so
-    operator can re-trigger until backfill_remaining == 0.
-
-    Bounded per call (`batch_size`) so the endpoint stays under
-    Vercel's 300s default timeout. ~32k articles + ~1.5k stories at
-    ~50ms per row = several minutes total; expect 2-5 calls.
-
-    JSONB array `[1.234, 5.678, ...]` happens to be valid pgvector
-    text input, so `(embedding::text)::vector(384)` works directly
-    without intermediate conversion.
-
-    Cycle-4 (2026-05-08) — egress structural fix.
-    """
-    out: dict = {}
-
-    # Articles
-    art_filled = await db.execute(_sa_text(
-        """
-        UPDATE articles
-        SET embedding_v = (embedding::text)::vector(384)
-        WHERE id IN (
-            SELECT id FROM articles
-            WHERE embedding IS NOT NULL AND embedding_v IS NULL
-            LIMIT :batch
-        )
-        """
-    ), {"batch": batch_size})
-    out["articles_filled_this_call"] = art_filled.rowcount or 0
-
-    art_remaining = await db.execute(_sa_text(
-        "SELECT COUNT(*) FROM articles "
-        "WHERE embedding IS NOT NULL AND embedding_v IS NULL"
-    ))
-    out["articles_remaining"] = int(art_remaining.scalar() or 0)
-
-    # Stories (much smaller table, fill all in one go)
-    story_filled = await db.execute(_sa_text(
-        """
-        UPDATE stories
-        SET centroid_embedding_v = (centroid_embedding::text)::vector(384)
-        WHERE centroid_embedding IS NOT NULL AND centroid_embedding_v IS NULL
-        """
-    ))
-    out["stories_filled_this_call"] = story_filled.rowcount or 0
-
-    await db.commit()
-    return out
-
-
 @router.get("/debug/egress-audit", dependencies=[Depends(require_admin)])
 async def egress_audit(db: AsyncSession = Depends(get_db)):
     """Per-column byte-size measurement for the egress investigation.

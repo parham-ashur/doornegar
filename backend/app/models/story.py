@@ -1,7 +1,6 @@
 import uuid
 from datetime import datetime
 
-from pgvector.sqlalchemy import Vector
 from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -79,12 +78,6 @@ class Story(Base):
     # pre-filter to quickly find candidate stories for new articles via
     # cosine similarity (avoids sending irrelevant stories to the LLM).
     centroid_embedding: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    # Cycle-4 (2026-05-08) pgvector dual-column: see Article.embedding_v
-    # for rationale. Coexists with JSONB during the dual-write phase;
-    # readers switch later. ~50% byte reduction once primary.
-    centroid_embedding_v: Mapped[list[float] | None] = mapped_column(
-        Vector(384), nullable=True
-    )
     telegram_analysis: Mapped[dict | None] = mapped_column(JSONB, nullable=True, comment="Cached deep Telegram discourse analysis")
     editorial_context_fa: Mapped[dict | None] = mapped_column(JSONB, nullable=True, comment="Niloofar editorial background context in Farsi")
     # Snapshot of the analysis axes (dispute_score, inside/outside pct, bias

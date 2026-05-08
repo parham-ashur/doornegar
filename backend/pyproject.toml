@@ -8,12 +8,6 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "sqlalchemy[asyncio]>=2.0",
     "asyncpg>=0.29",
-    # pgvector: binary vector type for embeddings. Drops Article.embedding
-    # row weight from 3,772 B (JSONB array of 384 floats) to ~1,540 B
-    # (binary float4×384), and enables Postgres-side cosine similarity
-    # via the `<=>` operator (no need to ship vectors back to Python).
-    # Cycle-4 egress structural fix.
-    "pgvector>=0.3",
     "alembic>=1.13",
     "pydantic-settings>=2.0",
     "celery[redis]>=5.4",
