@@ -1180,6 +1180,7 @@ async def step_recompute_centroids():
             centroid = _compute_centroid(embeddings)
             if centroid:
                 story.centroid_embedding = centroid
+                story.centroid_embedding_v = centroid  # cycle-4 pgvector dual-write
                 if is_null:
                     stats["updated_null"] += 1
                 else:

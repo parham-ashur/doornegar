@@ -278,6 +278,10 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
                     skipped_by_source[src_key] = skipped_by_source.get(src_key, 0) + 1
                     continue
                 article.embedding = embedding
+                # Cycle-4 (2026-05-08) pgvector dual-write — populate
+                # the new vector column alongside the legacy JSONB.
+                # Readers switch over in a later commit.
+                article.embedding_v = embedding
             if skipped:
                 logger.warning(
                     f"Embedding: skipped {skipped}/{len(embeddings)} articles "

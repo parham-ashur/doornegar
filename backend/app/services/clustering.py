@@ -1456,7 +1456,9 @@ async def _refresh_story_metadata(db: AsyncSession, story_id: uuid.UUID) -> None
         .where(Article.story_id == story_id, Article.embedding.isnot(None))
     )
     embeddings = [row[0] for row in emb_result.all() if row[0]]
-    story.centroid_embedding = _compute_centroid(embeddings)
+    centroid = _compute_centroid(embeddings)
+    story.centroid_embedding = centroid
+    story.centroid_embedding_v = centroid  # cycle-4 pgvector dual-write
 
     # Only clear summary if article count changed by 3+ (throttle saves ~60%
     # of summary regeneration cost — each regeneration costs ~$0.01).
@@ -1606,9 +1608,9 @@ async def _refresh_stories_metadata_batch(
             story = stories_by_id.get(sid)
             if not story:
                 continue
-            story.centroid_embedding = _compute_centroid(
-                embeddings_by_story.get(sid, [])
-            )
+            _centroid = _compute_centroid(embeddings_by_story.get(sid, []))
+            story.centroid_embedding = _centroid
+            story.centroid_embedding_v = _centroid  # cycle-4 pgvector dual-write
 
 
 def _compute_centroid(embeddings: list[list[float] | None]) -> list[float] | None:
@@ -2438,6 +2440,7 @@ async def _create_story_from_dicts(
         last_updated_at=datetime.now(timezone.utc),
         trending_score=_compute_trending_score(len(article_dicts), first_published, len(source_ids)),
         centroid_embedding=centroid,
+        centroid_embedding_v=centroid,  # cycle-4 pgvector dual-write
     )
     db.add(story)
     await db.flush()  # get story.id
@@ -2542,6 +2545,7 @@ async def _create_story(
         last_updated_at=datetime.now(timezone.utc),
         trending_score=_compute_trending_score(len(articles), first_published, len(set(a.source_id for a in articles))),
         centroid_embedding=centroid,
+        centroid_embedding_v=centroid,  # cycle-4 pgvector dual-write
     )
     db.add(story)
     await db.flush()  # Get the story ID

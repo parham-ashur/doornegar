@@ -253,6 +253,16 @@ async def lifespan(app: FastAPI):
                 # chronically broken upstream URL doesn't burn the per-run
                 # cap forever. See project_r2_migrate_sentinel.md.
                 "ALTER TABLE articles ADD COLUMN IF NOT EXISTS last_r2_migration_attempt_at TIMESTAMPTZ",
+                # Cycle-4 (2026-05-08) — pgvector for embeddings,
+                # migration z1u2v3w4x5y6. Drops Article.embedding row
+                # weight from 3,772 B to ~1,540 B and enables Postgres-
+                # side cosine similarity via the `<=>` operator. Both
+                # column types coexist during the dual-write phase;
+                # readers switch in a later step. The CREATE EXTENSION
+                # is a no-op if already installed (Neon supports it).
+                "CREATE EXTENSION IF NOT EXISTS vector",
+                "ALTER TABLE articles ADD COLUMN IF NOT EXISTS embedding_v vector(384)",
+                "ALTER TABLE stories ADD COLUMN IF NOT EXISTS centroid_embedding_v vector(384)",
                 # Budget guard (Parham 2026-05-07) — single-row table
                 # holds the cron's manual override flag. The hard
                 # rule: if month-to-date LLM spend reaches 80% of
