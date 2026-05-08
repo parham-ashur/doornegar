@@ -7403,6 +7403,16 @@ FULL_PIPELINE = [
     ("cluster", "Cluster articles into stories", "step_cluster"),
     ("centroids", "Recompute story centroid embeddings", "step_recompute_centroids"),
     ("recluster_orphans", "Second-chance clustering for 6h+ orphans (looser cosine)", "step_recluster_orphans"),
+    # Cycle-3 Phase B fix (2026-05-08): recalc_trending must run BEFORE
+    # summarize_newly_visible. Pre-this-fix, the gate
+    # `homepage_story_ids` filter `trending_score > 0.5` saw the PRIOR
+    # cron's score, so a story whose article_count just jumped 2→5 in
+    # this cron's `cluster` step still failed the filter (its old score
+    # was 0). Stale-low scores silently dropped legitimately-newly-
+    # visible stories from the early-summarize pass — defeating the
+    # 30-min benefit cycle-1 added the step for.
+    ("recalc_trending_pre_summarize", "Recalculate trending before summarize",
+     "step_recalculate_trending"),
     # Catch any story that just crossed `article_count >= 4` and is
     # homepage-eligible but lacks a summary. Runs BEFORE telegram_link
     # (~18min) so newly-visible stories get summaries ~10-15 min into
@@ -7422,15 +7432,10 @@ FULL_PIPELINE = [
     # not in any cron schedule. Saves 1215s × 3 runs/day = ~1 hour/day
     # of pipeline time.
     ("merge_similar", "Merge similar visible stories", "step_merge_similar"),
-    # Recompute trending BEFORE summarize so doornama_top_ids reflects
-    # post-ingest reality (Parham 2026-05-04). Without this, step_summarize
-    # was picking the briefing's hero card based on the PRIOR cron's
-    # trending_score — so a story that climbed to rank 1 during this
-    # cron's ingest didn't get a دورنما until the NEXT cron 6h later.
-    # Idempotent + cheap (~3s); the late recalc_trending below still runs
-    # to pick up changes from prune/demote/archive steps after summarize.
-    ("recalc_trending_pre_summarize", "Recalculate trending before summarize",
-     "step_recalculate_trending"),
+    # Cycle-3 Phase B (2026-05-08): the recalc_trending_pre_summarize
+    # step that used to live HERE has moved up to before
+    # summarize_newly_visible (so both summarize steps read fresh
+    # trending after merge_similar's article-count adjustments).
     ("summarize", "Summarize new stories", "step_summarize"),
     ("bias_score", "Bias scoring", "step_bias_score"),
     ("fix_images", "Fix broken images", "step_fix_images"),
@@ -7456,7 +7461,6 @@ FULL_PIPELINE = [
     # the 6h window between this cron and the next.
     ("archive_stale", "Archive stale stories", "step_archive_stale"),
     ("demote_umbrellas", "Demote umbrella stories (>21d old + >100 articles)", "step_demote_umbrella_stories"),
-    ("recalc_trending", "Recalculate trending", "step_recalculate_trending"),
     ("dedup_articles", "Dedup articles", "step_deduplicate_articles"),
     ("fixes", "Auto-fix common issues", "step_fix_issues"),
     ("flag_unrelated", "Auto-flag unrelated articles", "step_flag_unrelated_articles"),
@@ -7468,6 +7472,13 @@ FULL_PIPELINE = [
     # second pass, every cron leaves `article_count` drifted by N (where
     # N = number of detachments). Trending decays incorrectly.
     ("recount_after_dedup", "Recount after dedup/flag detachments", "step_recount_stories"),
+    # Cycle-3 Phase B (2026-05-08): recalc_trending now runs AFTER
+    # dedup + flag_unrelated + recount, so it sees the FINAL article
+    # counts. Pre-this-fix it ran BEFORE dedup, so the trending_score
+    # baked the pre-dedup count and stayed stale on the homepage for
+    # the 6h until next cron. Demote sets priority via formula
+    # independent of trending_score, so swapping order is safe.
+    ("recalc_trending", "Recalculate trending", "step_recalculate_trending"),
     ("image_relevance", "Image relevance check", "step_image_relevance"),
     ("analyst_takes", "Extract analyst takes from Telegram", "step_extract_analyst_takes"),
     ("verify_predictions", "Verify analyst predictions", "step_verify_predictions"),

@@ -147,6 +147,41 @@ class TestPipelineOrdering:
         m = _import_pipelines()
         assert self._idx(m, "recalc_trending_pre_summarize") < self._idx(m, "summarize")
 
+    def test_recalc_trending_pre_summarize_runs_before_newly_visible(self):
+        """Cycle-3 Phase B (2026-05-08): also before summarize_newly_visible.
+        Pre-this-fix the pre-summarize recalc ran AFTER newly_visible at
+        position 13, so the homepage_story_ids `trending_score > 0.5`
+        gate saw the prior cron's score — silently dropping legitimately-
+        newly-visible stories from the early-summarize pass."""
+        m = _import_pipelines()
+        assert self._idx(m, "recalc_trending_pre_summarize") < self._idx(
+            m, "summarize_newly_visible"
+        ), (
+            "recalc_trending_pre_summarize MUST run before summarize_"
+            "newly_visible — otherwise homepage_story_ids reads stale "
+            "trending_score and the early-summarize pass misses stories"
+        )
+
+    def test_late_recalc_trending_runs_after_recount_after_dedup(self):
+        """Cycle-3 Phase B (2026-05-08): the late recalc_trending must
+        come AFTER recount_after_dedup. Pre-this-fix it ran BEFORE
+        dedup_articles + flag_unrelated, so trending_score baked the
+        pre-dedup article_count and stayed stale on the homepage for
+        the 6h until next cron's recalc. Trending depends on
+        article_count; article_count just got fixed by recount_after_
+        dedup; therefore recalc must follow it."""
+        m = _import_pipelines()
+        keys = _pipeline_keys(m.FULL_PIPELINE)
+        assert "recount_after_dedup" in keys
+        assert "recalc_trending" in keys
+        recount_pos = keys.index("recount_after_dedup")
+        recalc_pos = keys.index("recalc_trending")
+        assert recount_pos < recalc_pos, (
+            f"recount_after_dedup (pos {recount_pos}) must run BEFORE "
+            f"the late recalc_trending (pos {recalc_pos}). Otherwise "
+            f"trending_score uses stale pre-dedup article_count."
+        )
+
     def test_summarize_before_bias_score(self):
         """bias_score per-article scoring uses summary context; if it
         runs first, scoring lacks the cluster narrative."""

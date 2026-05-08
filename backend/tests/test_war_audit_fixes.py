@@ -869,13 +869,25 @@ class TestStoryAnalysisGpt4oMiniTokenBudget:
 class TestRecalcTrendingBeforeSummarize:
     """step_summarize uses Story.trending_score to pick `doornama_top_ids`
     via homepage_story_ids. If trending_score is stale (recomputed AFTER
-    summarize at line 6681 in FULL_PIPELINE), the briefing's hero pick
-    can be a cron cycle behind reality.
+    summarize), the briefing's hero pick lags one 6h cron cycle.
 
-    Fix: add an extra recalc_trending pass right after merge_similar,
-    before summarize. The recompute is idempotent and cheap (~3s);
-    the original late recalc still runs to pick up later-step changes
-    (prune/demote/archive)."""
+    Cycle-3 Phase B (2026-05-08): the recalc was moved EARLIER, to
+    before summarize_newly_visible (was previously between merge_similar
+    and summarize). Both summarize_newly_visible and summarize now read
+    fresh trending. The order is now:
+
+        recluster_orphans
+        recalc_trending_pre_summarize  ← was here historically AFTER merge_similar
+        summarize_newly_visible
+        telegram_link
+        merge_similar
+        summarize
+
+    Trade-off: merge_similar can change article_count of merged stories
+    AFTER the pre-summarize recalc fires, so a story merged in this
+    cron may briefly show stale trending. Bounded — the late
+    recalc_trending picks it up.
+    """
 
     def test_recalc_trending_runs_before_summarize(self):
         from pathlib import Path
@@ -884,27 +896,26 @@ class TestRecalcTrendingBeforeSummarize:
             Path(__file__).parent.parent / "auto_maintenance.py"
         ).read_text()
 
-        # Find the FULL_PIPELINE block and confirm step ordering.
         idx = src.find("FULL_PIPELINE = [")
         assert idx >= 0
-        # Find positions of merge_similar, the pre-summarize recalc, and summarize.
-        # The recalc must be between merge_similar and summarize.
-        merge_pos = src.find('"step_merge_similar"', idx)
-        summarize_pos = src.find('"step_summarize"', idx)
         recalc_pre_pos = src.find('"recalc_trending_pre_summarize"', idx)
-        assert merge_pos >= 0 and summarize_pos >= 0, (
-            "FULL_PIPELINE must contain merge_similar and summarize"
-        )
+        summarize_pos = src.find('"step_summarize"', idx)
+        newly_visible_pos = src.find('"step_summarize_newly_visible"', idx)
         assert recalc_pre_pos >= 0, (
-            "FULL_PIPELINE must contain a 'recalc_trending_pre_summarize' "
-            "step between merge_similar and summarize so doornama_top_ids "
-            "reflects post-ingest reality. Without it, the hero-card "
-            "briefing lags by one 6h cron cycle."
+            "FULL_PIPELINE must contain 'recalc_trending_pre_summarize'"
         )
-        assert merge_pos < recalc_pre_pos < summarize_pos, (
-            f"Step ordering wrong: merge_similar({merge_pos}) → "
-            f"recalc_trending_pre_summarize({recalc_pre_pos}) → "
-            f"summarize({summarize_pos}) is the required order."
+        assert summarize_pos >= 0
+        assert newly_visible_pos >= 0
+        # Recalc must precede BOTH summarize steps so each reads fresh
+        # trending_score.
+        assert recalc_pre_pos < newly_visible_pos, (
+            f"recalc_trending_pre_summarize({recalc_pre_pos}) must "
+            f"precede summarize_newly_visible({newly_visible_pos}) — "
+            f"otherwise homepage_story_ids reads stale trending."
+        )
+        assert recalc_pre_pos < summarize_pos, (
+            f"recalc_trending_pre_summarize({recalc_pre_pos}) must "
+            f"precede summarize({summarize_pos})."
         )
 
 
