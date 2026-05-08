@@ -1466,9 +1466,30 @@ async def _refresh_stories_metadata_batch(
 
     id_list = list(story_ids)
 
-    # 1. Load all affected Story ORM objects in one query
+    # 1. Load all affected Story ORM objects in one query.
+    # Cycle-3 audit (2026-05-08): cycle-1 commit 7e6fa46 added defers
+    # to the three merge functions but missed this batch helper. Each
+    # full Story row carries ~70-80 KB of heavy JSONB
+    # (translations / telegram_analysis / editorial_context_fa /
+    # summary_anchor / analysis_snapshot_24h / summary_en /
+    # hourly_update_signal). The function only reads summary_fa and
+    # is_edited; the heavy columns ride along uselessly. At 50
+    # affected stories per cluster pass × 3 daily crons = ~12 MB/day
+    # wasted egress before this defer.
+    from sqlalchemy.orm import defer as _defer_refresh
     story_result = await db.execute(
-        select(Story).where(Story.id.in_(id_list))
+        select(Story)
+        .options(
+            _defer_refresh(Story.translations),
+            _defer_refresh(Story.telegram_analysis),
+            _defer_refresh(Story.editorial_context_fa),
+            _defer_refresh(Story.summary_anchor),
+            _defer_refresh(Story.analysis_snapshot_24h),
+            _defer_refresh(Story.summary_en),
+            _defer_refresh(Story.hourly_update_signal),
+            _defer_refresh(Story.centroid_embedding),
+        )
+        .where(Story.id.in_(id_list))
     )
     stories_by_id = {s.id: s for s in story_result.scalars().all()}
 
@@ -2960,9 +2981,26 @@ async def audit_cluster_coherence(
             "ALTER TABLE stories ADD COLUMN IF NOT EXISTS audit_notes JSONB"
         ))
 
+    # Cycle-3 audit (2026-05-08): scope to recently-active stories
+    # only. Pre-this-fix, every cron iterated all 561 stories with
+    # article_count >= 10 — including 3-year-old frozen umbrellas
+    # that haven't accepted a new article in months. Each story
+    # required a 4-row Article.embedding sample (~3.7 KB each =
+    # ~15 KB/story), so 561 stories burned ~8 MB of pure waste per
+    # cron audit. Adding `last_updated_at >= NOW() - 7d` AND skipping
+    # frozen + archived stories drops the surface to ~30-50 stories
+    # — only the ones that could realistically have absorbed
+    # incoherent articles in the recent window. Frozen umbrellas
+    # don't grow, so re-checking their drift adds no signal.
+    audit_cutoff = datetime.now(timezone.utc) - timedelta(days=7)
     q = await db.execute(
         select(Story.id, Story.title_fa, Story.article_count)
-        .where(Story.article_count >= min_articles)
+        .where(
+            Story.article_count >= min_articles,
+            Story.last_updated_at >= audit_cutoff,
+            Story.frozen_at.is_(None),
+            Story.archived_at.is_(None),
+        )
     )
     rows = q.all()
 

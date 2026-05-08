@@ -1747,6 +1747,79 @@ class TestNlpTranslationBatchSizeUsedConsistently:
         )
 
 
+class TestAuditClusterCoherenceScopedToRecent:
+    """Cycle-3 audit (2026-05-08): audit_cluster_coherence loaded ALL
+    stories with article_count >= 10 (561 in production), including
+    3-year-old frozen umbrellas. Each story required a 4-row Article.
+    embedding sample, burning ~8 MB pure-waste egress per cron. Add a
+    7-day last_updated_at gate + skip frozen + archived.
+    """
+
+    def test_audit_filters_on_last_updated_at(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "clustering.py"
+        ).read_text()
+        idx = src.find("async def audit_cluster_coherence(")
+        assert idx >= 0
+        end = src.find("\nasync def ", idx + 1)
+        body = src[idx:end] if end > idx else src[idx:idx + 4000]
+        # Recently-active filter must be present
+        assert "Story.last_updated_at >= audit_cutoff" in body, (
+            "audit_cluster_coherence MUST scope to last_updated_at "
+            ">= audit_cutoff (7d) — otherwise it iterates ancient frozen "
+            "umbrellas every cron and burns egress."
+        )
+        assert "Story.frozen_at.is_(None)" in body, (
+            "audit_cluster_coherence MUST skip frozen stories — they "
+            "can't absorb new articles, so drift audit adds no signal."
+        )
+        assert "Story.archived_at.is_(None)" in body, (
+            "audit_cluster_coherence MUST skip archived stories"
+        )
+        assert "timedelta(days=7)" in body, (
+            "Audit window must be 7 days"
+        )
+
+
+class TestRefreshStoriesMetadataBatchDefersHeavyJsonb:
+    """Cycle-3 audit (2026-05-08): cycle-1 commit 7e6fa46 added defers
+    to the three merge functions but missed _refresh_stories_metadata_batch.
+    Each Story row carries ~70-80 KB of heavy JSONB; the function only
+    reads summary_fa and is_edited. ~12 MB/day wasted egress before
+    this defer.
+    """
+
+    def test_batch_helper_defers_heavy_jsonb(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "clustering.py"
+        ).read_text()
+        idx = src.find("async def _refresh_stories_metadata_batch(")
+        assert idx >= 0
+        end = src.find("\nasync def ", idx + 1)
+        body = src[idx:end] if end > idx else src[idx:idx + 6000]
+        # All 8 heavy JSONB columns must be deferred.
+        for col in (
+            "translations",
+            "telegram_analysis",
+            "editorial_context_fa",
+            "summary_anchor",
+            "analysis_snapshot_24h",
+            "summary_en",
+            "hourly_update_signal",
+            "centroid_embedding",
+        ):
+            assert f"_defer_refresh(Story.{col})" in body, (
+                f"_refresh_stories_metadata_batch must defer Story.{col} "
+                f"— function reads only summary_fa + is_edited."
+            )
+
+
 class TestBudgetStatusDoesNotConsumeOverride:
     """Cycle-3 audit (2026-05-08): /admin/budget/status used to call
     should_halt_for_budget without `consume_override=False`, so any
