@@ -1747,6 +1747,70 @@ class TestNlpTranslationBatchSizeUsedConsistently:
         )
 
 
+class TestClusterStepNameError:
+    """Cycle-3 audit (2026-05-08): cycle-1 commit 6abc775 referenced
+    `article_candidates` in cluster_articles.stats but the variable
+    lives only in `_match_to_existing_stories` scope. Every cron since
+    that commit hit `NameError: name 'article_candidates' is not
+    defined` at the cluster step, dropping clustering for ~20h until
+    detected on the 2026-05-08 03:00 UTC cron. Fix: tuple return from
+    the matcher.
+    """
+
+    def test_match_to_existing_stories_returns_tuple(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "clustering.py"
+        ).read_text()
+        # Locate the matcher's return path.
+        idx = src.find("async def _match_to_existing_stories(")
+        assert idx >= 0
+        end_marker = src.find(
+            "\nasync def _refresh_story_metadata", idx
+        )
+        assert end_marker > idx, "Function boundary must be findable"
+        body = src[idx:end_marker]
+        # Look for the final return statement
+        ret_idx = body.rfind("return ")
+        assert ret_idx >= 0
+        ret_line = body[ret_idx:ret_idx + 200]
+        assert "len(article_candidates)" in ret_line, (
+            "_match_to_existing_stories must return both unmatched_ids "
+            "and len(article_candidates) so the caller can include the "
+            "count in cluster stats. See cycle-3 audit (NameError fix)."
+        )
+
+    def test_cluster_articles_unpacks_tuple(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "clustering.py"
+        ).read_text()
+        # The cluster_articles function must unpack the tuple.
+        assert (
+            "unmatched_ids, llm_candidates_sent = await _match_to_existing_stories"
+            in src
+        ), "cluster_articles must unpack the tuple from the matcher"
+
+    def test_cluster_stats_uses_captured_count(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "clustering.py"
+        ).read_text()
+        # The stats dict must reference the captured local, not the
+        # out-of-scope `article_candidates`.
+        assert '"llm_candidates_sent": int(len(article_candidates))' not in src, (
+            "Cluster stats dict must NOT reference article_candidates "
+            "directly — that variable lives only in the matcher scope. "
+            "Use the captured llm_candidates_sent local."
+        )
+
+
 class TestStepSummarizeNoCentroidDefer:
     """Cycle-2 audit (CRITICAL): cycle-1 commit 12076f9 added
     `defer(Story.centroid_embedding)` to step_summarize's main

@@ -1341,7 +1341,15 @@ async def _match_to_existing_stories(
     # passing them downstream causes greenlet_spawn elsewhere
     # (observed in _cluster_new_articles at _dedup_signature on
     # 2026-04-30 01:27 / 05:29 UTC).
-    return [aid for aid in article_ids_eager if aid not in matched_article_ids]
+    #
+    # Cycle-3 fix (2026-05-08): also surface llm_candidates_sent so the
+    # caller can include it in the cluster stats. Cycle-1 commit
+    # 6abc775 added a stats reference to `article_candidates` in the
+    # caller scope, but the variable lives only here — every cron
+    # since 6abc775 deployed has hit `NameError: article_candidates`
+    # at the cluster step. Tuple return surfaces the count cleanly.
+    unmatched_ids = [aid for aid in article_ids_eager if aid not in matched_article_ids]
+    return unmatched_ids, len(article_candidates)
 
 
 async def _refresh_story_metadata(db: AsyncSession, story_id: uuid.UUID) -> None:
@@ -2661,9 +2669,10 @@ async def cluster_articles(db: AsyncSession, *, deadline_ts: float | None = None
     # ORM objects expired) doesn't poison phase N+1. Inputs cross phase
     # boundaries as primitive UUIDs only — never ORM objects.
     from app.database import async_session as _phase_session
+    llm_candidates_sent = 0  # default if matcher errored / short-circuited
     try:
         async with _phase_session() as match_db:
-            unmatched_ids = await _match_to_existing_stories(
+            unmatched_ids, llm_candidates_sent = await _match_to_existing_stories(
                 match_db, articles, source_names, deadline_ts=deadline_ts,
             )
             try:
@@ -2904,7 +2913,11 @@ async def cluster_articles(db: AsyncSession, *, deadline_ts: float | None = None
         # Conversion-rate signal from the match phase. Sent_to_llm is
         # the input pool, matched_to_existing is the outcome. Rejected
         # = sent_to_llm - matched_to_existing (when sent > 0).
-        "llm_candidates_sent": int(len(article_candidates)),
+        # Cycle-3 fix: count is captured from _match_to_existing_stories
+        # via tuple return — pre-fix referenced article_candidates
+        # which lives in that function's scope, raising NameError on
+        # every cluster step.
+        "llm_candidates_sent": int(llm_candidates_sent),
     }
     logger.info(f"Incremental clustering complete: {stats}")
     return stats
