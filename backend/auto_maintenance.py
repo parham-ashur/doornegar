@@ -7676,17 +7676,28 @@ async def run_maintenance(mode: str = "full"):
     # The auto 80%-budget halt keeps its previous "skip LLM only"
     # behavior so ingest stays fresh. Only the operator's explicit
     # `manual_lock` halts the entire pipeline.
-    if halt and halt_reason == "manual_lock":
+    # Parham 2026-05-09: daily_egress_cap halts the entire pipeline
+    # the same way manual_lock does. 3 GB/day is the survival floor
+    # under Neon's 100 GB/mo allotment. If today's egress already
+    # crossed the cap, no further steps run — even ingest. The cap
+    # naturally resets at UTC midnight via egress_daily_snapshot.
+    full_halt_reasons = ("manual_lock",)
+    if halt and halt_reason.startswith("daily_egress_cap"):
+        full_halt_reasons = (halt_reason,)
+    if halt and (halt_reason == "manual_lock" or halt_reason.startswith("daily_egress_cap")):
         logger.error(
-            "MANUAL_LOCK active — halting entire pipeline. No steps will run. "
-            "Clear with POST /admin/budget/override?action=clear (one-shot)."
+            f"FULL HALT ({halt_reason}) — pipeline will not run. "
+            f"Signals: {halt_signals}. "
+            f"manual_lock: clear with POST /admin/budget/override?action=clear. "
+            f"daily_egress_cap: resets automatically at UTC midnight."
         )
         await maintenance_state.start_run(total_steps=1)
-        await maintenance_state.begin_step("manual_lock_halt")
+        step_name = "manual_lock_halt" if halt_reason == "manual_lock" else "daily_egress_cap_halt"
+        await maintenance_state.begin_step(step_name)
         await maintenance_state.end_step(
-            "manual_lock_halt",
+            step_name,
             "ok",
-            {"halted": True, "reason": "manual_lock", "signals": halt_signals},
+            {"halted": True, "reason": halt_reason, "signals": halt_signals},
         )
         # Persist the halt to maintenance_logs so /admin/maintenance/logs
         # shows it and Railway log retention isn't the only record.
@@ -7709,18 +7720,18 @@ async def run_maintenance(mode: str = "full"):
                         "results": _json.dumps(
                             {
                                 "halted": True,
-                                "reason": "manual_lock",
+                                "reason": halt_reason,
                                 "signals": halt_signals,
                             },
                             ensure_ascii=False,
                         ),
-                        "error": "manual_lock",
+                        "error": halt_reason,
                     },
                 )
                 await _ldb.commit()
         except Exception:
-            logger.exception("Failed to persist manual_lock_halt log row")
-        return {"_manual_lock": {"halted": True, "reason": halt_reason}}
+            logger.exception(f"Failed to persist {halt_reason} log row")
+        return {"_full_halt": {"halted": True, "reason": halt_reason}}
 
     # Cycle-4 (2026-05-08): full mode runs an extra "Update project
     # docs" step AFTER the pipeline loop (see L7666-7683). The dashboard

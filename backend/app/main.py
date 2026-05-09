@@ -268,6 +268,17 @@ async def lifespan(app: FastAPI):
                     CHECK (id = 1)
                 )""",
                 "INSERT INTO budget_override (id, action) VALUES (1, NULL) ON CONFLICT (id) DO NOTHING",
+                # Parham 2026-05-09: 3 GB/day Neon egress cap. One row
+                # per UTC day stores the start-of-day tup_returned
+                # anchor; budget_guard.get_daily_egress_estimate reads
+                # it and computes today's delta. Halts the entire
+                # pipeline (same semantics as manual_lock) when the
+                # day's estimated egress crosses 3 GB.
+                """CREATE TABLE IF NOT EXISTS egress_daily_snapshot (
+                    day DATE PRIMARY KEY,
+                    tup_returned_start BIGINT NOT NULL,
+                    set_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )""",
             ):
                 try:
                     await db.execute(text(ddl))

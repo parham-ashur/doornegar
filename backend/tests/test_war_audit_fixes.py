@@ -2700,6 +2700,101 @@ class TestImageDownloaderHasByteCaps:
         )
 
 
+class TestDailyEgressCap3GB:
+    """Parham 2026-05-09: hard rule — never let any single UTC day
+    exceed 3 GB of estimated Neon egress. 100 GB Neon free tier / 30
+    days = 3.33 GB/day; 3.0 leaves 10 % headroom. Estimate uses
+    pg_stat_database.tup_returned delta against a start-of-day
+    snapshot persisted in egress_daily_snapshot. When today's egress
+    crosses the cap, the entire cron pipeline halts (same semantics
+    as manual_lock). Resets at UTC midnight via natural day-rollover.
+
+    Context: the 2026-05-09 30 GB egress incident burned ~30 % of the
+    monthly allotment in one day because the kill-switch's
+    HALT_SKIP_STEPS only blocked LLM-heavy steps; ~41 non-LLM heavy
+    steps still ran on every cron fire. This rule survives that
+    failure mode regardless of which steps are tagged where.
+    """
+
+    def test_constant_set_to_3gb(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "budget_guard.py"
+        ).read_text()
+        assert "DAILY_EGRESS_CAP_GB = 3.0" in src, (
+            "DAILY_EGRESS_CAP_GB must be 3.0. The 100 GB Neon free "
+            "tier / 30 days = 3.33 GB/day; 3.0 is the survival floor "
+            "with 10 % headroom. Future cycles must not weaken this."
+        )
+
+    def test_should_halt_for_budget_returns_daily_egress_cap_reason(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "budget_guard.py"
+        ).read_text()
+        # The function must check daily egress and return a
+        # daily_egress_cap halt reason BEFORE the manual_clear
+        # one-shot can bypass it.
+        idx = src.find("async def should_halt_for_budget")
+        assert idx >= 0
+        next_def = src.find("\nasync def ", idx + 1)
+        body = src[idx:next_def if next_def > 0 else len(src)]
+        assert "daily_egress_cap" in body, (
+            "should_halt_for_budget must return halt reason "
+            "starting with 'daily_egress_cap' when today's egress "
+            "crosses the cap. Cycle-5 Phase E.3 regression."
+        )
+        # Ordering: daily egress check must come BEFORE manual_clear
+        # one-shot (so a clear can't sidestep the daily cap — the cap
+        # is the survival floor, clear is for unblocking specific runs
+        # within budget).
+        cap_pos = body.find("daily_egress_cap_")
+        clear_pos = body.find('override == "clear"')
+        assert cap_pos > 0 and clear_pos > 0
+        assert cap_pos < clear_pos, (
+            "Daily egress cap check must come BEFORE the "
+            "manual_clear one-shot — otherwise clear bypasses the "
+            "daily survival floor."
+        )
+
+    def test_run_maintenance_treats_daily_cap_like_manual_lock(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent / "auto_maintenance.py"
+        ).read_text()
+        # The full-halt block in run_maintenance must check for
+        # daily_egress_cap reason, not just manual_lock.
+        idx = src.find("Phase E.2")
+        assert idx >= 0
+        # Look at the full-halt block — should now also include
+        # daily_egress_cap.
+        block = src[idx:idx + 3500]
+        assert "daily_egress_cap" in block, (
+            "run_maintenance full-halt block must also short-circuit "
+            "on halt_reason starting with 'daily_egress_cap'. "
+            "Otherwise the daily cap doesn't actually halt the "
+            "non-LLM heavy steps. Phase E.3 regression."
+        )
+
+    def test_egress_daily_snapshot_table_in_self_heal(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "main.py"
+        ).read_text()
+        assert "egress_daily_snapshot" in src, (
+            "egress_daily_snapshot table DDL must be in main.py "
+            "lifespan self-heal so the daily-egress estimator works "
+            "on a fresh DB without manual migration."
+        )
+
+
 class TestManualLockHaltsEntirePipeline:
     """Cycle-5 Phase E.2 (CRITICAL 2026-05-09): the budget kill-switch
     HALT_SKIP_STEPS list contains only ~17 LLM-heavy step names. The
@@ -2721,31 +2816,33 @@ class TestManualLockHaltsEntirePipeline:
         src = (
             Path(__file__).parent.parent / "auto_maintenance.py"
         ).read_text()
-        # Locate the manual_lock check block.
+        # Locate the full-halt block by Phase E.2 anchor.
         idx = src.find("Phase E.2")
         assert idx >= 0, (
             "Phase E.2 anchor comment must remain in run_maintenance"
         )
-        block = src[idx:idx + 3000]
         # Must check for manual_lock specifically (not just `halt`).
+        block = src[idx:idx + 5000]
         assert 'halt_reason == "manual_lock"' in block, (
             "run_maintenance must distinguish manual_lock from "
             "auto-halt. Without the explicit check, lock ≡ auto-halt "
             "and ~41 heavy steps still run. Cycle-5 Phase E.2."
         )
-        # Must early-return so the pipeline loop never executes.
-        assert "return {" in block, (
-            "manual_lock branch must `return` before the for-loop. "
-            "Otherwise heavy non-LLM steps run anyway. The 2026-05-09 "
-            "30 GB egress incident was this exact bug."
-        )
-        # Ensure the early-return happens BEFORE the pipeline loop.
-        return_pos = src.find("return {", idx)
+        # The early-return happens BEFORE the pipeline for-loop.
         loop_pos = src.find("for key, display, func in pipeline:", idx)
-        assert return_pos > 0 and loop_pos > 0
+        # Find the earliest `return` after the full-halt block within
+        # the run_maintenance function.
+        return_pos = src.find('return {"_full_halt"', idx)
+        assert return_pos > 0, (
+            "Full-halt branch must `return {\"_full_halt\": ...}` "
+            "before the for-loop. Otherwise heavy non-LLM steps run "
+            "anyway. The 2026-05-09 30 GB egress incident was this "
+            "exact bug."
+        )
+        assert loop_pos > 0
         assert return_pos < loop_pos, (
-            "manual_lock early-return must execute BEFORE the pipeline "
-            "for-loop. Check ordering."
+            "full-halt early-return must execute BEFORE the pipeline "
+            "for-loop."
         )
 
 

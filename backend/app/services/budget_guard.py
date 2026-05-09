@@ -49,6 +49,23 @@ HALT_FRACTION_LLM = 0.80
 # Neon data transfer alone, projecting to $77/mo).
 HALT_HARD_USD = MONTHLY_BUDGET_USD * 0.85  # $25.50
 
+# Parham 2026-05-09: Neon free tier allows 100 GB/month outbound
+# data transfer. 100 / 30 = ~3.33 GB/day. We cap at 3.0 GB/day to
+# leave 10% headroom for unexpected spikes. When today's egress
+# (estimated from pg_stat_database.tup_returned delta since
+# start-of-day snapshot) crosses this threshold, the entire cron
+# pipeline halts — same semantics as a manual_lock. This is a
+# hard rule that survived the 2026-05-09 30 GB egress incident
+# (caused by HALT_SKIP_STEPS only covering LLM-heavy steps; the
+# ~41 non-LLM steps still ran on every cron fire under the lock).
+DAILY_EGRESS_CAP_GB = 3.0
+# Same calibration anchor as MTD: 4 KB average row weight, mapping
+# tup_returned (rows) to bytes-on-the-wire estimate. Estimate runs
+# ~30-50% high vs Neon's actual billing — that's intentional. The
+# cap at 3 GB ESTIMATE corresponds to ~2 GB ACTUAL billing, well
+# under the 3.33 GB/day allotment.
+DAILY_EGRESS_AVG_ROW_BYTES = 4 * 1024
+
 # Cron RUNS the cheap-only steps even when budget halts. The two
 # tiers below let us continue ingest+classify (which keep the
 # pipeline data coherent) while shutting off LLM-heavy work.
@@ -162,6 +179,67 @@ async def get_neon_egress_estimate_mtd(db: AsyncSession) -> tuple[float, float]:
         return 0.0, 0.0
 
 
+async def get_daily_egress_estimate(db: AsyncSession) -> tuple[float, int]:
+    """Return (estimated_egress_gb_today, current_tup_returned).
+
+    Computes today's tup_returned delta against the start-of-day
+    snapshot persisted in egress_daily_snapshot. If no snapshot exists
+    yet for today (first call after UTC midnight), creates one and
+    returns 0.0 — the new day starts at zero.
+
+    Idempotent and self-healing: works on a fresh DB once
+    ensure_budget_override_table has run.
+
+    Parham 2026-05-09: implements the 3 GB/day cap.
+    """
+    GB = 1024 * 1024 * 1024
+
+    try:
+        row = (await db.execute(_sa_text(
+            "SELECT tup_returned FROM pg_stat_database "
+            "WHERE datname = current_database()"
+        ))).first()
+        current_tup = int(row.tup_returned or 0) if row else 0
+    except Exception:
+        logger.exception("get_daily_egress_estimate: pg_stat_database read failed")
+        return 0.0, 0
+
+    today_utc = datetime.now(timezone.utc).date()
+
+    try:
+        snap = (await db.execute(
+            _sa_text(
+                "SELECT tup_returned_start FROM egress_daily_snapshot "
+                "WHERE day = :d"
+            ),
+            {"d": today_utc},
+        )).first()
+
+        if snap is None:
+            # First call today — capture the snapshot. Today's egress
+            # starts at 0. Subsequent calls today compute delta against
+            # this anchor.
+            await db.execute(
+                _sa_text(
+                    "INSERT INTO egress_daily_snapshot "
+                    "(day, tup_returned_start, set_at) "
+                    "VALUES (:d, :t, NOW()) "
+                    "ON CONFLICT (day) DO NOTHING"
+                ),
+                {"d": today_utc, "t": current_tup},
+            )
+            await db.commit()
+            return 0.0, current_tup
+
+        snap_tup = int(snap.tup_returned_start or 0)
+        delta_rows = max(0, current_tup - snap_tup)
+        delta_bytes = delta_rows * DAILY_EGRESS_AVG_ROW_BYTES
+        return delta_bytes / GB, current_tup
+    except Exception:
+        logger.exception("get_daily_egress_estimate: snapshot read failed")
+        return 0.0, current_tup
+
+
 async def get_manual_override(db: AsyncSession) -> Optional[str]:
     """Returns the manual override action ('lock'|'clear'|None).
 
@@ -211,6 +289,7 @@ async def should_halt_for_budget(
     """
     llm_mtd = await get_llm_cost_mtd(db)
     egress_gb, egress_cost = await get_neon_egress_estimate_mtd(db)
+    daily_egress_gb, _current_tup = await get_daily_egress_estimate(db)
     override = await get_manual_override(db)
     combined_mtd = llm_mtd + egress_cost
 
@@ -219,6 +298,8 @@ async def should_halt_for_budget(
         "neon_egress_estimate_gb_mtd": round(egress_gb, 2),
         "neon_cost_estimate_usd_mtd": round(egress_cost, 4),
         "combined_cost_estimate_usd_mtd": round(combined_mtd, 4),
+        "neon_egress_estimate_gb_today": round(daily_egress_gb, 3),
+        "daily_egress_cap_gb": DAILY_EGRESS_CAP_GB,
         "monthly_budget_usd": MONTHLY_BUDGET_USD,
         "halt_fraction_llm": HALT_FRACTION_LLM,
         "halt_hard_usd": HALT_HARD_USD,
@@ -228,6 +309,21 @@ async def should_halt_for_budget(
 
     if override == "lock":
         return True, "manual_lock", signals
+
+    # Parham 2026-05-09: 3 GB/day cap. 100 GB Neon free tier / 30 days
+    # = 3.33 GB/day; cap at 3.0 leaves 10% headroom. Treated like
+    # manual_lock by the cron — entire pipeline halts. Resets at UTC
+    # midnight via natural day-rollover. Checked BEFORE manual_clear
+    # so a one-shot clear cannot bypass the daily cap (the cap is
+    # the survival floor; clear is for unblocking specific runs
+    # within budget).
+    if daily_egress_gb >= DAILY_EGRESS_CAP_GB:
+        return (
+            True,
+            f"daily_egress_cap_{daily_egress_gb:.2f}gb_over_{DAILY_EGRESS_CAP_GB}gb",
+            signals,
+        )
+
     if override == "clear":
         # One-shot pass. Only consume the flag when the cron is
         # actually pre-flighting; read-only callers leave it in place.
@@ -303,9 +399,9 @@ async def enforce_budget_or_403_dep(db: AsyncSession) -> None:
 
 
 async def ensure_budget_override_table(db: AsyncSession) -> None:
-    """Idempotent DDL for the override table. Called from
-    self-heal at app startup so the lock-clear admin endpoint
-    works on a fresh DB.
+    """Idempotent DDL for the override + egress_daily_snapshot tables.
+    Called from self-heal at app startup so the lock-clear admin
+    endpoint and the 3 GB/day cap both work on a fresh DB.
     """
     try:
         await db.execute(
@@ -327,6 +423,22 @@ async def ensure_budget_override_table(db: AsyncSession) -> None:
                 "ON CONFLICT (id) DO NOTHING"
             )
         )
+        # Parham 2026-05-09: 3 GB/day cap snapshot table. One row per
+        # UTC day. The first call to get_daily_egress_estimate after
+        # midnight inserts the start-of-day tup_returned anchor; later
+        # calls compute delta against it. Old rows are kept for audit
+        # — small table (1 row/day = 365 rows/year × ~50 bytes ≈ 18 KB).
+        await db.execute(
+            _sa_text(
+                """
+                CREATE TABLE IF NOT EXISTS egress_daily_snapshot (
+                    day DATE PRIMARY KEY,
+                    tup_returned_start BIGINT NOT NULL,
+                    set_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+        )
         await db.commit()
     except Exception:
-        logger.exception("Failed to ensure budget_override table")
+        logger.exception("Failed to ensure budget_override / egress_daily_snapshot tables")
