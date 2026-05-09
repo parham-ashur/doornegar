@@ -3981,13 +3981,25 @@ async def story_probe(
             report[f] = {"type": "ERR", "sample": f"{type(e).__name__}: {e}"}
 
     # Try to construct the StoryDetail to find which field is the
-    # actual cause of the 500.
+    # actual cause of the 500. Multiple isolation tests so we know
+    # exactly which step blew up.
+    try:
+        from app.schemas.story import StoryBrief
+        plain_brief = StoryBrief.model_validate(story)
+        report["_plain_brief_validate"] = "ok"
+    except Exception as e:
+        import traceback as _tb
+        report["_plain_brief_validate"] = f"FAILED: {type(e).__name__}: {e}"
+        report["_plain_brief_traceback"] = _tb.format_exc()[:3000]
+
     try:
         from app.api.v1.stories import _story_brief_with_extras
         brief = _story_brief_with_extras(story)
         report["_brief_built"] = "ok"
     except Exception as e:
+        import traceback as _tb
         report["_brief_built"] = f"FAILED: {type(e).__name__}: {e}"
+        report["_brief_traceback"] = _tb.format_exc()[:3000]
 
     try:
         from app.schemas.story import StoryDetail
