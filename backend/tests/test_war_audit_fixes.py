@@ -2692,6 +2692,68 @@ class TestImageDownloaderHasByteCaps:
         )
 
 
+class TestCeleryTasksHaveBudgetGuard:
+    """Cycle-5 Phase E (2026-05-09): the budget kill-switch only fires
+    from auto_maintenance.run_maintenance pre-flight. Celery tasks
+    enqueued from any path (beat schedule, application code, manual
+    enqueue) bypassed it entirely. The 2026-05-09 30 GB Neon egress
+    jump exposed this gap.
+
+    All 7 tasks across the 3 worker modules MUST check
+    should_halt_for_budget at fire-time and return early on halt.
+    """
+
+    GUARDED_TASKS = (
+        ("app/workers/nlp_task.py", "process_nlp_batch_task"),
+        ("app/workers/nlp_task.py", "cluster_stories_task"),
+        ("app/workers/nlp_task.py", "score_bias_batch_task"),
+        ("app/workers/ingest_task.py", "ingest_all_feeds_task"),
+        ("app/workers/social_task.py", "ingest_telegram_task"),
+        ("app/workers/social_task.py", "link_posts_task"),
+        ("app/workers/social_task.py", "compute_sentiment_task"),
+    )
+
+    def test_each_task_calls_budget_halt_check(self):
+        from pathlib import Path
+
+        for relpath, task_name in self.GUARDED_TASKS:
+            src = (
+                Path(__file__).parent.parent / relpath
+            ).read_text()
+            idx = src.find(f"def {task_name}(")
+            assert idx >= 0, (
+                f"Task {task_name} not found in {relpath}"
+            )
+            # Body of the task up to the next @celery_app.task decorator
+            # or end of file.
+            next_dec = src.find("@celery_app.task", idx + 1)
+            body = src[idx:next_dec if next_dec > 0 else len(src)]
+            assert "_budget_halt_if_active" in body, (
+                f"Task {task_name} in {relpath} must call "
+                f"_budget_halt_if_active() at fire-time. Cycle-5 "
+                f"Phase E regression — workers route around the lock."
+            )
+            assert 'return {"skipped": True' in body, (
+                f"Task {task_name} must return {{'skipped': True, ...}} "
+                f"on halt so logs/Celery results show why it no-op'd."
+            )
+
+    def test_helper_uses_consume_override_false(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "workers" / "nlp_task.py"
+        ).read_text()
+        idx = src.find("async def _budget_halt_if_active")
+        assert idx >= 0
+        body = src[idx:idx + 1500]
+        assert "consume_override=False" in body, (
+            "Worker budget check must NOT consume the operator's "
+            "one-shot clear — that belongs to the cron pre-flight."
+        )
+
+
 class TestEditStoryRequestAcceptsAllNarrativeFields:
     """Cycle-5 H6+ (2026-05-08 evening): the chat-driven editorial
     workflow needs to set the same long-form FA fields the cron does:

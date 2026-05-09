@@ -23,6 +23,11 @@ def run_async(coro):
 @celery_app.task(name="app.workers.social_task.ingest_telegram_task", bind=True)
 def ingest_telegram_task(self):
     """Fetch new posts from all tracked Telegram channels."""
+    from app.workers.nlp_task import _budget_halt_if_active
+    halt, reason = run_async(_budget_halt_if_active())
+    if halt:
+        logger.warning(f"ingest_telegram_task halted by budget: {reason}")
+        return {"skipped": True, "reason": reason}
     logger.info("Starting Telegram ingestion...")
 
     async def _run():
@@ -39,6 +44,11 @@ def ingest_telegram_task(self):
 @celery_app.task(name="app.workers.social_task.link_posts_task", bind=True)
 def link_posts_task(self):
     """Try to link unlinked Telegram posts to news stories."""
+    from app.workers.nlp_task import _budget_halt_if_active
+    halt, reason = run_async(_budget_halt_if_active())
+    if halt:
+        logger.warning(f"link_posts_task halted by budget: {reason}")
+        return {"skipped": True, "reason": reason}
     logger.info("Linking unlinked Telegram posts...")
 
     async def _run():
@@ -55,6 +65,11 @@ def link_posts_task(self):
 @celery_app.task(name="app.workers.social_task.compute_sentiment_task", bind=True)
 def compute_sentiment_task(self):
     """Compute social sentiment snapshots for recent stories."""
+    from app.workers.nlp_task import _budget_halt_if_active
+    halt, reason = run_async(_budget_halt_if_active())
+    if halt:
+        logger.warning(f"compute_sentiment_task halted by budget: {reason}")
+        return {"skipped": True, "reason": reason}
     logger.info("Computing social sentiment snapshots...")
 
     async def _run():

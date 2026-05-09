@@ -28,7 +28,18 @@ def run_async(coro):
 
 @celery_app.task(name="app.workers.ingest_task.ingest_all_feeds_task", bind=True)
 def ingest_all_feeds_task(self):
-    """Periodic task to ingest RSS feeds from all active sources."""
+    """Periodic task to ingest RSS feeds from all active sources.
+
+    Cycle-5 Phase E (2026-05-09): defensive budget guard. Even though
+    this task is documented as dormant, the worker process listens on
+    Redis and would execute any enqueue. The lock on the FULL_PIPELINE
+    cron does not protect this codepath.
+    """
+    from app.workers.nlp_task import _budget_halt_if_active
+    halt, reason = run_async(_budget_halt_if_active())
+    if halt:
+        logger.warning(f"ingest_all_feeds_task halted by budget: {reason}")
+        return {"skipped": True, "reason": reason}
     logger.info("Starting scheduled feed ingestion...")
 
     async def _run():

@@ -18,8 +18,36 @@ def run_async(coro):
         loop.close()
 
 
+async def _budget_halt_if_active() -> tuple[bool, str | None]:
+    """Cycle-5 Phase E (2026-05-09): all worker tasks defensively check
+    the budget guard at fire-time. The `manual_lock` was meant to halt
+    LLM/egress-heavy work during cost emergencies, but it only fired
+    from auto_maintenance.run_maintenance pre-flight. Any Celery task
+    enqueued by beat or by application code routed around it.
+
+    Returns (halt, reason). If halt=True the task should return early.
+    """
+    try:
+        from app.services.budget_guard import should_halt_for_budget
+
+        async with async_session() as db:
+            halt, reason, _signals = await should_halt_for_budget(
+                db, consume_override=False
+            )
+            return halt, reason
+    except Exception:
+        logger.exception("budget_halt_check failed; defaulting to halt")
+        return True, "budget_check_error"
+
+
 # NOTE: dormant in the current Railway deployment (auto_maintenance.py
 # runs the pipeline). See ingest_task.py for the full explanation.
+#
+# Cycle-5 Phase E (2026-05-09): even when "dormant", these tasks listen
+# on Redis. If anything (a stray beat, application code, manual enqueue)
+# fires them, they MUST respect the budget guard. The 2026-05-09 30 GB
+# Neon egress jump exposed this gap — the lock was on the cron, not on
+# the workers.
 
 
 @celery_app.task(name="app.workers.nlp_task.process_nlp_batch_task", bind=True)
@@ -28,6 +56,10 @@ def process_nlp_batch_task(self):
 
     Runs: normalization, keyword extraction, embedding generation, translation.
     """
+    halt, reason = run_async(_budget_halt_if_active())
+    if halt:
+        logger.warning(f"process_nlp_batch_task halted by budget: {reason}")
+        return {"skipped": True, "reason": reason}
     logger.info("Starting NLP batch processing...")
 
     async def _run():
@@ -44,6 +76,10 @@ def process_nlp_batch_task(self):
 @celery_app.task(name="app.workers.nlp_task.cluster_stories_task", bind=True)
 def cluster_stories_task(self):
     """Cluster articles into stories based on embedding similarity."""
+    halt, reason = run_async(_budget_halt_if_active())
+    if halt:
+        logger.warning(f"cluster_stories_task halted by budget: {reason}")
+        return {"skipped": True, "reason": reason}
     logger.info("Starting story clustering...")
 
     async def _run():
@@ -68,6 +104,10 @@ def score_bias_batch_task(self):
     this exact codepath. Pass `homepage_only_top_n=20` so the gate
     behaves identically to the maintenance cron's `step_bias_score`.
     """
+    halt, reason = run_async(_budget_halt_if_active())
+    if halt:
+        logger.warning(f"score_bias_batch_task halted by budget: {reason}")
+        return {"skipped": True, "reason": reason}
     logger.info("Starting bias scoring batch (homepage-scoped)...")
 
     async def _run():
