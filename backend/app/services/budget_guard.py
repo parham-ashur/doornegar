@@ -66,6 +66,11 @@ DAILY_EGRESS_CAP_GB = 3.0
 # under the 3.33 GB/day allotment.
 DAILY_EGRESS_AVG_ROW_BYTES = 4 * 1024
 
+# Warning threshold (Phase F.3 — 50% of cap). When today's egress
+# crosses this, surface a warning in /admin/budget/status without
+# halting. Lets the operator see the trajectory before the cap fires.
+DAILY_EGRESS_WARN_GB = 1.5
+
 # Cron RUNS the cheap-only steps even when budget halts. The two
 # tiers below let us continue ingest+classify (which keep the
 # pipeline data coherent) while shutting off LLM-heavy work.
@@ -300,6 +305,8 @@ async def should_halt_for_budget(
         "combined_cost_estimate_usd_mtd": round(combined_mtd, 4),
         "neon_egress_estimate_gb_today": round(daily_egress_gb, 3),
         "daily_egress_cap_gb": DAILY_EGRESS_CAP_GB,
+        "daily_egress_warn_gb": DAILY_EGRESS_WARN_GB,
+        "daily_egress_warning_active": daily_egress_gb >= DAILY_EGRESS_WARN_GB,
         "monthly_budget_usd": MONTHLY_BUDGET_USD,
         "halt_fraction_llm": HALT_FRACTION_LLM,
         "halt_hard_usd": HALT_HARD_USD,

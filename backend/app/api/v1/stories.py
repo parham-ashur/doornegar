@@ -2,7 +2,7 @@ import logging
 import time as _time
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -132,10 +132,27 @@ async def list_stories(
 @_limiter.limit("120/minute")
 async def trending_stories(
     request: Request,
-    limit: int = Query(10, ge=1, le=50),
+    response: Response,
+    # Phase F.3 (Parham 2026-05-09): max limit reduced 50→30. The
+    # homepage renders ~15-20 cards visibly; the diversity reranker
+    # works fine on a fetch_limit of 30 × 3 = 90 candidates. Saves
+    # ~40% per /trending call across the board. The frontend
+    # explicitly requests limit=30 (cycle-5 phase F.3).
+    limit: int = Query(10, ge=1, le=30),
     min_articles: int = Query(4, ge=1),
     db: AsyncSession = Depends(get_db),
 ):
+    # Phase F.3 (Parham 2026-05-09): Cloudflare CDN cache. Without
+    # this header, every Vercel-region ISR regen hits Railway → Neon
+    # independently. With s-maxage=300, Cloudflare absorbs cross-region
+    # duplicates and Neon only sees one regen per 5-min window globally.
+    # stale-while-revalidate=600 lets the edge serve a slightly stale
+    # response while it fetches a fresh one in the background — keeps
+    # latency low under cache miss.
+    response.headers["Cache-Control"] = (
+        "public, s-maxage=300, stale-while-revalidate=600"
+    )
+
     cache_key = f"trending:{limit}:{min_articles}"
     async with _stories_cache_lock:
         cached = _stories_cache.get(cache_key)
@@ -591,9 +608,21 @@ async def article_positions(
     db: AsyncSession = Depends(get_db),
 ):
     """Return 2D-projected article embeddings for the narrative map visualization."""
+    # Phase F.2 (Parham 2026-05-09): defer the heavy JSONB cols we
+    # don't read here. This endpoint needs Article.embedding (it's
+    # the WHOLE point), but content_text/keywords/named_entities
+    # are dead weight. Each Article row drops from ~6 KB → ~4 KB.
     result = await db.execute(
         select(Story)
-        .options(selectinload(Story.articles).selectinload(Article.source))
+        .options(
+            selectinload(Story.articles).options(
+                defer(Article.content_text),
+                defer(Article.keywords),
+                defer(Article.named_entities),
+                selectinload(Article.source),
+            ),
+            *_story_listing_defers(),
+        )
         .where(Story.id == story_id)
     )
     story = result.scalar_one_or_none()

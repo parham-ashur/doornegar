@@ -360,14 +360,14 @@ export default async function HomeBody({
   // initial `next build` prerender (no prior cached version exists
   // then), so we retry instead and accept occasional empty caches.
   const [trendingFirst, _blindspots, weeklyDigestData] = await Promise.all([
-    fetchAPI<StoryBrief[]>("/api/v1/stories/trending?limit=50"),
+    fetchAPI<StoryBrief[]>("/api/v1/stories/trending?limit=30"),
     fetchAPI<StoryBrief[]>("/api/v1/stories/blindspots?limit=10").then(d => d || []),
     fetchAPI<{ status: string; content?: string }>("/api/v1/stories/weekly-digest"),
   ]);
   let _stories: StoryBrief[] | null = trendingFirst;
   for (let attempt = 1; _stories === null && attempt <= 3; attempt++) {
     await new Promise((r) => setTimeout(r, 1500 * attempt));
-    _stories = await fetchAPI<StoryBrief[]>("/api/v1/stories/trending?limit=50");
+    _stories = await fetchAPI<StoryBrief[]>("/api/v1/stories/trending?limit=30");
   }
   // If trending is genuinely null after retries, the API is down. Opt
   // OUT of the ISR cache for this response so the empty state isn't

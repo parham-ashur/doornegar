@@ -3821,6 +3821,97 @@ _health_cache: dict = {"data": None, "expires": 0.0}
 _HEALTH_CACHE_TTL = 300  # cycle-1 audit Phase B: bumped 60→300 to cut canary fan-out under dashboard polling
 
 
+@router.get("/egress/per-step", dependencies=[Depends(require_admin)])
+async def egress_per_step(
+    runs: int = Query(20, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+):
+    """Per-step egress Pareto across the last N maintenance runs.
+
+    Phase F.1 (Parham 2026-05-09): the maintenance pipeline is now
+    instrumented with per-step tup_returned snapshots. Each step's
+    result dict carries `_egress: {tup_delta, estimate_mb, elapsed_s}`.
+    This endpoint aggregates those across the last `runs` rows of
+    maintenance_logs and returns a ranked list — most-expensive step
+    first.
+
+    Use this BEFORE proposing optimization work. The 2026-05-09 30 GB
+    egress incident happened in part because we were optimizing
+    blind: HALT_SKIP_STEPS was a static list with no per-step data
+    showing where the actual cost lived.
+
+    Response shape: list of
+      {step, n_runs, mean_mb, max_mb, total_mb, mean_tup_delta,
+       mean_elapsed_s}
+    sorted by total_mb descending.
+    """
+    rows = (await db.execute(
+        _sa_text(
+            "SELECT id, run_at, results FROM maintenance_logs "
+            "WHERE results IS NOT NULL "
+            "ORDER BY run_at DESC LIMIT :n"
+        ),
+        {"n": runs},
+    )).all()
+
+    per_step: dict[str, dict] = {}
+    for r in rows:
+        results = r.results
+        if not isinstance(results, dict):
+            continue
+        for step_key, step_result in results.items():
+            if not isinstance(step_result, dict):
+                continue
+            eg = step_result.get("_egress")
+            if not isinstance(eg, dict):
+                continue
+            mb = float(eg.get("estimate_mb") or 0)
+            tup = int(eg.get("tup_delta") or 0)
+            elapsed = float(eg.get("elapsed_s") or 0)
+            slot = per_step.setdefault(
+                step_key,
+                {"n": 0, "total_mb": 0.0, "max_mb": 0.0,
+                 "total_tup": 0, "total_elapsed_s": 0.0},
+            )
+            slot["n"] += 1
+            slot["total_mb"] += mb
+            slot["max_mb"] = max(slot["max_mb"], mb)
+            slot["total_tup"] += tup
+            slot["total_elapsed_s"] += elapsed
+
+    out = []
+    grand_total_mb = 0.0
+    for step_key, slot in per_step.items():
+        n = slot["n"] or 1
+        total_mb = round(slot["total_mb"], 2)
+        grand_total_mb += total_mb
+        out.append({
+            "step": step_key,
+            "n_runs": slot["n"],
+            "mean_mb": round(slot["total_mb"] / n, 2),
+            "max_mb": round(slot["max_mb"], 2),
+            "total_mb": total_mb,
+            "mean_tup_delta": int(slot["total_tup"] / n),
+            "mean_elapsed_s": round(slot["total_elapsed_s"] / n, 2),
+        })
+
+    out.sort(key=lambda d: d["total_mb"], reverse=True)
+    # Pareto column: cumulative %  of total egress (so the operator
+    # immediately sees "top 5 steps = 80% of egress").
+    cum = 0.0
+    for entry in out:
+        cum += entry["total_mb"]
+        entry["cumulative_pct"] = (
+            round(100 * cum / grand_total_mb, 1) if grand_total_mb > 0 else 0.0
+        )
+
+    return {
+        "runs_sampled": len(rows),
+        "grand_total_mb_across_runs": round(grand_total_mb, 2),
+        "steps": out,
+    }
+
+
 @router.get("/debug/egress-audit", dependencies=[Depends(require_admin)])
 async def egress_audit(db: AsyncSession = Depends(get_db)):
     """Per-column byte-size measurement for the egress investigation.

@@ -1,3 +1,9 @@
 web: uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
-worker: celery -A app.workers.celery_app worker --loglevel=info --concurrency=2
-beat: celery -A app.workers.celery_app beat --loglevel=info
+# Phase F.3 (Parham 2026-05-09): worker + beat lines REMOVED.
+# Active Railway services: doornegar (web) + maintenance-cron (auto_maintenance.py)
+# + db-backup (scripts/r2_db_backup.py) + umami (analytics, separate). No worker
+# or beat exists today, but if either Procfile line was active it would let any
+# code path enqueueing a Celery task drain Neon outside the budget guard. Keep
+# this file minimal so future Railway provisioning can't accidentally spin them up.
+# If async background work is needed in future, add a budget-guarded asyncio task
+# inside `app.main:lifespan` instead of revivifying Celery.

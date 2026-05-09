@@ -2700,6 +2700,111 @@ class TestImageDownloaderHasByteCaps:
         )
 
 
+class TestPhaseFOptimizationsLanded:
+    """Phase F (Parham 2026-05-09): broader 'optimize for restrictions'
+    work after the 30 GB Neon incident. Pins the per-step egress
+    instrumentation, the trending /trending egress cuts, and the
+    Procfile cleanup so future cycles can't accidentally undo them.
+    """
+
+    def test_per_step_egress_instrumentation(self):
+        """Phase F.1: every step records tup_returned delta + estimate_mb."""
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent / "auto_maintenance.py"
+        ).read_text()
+        # The pipeline for-loop must read tup_returned before/after
+        # each step and attach _egress to the result dict.
+        anchor = "Phase F.1"
+        assert anchor in src, "Phase F.1 anchor must remain"
+        block_start = src.find(anchor)
+        block = src[block_start:block_start + 4000]
+        assert "tup_before" in block and "tup_after" in block, (
+            "Pipeline must take before/after tup_returned snapshots."
+        )
+        assert '"_egress"' in block or "'_egress'" in block, (
+            "Step result dict must carry an _egress sub-dict."
+        )
+        assert "tup_delta" in block and "estimate_mb" in block, (
+            "_egress must include tup_delta and estimate_mb."
+        )
+
+    def test_egress_per_step_endpoint_exists(self):
+        """Phase F.1: /admin/egress/per-step Pareto endpoint."""
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "api" / "v1" / "admin.py"
+        ).read_text()
+        assert '@router.get("/egress/per-step"' in src, (
+            "Phase F.1 /admin/egress/per-step endpoint must exist."
+        )
+
+    def test_trending_endpoint_caps_limit_at_30(self):
+        """Phase F.3: max trending limit dropped 50→30."""
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "api" / "v1" / "stories.py"
+        ).read_text()
+        # Locate the trending endpoint and check the Query() bounds.
+        idx = src.find('@router.get("/trending"')
+        assert idx >= 0
+        block = src[idx:idx + 1500]
+        assert "le=30" in block, (
+            "Trending endpoint must cap limit at 30 (was 50). "
+            "Phase F.3 — saves ~40% per call."
+        )
+        assert "le=50" not in block, (
+            "Trending endpoint must NOT allow limit > 30. Phase F.3."
+        )
+
+    def test_trending_endpoint_sets_cache_control(self):
+        """Phase F.3: Cloudflare CDN cache header on /trending response."""
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "api" / "v1" / "stories.py"
+        ).read_text()
+        idx = src.find('@router.get("/trending"')
+        next_dec = src.find("@router.", idx + 1)
+        body = src[idx:next_dec if next_dec > 0 else idx + 3000]
+        assert "s-maxage=300" in body, (
+            "Trending response must set Cache-Control: s-maxage=300 "
+            "so Cloudflare absorbs cross-region duplicate fetches."
+        )
+        assert "stale-while-revalidate" in body, (
+            "Trending response must include stale-while-revalidate "
+            "so cache misses don't block the response."
+        )
+
+    def test_procfile_has_no_celery_workers(self):
+        """Phase F.3: worker + beat lines removed to prevent any path
+        from enqueueing tasks that bypass the budget guard.
+        """
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent / "Procfile"
+        ).read_text()
+        # Lines that would actually start a Celery process. Matching
+        # at line-start to ignore comments.
+        lines = [ln.strip() for ln in src.splitlines() if ln.strip() and not ln.strip().startswith("#")]
+        active_celery = [
+            ln for ln in lines
+            if ln.startswith("worker:") and "celery" in ln
+            or ln.startswith("beat:") and "celery" in ln
+        ]
+        assert not active_celery, (
+            f"Procfile must not declare a worker or beat process. "
+            f"Found: {active_celery}. Phase F.3."
+        )
+
+
 class TestDailyEgressCap3GB:
     """Parham 2026-05-09: hard rule — never let any single UTC day
     exceed 3 GB of estimated Neon egress. 100 GB Neon free tier / 30

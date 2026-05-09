@@ -51,9 +51,20 @@ async def export_for_audit(
     db: AsyncSession, top_n: int = 30, include_scored: bool = False,
 ) -> list[dict[str, Any]]:
     """Build the export payload the CLI writes to disk, in memory."""
+    # Phase F.2 (Parham 2026-05-09): defer heavy Article cols we don't
+    # read. We use a.content_text + a.title_* + a.source. The 3 deferred
+    # JSONB cols cut ~3.7 KB + 1 KB + 5 B per article = ~5 KB/row saved.
+    from sqlalchemy.orm import defer as _defer
     result = await db.execute(
         select(Story)
-        .options(selectinload(Story.articles).selectinload(Article.source))
+        .options(
+            selectinload(Story.articles).options(
+                _defer(Article.embedding),
+                _defer(Article.keywords),
+                _defer(Article.named_entities),
+                selectinload(Article.source),
+            )
+        )
         .where(Story.summary_fa.isnot(None))
         .order_by(Story.trending_score.desc())
         .limit(top_n * 3)  # oversample so skips don't starve us
@@ -137,9 +148,19 @@ async def apply_scores(
             reasons.append({"story_id": sid, "reason": "no valid numeric scores"})
             continue
 
+        # Phase F.2: defer heavy Article cols we don't read on apply.
+        from sqlalchemy.orm import defer as _defer
         res = await db.execute(
             select(Story)
-            .options(selectinload(Story.articles).selectinload(Article.source))
+            .options(
+                selectinload(Story.articles).options(
+                    _defer(Article.embedding),
+                    _defer(Article.content_text),
+                    _defer(Article.keywords),
+                    _defer(Article.named_entities),
+                    selectinload(Article.source),
+                )
+            )
             .where(Story.id == sid)
         )
         story = res.scalar_one_or_none()

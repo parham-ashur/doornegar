@@ -2319,9 +2319,20 @@ async def step_story_quality():
         homepage_ids = await homepage_story_ids(db)
         if not homepage_ids:
             return stats
+        # Phase F.2 (Parham 2026-05-09): defer heavy Article cols we
+        # don't read here. We read content_text (for the prompt) and
+        # source.* — embedding/keywords/named_entities are dead weight.
+        from sqlalchemy.orm import defer as _defer
         result = await db.execute(
             select(Story)
-            .options(selectinload(Story.articles).selectinload(Article.source))
+            .options(
+                selectinload(Story.articles).options(
+                    _defer(Article.embedding),
+                    _defer(Article.keywords),
+                    _defer(Article.named_entities),
+                    selectinload(Article.source),
+                )
+            )
             .where(
                 Story.id.in_(homepage_ids),
                 Story.summary_fa.is_(None),
@@ -7767,8 +7778,51 @@ async def run_maintenance(mode: str = "full"):
                 continue
             await maintenance_state.begin_step(display)
             timeout = STEP_TIMEOUTS_SEC.get(key, DEFAULT_STEP_TIMEOUT_SEC)
+            # Phase F.1 (2026-05-09): per-step egress instrumentation.
+            # Snapshot pg_stat_database.tup_returned before and after
+            # the step so we can attribute the day's egress to specific
+            # steps. The 2026-05-09 audit revealed we were optimizing
+            # blind — HALT_SKIP_STEPS was a static list with no data
+            # showing which steps actually drove cost. After this
+            # ships, /admin/egress/per-step shows the Pareto chart.
+            tup_before = 0
+            try:
+                async with _async_session() as _eg_db:
+                    _eg_row = (await _eg_db.execute(
+                        _sa_text(
+                            "SELECT tup_returned FROM pg_stat_database "
+                            "WHERE datname = current_database()"
+                        )
+                    )).first()
+                    tup_before = int(_eg_row.tup_returned or 0) if _eg_row else 0
+            except Exception:
+                tup_before = 0  # tolerate stat read failure; just no instrumentation
+            step_t0 = time.time()
             try:
                 result = await asyncio.wait_for(func(), timeout=timeout)
+                # Attach egress + duration to the step result so it
+                # lands in maintenance_logs and is queryable later.
+                step_elapsed = round(time.time() - step_t0, 2)
+                tup_after = tup_before
+                try:
+                    async with _async_session() as _eg_db:
+                        _eg_row = (await _eg_db.execute(
+                            _sa_text(
+                                "SELECT tup_returned FROM pg_stat_database "
+                                "WHERE datname = current_database()"
+                            )
+                        )).first()
+                        tup_after = int(_eg_row.tup_returned or 0) if _eg_row else tup_before
+                except Exception:
+                    tup_after = tup_before
+                tup_delta = max(0, tup_after - tup_before)
+                if isinstance(result, dict):
+                    result.setdefault("_egress", {})
+                    result["_egress"]["tup_delta"] = tup_delta
+                    result["_egress"]["estimate_mb"] = round(
+                        tup_delta * 4096 / 1024 / 1024, 2
+                    )
+                    result["_egress"]["elapsed_s"] = step_elapsed
                 results[key] = result
                 await maintenance_state.end_step(display, "ok", result)
             except asyncio.TimeoutError:
