@@ -3919,22 +3919,37 @@ async def story_probe(
 ):
     """Inspect a story's row to find what makes /api/v1/stories/{id} 500.
 
-    Returns the raw types and value samples for every field StoryDetail
-    pulls. Lets us bisect "Pydantic chokes on field X with value Y"
-    without trial-and-error deploys.
+    Mimics get_story's load options exactly so we trigger the same
+    code path. Returns raw types + the full traceback of whatever
+    blew up so we can fix it without log-spelunking.
     """
     import uuid as _uuid
     from sqlalchemy import select as _select
-    from sqlalchemy.orm import selectinload as _sel
+    from sqlalchemy.orm import selectinload as _sel, defer as _defer
     from app.models.story import Story as _Sty
     from app.models.article import Article as _Art
+    from app.api.v1.stories import _story_detail_defers
 
     try:
         sid = _uuid.UUID(story_id)
     except Exception:
         return {"error": "bad uuid"}
 
-    res = await db.execute(_select(_Sty).where(_Sty.id == sid))
+    res = await db.execute(
+        _select(_Sty)
+        .options(
+            _sel(_Sty.articles).options(
+                _defer(_Art.embedding),
+                _defer(_Art.content_text),
+                _defer(_Art.keywords),
+                _defer(_Art.named_entities),
+                _sel(_Art.source),
+                _sel(_Art.bias_scores),
+            ),
+            *_story_detail_defers(),
+        )
+        .where(_Sty.id == sid)
+    )
     story = res.scalar_one_or_none()
     if not story:
         return {"error": "not found"}
