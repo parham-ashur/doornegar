@@ -3912,6 +3912,93 @@ async def egress_per_step(
     }
 
 
+@router.get("/debug/story-probe", dependencies=[Depends(require_admin)])
+async def story_probe(
+    story_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Inspect a story's row to find what makes /api/v1/stories/{id} 500.
+
+    Returns the raw types and value samples for every field StoryDetail
+    pulls. Lets us bisect "Pydantic chokes on field X with value Y"
+    without trial-and-error deploys.
+    """
+    import uuid as _uuid
+    from sqlalchemy import select as _select
+    from sqlalchemy.orm import selectinload as _sel
+    from app.models.story import Story as _Sty
+    from app.models.article import Article as _Art
+
+    try:
+        sid = _uuid.UUID(story_id)
+    except Exception:
+        return {"error": "bad uuid"}
+
+    res = await db.execute(_select(_Sty).where(_Sty.id == sid))
+    story = res.scalar_one_or_none()
+    if not story:
+        return {"error": "not found"}
+
+    def _t(v):
+        return type(v).__name__
+
+    def _sample(v, maxlen=120):
+        if v is None:
+            return None
+        s = repr(v)
+        return s[:maxlen]
+
+    # Probe every field StoryDetail / StoryBrief reads.
+    fields = [
+        "id", "title_fa", "title_en", "summary_fa", "summary_en",
+        "editorial_context_fa", "translations", "summary_anchor",
+        "telegram_analysis", "centroid_embedding", "image_url",
+        "topics", "narrative_groups", "is_edited", "article_count",
+        "trending_score", "priority", "frozen_at", "archived_at",
+        "first_published_at", "last_updated_at", "view_count",
+    ]
+    report = {}
+    for f in fields:
+        try:
+            v = getattr(story, f, "<missing>")
+            report[f] = {"type": _t(v), "sample": _sample(v)}
+        except Exception as e:
+            report[f] = {"type": "ERR", "sample": f"{type(e).__name__}: {e}"}
+
+    # Try to construct the StoryDetail to find which field is the
+    # actual cause of the 500.
+    try:
+        from app.api.v1.stories import _story_brief_with_extras
+        brief = _story_brief_with_extras(story)
+        report["_brief_built"] = "ok"
+    except Exception as e:
+        report["_brief_built"] = f"FAILED: {type(e).__name__}: {e}"
+
+    try:
+        from app.schemas.story import StoryDetail
+        # minimal construction with brief fields only
+        if "_brief_built" in report and report["_brief_built"] == "ok":
+            sd = StoryDetail(
+                **brief.model_dump(),
+                summary_en=story.summary_en,
+                summary_fa=story.summary_fa,
+                editorial_context_fa=story.editorial_context_fa,
+                articles=[],
+                arc=None,
+                covering_sources=[],
+                translations=story.translations,
+            )
+            report["_story_detail_built"] = "ok"
+    except Exception as e:
+        import traceback as _tb
+        report["_story_detail_built"] = (
+            f"FAILED: {type(e).__name__}: {str(e)[:500]}"
+        )
+        report["_story_detail_traceback"] = _tb.format_exc()[:2000]
+
+    return report
+
+
 @router.get("/debug/egress-audit", dependencies=[Depends(require_admin)])
 async def egress_audit(db: AsyncSession = Depends(get_db)):
     """Per-column byte-size measurement for the egress investigation.
