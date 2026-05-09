@@ -4001,6 +4001,28 @@ async def story_probe(
         report["_brief_built"] = f"FAILED: {type(e).__name__}: {e}"
         report["_brief_traceback"] = _tb.format_exc()[:3000]
 
+    # Test the articles loop the same way get_story does it.
+    try:
+        from app.api.v1.stories import ArticleBriefDict
+        from app.schemas.story import StoryArticleWithBias
+        from app.schemas.bias import BiasScoreResponse
+        articles_with_bias = []
+        for article in story.articles:
+            article_data = StoryArticleWithBias(
+                **{k: v for k, v in ArticleBriefDict(article).items()},
+                source_name_en=article.source.name_en if article.source else None,
+                source_name_fa=article.source.name_fa if article.source else None,
+                source_slug=article.source.slug if article.source else None,
+                source_state_alignment=article.source.state_alignment if article.source else None,
+                bias_scores=[BiasScoreResponse.model_validate(bs) for bs in article.bias_scores],
+            )
+            articles_with_bias.append(article_data)
+        report["_articles_loop"] = f"ok ({len(articles_with_bias)} articles)"
+    except Exception as e:
+        import traceback as _tb
+        report["_articles_loop"] = f"FAILED: {type(e).__name__}: {e}"
+        report["_articles_loop_traceback"] = _tb.format_exc()[:3000]
+
     try:
         from app.schemas.story import StoryDetail
         # minimal construction with brief fields only
@@ -4022,6 +4044,22 @@ async def story_probe(
             f"FAILED: {type(e).__name__}: {str(e)[:500]}"
         )
         report["_story_detail_traceback"] = _tb.format_exc()[:2000]
+
+    # Try the FULL get_story sequence including covering_sources.
+    try:
+        from app.schemas.source import SourceResponse
+        covering_sources_map: dict = {}
+        for article in story.articles:
+            if article.source and article.source.id not in covering_sources_map:
+                covering_sources_map[article.source.id] = article.source
+        covering_sources = [
+            SourceResponse.model_validate(s) for s in covering_sources_map.values()
+        ]
+        report["_covering_sources"] = f"ok ({len(covering_sources)} sources)"
+    except Exception as e:
+        import traceback as _tb
+        report["_covering_sources"] = f"FAILED: {type(e).__name__}: {e}"
+        report["_covering_sources_traceback"] = _tb.format_exc()[:3000]
 
     return report
 
