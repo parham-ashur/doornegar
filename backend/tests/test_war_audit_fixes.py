@@ -2031,10 +2031,18 @@ class TestPipelineTotalStepsMatchesActual:
         src = (
             Path(__file__).parent.parent / "auto_maintenance.py"
         ).read_text()
-        idx = src.find("await maintenance_state.start_run(total_steps=")
-        assert idx >= 0
-        line = src[idx:idx + 200]
-        assert "len(pipeline) + _extra_steps" in line, (
+        # The pipeline-loop start_run call uses `len(pipeline) +
+        # _extra_steps`. Phase E.2 (2026-05-09) added an earlier
+        # start_run for the manual_lock short-circuit which uses
+        # `total_steps=1` — skip past that one to find the real
+        # pipeline-mode call.
+        anchor = "_extra_steps = 1 if mode == \"full\" else 0"
+        idx = src.find(anchor)
+        assert idx >= 0, (
+            "Pipeline-mode start_run anchor comment must remain"
+        )
+        line = src[idx:idx + 400]
+        assert "start_run(total_steps=len(pipeline) + _extra_steps)" in line, (
             "total_steps must add 1 for full mode to account for the "
             "trailing 'Update project docs' step."
         )
@@ -2689,6 +2697,55 @@ class TestImageDownloaderHasByteCaps:
         assert "MAX_IMAGE_PIXELS" in src, (
             "Pillow MAX_IMAGE_PIXELS must be set explicitly to defend "
             "against decompression-bomb attacks. Cycle-5 C4."
+        )
+
+
+class TestManualLockHaltsEntirePipeline:
+    """Cycle-5 Phase E.2 (CRITICAL 2026-05-09): the budget kill-switch
+    HALT_SKIP_STEPS list contains only ~17 LLM-heavy step names. The
+    other ~41 pipeline steps (cluster, recompute_centroids, ingest,
+    audit_clusters, recluster_orphans, etc.) STILL ran on every cron
+    fire even with the lock active — these are Neon-egress-heavy and
+    burned ~10 GB per fire × 3 fires/day = 30 GB. The 2026-05-09
+    Neon billing jump exposed this gap.
+
+    Fix: when halt_reason == 'manual_lock' (operator emergency), the
+    entire pipeline early-exits before ANY step runs. The auto-halt
+    (combined_mtd over 80%) keeps current partial behavior so ingest
+    stays fresh on accidental over-spend days.
+    """
+
+    def test_manual_lock_short_circuits_run_maintenance(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent / "auto_maintenance.py"
+        ).read_text()
+        # Locate the manual_lock check block.
+        idx = src.find("Phase E.2")
+        assert idx >= 0, (
+            "Phase E.2 anchor comment must remain in run_maintenance"
+        )
+        block = src[idx:idx + 3000]
+        # Must check for manual_lock specifically (not just `halt`).
+        assert 'halt_reason == "manual_lock"' in block, (
+            "run_maintenance must distinguish manual_lock from "
+            "auto-halt. Without the explicit check, lock ≡ auto-halt "
+            "and ~41 heavy steps still run. Cycle-5 Phase E.2."
+        )
+        # Must early-return so the pipeline loop never executes.
+        assert "return {" in block, (
+            "manual_lock branch must `return` before the for-loop. "
+            "Otherwise heavy non-LLM steps run anyway. The 2026-05-09 "
+            "30 GB egress incident was this exact bug."
+        )
+        # Ensure the early-return happens BEFORE the pipeline loop.
+        return_pos = src.find("return {", idx)
+        loop_pos = src.find("for key, display, func in pipeline:", idx)
+        assert return_pos > 0 and loop_pos > 0
+        assert return_pos < loop_pos, (
+            "manual_lock early-return must execute BEFORE the pipeline "
+            "for-loop. Check ordering."
         )
 
 

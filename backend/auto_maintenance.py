@@ -7665,6 +7665,63 @@ async def run_maintenance(mode: str = "full"):
             f"Reason: {halt_reason}. Signals: {halt_signals}"
         )
 
+    # Cycle-5 Phase E.2 (2026-05-09): manual_lock means "stop everything"
+    # — operator emergency. The 2026-05-09 30 GB Neon egress incident
+    # was caused by treating manual_lock the same as the auto-budget
+    # halt. HALT_SKIP_STEPS only skips ~17 LLM-heavy steps; the other
+    # ~41 (cluster, recompute_centroids, ingest, audit_clusters, etc.)
+    # are Neon-egress-heavy and STILL ran on every cron fire, burning
+    # ~10 GB per fire × 3 fires/day = 30 GB.
+    #
+    # The auto 80%-budget halt keeps its previous "skip LLM only"
+    # behavior so ingest stays fresh. Only the operator's explicit
+    # `manual_lock` halts the entire pipeline.
+    if halt and halt_reason == "manual_lock":
+        logger.error(
+            "MANUAL_LOCK active — halting entire pipeline. No steps will run. "
+            "Clear with POST /admin/budget/override?action=clear (one-shot)."
+        )
+        await maintenance_state.start_run(total_steps=1)
+        await maintenance_state.begin_step("manual_lock_halt")
+        await maintenance_state.end_step(
+            "manual_lock_halt",
+            "ok",
+            {"halted": True, "reason": "manual_lock", "signals": halt_signals},
+        )
+        # Persist the halt to maintenance_logs so /admin/maintenance/logs
+        # shows it and Railway log retention isn't the only record.
+        try:
+            from sqlalchemy import text as _sa_text
+            from datetime import datetime as _dt, timezone as _tz
+            import json as _json
+            async with _async_session() as _ldb:
+                await _ldb.execute(
+                    _sa_text(
+                        "INSERT INTO maintenance_logs "
+                        "(id, run_at, status, elapsed_s, results, error) "
+                        "VALUES (gen_random_uuid(), :run_at, :status, "
+                        ":elapsed_s, CAST(:results AS JSONB), :error)"
+                    ),
+                    {
+                        "run_at": _dt.now(_tz.utc),
+                        "status": "manual_lock_halt",
+                        "elapsed_s": 0.0,
+                        "results": _json.dumps(
+                            {
+                                "halted": True,
+                                "reason": "manual_lock",
+                                "signals": halt_signals,
+                            },
+                            ensure_ascii=False,
+                        ),
+                        "error": "manual_lock",
+                    },
+                )
+                await _ldb.commit()
+        except Exception:
+            logger.exception("Failed to persist manual_lock_halt log row")
+        return {"_manual_lock": {"halted": True, "reason": halt_reason}}
+
     # Cycle-4 (2026-05-08): full mode runs an extra "Update project
     # docs" step AFTER the pipeline loop (see L7666-7683). The dashboard
     # progress bar pinned to `len(pipeline)` showed 58/58 then jumped
