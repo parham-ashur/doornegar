@@ -2700,6 +2700,51 @@ class TestImageDownloaderHasByteCaps:
         )
 
 
+class TestStoryDetailNoDuplicateTranslationsKwarg:
+    """2026-05-09 fix: /api/v1/stories/{id} 500'd with TypeError because
+    brief.model_dump() already included `translations` (cycle-4 commit
+    632ab15 promoted it to StoryBrief), and the StoryDetail constructor
+    was ALSO passing `translations=story.translations` explicitly. Python
+    raised "got multiple values for keyword argument 'translations'"
+    on every request — silently breaking every story detail page since
+    632ab15 landed.
+
+    This test pins the fix: the get_story handler must NOT pass an
+    explicit `translations=` kwarg next to `**brief.model_dump()`.
+    """
+
+    def test_get_story_does_not_double_pass_translations(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "api" / "v1" / "stories.py"
+        ).read_text()
+        idx = src.find("async def get_story(")
+        assert idx >= 0, "get_story handler must remain"
+        next_def = src.find("\nasync def ", idx + 1)
+        body = src[idx:next_def if next_def > 0 else len(src)]
+        # Find the StoryDetail constructor block.
+        sd_idx = body.find("response = StoryDetail(")
+        assert sd_idx >= 0
+        # Look at a comfortable window around the constructor call.
+        sd_block = body[sd_idx:sd_idx + 800]
+        # The block must contain `**brief.model_dump()` (the kwarg
+        # spread that brings in translations).
+        assert "**brief.model_dump()" in sd_block, (
+            "get_story must spread brief.model_dump() into StoryDetail"
+        )
+        # And the block must NOT additionally pass translations=. If
+        # someone re-adds it, this test fails immediately and the
+        # 500-on-every-detail-page regression is caught at CI time
+        # rather than after pushing to prod.
+        assert "translations=story.translations" not in sd_block, (
+            "get_story must NOT pass translations= kwarg explicitly. "
+            "brief.model_dump() already provides it (StoryBrief field). "
+            "Duplicate kwargs raise TypeError and 500 the endpoint."
+        )
+
+
 class TestPhaseFOptimizationsLanded:
     """Phase F (Parham 2026-05-09): broader 'optimize for restrictions'
     work after the 30 GB Neon incident. Pins the per-step egress

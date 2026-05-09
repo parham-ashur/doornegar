@@ -971,6 +971,14 @@ async def get_story(
         SourceResponse.model_validate(s) for s in covering_sources_map.values()
     ]
 
+    # 2026-05-09 fix: `brief.model_dump()` already includes
+    # `translations` (cycle-4 commit 632ab15 promoted it to StoryBrief).
+    # Passing it again here would raise TypeError("got multiple values
+    # for keyword argument 'translations'") — which silently broke
+    # /api/v1/stories/{id} since 632ab15 landed. The single source of
+    # truth for translations on the response is brief.translations,
+    # populated by `StoryBrief.model_validate(story)` in
+    # _story_brief_with_extras.
     response = StoryDetail(
         **brief.model_dump(),
         summary_en=story.summary_en,
@@ -979,7 +987,6 @@ async def get_story(
         articles=articles_with_bias,
         arc=arc_brief,
         covering_sources=covering_sources,
-        translations=story.translations,
     )
 
     # Bump view_count AFTER the response is built, in a background task so
