@@ -1172,11 +1172,33 @@ async def step_recompute_centroids():
             if not (is_null or drifted):
                 continue
 
+            # 7-day data window (Parham 2026-05-09): centroid is the
+            # mean of the story's articles' embeddings — but only the
+            # ones ingested in the last 7 days. Older articles are
+            # invisible to the pipeline, so they shouldn't shape the
+            # centroid that the matcher will use to absorb new content.
+            # If a story has zero in-window articles, we leave its
+            # centroid alone (old centroid > stale-ish centroid >
+            # zero centroid that would attract anything).
+            from datetime import timedelta as _td_centroid
+            recent_article_cutoff = (
+                datetime.now(timezone.utc) - _td_centroid(days=7)
+            )
             emb_result = await db.execute(
                 select(Article.embedding)
-                .where(Article.story_id == story.id, Article.embedding.isnot(None))
+                .where(
+                    Article.story_id == story.id,
+                    Article.embedding.isnot(None),
+                    Article.ingested_at >= recent_article_cutoff,
+                )
             )
             embeddings = [row[0] for row in emb_result.all() if row[0]]
+            if not embeddings:
+                # No in-window articles → preserve the existing centroid
+                # rather than nullify it. Frozen stories already short-
+                # circuit (handled by frozen_at filter above), so this
+                # only fires for fresh-but-quiet active stories.
+                continue
             centroid = _compute_centroid(embeddings)
             if centroid:
                 story.centroid_embedding = centroid

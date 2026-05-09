@@ -684,7 +684,10 @@ async def _match_to_existing_stories(
     # instead. Tighter than `settings.clustering_time_window_days`
     # (which existed for legacy reasons); we pick the stricter of
     # the two.
-    AGE_CAP_DAYS = 10
+    # 7-day data window (Parham 2026-05-09): match-existing only
+    # considers articles ≤ 7 days old. Was 10. See `clustering.py`
+    # cluster_articles cutoff comment for full rationale.
+    AGE_CAP_DAYS = 7
     legacy_cutoff = datetime.now(timezone.utc) - _timedelta(days=settings.clustering_time_window_days)
     fresh_cutoff = datetime.now(timezone.utc) - _timedelta(days=AGE_CAP_DAYS)
     time_cutoff = max(legacy_cutoff, fresh_cutoff)
@@ -2602,9 +2605,15 @@ async def cluster_articles(db: AsyncSession, *, deadline_ts: float | None = None
             "unclustered": 0,
         }
 
-    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+    # 7-day data window (Parham 2026-05-09): clustering, centroids,
+    # telegram-link, and sentiment all operate on articles + posts ≤ 7
+    # days. Older content stays queryable for archived/historical pages
+    # but is invisible to the pipeline. Was 30 days before; the slack
+    # let umbrella stories absorb articles for weeks before being
+    # frozen. Tightening to 7 makes the freeze rule actually meaningful.
+    cutoff = datetime.now(timezone.utc) - timedelta(days=7)
 
-    # ── Step 1: Get unclustered articles from the last 30 days ──
+    # ── Step 1: Get unclustered articles from the last 7 days ──
     # Skip orphans that have already been sent to cluster_new
     # MAX_CLUSTER_ATTEMPTS times without joining a viable group.
     # Without this gate, articles with no duplicates (e.g. niche

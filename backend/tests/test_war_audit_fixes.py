@@ -2700,6 +2700,119 @@ class TestImageDownloaderHasByteCaps:
         )
 
 
+class TestSevenDayDataWindow:
+    """Parham 2026-05-09: clustering / centroids / telegram-link /
+    telegram-sentiment all operate on articles + posts ≤ 7 days. Older
+    content stays queryable for archived/historical pages but is
+    invisible to the pipeline.
+
+    Triggered by the 2026-05-09 umbrella incident: two stories had
+    absorbed 1464 + 2354 articles over 60-70 days because the cluster
+    window was 30 days while the freeze rule was 7 days. Mismatch =
+    umbrellas grow for 23 days before the freeze catches them.
+
+    This test pins the four hot cutoffs at ≤ 7 days. Future cycles
+    cannot weaken any of them without the test failing.
+    """
+
+    def test_cluster_articles_uses_7d_cutoff(self):
+        """clustering.cluster_articles main cutoff."""
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "clustering.py"
+        ).read_text()
+        idx = src.find("async def cluster_articles")
+        assert idx >= 0
+        next_def = src.find("\nasync def ", idx + 1)
+        body = src[idx:next_def if next_def > 0 else len(src)]
+        # Find the FIRST timedelta(days=N) inside cluster_articles
+        # — that's the unclustered-articles cutoff.
+        import re
+        first_cutoff = re.search(r"timedelta\(days=(\d+)\)", body)
+        assert first_cutoff is not None, (
+            "cluster_articles must declare a timedelta(days=N) cutoff"
+        )
+        n = int(first_cutoff.group(1))
+        assert n <= 7, (
+            f"cluster_articles cutoff is {n} days — must be ≤ 7. "
+            f"Older articles must NOT enter clustering."
+        )
+
+    def test_match_existing_age_cap_is_7d(self):
+        """clustering._match_to_existing_stories AGE_CAP_DAYS."""
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "clustering.py"
+        ).read_text()
+        # AGE_CAP_DAYS lives inside _match_to_existing_stories.
+        idx = src.find("AGE_CAP_DAYS = ")
+        assert idx >= 0, "AGE_CAP_DAYS constant must remain"
+        # Read the integer literal that follows.
+        import re
+        m = re.search(r"AGE_CAP_DAYS = (\d+)", src)
+        assert m is not None
+        n = int(m.group(1))
+        assert n <= 7, (
+            f"AGE_CAP_DAYS is {n} — must be ≤ 7. Match-existing must "
+            f"only consider articles ≤ 7 days old."
+        )
+
+    def test_recompute_centroids_filters_to_7d(self):
+        """auto_maintenance.step_recompute_centroids must filter the
+        article-embedding query to articles ingested in the last 7 days.
+        """
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent / "auto_maintenance.py"
+        ).read_text()
+        idx = src.find("async def step_recompute_centroids")
+        assert idx >= 0
+        next_def = src.find("\nasync def ", idx + 1)
+        body = src[idx:next_def if next_def > 0 else len(src)]
+        # The function must include a 7-day cutoff for the article query.
+        assert "timedelta(days=7)" in body or "_td_centroid(days=7)" in body or "_td(days=7)" in body, (
+            "step_recompute_centroids must filter Article.embedding to "
+            "articles ingested in the last 7 days. Otherwise old "
+            "articles drag the centroid and attract more drift."
+        )
+        # And the filter must be applied to the embedding-fetch query
+        # (Article.ingested_at >= cutoff).
+        assert "Article.ingested_at" in body, (
+            "step_recompute_centroids must filter by Article.ingested_at"
+        )
+
+    def test_telegram_link_story_recency_is_7d(self):
+        """telegram_analysis.link_posts_by_embedding story_recency_cutoff
+        must be ≤ 7 days. Was 14 before the 2026-05-09 audit.
+        """
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "telegram_analysis.py"
+        ).read_text()
+        idx = src.find("story_recency_cutoff =")
+        assert idx >= 0, (
+            "link_posts_by_embedding must declare story_recency_cutoff"
+        )
+        # Read the days=N value on or near this line.
+        line_block = src[idx:idx + 200]
+        import re
+        m = re.search(r"days=(\d+)", line_block)
+        assert m is not None
+        n = int(m.group(1))
+        assert n <= 7, (
+            f"story_recency_cutoff is {n} days — must be ≤ 7. "
+            f"A post can't link to a story with no recent articles "
+            f"to validate the match."
+        )
+
+
 class TestStoryDetailNoDuplicateTranslationsKwarg:
     """2026-05-09 fix: /api/v1/stories/{id} 500'd with TypeError because
     brief.model_dump() already included `translations` (cycle-4 commit

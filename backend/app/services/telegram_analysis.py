@@ -821,11 +821,12 @@ async def link_posts_by_embedding(
         # editorial_context_fa, summary_anchor, analysis_snapshot_24h,
         # hourly_update_signal, translations — for ~1000+ stories per
         # cron, even though we only read id + centroid + last_updated.
-        # Bounded scope: only stories updated in last 14 days are
-        # candidates anyway (older stories' Telegram window has
-        # passed). Drops query weight from ~30 MB to ~3 MB per cron.
+        # 7-day data window (Parham 2026-05-09): only stories updated
+        # in the last 7 days are candidates. Was 14; tightened to
+        # match the cluster cutoff so a post can't link to a story
+        # that has no recent articles to validate the match.
         from datetime import timedelta as _td
-        story_recency_cutoff = datetime.now(timezone.utc) - _td(days=14)
+        story_recency_cutoff = datetime.now(timezone.utc) - _td(days=7)
         story_result = await db.execute(
             select(Story.id, Story.centroid_embedding, Story.last_updated_at).where(
                 Story.centroid_embedding.isnot(None),
