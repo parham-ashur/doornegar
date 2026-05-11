@@ -7580,7 +7580,46 @@ async def step_delete_aged():
         article_ids_to_delete = [row[0] for row in article_ids_q.all()]
 
         # ── D. Cascade deletes in FK-safe order ──────────────────
-        # bias_scores → articles
+        # FK map (validated against schema 2026-05-12):
+        #   bias_scores.article_id   → articles.id  (NOT NULL)
+        #   community_ratings.article_id → articles.id  (nullable)
+        #   rater_feedback.{story_id, article_id} → stories/articles (nullable)
+        #   social_sentiment_snapshots.story_id → stories.id (NOT NULL)
+        #   story_events.story_id → stories.id (NOT NULL)
+        #   analyst_takes.story_id → stories.id (nullable)
+        #   analyst_takes.telegram_post_id → telegram_posts.id (nullable)
+        #
+        # Order: NULL the nullable refs first, then DELETE non-nullable
+        # references, then DELETE parent rows.
+
+        # Identify telegram posts about to be deleted so we can NULL
+        # analyst_takes.telegram_post_id pointing at them before drop.
+        old_tg_posts_q = await db.execute(
+            _text(
+                "SELECT id FROM telegram_posts WHERE created_at < :c"
+            ),
+            {"c": grace_cutoff},
+        )
+        old_tg_post_ids = [row[0] for row in old_tg_posts_q.all()]
+
+        # NULL rater_feedback FKs that would otherwise dangle
+        if article_ids_to_delete:
+            await db.execute(
+                _text(
+                    "UPDATE rater_feedback SET article_id = NULL "
+                    "WHERE article_id = ANY(:ids)"
+                ),
+                {"ids": article_ids_to_delete},
+            )
+        await db.execute(
+            _text(
+                "UPDATE rater_feedback SET story_id = NULL "
+                "WHERE story_id = ANY(:ids)"
+            ),
+            {"ids": delete_story_list},
+        )
+
+        # Cascade article-FKs
         if article_ids_to_delete:
             res = await db.execute(
                 _text("DELETE FROM bias_scores WHERE article_id = ANY(:ids)"),
@@ -7588,7 +7627,6 @@ async def step_delete_aged():
             )
             stats["bias_scores_deleted"] = res.rowcount or 0
 
-            # community_ratings → articles
             await db.execute(
                 _text(
                     "DELETE FROM community_ratings WHERE article_id = ANY(:ids)"
@@ -7596,12 +7634,33 @@ async def step_delete_aged():
                 {"ids": article_ids_to_delete},
             )
 
+        # social_sentiment_snapshots.story_id is NOT NULL — must delete
+        await db.execute(
+            _text(
+                "DELETE FROM social_sentiment_snapshots WHERE story_id = ANY(:ids)"
+            ),
+            {"ids": delete_story_list},
+        )
+
         # story_events → stories
         res = await db.execute(
             _text("DELETE FROM story_events WHERE story_id = ANY(:ids)"),
             {"ids": delete_story_list},
         )
         stats["story_events_deleted"] = res.rowcount or 0
+
+        # NULL analyst_takes.telegram_post_id for posts about to be
+        # deleted (kept analyst_takes whose story_id IS NULL or in keep
+        # set, but pointing at a >7d telegram post). Without this, the
+        # telegram_posts DELETE later hits FK violation.
+        if old_tg_post_ids:
+            await db.execute(
+                _text(
+                    "UPDATE analyst_takes SET telegram_post_id = NULL "
+                    "WHERE telegram_post_id = ANY(:ids)"
+                ),
+                {"ids": old_tg_post_ids},
+            )
 
         # analyst_takes → stories
         res = await db.execute(
@@ -7611,8 +7670,7 @@ async def step_delete_aged():
         stats["analyst_takes_deleted"] = res.rowcount or 0
 
         # improvement_feedback uses `orphaned_from_story_id` (not
-        # story_id) and is small + not bot-walked. Skip — leaving its
-        # references stale is harmless.
+        # story_id) — leaving its references stale is harmless.
 
         # telegram_posts: null out story_id on rows we'd otherwise
         # keep (≤7d telegram_posts linked to a to-be-deleted story).
