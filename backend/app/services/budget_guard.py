@@ -93,6 +93,10 @@ CHEAP_STEPS = {
     # read+write — must keep running during soft-halt so the homepage
     # stays fresh while LLM steps are paused.
     "homepage_aggregates",
+    # Phase G follow-up (Parham 2026-05-12): retention deletes. Pure
+    # DB operation, no LLM. Keep running during soft-halt so the
+    # database stays lean even while LLM steps are paused.
+    "delete_aged",
 }
 
 # Steps that ALWAYS get skipped when the budget guard fires —

@@ -3518,6 +3518,72 @@ class TestHomepageAggregatesDenormalized:
         )
 
 
+class TestStrictRetention:
+    """Phase G follow-up (Parham 2026-05-12) — strict retention rule.
+    Only stories that earned homepage time are kept (up to 30 days
+    after archival). Stories that came in but never reached the
+    homepage are deleted after a 7-day grace period.
+
+    Pinned by:
+    1. step_delete_aged exists in FULL_PIPELINE at the very end
+    2. CHEAP_STEPS tagged so it keeps running during budget soft-halt
+    3. Function uses homepage_story_ids (single source of truth) as
+       the never-delete guardrail
+    """
+
+    def test_step_delete_aged_in_full_pipeline(self):
+        import importlib
+        m = importlib.import_module("auto_maintenance")
+        keys = [t[0] for t in m.FULL_PIPELINE]
+        assert "delete_aged" in keys, (
+            "FULL_PIPELINE must include the delete_aged retention step."
+        )
+        # Must run LAST so other steps see complete data first.
+        assert keys[-1] == "delete_aged", (
+            f"delete_aged must be the LAST step in FULL_PIPELINE so "
+            f"other steps complete before rows are deleted. "
+            f"Currently last: {keys[-1]!r}"
+        )
+        funcs = {t[0]: t[2] for t in m.FULL_PIPELINE}
+        assert funcs["delete_aged"] == "step_delete_aged"
+        assert hasattr(m, "step_delete_aged")
+
+    def test_delete_aged_uses_homepage_scope_guardrail(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "auto_maintenance.py"
+        ).read_text()
+        idx = src.find("async def step_delete_aged")
+        assert idx >= 0
+        next_def = src.find("\nasync def ", idx + 1)
+        block = src[idx:next_def if next_def > 0 else idx + 8000]
+        # Must guard against deleting current homepage stories.
+        assert "homepage_story_ids" in block, (
+            "step_delete_aged must call homepage_story_ids and NEVER "
+            "delete a current homepage story."
+        )
+        assert "keep_ids" in block, (
+            "step_delete_aged must keep an explicit `keep_ids` set "
+            "to subtract from the delete candidates."
+        )
+        # Must explicitly subtract keep_ids — belt-and-braces.
+        assert "delete_story_ids -= keep_ids" in block, (
+            "step_delete_aged must subtract keep_ids from the delete "
+            "set as the last safety check."
+        )
+
+    def test_delete_aged_in_cheap_steps(self):
+        from app.services.budget_guard import CHEAP_STEPS, HALT_SKIP_STEPS
+
+        assert "delete_aged" in CHEAP_STEPS, (
+            "delete_aged must be tagged CHEAP so retention keeps "
+            "running during budget soft-halt."
+        )
+        assert "delete_aged" not in HALT_SKIP_STEPS
+
+
 class TestOptionCHomepageOnly:
     """Phase G follow-up (Parham 2026-05-11) — Option C: per-story read
     endpoints under /api/v1/stories/* return 410 Gone for stories not

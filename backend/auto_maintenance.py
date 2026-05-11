@@ -7477,6 +7477,201 @@ async def step_translate_homepage_visible():
     return await _impl()
 
 
+async def step_delete_aged():
+    """Phase G follow-up (Parham 2026-05-12) — strict retention.
+
+    Per policy: only stories that were ON the homepage (= had reader
+    attention) are kept, and only for up to 30 days. Everything else
+    is deleted to keep Neon storage and egress lean.
+
+    Deletes:
+    1. Stories archived >30 days ago (the "homepage stays accessible
+       for 30 days from archival" rule expires here).
+    2. Stories never on homepage that are >7 days old (= they didn't
+       earn reader attention — the 7-day grace window expired).
+    3. Articles whose story was just deleted (FK cleanup).
+    4. Orphan articles (story_id IS NULL OR points at a missing story).
+    5. Telegram posts >7 days old (matches the 7-day data window rule).
+    6. Bias scores, community_ratings, story_events, analyst_takes
+       for deleted stories/articles (FK cleanup before the parent).
+
+    NEVER deletes a story currently on the homepage — those rotate
+    off via step_archive_stale first (sets archived_at), then enter
+    the 30-day archival window before this step picks them up.
+    """
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    from sqlalchemy import select as _select, text as _text
+
+    from app.database import async_session
+    from app.models.article import Article
+    from app.models.story import Story
+    from app.services.homepage_scope import homepage_story_ids
+
+    stats = {
+        "stories_deleted_archived_30d": 0,
+        "stories_deleted_never_homepage_7d": 0,
+        "articles_deleted": 0,
+        "telegram_posts_deleted_7d": 0,
+        "bias_scores_deleted": 0,
+        "story_events_deleted": 0,
+        "analyst_takes_deleted": 0,
+    }
+
+    now = _dt.now(_tz.utc)
+    archived_cutoff = now - _td(days=30)
+    grace_cutoff = now - _td(days=7)
+
+    async with async_session() as db:
+        # Compute the set of stories CURRENTLY on the homepage so we
+        # never delete them, even by accident.
+        keep_ids = await homepage_story_ids(
+            db, trending_top_n=30, blindspot_top_n=20
+        )
+
+        # ── A. Stories archived >30 days ago ─────────────────────
+        # These had their 30-day "still accessible after falling off
+        # homepage" window expire. Now the row goes.
+        archived_to_delete_q = await db.execute(
+            _select(Story.id).where(
+                Story.archived_at.isnot(None),
+                Story.archived_at < archived_cutoff,
+            )
+        )
+        archived_to_delete = {row[0] for row in archived_to_delete_q.all()}
+
+        # ── B. Stories >7 days old, never on homepage, not archived ─
+        # Stories that came in, didn't reach trending visibility, and
+        # have been sitting for >7 days. They didn't earn reader
+        # attention — delete.
+        never_homepage_q = await db.execute(
+            _select(Story.id).where(
+                Story.archived_at.is_(None),
+                Story.first_published_at < grace_cutoff,
+                # Wasn't currently visible (trending_score too low to
+                # be on the homepage) — proxy for "never on homepage".
+                Story.trending_score <= 0.5,
+                Story.is_blindspot.is_(False),
+                ~Story.id.in_(keep_ids) if keep_ids else _text("true"),
+            )
+        )
+        never_homepage_to_delete = {row[0] for row in never_homepage_q.all()}
+
+        delete_story_ids = archived_to_delete | never_homepage_to_delete
+        # Belt-and-braces: never delete a current homepage story.
+        delete_story_ids -= keep_ids
+
+        if not delete_story_ids:
+            stats["telegram_posts_deleted_7d"] = await _delete_old_telegram(
+                db, grace_cutoff
+            )
+            await db.commit()
+            logger.info(f"Retention: {stats}")
+            return stats
+
+        delete_story_list = list(delete_story_ids)
+
+        # ── C. Articles to delete (story-FK + orphans) ───────────
+        article_ids_q = await db.execute(
+            _select(Article.id).where(
+                (Article.story_id.in_(delete_story_list))
+                | (Article.story_id.is_(None))
+            )
+        )
+        article_ids_to_delete = [row[0] for row in article_ids_q.all()]
+
+        # ── D. Cascade deletes in FK-safe order ──────────────────
+        # bias_scores → articles
+        if article_ids_to_delete:
+            res = await db.execute(
+                _text("DELETE FROM bias_scores WHERE article_id = ANY(:ids)"),
+                {"ids": article_ids_to_delete},
+            )
+            stats["bias_scores_deleted"] = res.rowcount or 0
+
+            # community_ratings → articles
+            await db.execute(
+                _text(
+                    "DELETE FROM community_ratings WHERE article_id = ANY(:ids)"
+                ),
+                {"ids": article_ids_to_delete},
+            )
+
+        # story_events → stories
+        res = await db.execute(
+            _text("DELETE FROM story_events WHERE story_id = ANY(:ids)"),
+            {"ids": delete_story_list},
+        )
+        stats["story_events_deleted"] = res.rowcount or 0
+
+        # analyst_takes → stories
+        res = await db.execute(
+            _text("DELETE FROM analyst_takes WHERE story_id = ANY(:ids)"),
+            {"ids": delete_story_list},
+        )
+        stats["analyst_takes_deleted"] = res.rowcount or 0
+
+        # improvement_feedback may reference stories — null it out
+        await db.execute(
+            _text(
+                "UPDATE improvement_feedback SET story_id = NULL "
+                "WHERE story_id = ANY(:ids)"
+            ),
+            {"ids": delete_story_list},
+        )
+
+        # telegram_posts: null out story_id on rows we'd otherwise
+        # keep (≤7d telegram_posts linked to a to-be-deleted story).
+        await db.execute(
+            _text(
+                "UPDATE telegram_posts SET story_id = NULL "
+                "WHERE story_id = ANY(:ids)"
+            ),
+            {"ids": delete_story_list},
+        )
+
+        # Delete telegram_posts >7 days old (matches data-window rule).
+        stats["telegram_posts_deleted_7d"] = await _delete_old_telegram(
+            db, grace_cutoff
+        )
+
+        # articles
+        if article_ids_to_delete:
+            res = await db.execute(
+                _text("DELETE FROM articles WHERE id = ANY(:ids)"),
+                {"ids": article_ids_to_delete},
+            )
+            stats["articles_deleted"] = res.rowcount or 0
+
+        # stories
+        res = await db.execute(
+            _text("DELETE FROM stories WHERE id = ANY(:ids)"),
+            {"ids": delete_story_list},
+        )
+        total_stories = res.rowcount or 0
+        stats["stories_deleted_archived_30d"] = len(
+            archived_to_delete & delete_story_ids
+        )
+        stats["stories_deleted_never_homepage_7d"] = (
+            total_stories - stats["stories_deleted_archived_30d"]
+        )
+
+        await db.commit()
+
+    logger.info(f"Retention: {stats}")
+    return stats
+
+
+async def _delete_old_telegram(db, cutoff):
+    """Helper: delete telegram_posts older than cutoff. Returns rowcount."""
+    from sqlalchemy import text as _text
+
+    res = await db.execute(
+        _text("DELETE FROM telegram_posts WHERE created_at < :c"),
+        {"c": cutoff},
+    )
+    return res.rowcount or 0
+
+
 async def step_recompute_homepage_aggregates():
     """Phase G.3.2 (Parham 2026-05-10) — populate Story.homepage_aggregates.
 
@@ -7740,6 +7935,12 @@ FULL_PIPELINE = [
     ("detect_hourly_updates", "Flag significant intra-day story updates", "step_detect_hourly_updates"),
     ("weekly_digest", "Weekly digest", "step_weekly_digest"),
     ("worldview_digests", "Weekly worldview synthesis (4 bundles)", "step_worldview_digests"),
+    # Phase G follow-up (Parham 2026-05-12) — strict retention.
+    # Runs LAST so all other steps have completed using whatever
+    # data they need before rows get deleted. Drops stories archived
+    # >30 days, stories >7 days that never made the homepage, and
+    # telegram_posts >7 days. See step_delete_aged docstring.
+    ("delete_aged", "Retention: delete aged-out stories + posts", "step_delete_aged"),
 ]
 
 # Lightweight pipeline for the ingest-only cron — keeps the homepage fresh
