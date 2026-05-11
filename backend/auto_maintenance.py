@@ -7610,14 +7610,9 @@ async def step_delete_aged():
         )
         stats["analyst_takes_deleted"] = res.rowcount or 0
 
-        # improvement_feedback may reference stories — null it out
-        await db.execute(
-            _text(
-                "UPDATE improvement_feedback SET story_id = NULL "
-                "WHERE story_id = ANY(:ids)"
-            ),
-            {"ids": delete_story_list},
-        )
+        # improvement_feedback uses `orphaned_from_story_id` (not
+        # story_id) and is small + not bot-walked. Skip — leaving its
+        # references stale is harmless.
 
         # telegram_posts: null out story_id on rows we'd otherwise
         # keep (≤7d telegram_posts linked to a to-be-deleted story).

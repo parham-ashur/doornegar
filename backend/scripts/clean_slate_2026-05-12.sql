@@ -93,15 +93,12 @@ WHERE story_id NOT IN (SELECT id FROM keep_stories);
 DELETE FROM analyst_takes
 WHERE story_id NOT IN (SELECT id FROM keep_stories);
 
--- 2e. improvement_feedback may have story_id — null it out if so
-UPDATE improvement_feedback
-SET story_id = NULL
-WHERE story_id IS NOT NULL AND story_id NOT IN (SELECT id FROM keep_stories);
+-- 2e. improvement_feedback uses `orphaned_from_story_id` (not story_id)
+-- and tracks user feedback about specific stories that may already be
+-- gone. Leave it alone — small table, not bot-walked, no FK to stories.
 
--- 2f. ratings table may reference stories — null them out
-UPDATE ratings
-SET story_id = NULL
-WHERE story_id IS NOT NULL AND story_id NOT IN (SELECT id FROM keep_stories);
+-- 2f. (skipped — `ratings` doesn't exist as a separate table; the
+-- only ratings table is `community_ratings`, handled in step 2b.)
 
 -- 2g. telegram_posts: NULL out story_id pointing at to-be-deleted
 -- stories. Keep posts ≤7d regardless of their story link.
