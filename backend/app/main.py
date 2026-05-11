@@ -253,6 +253,14 @@ async def lifespan(app: FastAPI):
                 # chronically broken upstream URL doesn't burn the per-run
                 # cap forever. See project_r2_migrate_sentinel.md.
                 "ALTER TABLE articles ADD COLUMN IF NOT EXISTS last_r2_migration_attempt_at TIMESTAMPTZ",
+                # Phase G.3.2 (Parham 2026-05-10) — denormalized
+                # homepage aggregates blob (image_url / state_pct /
+                # diaspora_pct / independent_pct / narrative_groups /
+                # inside_border_pct / outside_border_pct). Populated by
+                # step_recompute_homepage_aggregates once per cron so
+                # listing endpoints can drop selectinload(Story.articles).
+                # See migration z1u2v3w4x5y6.
+                "ALTER TABLE stories ADD COLUMN IF NOT EXISTS homepage_aggregates JSONB",
                 # Budget guard (Parham 2026-05-07) — single-row table
                 # holds the cron's manual override flag. The hard
                 # rule: if month-to-date LLM spend reaches 80% of

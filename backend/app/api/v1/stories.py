@@ -888,32 +888,63 @@ async def get_story(
     story_id: uuid.UUID,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    # Phase G.3.3 (Parham 2026-05-10): pagination caps. Default 50
+    # caps the article subset returned per fetch. Most stories have
+    # < 50 articles and are unaffected. Two known umbrella stories
+    # (1464 + 2354 articles, accumulated under the pre-7d-window
+    # cluster regime) drop ~6 MB → ~200 KB per fetch — the dominant
+    # story-detail egress driver. Max 500 lets a journalist still
+    # pull the full umbrella when they want it. Tripwire pins the
+    # default + max in test_war_audit_fixes.py.
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
 ):
-    result = await db.execute(
+    # Phase G.3.3: split the previous single selectinload(Story.articles)
+    # query into three lean queries so we can LIMIT the article fetch.
+    #
+    # 1. Story core only — no articles eager-loaded.
+    story = (await db.execute(
         select(Story)
-        .options(
-            selectinload(Story.articles).options(
-                defer(Article.embedding),
-                defer(Article.content_text),
-                defer(Article.keywords),
-                defer(Article.named_entities),
-                selectinload(Article.source),
-                selectinload(Article.bias_scores),
-            ),
-            *_story_detail_defers(),
-        )
+        .options(*_story_detail_defers())
         .where(Story.id == story_id)
-    )
-    story = result.scalar_one_or_none()
+    )).scalar_one_or_none()
     if not story:
         raise HTTPException(status_code=404, detail="Story not found")
 
-    # Build the response BEFORE committing — we want to touch every attribute
-    # on `story` while the session is still clean, so Pydantic's validation
-    # doesn't trigger any async refresh after a commit (which was the source
-    # of a MissingGreenlet error when view_count was bumped inline).
+    # 2. Articles for this story, paginated. Server-side LIMIT means
+    #    Neon never streams 1500 rows on umbrella-story fetches.
+    paginated_articles = list((await db.execute(
+        select(Article)
+        .options(
+            defer(Article.embedding),
+            defer(Article.content_text),
+            defer(Article.keywords),
+            defer(Article.named_entities),
+            selectinload(Article.source),
+            selectinload(Article.bias_scores),
+        )
+        .where(Article.story_id == story_id)
+        .order_by(Article.published_at.desc().nullslast(), Article.ingested_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )).scalars().all())
+
+    # 3. Per-source aggregate covering the FULL article set. Required
+    #    so coverage percentages stay correct when paginated_articles
+    #    is a truncated subset (otherwise an umbrella story's
+    #    state_pct would be computed against the latest 50 articles
+    #    only). Tiny payload — one row per unique source covering the
+    #    story (~10-30 rows × ~150 B = ~few KB).
+    source_count_rows: list[tuple[Source, int]] = list((await db.execute(
+        select(Source, func.count(Article.id))
+        .join(Article, Article.source_id == Source.id)
+        .where(Article.story_id == story_id)
+        .group_by(Source.id)
+    )).all())
+
+    # Build per-article StoryArticleWithBias from the limited subset.
     articles_with_bias = []
-    for article in story.articles:
+    for article in paginated_articles:
         article_data = StoryArticleWithBias(
             **{k: v for k, v in ArticleBriefDict(article).items()},
             source_name_en=article.source.name_en if article.source else None,
@@ -926,8 +957,13 @@ async def get_story(
 
     # Use the same helper as the other endpoints — it returns a populated
     # StoryBrief with image_url / state_pct / diaspora_pct / independent_pct,
-    # fields that aren't on the ORM model.
-    brief = _story_brief_with_extras(story)
+    # fields that aren't on the ORM model. Pass paginated_articles for
+    # image picking and source_count_rows for authoritative percentages.
+    brief = _story_brief_with_extras(
+        story,
+        articles=paginated_articles,
+        source_count_rows=source_count_rows,
+    )
 
     # Pull arc sibling strip when this story belongs to one. Single
     # extra query — no-op when arc_id is None (most stories).
@@ -958,17 +994,11 @@ async def get_story(
                 chapters=chapters,
             )
 
-    # Collect unique sources whose articles cite into this story. Reading
-    # article.source from already-eager-loaded relations is in-memory only —
-    # no additional round trip. Embeds the small subset here so the frontend
-    # doesn't need a second fetch to /api/v1/sources for the political
-    # spectrum + JSON-LD citations.
-    covering_sources_map: dict[uuid.UUID, Source] = {}
-    for article in story.articles:
-        if article.source and article.source.id not in covering_sources_map:
-            covering_sources_map[article.source.id] = article.source
+    # covering_sources comes from the FULL aggregate (Phase G.3.3)
+    # rather than the truncated articles subset, so the political-
+    # spectrum + JSON-LD citations stay complete on umbrella stories.
     covering_sources = [
-        SourceResponse.model_validate(s) for s in covering_sources_map.values()
+        SourceResponse.model_validate(s) for s, _cnt in source_count_rows if s
     ]
 
     # 2026-05-09 fix: `brief.model_dump()` already includes
@@ -979,6 +1009,8 @@ async def get_story(
     # truth for translations on the response is brief.translations,
     # populated by `StoryBrief.model_validate(story)` in
     # _story_brief_with_extras.
+    total_articles = int(story.article_count or 0)
+    articles_returned = len(articles_with_bias)
     response = StoryDetail(
         **brief.model_dump(),
         summary_en=story.summary_en,
@@ -987,6 +1019,9 @@ async def get_story(
         articles=articles_with_bias,
         arc=arc_brief,
         covering_sources=covering_sources,
+        articles_returned=articles_returned,
+        articles_offset=offset,
+        articles_has_more=(offset + articles_returned) < total_articles,
     )
 
     # Bump view_count AFTER the response is built, in a background task so
@@ -1054,7 +1089,12 @@ def _to_farsi_digits(text: str | None) -> str | None:
     return text.translate(_LATIN_TO_FARSI)
 
 
-def _story_brief_with_extras(story: Story) -> StoryBrief:
+def _story_brief_with_extras(
+    story: Story,
+    *,
+    articles: list[Article] | None = None,
+    source_count_rows: list[tuple[Source, int]] | None = None,
+) -> StoryBrief:
     """Build StoryBrief with image_url and coverage percentages.
 
     Image selection:
@@ -1062,12 +1102,31 @@ def _story_brief_with_extras(story: Story) -> StoryBrief:
     2. Score each by title-word overlap with the story title (≥3 char words)
     3. Prefer R2 / stable-storage URLs, break ties by highest overlap,
        then by longest URL (often higher-resolution on Telegram CDN)
+
+    Phase G.3.3 (Parham 2026-05-10) optional kwargs:
+    - `articles`: override the article iterable (used by paginated
+      get_story which fetches articles in a separate query rather than
+      via selectinload(Story.articles)). When None, falls back to
+      story.articles (the listing endpoints' selectinload path).
+    - `source_count_rows`: pre-aggregated [(Source, article_count), ...]
+      pairs covering the FULL story article set. Required for correct
+      coverage percentages when `articles` is a truncated subset —
+      otherwise percentages would be computed against the latest 50
+      articles instead of all 1500. When None, fall back to deduping
+      sources from the in-memory articles iterable (the listing
+      endpoints' path, where articles is already the full set).
     """
     import json as _json
 
     from app.config import settings
 
     brief = StoryBrief.model_validate(story)
+    # Resolve the articles iterable used for image picking + logo
+    # fallback. Listing endpoints pass None and rely on the eager-loaded
+    # relationship; get_story passes its paginated subset explicitly.
+    _articles: list[Article] = (
+        list(articles) if articles is not None else list(story.articles or [])
+    )
 
     # Normalize Latin digits → Farsi in titles served to the frontend
     brief.title_fa = _to_farsi_digits(brief.title_fa)
@@ -1094,6 +1153,21 @@ def _story_brief_with_extras(story: Story) -> StoryBrief:
     else:
         _skip_scorer = False
 
+    # Phase G.3.2 (Parham 2026-05-10) — when the cron has populated
+    # Story.homepage_aggregates, use the denormalized image_url +
+    # has_real_image instead of re-scoring the article list. This
+    # is the path that lets listing endpoints (Phase 2) drop
+    # selectinload(Story.articles). The blob is missing on freshly-
+    # ingested stories until the next cron pass; in that case we
+    # fall through to the article-iteration scorer below.
+    blob = getattr(story, "homepage_aggregates", None)
+    if not _skip_scorer and isinstance(blob, dict):
+        blob_image = blob.get("image_url")
+        if blob_image and not _is_bad_image(blob_image):
+            brief.image_url = blob_image
+            brief.has_real_image = bool(blob.get("has_real_image"))
+            _skip_scorer = True
+
     def _title_words(s: str | None) -> set:
         if not s:
             return set()
@@ -1101,9 +1175,12 @@ def _story_brief_with_extras(story: Story) -> StoryBrief:
 
     story_words = _title_words(story.title_fa or story.title_en)
 
-    # Collect candidate articles with a usable image
+    # Collect candidate articles with a usable image. On paginated
+    # get_story this is the latest-N subset; image picker still finds
+    # a good cover because newer articles tend to carry richer
+    # imagery. Listing endpoints see the full set via _articles.
     candidates = [
-        a for a in story.articles
+        a for a in _articles
         if a.image_url and not _is_bad_image(a.image_url)
     ]
     if candidates and not _skip_scorer:
@@ -1130,7 +1207,7 @@ def _story_brief_with_extras(story: Story) -> StoryBrief:
     # active sources over deactivated ones.
     if not brief.image_url:
         source_counts: dict = {}
-        for a in story.articles:
+        for a in _articles:
             if (
                 a.source
                 and a.source.logo_url
@@ -1140,7 +1217,7 @@ def _story_brief_with_extras(story: Story) -> StoryBrief:
                 source_counts[a.source.slug] = source_counts.get(a.source.slug, 0) + 1
         if source_counts:
             top_slug = max(source_counts, key=source_counts.get)  # type: ignore[arg-type]
-            for a in story.articles:
+            for a in _articles:
                 if a.source and a.source.slug == top_slug and a.source.logo_url:
                     brief.image_url = a.source.logo_url
                     break
@@ -1152,11 +1229,45 @@ def _story_brief_with_extras(story: Story) -> StoryBrief:
     # piece — this is a TRANSPARENCY platform measuring which outlets
     # cover what, not raw article volume. Blindspot / trending logic
     # still uses article_count, so the volume signal isn't lost.
-    sources_seen: dict[str, object] = {}
-    for a in story.articles:
-        if a.source and a.source.slug not in sources_seen:
-            sources_seen[a.source.slug] = a.source
-    total_sources = len(sources_seen)
+    #
+    # Precedence (highest → lowest):
+    #   1. source_count_rows kwarg (Phase G.3.3 — paginated get_story
+    #      passes a FULL aggregate even when articles is truncated)
+    #   2. story.homepage_aggregates (Phase G.3.2 — cron-denormalized
+    #      blob lets listing endpoints skip article iteration)
+    #   3. iterate _articles (legacy fallback — listing endpoints
+    #      with selectinload(Story.articles), or stories untouched
+    #      by cron yet)
+    if source_count_rows is None and isinstance(blob, dict) and blob.get("computed_at"):
+        from app.schemas.story import NarrativeGroupPercentages
+
+        brief.state_pct = int(blob.get("state_pct") or 0)
+        brief.diaspora_pct = int(blob.get("diaspora_pct") or 0)
+        brief.independent_pct = int(blob.get("independent_pct") or 0)
+        ng = blob.get("narrative_groups") or {}
+        if isinstance(ng, dict):
+            brief.narrative_groups = NarrativeGroupPercentages(
+                principlist=int(ng.get("principlist") or 0),
+                reformist=int(ng.get("reformist") or 0),
+                moderate_diaspora=int(ng.get("moderate_diaspora") or 0),
+                radical_diaspora=int(ng.get("radical_diaspora") or 0),
+            )
+        brief.inside_border_pct = int(blob.get("inside_border_pct") or 0)
+        brief.outside_border_pct = int(blob.get("outside_border_pct") or 0)
+        # Skip the legacy counting block entirely — blob is authoritative.
+        sources_seen = {}
+        total_sources = 0
+    else:
+        sources_seen: dict[str, object] = {}
+        if source_count_rows is not None:
+            for src, _cnt in source_count_rows:
+                if src and getattr(src, "slug", None):
+                    sources_seen[src.slug] = src
+        else:
+            for a in _articles:
+                if a.source and a.source.slug not in sources_seen:
+                    sources_seen[a.source.slug] = a.source
+        total_sources = len(sources_seen)
     if total_sources > 0:
         from app.schemas.story import NarrativeGroupPercentages
         from app.services.narrative_groups import (

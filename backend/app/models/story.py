@@ -125,6 +125,21 @@ class Story(Base):
     # Auto-cleared on FA edit; written by step_translate_homepage_visible.
     # Shape per locale: see project_en_fr_rollout.md JSONB schema.
     translations: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Phase G.3.2 (Parham 2026-05-10) — denormalized aggregates that
+    # /trending, /blindspots, and the homepage card composer used to
+    # compute on every read by iterating story.articles. Populated
+    # once per cron by step_recompute_homepage_aggregates so listing
+    # endpoints can drop selectinload(Story.articles). Shape:
+    #   {"image_url": str|null, "has_real_image": bool,
+    #    "state_pct": int, "diaspora_pct": int, "independent_pct": int,
+    #    "narrative_groups": {"principlist": int, "reformist": int,
+    #                         "moderate_diaspora": int, "radical_diaspora": int},
+    #    "inside_border_pct": int, "outside_border_pct": int,
+    #    "computed_at": ISO8601}
+    # NULL for stories not yet visited by the cron step. Read-side
+    # helper falls back to article iteration when null so the system
+    # works during the deploy → first-cron window.
+    homepage_aggregates: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     # Relationships
     articles: Mapped[list["Article"]] = relationship(back_populates="story")  # noqa: F821

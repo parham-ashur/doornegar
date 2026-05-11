@@ -20,19 +20,27 @@ import { getStory, getStoryAnalysis, getRelatedStories } from "@/lib/api";
 import RelatedStoriesSlider from "@/components/story/RelatedStoriesSlider";
 import { formatRelativeTime, toFa } from "@/lib/utils";
 
-// Serve the page as ISR with a 5-minute revalidate window — matches
-// the getStory/getStoryAnalysis fetch cache. Accessing searchParams
-// in this server component would opt out of ISR, so the tg/hl deep
-// link params are now read client-side inside StatsPanel via
-// useSearchParams() instead. First visitor after revalidate triggers
-// one SSR; subsequent readers get the cached HTML edge-served.
+// Serve the page as ISR. Accessing searchParams in this server
+// component would opt out of ISR, so the tg/hl deep link params are
+// read client-side inside StatsPanel via useSearchParams() instead.
+// First visitor after revalidate triggers one SSR; subsequent readers
+// get the cached HTML edge-served.
 //
-// 5 min was projecting Fluid Active CPU ~3× over the Vercel free-tier
-// limit (4h/mo). Story pages are the heaviest regen — full story
-// fetch + articles + bias + telegram. New articles join at most once
-// per 6h cron, so 15 min ISR is well inside the data freshness
-// envelope. (2026-05-06 Vercel cost cut.)
-export const revalidate = 900;
+// 2026-05-06: bumped 300 → 900 to keep Vercel Fluid CPU under the
+// free-tier limit. New articles join at most once per 6h cron so 15
+// min was well inside data-freshness.
+//
+// 2026-05-10 (Phase G.3.4): bumped 900 → 1800 for the Neon ≤ 2 GB/day
+// June target. Story-detail is the heaviest regen path on the site
+// (story + 50-1500 articles + bias + telegram + analyst takes). With
+// 18 Vercel ISR regions × 2 regens/hour × ~hundreds of indexed story
+// pages, halving regen frequency is a direct ~50% Neon read cut on
+// the dominant traffic path. Underlying data still only shifts on the
+// 6h cron, so 30-min cache age stays inside the data-freshness envelope.
+//
+// Tripwire: tests/test_war_audit_fixes.py::TestStoryDetailIsrAtLeast30Min
+// pins this >= 1800 to block silent reverts.
+export const revalidate = 1800;
 
 export async function generateMetadata({
   params,

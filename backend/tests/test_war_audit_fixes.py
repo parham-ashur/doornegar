@@ -3300,3 +3300,254 @@ class TestTelegramDeepNeighborPoolBounded:
             "Without LIMIT, the query is unbounded — same shape as the "
             "May 2026 $18 incident."
         )
+
+
+class TestStoryDetailArticlePagination:
+    """Phase G.3.3 (Parham 2026-05-10): GET /api/v1/stories/{id} now
+    paginates the articles list. The two known umbrella stories
+    (1464 + 2354 articles) drop ~6 MB → ~200 KB per fetch, which is
+    the dominant story-detail egress driver on the platform.
+
+    Tripwires the parts of the refactor that are easy to silently
+    revert:
+    1. limit default stays at 50 (max 500). Bumping default high
+       silently re-introduces the 6 MB-per-fetch behavior.
+    2. The per-source aggregate query exists. Without it, percentages
+       are computed from the truncated article subset and umbrella
+       stories silently misreport state_pct / diaspora_pct.
+    3. StoryDetail exposes articles_returned + articles_has_more so
+       the frontend can render an honest "X از Y مقاله" badge.
+    """
+
+    def test_get_story_default_limit_is_50(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "api" / "v1" / "stories.py"
+        ).read_text()
+        # Locate the get_story endpoint and check its limit Query bounds.
+        idx = src.find('@router.get("/{story_id}", response_model=StoryDetail)')
+        assert idx >= 0, "get_story endpoint anchor missing."
+        # End-of-block anchor: next router decorator or end of file.
+        next_dec = src.find("@router.", idx + 1)
+        block = src[idx:next_dec if next_dec > 0 else idx + 6000]
+        # Default 50.
+        assert "limit: int = Query(50" in block, (
+            "get_story default limit must be 50. Phase G.3.3 — "
+            "bumping the default re-introduces the umbrella-story "
+            "egress regression."
+        )
+        # Max 500 — guards against a `limit=99999` URL bypassing the cap.
+        assert "le=500" in block, (
+            "get_story limit must cap at 500 (le=500). Phase G.3.3."
+        )
+        # Offset param exists.
+        assert "offset: int = Query(0" in block, (
+            "get_story must expose an `offset` query param for pagination."
+        )
+
+    def test_get_story_uses_per_source_aggregate(self):
+        """Without a separate aggregate query for source counts, the
+        coverage percentages are computed against the truncated
+        articles subset. Pin the aggregate query shape so a future
+        cleanup can't silently delete it.
+        """
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "api" / "v1" / "stories.py"
+        ).read_text()
+        idx = src.find('@router.get("/{story_id}", response_model=StoryDetail)')
+        # End-of-block: scan to the next def at module level. The
+        # endpoint body runs ~9000 chars after Phase G.3.3.
+        next_def = src.find("\nasync def _bump_view_count", idx + 1)
+        block = src[idx:next_def if next_def > 0 else idx + 12000]
+        # The aggregate query: SELECT Source, count(Article.id) JOIN ... GROUP BY Source.id
+        assert "select(Source, func.count(Article.id))" in block, (
+            "get_story must compute per-source article counts via a "
+            "lean aggregate query so coverage percentages stay "
+            "correct on umbrella stories. Phase G.3.3."
+        )
+        assert "group_by(Source.id)" in block, (
+            "Per-source aggregate must group_by Source.id."
+        )
+        # Pagination metadata wired to the response.
+        assert "articles_returned=" in block, (
+            "Response must expose `articles_returned` so the frontend "
+            "can render an honest '20 از 1464 مقاله' badge."
+        )
+        assert "articles_has_more=" in block, (
+            "Response must expose `articles_has_more` so the frontend "
+            "knows when to render a 'load more' control."
+        )
+
+    def test_storydetail_schema_has_pagination_fields(self):
+        """Pin the StoryDetail schema so future cleanup can't drop
+        the pagination metadata fields without breaking this test.
+        """
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "schemas" / "story.py"
+        ).read_text()
+        idx = src.find("class StoryDetail")
+        assert idx >= 0
+        # Cheap window — schema definition fits well under 2 KB.
+        block = src[idx:idx + 2500]
+        assert "articles_returned: int" in block, (
+            "StoryDetail must declare articles_returned: int."
+        )
+        assert "articles_offset: int" in block, (
+            "StoryDetail must declare articles_offset: int."
+        )
+        assert "articles_has_more: bool" in block, (
+            "StoryDetail must declare articles_has_more: bool."
+        )
+
+
+class TestHomepageAggregatesDenormalized:
+    """Phase G.3.2 (Parham 2026-05-10): denormalize per-story image +
+    coverage percentages + narrative groups into a JSONB blob on
+    Story.homepage_aggregates so /trending and /blindspots can
+    (Phase 2) drop selectinload(Story.articles). Today's ship is
+    Phase 1: column + populate step + read-side fallback.
+
+    Tripwires the structural pieces that are easy to silently revert:
+    1. Story.homepage_aggregates column declared on the ORM.
+    2. Self-heal DDL adds the column at FastAPI startup.
+    3. step_recompute_homepage_aggregates exists and ships in
+       FULL_PIPELINE between recalc_trending and image_relevance.
+    4. _story_brief_with_extras consults the blob before falling
+       back to article iteration.
+    5. The step is tagged CHEAP so it keeps running during budget
+       soft-halt (otherwise the homepage drifts when LLM steps pause).
+    """
+
+    def test_story_model_has_homepage_aggregates_column(self):
+        from app.models.story import Story
+
+        assert hasattr(Story, "homepage_aggregates"), (
+            "Story.homepage_aggregates column missing — the "
+            "denormalized blob lives here. Phase G.3.2."
+        )
+
+    def test_self_heal_ddl_adds_homepage_aggregates(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "main.py"
+        ).read_text()
+        assert (
+            "ALTER TABLE stories ADD COLUMN IF NOT EXISTS "
+            "homepage_aggregates JSONB"
+        ) in src, (
+            "app/main.py self-heal must add stories.homepage_aggregates "
+            "JSONB. Without it, fresh deploys would 500 on listing "
+            "endpoints until alembic upgrade head ran. Phase G.3.2."
+        )
+
+    def test_step_recompute_homepage_aggregates_in_full_pipeline(self):
+        import importlib
+        m = importlib.import_module("auto_maintenance")
+        # Step function is defined.
+        assert hasattr(m, "step_recompute_homepage_aggregates"), (
+            "step_recompute_homepage_aggregates must exist in "
+            "auto_maintenance.py. Phase G.3.2."
+        )
+        # Step is wired into FULL_PIPELINE with the right key + func.
+        keys = [t[0] for t in m.FULL_PIPELINE]
+        funcs = {t[0]: t[2] for t in m.FULL_PIPELINE}
+        assert "homepage_aggregates" in keys, (
+            "FULL_PIPELINE must include the `homepage_aggregates` "
+            "step. Phase G.3.2."
+        )
+        assert funcs["homepage_aggregates"] == "step_recompute_homepage_aggregates", (
+            "FULL_PIPELINE step `homepage_aggregates` must dispatch "
+            "to step_recompute_homepage_aggregates."
+        )
+        # Order: must run after recalc_trending (final trending_score).
+        idx_recalc = keys.index("recalc_trending")
+        idx_agg = keys.index("homepage_aggregates")
+        assert idx_agg > idx_recalc, (
+            "`homepage_aggregates` must run AFTER `recalc_trending` so "
+            "the denormalized blob reflects the final trending_score "
+            "ordering visible on /trending."
+        )
+
+    def test_story_brief_with_extras_prefers_blob(self):
+        """Read-side helper must consult Story.homepage_aggregates
+        before falling back to article iteration. Without this, the
+        Phase 2 article-load drop would silently render empty
+        homepage cards.
+        """
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "api" / "v1" / "stories.py"
+        ).read_text()
+        idx = src.find("def _story_brief_with_extras")
+        assert idx >= 0
+        # Bound by next module-level def.
+        next_def = src.find("\ndef ArticleBriefDict", idx + 1)
+        block = src[idx:next_def if next_def > 0 else idx + 12000]
+        assert "homepage_aggregates" in block, (
+            "_story_brief_with_extras must read story.homepage_aggregates "
+            "and prefer it over article iteration. Phase G.3.2."
+        )
+
+    def test_homepage_aggregates_step_is_cheap(self):
+        """The step must keep running during budget soft-halt
+        (combined_mtd >= 80%) so the homepage doesn't drift while
+        LLM steps are paused. Pin it in CHEAP_STEPS.
+        """
+        from app.services.budget_guard import CHEAP_STEPS, HALT_SKIP_STEPS
+
+        assert "homepage_aggregates" in CHEAP_STEPS, (
+            "homepage_aggregates must be in CHEAP_STEPS — the "
+            "denormalize is pure DB read+write, must keep running "
+            "during budget soft-halt to keep the homepage fresh."
+        )
+        assert "homepage_aggregates" not in HALT_SKIP_STEPS, (
+            "homepage_aggregates must NOT be in HALT_SKIP_STEPS — "
+            "it's not LLM-heavy and the homepage depends on it."
+        )
+
+
+class TestStoryDetailIsrAtLeast30Min:
+    """Phase G.3.4 (Parham 2026-05-10): the story-detail page is the
+    heaviest ISR regen path on the site. With 18 Vercel ISR regions
+    each regenerating on cache miss, every doubling of `revalidate`
+    halves Neon read pressure on this dominant traffic path.
+
+    Tripwire: revalidate must stay >= 1800 (30 min). Halving it back
+    to 900 (15 min) doubles Neon egress on this path. The 6h cron
+    cadence means the underlying data only shifts every 6 hours, so
+    30 min cache age is well inside the data-freshness envelope.
+    """
+
+    def test_revalidate_at_least_1800(self):
+        import re
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent.parent
+            / "frontend" / "src" / "app" / "[locale]" / "stories" / "[id]"
+            / "page.tsx"
+        ).read_text()
+        match = re.search(r"export\s+const\s+revalidate\s*=\s*(\d+)", src)
+        assert match, (
+            "story detail page.tsx must export `revalidate` so the page "
+            "renders as ISR. Removing the export opts the page out of "
+            "edge caching and routes every visitor to a fresh SSR."
+        )
+        seconds = int(match.group(1))
+        assert seconds >= 1800, (
+            f"story detail revalidate must be >= 1800 (30 min). Found "
+            f"{seconds}. Phase G.3.4 — June 2 GB/day target requires "
+            "this path stays at >= 30 min cache age."
+        )

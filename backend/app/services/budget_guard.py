@@ -89,6 +89,10 @@ CHEAP_STEPS = {
     "niloofar_image_rescue", "snapshot_analyses", "audit_clusters",
     "detect_hourly_updates", "backfill_analyst_counts",
     "telegram_session",
+    # Phase G.3.2 (Parham 2026-05-10): denormalize step. Pure DB
+    # read+write — must keep running during soft-halt so the homepage
+    # stays fresh while LLM steps are paused.
+    "homepage_aggregates",
 }
 
 # Steps that ALWAYS get skipped when the budget guard fires —

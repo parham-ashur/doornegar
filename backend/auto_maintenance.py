@@ -7477,6 +7477,138 @@ async def step_translate_homepage_visible():
     return await _impl()
 
 
+async def step_recompute_homepage_aggregates():
+    """Phase G.3.2 (Parham 2026-05-10) — populate Story.homepage_aggregates.
+
+    Pre-computes the per-story image_url + coverage percentages +
+    narrative groups blob that /trending, /blindspots, and the
+    homepage card composer used to compute on every read by iterating
+    `story.articles`. Storing the aggregates inline lets the listing
+    endpoints drop selectinload(Story.articles) (Phase 2, ships once
+    this step has populated the blob in production).
+
+    Scope: every story matching homepage_eligible_filters() with
+    article_count >= 1. ~200 stories typical. Each story runs two
+    lean queries (latest 50 articles + per-source aggregate) plus
+    one UPDATE; total ~5-15 sec per cron pass.
+
+    Idempotent: a story whose aggregates are already correct gets
+    rewritten with the same values + a fresh `computed_at`. The blob
+    column is NULL on first run; subsequent runs just refresh.
+    """
+    from sqlalchemy import func as _sa_func, select as _select
+    from sqlalchemy.orm import defer as _defer, selectinload as _selectinload
+
+    from app.database import async_session
+    from app.models.article import Article
+    from app.models.source import Source
+    from app.models.story import Story
+    from app.services.homepage_aggregates import compute_homepage_aggregates
+    from app.services.homepage_scope import homepage_eligible_filters
+
+    stats = {
+        "updated": 0,
+        "scope_size": 0,
+        "skipped_no_articles": 0,
+    }
+
+    async with async_session() as db:
+        # ── Read-short: pull eligible story IDs only ──
+        # We re-fetch each story's articles in the per-story loop
+        # below so the initial scan is tiny (just IDs).
+        eligible_q = await db.execute(
+            _select(Story.id)
+            .where(
+                *homepage_eligible_filters(),
+                Story.article_count >= 1,
+            )
+        )
+        story_ids = [row[0] for row in eligible_q.all()]
+        stats["scope_size"] = len(story_ids)
+        if not story_ids:
+            return stats
+
+        for sid in story_ids:
+            # Per-story story core (lean — defer everything we don't read).
+            story = (await db.execute(
+                _select(Story)
+                .options(
+                    _defer(Story.translations),
+                    _defer(Story.telegram_analysis),
+                    _defer(Story.editorial_context_fa),
+                    _defer(Story.summary_anchor),
+                    _defer(Story.analysis_snapshot_24h),
+                    _defer(Story.hourly_update_signal),
+                    _defer(Story.summary_en),
+                    _defer(Story.summary_fa),
+                    _defer(Story.centroid_embedding),
+                    _defer(Story.audit_notes),
+                    _defer(Story.homepage_aggregates),
+                )
+                .where(Story.id == sid)
+            )).scalar_one_or_none()
+            if not story:
+                continue
+
+            # Latest 50 articles with source eager-loaded for image picking.
+            articles = list((await db.execute(
+                _select(Article)
+                .options(
+                    _defer(Article.embedding),
+                    _defer(Article.content_text),
+                    _defer(Article.keywords),
+                    _defer(Article.named_entities),
+                    _selectinload(Article.source),
+                )
+                .where(Article.story_id == sid)
+                .order_by(
+                    Article.published_at.desc().nullslast(),
+                    Article.ingested_at.desc(),
+                )
+                .limit(50)
+            )).scalars().all())
+
+            if not articles:
+                stats["skipped_no_articles"] += 1
+                continue
+
+            # Per-source article-count aggregate over the FULL set —
+            # required so percentages reflect every outlet, not just the
+            # latest 50.
+            source_count_rows = list((await db.execute(
+                _select(Source, _sa_func.count(Article.id))
+                .join(Article, Article.source_id == Source.id)
+                .where(Article.story_id == sid)
+                .group_by(Source.id)
+            )).all())
+
+            blob = compute_homepage_aggregates(
+                story, articles, source_count_rows
+            )
+
+            await db.execute(
+                Story.__table__.update()
+                .where(Story.id == sid)
+                .values(homepage_aggregates=blob)
+            )
+            stats["updated"] += 1
+
+            # Periodic commit so a single failure mid-run doesn't lose
+            # all progress, and the session stays well under the long-
+            # session reaper. Same pattern as step_recompute_centroids.
+            if stats["updated"] % 50 == 0:
+                await db.commit()
+
+        await db.commit()
+
+    logger.info(
+        f"Homepage aggregates recompute: scope={stats['scope_size']}, "
+        f"updated={stats['updated']}, "
+        f"skipped_no_articles={stats['skipped_no_articles']}"
+    )
+    return stats
+
+
 FULL_PIPELINE = [
     ("ingest", "Ingest RSS + Telegram (may take 10-20 min)", "step_ingest"),
     ("prune_noise", "Drop too-short Telegram posts/articles before NLP", "step_prune_noise"),
@@ -7563,6 +7695,15 @@ FULL_PIPELINE = [
     # the 6h until next cron. Demote sets priority via formula
     # independent of trending_score, so swapping order is safe.
     ("recalc_trending", "Recalculate trending", "step_recalculate_trending"),
+    # Phase G.3.2 (Parham 2026-05-10): denormalize per-story image +
+    # coverage percentages + narrative-group blob into
+    # Story.homepage_aggregates. Runs AFTER recalc_trending so the
+    # downstream /trending and /blindspots reads see fresh blobs that
+    # match the current trending_score-driven ordering. Cheap step
+    # (~5-15 sec for ~200 stories). Once stable in production, the
+    # listing endpoints will drop selectinload(Story.articles) and
+    # read straight from this column — the actual egress cut.
+    ("homepage_aggregates", "Recompute denormalized homepage aggregates", "step_recompute_homepage_aggregates"),
     ("image_relevance", "Image relevance check", "step_image_relevance"),
     ("analyst_takes", "Extract analyst takes from Telegram", "step_extract_analyst_takes"),
     ("verify_predictions", "Verify analyst predictions", "step_verify_predictions"),

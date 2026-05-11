@@ -267,10 +267,10 @@ class TestIngestOnlyPipelineShape:
     dashboard's progress bar shows wrong percentages but the run still
     completes — silent UI bug."""
 
-    def test_full_pipeline_total_steps_is_58(self):
+    def test_full_pipeline_total_steps_is_59(self):
         """The 6h-cron progress bar pins to this count. Same drift
         risk as INGEST_ONLY — keep both this number and the parent
-        `CLAUDE.md` (`full=58`) in lockstep with the actual list.
+        `CLAUDE.md` (`full=59`) in lockstep with the actual list.
 
         Bumped 56 → 57 on 2026-05-07 (EN+FR rollout Phase 2):
         added `translate_homepage_visible` after `niloofar_polish_telegram`.
@@ -279,13 +279,20 @@ class TestIngestOnlyPipelineShape:
         added `recount_after_dedup` after `flag_unrelated` to fix the
         100%-of-crons drift where `dedup_articles` + `flag_unrelated`
         detached articles AFTER the early `recount` pass.
+
+        Bumped 58 → 59 on 2026-05-10 (Phase G.3.2): added
+        `homepage_aggregates` after `recalc_trending` to denormalize
+        per-story image_url + coverage percentages + narrative groups
+        into Story.homepage_aggregates. Cron prep work for Phase 2
+        of G.3.2 (drop selectinload(Story.articles) from /trending +
+        /blindspots). Pure DB read+write, no LLM.
         """
         m = _import_pipelines()
-        assert len(m.FULL_PIPELINE) == 58, (
+        assert len(m.FULL_PIPELINE) == 59, (
             f"FULL_PIPELINE step count drifted: found "
             f"{len(m.FULL_PIPELINE)} steps. If this is intentional, "
             f"update both this test AND the parent CLAUDE.md verification "
-            f"step #4 (`full=58`)."
+            f"step #4 (`full=59`)."
         )
 
     def test_total_steps_is_13(self):

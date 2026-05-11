@@ -116,6 +116,16 @@ class StoryDetail(StoryBrief):
     # current locale (avoids advertising untranslated /en/X /fr/X
     # URLs to crawlers).
     translations: dict | None = None
+    # Phase G.3.3 (Parham 2026-05-10): pagination metadata. The
+    # `articles` list is now capped at the per-request `limit` (default
+    # 50, max 500). Most stories have < 50 articles and are unaffected;
+    # umbrella stories that absorbed 1500+ articles before the 7-day
+    # data window now return only the latest slice. Frontend can render
+    # "X از Y مقاله" honestly using these fields. The full count stays
+    # available via the inherited `article_count` field on StoryBrief.
+    articles_returned: int = 0
+    articles_offset: int = 0
+    articles_has_more: bool = False
 
 
 class StoryListResponse(BaseModel):
