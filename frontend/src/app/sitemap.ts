@@ -68,17 +68,31 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     }
   }
 
-  // Stories — bulk fetch, use last_updated_at for freshness. Skip
-  // stories without an id or that look archived (article_count < 2).
-  // Cycle-1 audit Island 10: dropped page_size 5000 → 500. Sitemap
-  // hourly egress was ~90 MB before today's backend defer fixes; even
-  // with defers, the long tail of 1-article stories rarely indexes
-  // anyway. 500 covers all visible homepage stories + a healthy
-  // recently-active tail.
-  const storiesPayload = await safeFetch<{ stories?: Brief[] }>(
-    `/api/v1/stories?page=1&page_size=500`,
-  );
-  const stories = storiesPayload?.stories ?? [];
+  // Stories — only homepage-eligible (trending + blindspots). Listing
+  // every archived story in the sitemap is what drives most of the
+  // bot-crawler tail: search engines and AI crawlers use the sitemap
+  // as the canonical "what to crawl" signal. Pre-this-change we
+  // shipped ~500 story URLs/hour to crawlers; post-change ~40.
+  //
+  // Stories not in the sitemap remain reachable via direct URL
+  // (permalinks + journalist citations) but are de-prioritized in
+  // crawl scheduling. Combined with `noindex` on non-homepage pages
+  // (see generateMetadata in stories/[id]/page.tsx), Google + Bing
+  // remove them from the index over ~2-3 weeks.
+  //
+  // 2026-05-11 Phase G follow-up: this change pairs with WAF rules
+  // blocking AI/SEO crawlers and a rate-limit on /api/v1/stories/*.
+  const [trendingPayload, blindspotsPayload] = await Promise.all([
+    safeFetch<Brief[]>(`/api/v1/stories/trending?limit=30`),
+    safeFetch<Brief[]>(`/api/v1/stories/blindspots?limit=20`),
+  ]);
+  const seen = new Set<string>();
+  const stories: Brief[] = [];
+  for (const s of [...(trendingPayload || []), ...(blindspotsPayload || [])]) {
+    if (!s?.id || seen.has(s.id)) continue;
+    seen.add(s.id);
+    stories.push(s);
+  }
   for (const s of stories) {
     if (!s.id || (s.article_count ?? 0) < 2) continue;
     const lastMod = s.last_updated_at || s.updated_at || s.first_published_at;

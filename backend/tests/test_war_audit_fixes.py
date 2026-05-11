@@ -3518,6 +3518,78 @@ class TestHomepageAggregatesDenormalized:
         )
 
 
+class TestSitemapHomepageOnly:
+    """Phase G follow-up (Parham 2026-05-11): the sitemap is the
+    canonical "what to crawl" signal for Google + Bing + AI crawlers.
+    Listing every story (~500) caused the crawler-driven egress tail.
+    Sitemap now lists only homepage-eligible stories (~40), pairing
+    with `noindex` on non-homepage pages.
+
+    Stories not in the sitemap stay reachable via direct URL — the
+    permalink + journalist-citation design from `Story.archived_at`
+    (story.py comment) is preserved. The change only affects which
+    URLs crawlers discover via sitemap walking.
+    """
+
+    def test_sitemap_uses_trending_and_blindspots(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent.parent
+            / "frontend" / "src" / "app" / "sitemap.ts"
+        ).read_text()
+        # Must reference both homepage endpoints.
+        assert "/api/v1/stories/trending" in src, (
+            "sitemap.ts must source from /trending so only homepage-"
+            "eligible stories ship to crawlers."
+        )
+        assert "/api/v1/stories/blindspots" in src, (
+            "sitemap.ts must source from /blindspots too."
+        )
+        # Must NOT do the old full-list fetch.
+        assert "page_size=500" not in src, (
+            "sitemap.ts must not bulk-fetch the full story list — "
+            "that's what drove the crawler-driven egress tail."
+        )
+
+
+class TestStoryPageNoindexOnNonHomepage:
+    """Phase G follow-up (Parham 2026-05-11): non-homepage-eligible
+    story pages emit <meta name="robots" content="noindex"> via
+    generateMetadata so Google + Bing remove them from search.
+    Combined with sitemap pruning, crawler walks of the long tail
+    drop dramatically over 2-3 weeks.
+    """
+
+    def test_generate_metadata_sets_noindex_for_thin_stories(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent.parent
+            / "frontend" / "src" / "app" / "[locale]" / "stories" / "[id]"
+            / "page.tsx"
+        ).read_text()
+        idx = src.find("export async function generateMetadata")
+        assert idx >= 0
+        # Bound by the default export.
+        next_def = src.find("\nexport default", idx + 1)
+        block = src[idx:next_def if next_def > 0 else idx + 8000]
+        # Must compute eligibility.
+        assert "isHomepageEligible" in block, (
+            "generateMetadata must compute homepage-eligibility so it "
+            "can noindex thin stories."
+        )
+        # Must condition on article_count.
+        assert "article_count" in block, (
+            "Eligibility must check article_count (homepage rule: >= 4)."
+        )
+        # Must emit robots metadata.
+        assert "robots" in block and "index: false" in block, (
+            "generateMetadata must emit `robots: { index: false, ... }` "
+            "for non-eligible stories."
+        )
+
+
 class TestStoryDetailIsrAtLeast30Min:
     """Phase G.3.4 (Parham 2026-05-10): the story-detail page is the
     heaviest ISR regen path on the site. With 18 Vercel ISR regions

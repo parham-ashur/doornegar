@@ -117,9 +117,25 @@ export async function generateMetadata({
       .filter((l) => l === "fa" || (l === "en" && enHasReal) || (l === "fr" && frHasReal))
       .map((l) => ogLocaleMap[l]);
 
+    // Phase G follow-up (2026-05-11) — only stories that meet the
+    // homepage-eligibility bar get indexed. Thin stories (< 4 articles)
+    // and stories without a real cover image are noindex'd to stop
+    // crawlers + AI scrapers walking the long tail. They remain
+    // accessible via direct URL (journalist permalinks) but don't
+    // appear in Google / Bing / Yandex results. Pairs with the
+    // sitemap that now lists only trending + blindspot stories, the
+    // WAF rule blocking AI crawlers, and the Cloudflare rate limit.
+    const articleCount = story.article_count ?? 0;
+    const hasRealImage = story.has_real_image !== false;
+    const isHomepageEligible = articleCount >= 4 && hasRealImage;
+    const robots = isHomepageEligible
+      ? undefined
+      : { index: false, follow: true, googleBot: { index: false, follow: true } };
+
     return {
       title, // root layout's template adds " — دورنگر"
       description,
+      robots,
       alternates: {
         canonical,
         languages,
