@@ -1,16 +1,27 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+// Server-side only — Next.js does NOT expose non-NEXT_PUBLIC_* envs to
+// client bundles, so this stays out of the browser. Paired with the
+// FastAPI origin_auth gate (Phase G follow-up 2026-05-11) that blocks
+// direct Railway hits without either this token or a doornegar.org
+// Origin/Referer header. Until BACKEND_API_TOKEN is set on both Vercel
+// and Railway, the gate is a no-op so this is forward-compatible.
+const BACKEND_API_TOKEN = process.env.BACKEND_API_TOKEN;
 
 async function fetchAPI<T>(
   path: string,
   options?: RequestInit & { revalidate?: number },
 ): Promise<T> {
   const { revalidate = 120, ...fetchOpts } = options || {};
+  const baseHeaders: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...((fetchOpts?.headers as Record<string, string>) || {}),
+  };
+  if (BACKEND_API_TOKEN) {
+    baseHeaders["X-API-Token"] = BACKEND_API_TOKEN;
+  }
   const res = await fetch(`${API_BASE}${path}`, {
     ...fetchOpts,
-    headers: {
-      "Content-Type": "application/json",
-      ...fetchOpts?.headers,
-    },
+    headers: baseHeaders,
     next: { revalidate },
   });
 

@@ -19,6 +19,11 @@ import {
 import { normalizedSidePercentages, independentShare } from "@/lib/narrativeGroups";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+// Server-side only — see app/api/v1/origin_auth.py for the contract.
+const BACKEND_API_TOKEN = process.env.BACKEND_API_TOKEN;
+const AUTH_HEADERS: HeadersInit = BACKEND_API_TOKEN
+  ? { "X-API-Token": BACKEND_API_TOKEN }
+  : {};
 
 // Cache TTLs tuned for a homepage where stories update on the hour, not the
 // minute. Every miss is a round trip from Vercel (US or EU) to Railway in the
@@ -41,7 +46,7 @@ async function fetchAPI<T>(path: string): Promise<T | null> {
     // aborting trending on those bursts and baking an empty homepage
     // into the ISR cache for the full 300s revalidate window.
     const timeout = setTimeout(() => controller.abort(), 20000);
-    const res = await fetch(`${API}${path}`, { next: { revalidate: TRENDING_TTL }, signal: controller.signal });
+    const res = await fetch(`${API}${path}`, { next: { revalidate: TRENDING_TTL }, signal: controller.signal, headers: AUTH_HEADERS });
     clearTimeout(timeout);
     if (!res.ok) return null;
     return res.json();
@@ -52,7 +57,7 @@ async function fetchAPI<T>(path: string): Promise<T | null> {
 
 async function fetchSummary(storyId: string): Promise<string | null> {
   try {
-    const res = await fetch(`${API}/api/v1/stories/${storyId}/analysis`, { next: { revalidate: ANALYSIS_TTL } });
+    const res = await fetch(`${API}/api/v1/stories/${storyId}/analysis`, { next: { revalidate: ANALYSIS_TTL }, headers: AUTH_HEADERS });
     if (!res.ok) return null;
     const data = await res.json();
     return data.summary_fa || null;
@@ -63,7 +68,7 @@ async function fetchSummary(storyId: string): Promise<string | null> {
 
 async function fetchAnalysis(storyId: string): Promise<{ summary_fa?: string; bias_explanation_fa?: string; state_summary_fa?: string; diaspora_summary_fa?: string; dispute_score?: number; loaded_words?: { conservative: string[]; opposition: string[] } } | null> {
   try {
-    const res = await fetch(`${API}/api/v1/stories/${storyId}/analysis`, { next: { revalidate: ANALYSIS_TTL } });
+    const res = await fetch(`${API}/api/v1/stories/${storyId}/analysis`, { next: { revalidate: ANALYSIS_TTL }, headers: AUTH_HEADERS });
     if (!res.ok) return null;
     return res.json();
   } catch {
@@ -80,7 +85,7 @@ async function fetchAnalysesBatch(storyIds: string[]): Promise<Record<string, { 
     const timeout = setTimeout(() => controller.abort(), 10000);
     const res = await fetch(
       `${API}/api/v1/stories/analyses?ids=${ids.join(",")}`,
-      { next: { revalidate: ANALYSIS_TTL }, signal: controller.signal },
+      { next: { revalidate: ANALYSIS_TTL }, signal: controller.signal, headers: AUTH_HEADERS },
     );
     clearTimeout(timeout);
     if (!res.ok) return {};
@@ -98,7 +103,7 @@ async function fetchTelegramAnalysesBatch(storyIds: string[]): Promise<Record<st
     const timeout = setTimeout(() => controller.abort(), 15000);
     const res = await fetch(
       `${API}/api/v1/social/stories/telegram-analyses?ids=${ids.join(",")}`,
-      { next: { revalidate: TELEGRAM_TTL }, signal: controller.signal },
+      { next: { revalidate: TELEGRAM_TTL }, signal: controller.signal, headers: AUTH_HEADERS },
     );
     clearTimeout(timeout);
     if (!res.ok) return {};
