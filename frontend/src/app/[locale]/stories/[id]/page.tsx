@@ -1,4 +1,5 @@
 import { setRequestLocale } from "next-intl/server";
+import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Newspaper } from "lucide-react";
@@ -189,7 +190,16 @@ export default async function StoryDetailPage({
     story = storyResult;
     analysis = analysisResult;
     relatedStories = relatedResult?.stories || [];
-  } catch {
+  } catch (e) {
+    // Phase G follow-up (2026-05-11) — Option C: when the backend
+    // returns 410 Gone, the story is no longer on the homepage and
+    // is archived. Call notFound() so Next.js renders a 404 page
+    // (clean UX) instead of throwing a generic error. Search engines
+    // see 404 here and the actual 410 on the underlying API call.
+    const status = (e as { status?: number })?.status;
+    if (status === 410 || status === 404) {
+      notFound();
+    }
     return (
       <div dir={locale === "fa" ? "rtl" : "ltr"} className="mx-auto max-w-7xl px-4 py-16 text-center">
         <p className="text-slate-500">خطا در بارگذاری</p>

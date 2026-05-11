@@ -26,7 +26,13 @@ async function fetchAPI<T>(
   });
 
   if (!res.ok) {
-    throw new Error(`API error: ${res.status} ${res.statusText}`);
+    // Phase G follow-up (2026-05-11) — Option C 410 Gone responses
+    // are how the backend signals "this story is archived/off-homepage".
+    // We surface the status code on the thrown Error so pages can
+    // call notFound() on 410 instead of crashing with a generic error.
+    const err = new Error(`API error: ${res.status} ${res.statusText}`) as Error & { status?: number };
+    err.status = res.status;
+    throw err;
   }
 
   return res.json();

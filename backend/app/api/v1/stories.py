@@ -47,6 +47,72 @@ _STORIES_CACHE_TTL = 120  # 2 minutes
 _STORIES_CACHE_MAX_ENTRIES = 64  # hard ceiling — sweep when exceeded
 
 
+# ── Phase G follow-up (Parham 2026-05-11) — Option C: 410-Gone gate ──
+# Public read endpoints (/{id}, /{id}/analysis, /{id}/related, etc.) only
+# serve stories currently visible on the homepage (trending top-30 or
+# blindspot top-20). Everything else — thin stories, archived stories,
+# stories aged out — returns HTTP 410 Gone.
+#
+# Once cron runs again, step_archive_stale ages stories out of the
+# homepage at 30 days of last_updated_at staleness. They then fall into
+# the 410 bucket automatically; R2 weekly backup is the long-term record.
+#
+# Set cache: per-process, 5-min TTL. Each web container computes the
+# eligible set independently; staleness within 5 min is acceptable.
+_eligible_cache: dict[str, set] = {}
+_eligible_cache_lock = _asyncio.Lock()
+_eligible_cache_at: float = 0.0
+_ELIGIBLE_CACHE_TTL = 300
+
+
+async def _get_homepage_eligible_ids(db: AsyncSession) -> set:
+    """Cached set of story IDs currently on the homepage (trending + blindspots)."""
+    global _eligible_cache_at
+    now = _time.time()
+    async with _eligible_cache_lock:
+        ids = _eligible_cache.get("ids")
+        if ids is not None and now - _eligible_cache_at < _ELIGIBLE_CACHE_TTL:
+            return ids
+    from app.services.homepage_scope import homepage_story_ids
+    fresh_ids = await homepage_story_ids(db, trending_top_n=30, blindspot_top_n=20)
+    async with _eligible_cache_lock:
+        _eligible_cache["ids"] = fresh_ids
+        _eligible_cache_at = _time.time()
+    return fresh_ids
+
+
+async def _require_homepage_eligible(
+    story_id: uuid.UUID, db: AsyncSession
+) -> None:
+    """Raise 410 Gone if the story isn't currently on the homepage.
+
+    Permalinks for archived/thin stories now return 410 — preserves
+    the URL structure for any external citations, but signals to
+    search engines + crawlers that the content has moved on. Real
+    visitors clicking through see a 'this story has been archived'
+    page on the frontend (page.tsx catches 410 → notFound()).
+    """
+    eligible = await _get_homepage_eligible_ids(db)
+    # Safety net: if the eligible set is empty (homepage_story_ids
+    # returned nothing — e.g. fresh deploy before any cron has run,
+    # or all trending_score=0), fall through rather than 410 every
+    # request. Better to over-serve than to take the entire site down.
+    if not eligible:
+        return
+    if story_id not in eligible:
+        raise HTTPException(
+            status_code=410,
+            detail={
+                "error": "gone",
+                "message_fa": "این خبر دیگر روی صفحه اصلی نیست و در آرشیو نگهداری می‌شود.",
+                "message_en": (
+                    "This story is no longer on the homepage. "
+                    "It remains in our archive for the record."
+                ),
+            },
+        )
+
+
 # ── Egress-saving load options ──
 # selectinload(Story.articles) by default pulls every Article column,
 # including the JSONB embedding (~7-8 KB) and content_text (~5-30 KB).
@@ -97,18 +163,26 @@ async def list_stories(
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
+    # Phase G follow-up (2026-05-11) — Option C: only currently-homepage
+    # stories appear in the paginated list. Archived/thin stories are
+    # 410'd on direct access (see _require_homepage_eligible) and never
+    # exposed via listings.
+    eligible_ids = await _get_homepage_eligible_ids(db)
+    if not eligible_ids:
+        return StoryListResponse(stories=[], total=0, page=page, page_size=page_size)
+
     query = select(Story).options(
         _articles_load_brief(),
         *_story_listing_defers(),
-    )
-    count_query = select(func.count(Story.id))
+    ).where(Story.id.in_(eligible_ids))
+    count_query = select(func.count(Story.id)).where(Story.id.in_(eligible_ids))
 
     if blindspots_only:
         query = query.where(Story.is_blindspot.is_(True))
         count_query = count_query.where(Story.is_blindspot.is_(True))
 
-    # Hide soft-archived stories from the paginated index. Direct
-    # /stories/{id} access still resolves them — only listings filter.
+    # archived_at is also covered by the eligibility filter, but kept
+    # explicit for defense-in-depth.
     query = query.where(Story.archived_at.is_(None))
     count_query = count_query.where(Story.archived_at.is_(None))
 
@@ -287,6 +361,7 @@ async def blindspot_stories(
 @_limiter.limit("120/minute")
 async def get_story_analysis(request: Request, story_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     """Return the saved analysis instantly. Full JSON is stored in summary_en."""
+    await _require_homepage_eligible(story_id, db)
     import json as _json
     result = await db.execute(
         select(Story)
@@ -366,6 +441,15 @@ async def get_story_analyses_batch(
 
     # Cap to something reasonable so a crafted URL can't DoS the endpoint.
     id_list = id_list[:60]
+
+    # Phase G follow-up (2026-05-11) — Option C: filter to homepage-
+    # eligible only. Non-eligible IDs are silently dropped from the
+    # batch (vs raising 410), so the homepage doesn't break when it
+    # passes a stale id from cached state.
+    eligible_ids = await _get_homepage_eligible_ids(db)
+    id_list = [sid for sid in id_list if sid in eligible_ids]
+    if not id_list:
+        return {}
 
     result = await db.execute(
         select(Story)
@@ -571,6 +655,7 @@ async def get_analyst_takes(
     db: AsyncSession = Depends(get_db),
 ):
     """Return analyst takes for a story, joined with analyst info."""
+    await _require_homepage_eligible(story_id, db)
     result = await db.execute(
         select(AnalystTake)
         .options(selectinload(AnalystTake.analyst))
@@ -608,6 +693,7 @@ async def article_positions(
     db: AsyncSession = Depends(get_db),
 ):
     """Return 2D-projected article embeddings for the narrative map visualization."""
+    await _require_homepage_eligible(story_id, db)
     # Phase F.2 (Parham 2026-05-09): defer the heavy JSONB cols we
     # don't read here. This endpoint needs Article.embedding (it's
     # the WHOLE point), but content_text/keywords/named_entities
@@ -732,6 +818,7 @@ async def get_related_stories(
     Excludes the source story, hidden stories (article_count<5), and
     de-duplicates when an arc sibling is also a close cosine match.
     """
+    await _require_homepage_eligible(story_id, db)
     from app.nlp.embeddings import cosine_similarity
 
     source = (await db.execute(
@@ -750,6 +837,13 @@ async def get_related_stories(
     picked_ids: list[uuid.UUID] = []
     seen: set[uuid.UUID] = {story_id}
 
+    # Phase G follow-up (2026-05-11) — Option C: related-stories slider
+    # only shows currently-homepage stories. Without this, the slider
+    # could surface archived stories whose links 410 on click — bad UX.
+    eligible_ids = await _get_homepage_eligible_ids(db)
+    if not eligible_ids:
+        return {"stories": [], "count": 0}
+
     # Both queries below filter for `summary_fa IS NOT NULL`. Without
     # a summary, the related-stories card lands on a story page that
     # shows the empty bias panel — a dead-end click for a journalist
@@ -758,6 +852,7 @@ async def get_related_stories(
     # summaries." Stories without summaries become eligible for this
     # slider as soon as the next step_summarize run gives them one.
     SUMMARY_GATE = Story.summary_fa.isnot(None)
+    HOMEPAGE_GATE = Story.id.in_(eligible_ids)
 
     # ── Arc siblings first (curated grouping) ──
     if source.arc_id:
@@ -773,6 +868,7 @@ async def get_related_stories(
                 Story.id != story_id,
                 Story.article_count >= 5,
                 SUMMARY_GATE,
+                HOMEPAGE_GATE,
             )
             .order_by(Story.arc_order.asc().nullslast(), Story.first_published_at.desc().nullslast())
             .limit(limit)
@@ -802,6 +898,7 @@ async def get_related_stories(
                 Story.article_count >= 5,
                 Story.centroid_embedding.isnot(None),
                 SUMMARY_GATE,
+                HOMEPAGE_GATE,
             )
             .order_by(Story.first_published_at.desc().nullslast())
             .limit(500)
@@ -899,6 +996,12 @@ async def get_story(
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
+    # Phase G follow-up (2026-05-11) — Option C: 410 Gone for stories
+    # not currently on the homepage. Runs BEFORE the lean fetch so
+    # archived/thin URLs short-circuit with a tiny response and no
+    # main-table reads.
+    await _require_homepage_eligible(story_id, db)
+
     # Phase G.3.3: split the previous single selectinload(Story.articles)
     # query into three lean queries so we can LIMIT the article fetch.
     #

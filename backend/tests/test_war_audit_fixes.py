@@ -3518,6 +3518,75 @@ class TestHomepageAggregatesDenormalized:
         )
 
 
+class TestOptionCHomepageOnly:
+    """Phase G follow-up (Parham 2026-05-11) — Option C: per-story read
+    endpoints under /api/v1/stories/* return 410 Gone for stories not
+    currently on the homepage (trending + blindspots). Archived/thin
+    stories stop bleeding egress on every crawler hit.
+
+    Tripwires the structural pieces:
+    1. _require_homepage_eligible exists and uses the homepage_scope module
+    2. The 5 per-story GET endpoints call the gate
+    3. Listing endpoints filter to the eligible set
+    4. Safety net: empty-set fallthrough (so the site doesn't 410 itself)
+    """
+
+    def test_eligibility_gate_exists(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "api" / "v1" / "stories.py"
+        ).read_text()
+        assert "_require_homepage_eligible" in src, (
+            "_require_homepage_eligible helper must exist."
+        )
+        assert "_get_homepage_eligible_ids" in src, (
+            "_get_homepage_eligible_ids cache helper must exist."
+        )
+        assert "from app.services.homepage_scope import homepage_story_ids" in src, (
+            "Gate must source the eligible set from homepage_scope "
+            "(single source of truth)."
+        )
+        assert 'status_code=410' in src, (
+            "Gate must raise 410 Gone (not 404 — different SEO signal)."
+        )
+
+    def test_gate_applied_to_per_story_endpoints(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "api" / "v1" / "stories.py"
+        ).read_text()
+        # Count callsites — should be at least 5: get_story, get_story_analysis,
+        # get_related_stories, get_analyst_takes, article_positions
+        callsites = src.count("await _require_homepage_eligible(story_id, db)")
+        assert callsites >= 5, (
+            f"At least 5 per-story endpoints must call the eligibility "
+            f"gate (get_story, /analysis, /related, /analyst-takes, "
+            f"/article-positions). Found {callsites}."
+        )
+
+    def test_safety_net_for_empty_eligible_set(self):
+        """If homepage_story_ids returns empty (fresh deploy, all
+        trending_score=0, etc.) the gate must fall through rather than
+        410 every request. Otherwise the site self-destructs.
+        """
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "api" / "v1" / "stories.py"
+        ).read_text()
+        # The safety net pattern: `if not eligible: return`
+        assert "if not eligible:\n        return" in src or \
+            "if not eligible: return" in src, (
+            "Eligibility gate must have a safety net for empty sets "
+            "to avoid self-410'ing the whole site."
+        )
+
+
 class TestSitemapHomepageOnly:
     """Phase G follow-up (Parham 2026-05-11): the sitemap is the
     canonical "what to crawl" signal for Google + Bing + AI crawlers.
