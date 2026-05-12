@@ -2964,13 +2964,15 @@ class TestPhaseFOptimizationsLanded:
 
 
 class TestDailyEgressCap3GB:
-    """Parham 2026-05-09: hard rule — never let any single UTC day
-    exceed 3 GB of estimated Neon egress. 100 GB Neon free tier / 30
-    days = 3.33 GB/day; 3.0 leaves 10 % headroom. Estimate uses
-    pg_stat_database.tup_returned delta against a start-of-day
-    snapshot persisted in egress_daily_snapshot. When today's egress
-    crosses the cap, the entire cron pipeline halts (same semantics
-    as manual_lock). Resets at UTC midnight via natural day-rollover.
+    """Parham 2026-05-09 (rule), 2026-05-12 (tightened to 2.0 GB):
+    hard rule — never let any single UTC day exceed the estimated
+    Neon egress cap. 100 GB Neon free tier / 30 days = 3.33 GB/day;
+    after Phase G ship the cap was tightened to 2.0 GB/day (the
+    Phase G target). Estimate uses pg_stat_database.tup_returned
+    delta against a start-of-day snapshot persisted in
+    egress_daily_snapshot. When today's egress crosses the cap, the
+    entire cron pipeline halts (same semantics as manual_lock).
+    Resets at UTC midnight via natural day-rollover.
 
     Context: the 2026-05-09 30 GB egress incident burned ~30 % of the
     monthly allotment in one day because the kill-switch's
@@ -2979,17 +2981,20 @@ class TestDailyEgressCap3GB:
     failure mode regardless of which steps are tagged where.
     """
 
-    def test_constant_set_to_3gb(self):
+    def test_constant_set_to_2gb(self):
         from pathlib import Path
 
         src = (
             Path(__file__).parent.parent
             / "app" / "services" / "budget_guard.py"
         ).read_text()
-        assert "DAILY_EGRESS_CAP_GB = 3.0" in src, (
-            "DAILY_EGRESS_CAP_GB must be 3.0. The 100 GB Neon free "
-            "tier / 30 days = 3.33 GB/day; 3.0 is the survival floor "
-            "with 10 % headroom. Future cycles must not weaken this."
+        assert "DAILY_EGRESS_CAP_GB = 2.0" in src, (
+            "DAILY_EGRESS_CAP_GB must be 2.0 after Phase G.4 "
+            "(Parham 2026-05-12). The 100 GB Neon free tier / 30 "
+            "days = 3.33 GB/day; 2.0 is the post-Phase G target "
+            "with 40% headroom. Future cycles must not raise this "
+            "without explicit Parham acknowledgement — see strict "
+            "rule 3gb-daily-egress-cap in CLAUDE.md."
         )
 
     def test_should_halt_for_budget_returns_daily_egress_cap_reason(self):
@@ -3515,6 +3520,56 @@ class TestHomepageAggregatesDenormalized:
         assert "homepage_aggregates" not in HALT_SKIP_STEPS, (
             "homepage_aggregates must NOT be in HALT_SKIP_STEPS — "
             "it's not LLM-heavy and the homepage depends on it."
+        )
+
+
+class TestListingEndpointsDontLoadArticles:
+    """Phase G.3.2 Phase 2 (Parham 2026-05-12): /trending,
+    /blindspots, /, and /related listings no longer eagerly load
+    Story.articles. Per-card image + coverage come from the
+    denormalized homepage_aggregates blob (Phase 1). This was the
+    dominant story-listing egress driver before the cut.
+
+    Tripwires:
+    1. _articles_load_brief() function is removed (was the
+       selectinload helper).
+    2. Listing endpoints don't use selectinload(Story.articles)
+       in their query .options().
+    3. The brief builder is called with articles=[] explicitly
+       so it doesn't trigger a lazy-load of the unloaded relation.
+    """
+
+    def test_articles_load_brief_function_removed(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "api" / "v1" / "stories.py"
+        ).read_text()
+        assert "def _articles_load_brief" not in src, (
+            "_articles_load_brief() must remain removed. "
+            "Phase G.3.2 Phase 2 (Parham 2026-05-12) eliminated "
+            "selectinload(Story.articles) from listing endpoints "
+            "in favor of Story.homepage_aggregates. Reintroducing "
+            "the helper means listing endpoints would re-fetch full "
+            "article rows on every cache miss."
+        )
+
+    def test_listing_endpoints_pass_empty_articles_to_brief(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "api" / "v1" / "stories.py"
+        ).read_text()
+        # The three listing endpoints each call _story_brief_with_extras
+        # with articles=[] explicitly so the brief builder skips
+        # touching the unloaded story.articles relation. Without the
+        # kwarg, async SQLAlchemy would MissingGreenlet on access.
+        assert src.count("_story_brief_with_extras(s, articles=[])") >= 3, (
+            "list_stories, trending_stories, and blindspot_stories "
+            "must each call _story_brief_with_extras(s, articles=[]). "
+            "Phase G.3.2 Phase 2."
         )
 
 

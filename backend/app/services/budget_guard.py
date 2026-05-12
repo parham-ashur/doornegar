@@ -58,18 +58,26 @@ HALT_HARD_USD = MONTHLY_BUDGET_USD * 0.85  # $25.50
 # hard rule that survived the 2026-05-09 30 GB egress incident
 # (caused by HALT_SKIP_STEPS only covering LLM-heavy steps; the
 # ~41 non-LLM steps still ran on every cron fire under the lock).
-DAILY_EGRESS_CAP_GB = 3.0
+DAILY_EGRESS_CAP_GB = 2.0
 # Same calibration anchor as MTD: 4 KB average row weight, mapping
 # tup_returned (rows) to bytes-on-the-wire estimate. Estimate runs
 # ~30-50% high vs Neon's actual billing — that's intentional. The
-# cap at 3 GB ESTIMATE corresponds to ~2 GB ACTUAL billing, well
-# under the 3.33 GB/day allotment.
+# cap at 2 GB ESTIMATE corresponds to ~1.3 GB ACTUAL billing, well
+# under the 3.33 GB/day allotment (40% of the free tier per day).
+#
+# Phase G.4 (Parham 2026-05-12): lowered from 3.0 → 2.0 after the
+# Phase G structural cuts + clean slate + dashboard cache fix.
+# Post-Phase G measured baseline runs well under 1.5 GB/day; a 2.0
+# cap with 1.0 warning gives early signal at 50% and hard halt at
+# the new survival floor. To raise this back up, you need explicit
+# Parham acknowledgement (see strict-rule "3gb-daily-egress-cap"
+# in CLAUDE.md, which now reads "2gb-daily-egress-cap").
 DAILY_EGRESS_AVG_ROW_BYTES = 4 * 1024
 
-# Warning threshold (Phase F.3 — 50% of cap). When today's egress
+# Warning threshold (Phase G.4 — 50% of cap). When today's egress
 # crosses this, surface a warning in /admin/budget/status without
 # halting. Lets the operator see the trajectory before the cap fires.
-DAILY_EGRESS_WARN_GB = 1.5
+DAILY_EGRESS_WARN_GB = 1.0
 
 # Cron RUNS the cheap-only steps even when budget halts. The two
 # tiers below let us continue ingest+classify (which keep the

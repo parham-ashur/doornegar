@@ -114,22 +114,13 @@ async def _require_homepage_eligible(
 
 
 # ── Egress-saving load options ──
-# selectinload(Story.articles) by default pulls every Article column,
-# including the JSONB embedding (~7-8 KB) and content_text (~5-30 KB).
-# The story API responses never read those — so we defer them. Cuts
-# trending/blindspot payloads ~20× and was the dominant Neon egress
-# cost driver before 2026-05-01 ($31/mo on a $41 bill).
-def _articles_load_brief():
-    """selectinload(Story.articles) → Source, with heavy article columns
-    deferred. Use on listing endpoints whose response uses ArticleBrief
-    (no content_text, keywords, or named_entities)."""
-    return selectinload(Story.articles).options(
-        defer(Article.embedding),
-        defer(Article.content_text),
-        defer(Article.keywords),
-        defer(Article.named_entities),
-        selectinload(Article.source),
-    )
+# Phase G.3.2 Phase 2 (Parham 2026-05-12) — listing endpoints
+# (/trending, /blindspots, /, /related) no longer eagerly load
+# Story.articles. Image + coverage percentages are read from
+# Story.homepage_aggregates (denormalized by cron). _articles_load_brief
+# was removed in this cycle; the function previously deferred the heavy
+# article columns but still loaded a row per article — the blob skips
+# the article fetch entirely.
 
 
 def _story_listing_defers():
@@ -171,8 +162,14 @@ async def list_stories(
     if not eligible_ids:
         return StoryListResponse(stories=[], total=0, page=page, page_size=page_size)
 
+    # Phase G.3.2 Phase 2 (Parham 2026-05-12) — listing endpoints no
+    # longer eagerly load Story.articles. The per-story image +
+    # coverage percentages are read from Story.homepage_aggregates
+    # (denormalized blob refreshed by step_recompute_homepage_aggregates).
+    # _story_brief_with_extras gracefully degrades to zero/None when
+    # the blob is missing, which only happens for fresh stories that
+    # haven't yet been touched by cron.
     query = select(Story).options(
-        _articles_load_brief(),
         *_story_listing_defers(),
     ).where(Story.id.in_(eligible_ids))
     count_query = select(func.count(Story.id)).where(Story.id.in_(eligible_ids))
@@ -195,7 +192,7 @@ async def list_stories(
     stories = result.scalars().all()
 
     return StoryListResponse(
-        stories=[_story_brief_with_extras(s) for s in stories],
+        stories=[_story_brief_with_extras(s, articles=[]) for s in stories],
         total=total,
         page=page,
         page_size=page_size,
@@ -237,7 +234,8 @@ async def trending_stories(
     fetch_limit = min(limit * 3, 100)
     result = await db.execute(
         select(Story)
-        .options(_articles_load_brief(), *_story_listing_defers())
+        # Phase G.3.2 Phase 2 — read image + percentages from blob.
+        .options(*_story_listing_defers())
         .where(
             Story.article_count >= min_articles,
             # Exclude stale tiny stories — F2 trending decay (0.85^days)
@@ -298,7 +296,7 @@ async def trending_stories(
     scored.sort(key=lambda x: x[0], reverse=True)
     ranked = [s for _, _, s in scored[:limit]]
 
-    data = [_story_brief_with_extras(s) for s in ranked]
+    data = [_story_brief_with_extras(s, articles=[]) for s in ranked]
     async with _stories_cache_lock:
         # Sweep expired entries on every write — bounded by entry count
         # so this never blocks past O(N). Also enforce hard ceiling.
@@ -333,7 +331,8 @@ async def blindspot_stories(
     cutoff_soft = _dt.now(_tz.utc) - _td(days=14)
     base = (
         select(Story)
-        .options(_articles_load_brief(), *_story_listing_defers())
+        # Phase G.3.2 Phase 2 — read image + percentages from blob.
+        .options(*_story_listing_defers())
         .where(
             Story.is_blindspot.is_(True),
             Story.article_count >= min_articles,
@@ -354,7 +353,7 @@ async def blindspot_stories(
     if not stories:
         result = await db.execute(base.where(Story.last_updated_at >= cutoff_soft))
         stories = list(result.scalars().all())
-    return [_story_brief_with_extras(s) for s in stories]
+    return [_story_brief_with_extras(s, articles=[]) for s in stories]
 
 
 @router.get("/{story_id}/analysis", response_model=StoryAnalysisResponse)
@@ -856,13 +855,12 @@ async def get_related_stories(
 
     # ── Arc siblings first (curated grouping) ──
     if source.arc_id:
-        # selectinload + defers (Parham 2026-05-03 audit): _pick_real_image
-        # downstream reads Story.articles for each sibling — without
-        # eager-loading we'd N+1 fetch articles N times for an N-sibling
-        # arc. Same brief loader the trending list uses.
+        # Phase G.3.2 Phase 2 (Parham 2026-05-12) — _pick_real_image
+        # now reads Story.homepage_aggregates.image_url, so the
+        # arc-siblings fetch no longer needs to eager-load articles.
         arc_result = await db.execute(
             select(Story)
-            .options(_articles_load_brief(), *_story_listing_defers())
+            .options(*_story_listing_defers())
             .where(
                 Story.arc_id == source.arc_id,
                 Story.id != story_id,
@@ -925,37 +923,27 @@ async def get_related_stories(
     if not picked_ids:
         return {"stories": []}
 
-    # Fetch the picked stories with articles eagerly loaded so we can
-    # pick a representative image per card without extra round trips.
+    # Phase G.3.2 Phase 2 (Parham 2026-05-12) — fetch story cores only;
+    # image_url comes from Story.homepage_aggregates (denormalized by
+    # cron), not by iterating Article rows. Saves ~5 MB per call when
+    # related-stories returns 12 cards.
     detail_result = await db.execute(
         select(Story)
-        .options(_articles_load_brief(), *_story_listing_defers())
+        .options(*_story_listing_defers())
         .where(Story.id.in_(picked_ids))
     )
     by_id = {s.id: s for s in detail_result.scalars().all()}
 
-    def _is_bad_img(url: str | None) -> bool:
-        if not url:
-            return True
-        u = url.lower()
-        return (
-            "favicon" in u or "icon" in u or "logo" in u or "sprite" in u
-            or u.endswith(".svg") or "1x1" in u or "placeholder" in u
-        )
-
     def _pick_real_image(s: Story) -> str | None:
-        # Only real article images or R2-stable covers — NO logo fallback.
-        # Related-stories filters out logo-only cards to avoid showing
-        # placeholder-y tiles at the bottom of story pages. Stories without
-        # a real image flow to the /admin/hitl/stories-without-image queue.
-        r2_prefix = settings.r2_public_url or ""
-        for a in s.articles or []:
-            if a.image_url and not _is_bad_img(a.image_url):
-                if r2_prefix and a.image_url.startswith(r2_prefix):
-                    return a.image_url
-        for a in s.articles or []:
-            if a.image_url and not _is_bad_img(a.image_url):
-                return a.image_url
+        # Only real article images — NO logo fallback. Reads from the
+        # homepage_aggregates blob (computed by cron). has_real_image
+        # flag distinguishes "picked from article" (True) from "logo
+        # fallback" (False); we only return the URL when it's real.
+        blob = getattr(s, "homepage_aggregates", None)
+        if isinstance(blob, dict) and blob.get("has_real_image"):
+            img = blob.get("image_url")
+            if img:
+                return img
         return None
 
     out = []

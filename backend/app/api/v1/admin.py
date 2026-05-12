@@ -142,11 +142,14 @@ async def _get_maintenance_info(db: AsyncSession) -> dict:
 # with 10+ aggregate queries on every poll (was 3-5s, now 30s, but still
 # wasteful if multiple browser tabs are open).
 _dashboard_cache: dict = {"data": None, "expires": 0}
-# 60s (Parham 2026-05-03 audit): was 300s — operator polling /dashboard
-# every 30s during a maintenance run could see 5-min-old stats. 60s
-# matches the health overview cache and keeps DB load trivial (the
-# dashboard query takes ~50ms cold).
-_DASHBOARD_CACHE_TTL = 60
+# 300s (Parham 2026-05-12 audit): bumped back from 60s after observing
+# every-8-minute sequential scans on articles even with the page closed
+# (Vercel ISR / external probe was triggering cache misses every ~60s,
+# each miss firing 3 unfiltered full scans). The dashboard counts don't
+# change meaningfully over 5 minutes — a 5-min-old read is acceptable.
+# If the operator needs fresher data, the dashboard already auto-polls
+# every 30s, so a forced refresh is one page reload away.
+_DASHBOARD_CACHE_TTL = 300
 
 
 @router.get("/dashboard")

@@ -740,9 +740,15 @@ async def convert_telegram_posts_to_articles(db: AsyncSession) -> dict:
         c.id: c for c in channel_result.scalars().all()
     }
 
-    # --- Get all posts; we'll filter out already-converted ones via URL ---
+    # --- Get recent posts only (7-day window per strict retention rule) ---
+    # Posts older than 7 days are deleted by step_delete_aged and never
+    # appear in the pipeline anyway. Loading all posts here used to scan
+    # the entire telegram_posts table on every cron fire (full seq scan).
+    recent_cutoff = datetime.now(timezone.utc) - timedelta(days=7)
     posts_result = await db.execute(
-        select(TelegramPost).order_by(TelegramPost.date.asc())
+        select(TelegramPost)
+        .where(TelegramPost.date >= recent_cutoff)
+        .order_by(TelegramPost.date.asc())
     )
     posts = posts_result.scalars().all()
 
@@ -1119,8 +1125,14 @@ async def extract_articles_from_aggregators(db: AsyncSession) -> dict:
     )
     posts = posts_result.scalars().all()
 
-    # Pre-load existing article URLs for duplicate checking
-    existing_urls_result = await db.execute(select(Article.url))
+    # Pre-load existing article URLs for duplicate checking.
+    # Limited to 30-day window — articles older than that are deleted by
+    # step_delete_aged per the strict retention rule, so loading all URLs
+    # was scanning the whole articles table on every cron fire.
+    existing_urls_cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+    existing_urls_result = await db.execute(
+        select(Article.url).where(Article.ingested_at >= existing_urls_cutoff)
+    )
     existing_urls: set[str] = {row[0] for row in existing_urls_result.all()}
 
     # Pre-load sources by slug
