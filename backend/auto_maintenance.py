@@ -604,13 +604,29 @@ async def step_classify_content_type():
     comes back smaller than batch_size — same pattern as step_process.
     """
     from app.database import async_session
+    from app.services.budget_guard import should_halt_for_budget
     from app.services.content_type import classify_unclassified_articles
 
     BATCH = 400
-    MAX_ITERS = 5  # cap at 2000 articles per maintenance run
+    # 2026-05-13: reduced from 5 → 3 (1200 articles per run, not 2000)
+    # after the maintenance test showed this step burning ~400 MB on a
+    # clean-slate backlog. The drain still completes across crons; one
+    # firing just doesn't try to swallow everything.
+    MAX_ITERS = 3
     total = {"total": 0, "by_label": {}, "llm_called": 0, "llm_returned": 0, "unresolved": 0}
+    halted_reason: str | None = None
     async with async_session() as db:
-        for _ in range(MAX_ITERS):
+        for iter_idx in range(MAX_ITERS):
+            halt, reason, _signals = await should_halt_for_budget(
+                db, consume_override=False
+            )
+            if halt:
+                halted_reason = reason
+                logger.warning(
+                    f"step_classify_content_type: budget halt before iter "
+                    f"{iter_idx} ({reason}); classified={total['total']}"
+                )
+                break
             stats = await classify_unclassified_articles(db, batch_size=BATCH)
             n = stats.get("total", 0)
             total["total"] += n
@@ -625,19 +641,54 @@ async def step_classify_content_type():
             if n < BATCH or stats.get("unresolved", 0) == n:
                 break
 
+    if halted_reason:
+        total["halted"] = halted_reason
     logger.info(f"Content-type classifier (drained): {total}")
     return total
 
 
 async def step_process():
-    """Step 2: NLP processing — translate, embed, extract keywords."""
+    """Step 2: NLP processing — translate, embed, extract keywords.
+
+    Bounded loop (Parham 2026-05-13): the prior unbounded loop with
+    only-break-on-batch-under-50 allowed step_process to chew through
+    a 500+ article backlog in one cron firing, burning ~1.3 GB of Neon
+    egress before the cap halt (which only checks at step boundaries)
+    could fire. The 2026-05-13 maintenance test triggered this exact
+    pattern after the clean-slate left every article unprocessed.
+
+    Mitigations:
+    1. MAX_ITERS = 4 caps a single run at 200 articles. Backlog drains
+       across multiple cron firings instead of one huge burst.
+    2. Mid-loop `should_halt_for_budget` check between iterations
+       (consume_override=False — this is a read-only probe, not a
+       consume-the-clear). Breaks early if the daily egress cap or
+       any other halt signal trips between batches.
+    """
     from app.database import async_session
     from app.services.nlp_pipeline import process_unprocessed_articles
+    from app.services.budget_guard import should_halt_for_budget
     from sqlalchemy import text as _text
 
+    MAX_ITERS = 4  # cap at 200 articles per maintenance run
     total_processed = 0
+    halted_reason: str | None = None
     async with async_session() as db:
-        while True:
+        for iter_idx in range(MAX_ITERS):
+            # Pre-iteration budget probe: if today's egress crossed the
+            # cap during the previous iteration, bail before we read
+            # another 50 articles' content_text.
+            halt, reason, _signals = await should_halt_for_budget(
+                db, consume_override=False
+            )
+            if halt:
+                halted_reason = reason
+                logger.warning(
+                    f"step_process: budget halt before iter {iter_idx} "
+                    f"({reason}); processed={total_processed}"
+                )
+                break
+
             stats = await process_unprocessed_articles(db)
             batch = stats.get("processed", 0)
             total_processed += batch
@@ -676,8 +727,11 @@ async def step_process():
                     f"Embedding health: {zeros}/{total} zero-vectors in last 24h ({pct:.1f}%)"
                 )
 
+    result = {"processed": total_processed}
+    if halted_reason:
+        result["halted"] = halted_reason
     logger.info(f"NLP: {total_processed} articles processed")
-    return {"processed": total_processed}
+    return result
 
 
 async def step_backfill_farsi_titles():

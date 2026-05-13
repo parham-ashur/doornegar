@@ -3573,6 +3573,82 @@ class TestListingEndpointsDontLoadArticles:
         )
 
 
+class TestStepProcessBounded:
+    """Parham 2026-05-13: the cap halt fires between cron steps, NOT
+    inside a step. A 2026-05-13 maintenance test showed step_process
+    burning ~1.3 GB of Neon egress in a single firing on a clean-slate
+    backlog, because the prior `while True` loop drained until batch < 50
+    with no mid-loop budget check.
+
+    Tripwires:
+    1. step_process must have a bounded iteration cap (MAX_ITERS) so a
+       single firing can't unbound-loop through hundreds of articles.
+    2. step_process must call should_halt_for_budget between iterations
+       — that's how the cap halt actually fires before the step ends.
+    3. Same shape for step_classify_content_type — also burned ~400 MB
+       on the same run before bounded.
+    """
+
+    def test_step_process_has_bounded_iterations(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "auto_maintenance.py"
+        ).read_text()
+        idx = src.find("async def step_process")
+        assert idx >= 0
+        # Limit search to this function body.
+        end = src.find("\nasync def ", idx + 1)
+        body = src[idx:end if end > 0 else len(src)]
+
+        assert "MAX_ITERS" in body, (
+            "step_process must declare a MAX_ITERS cap. The prior "
+            "unbounded `while True` loop allowed one cron firing to "
+            "drain a 500+ article backlog and burn 1.3 GB of egress."
+        )
+        assert "while True" not in body, (
+            "step_process must NOT use `while True` — replaced with a "
+            "for-loop over MAX_ITERS to bound the per-cron work."
+        )
+
+    def test_step_process_checks_budget_between_batches(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "auto_maintenance.py"
+        ).read_text()
+        idx = src.find("async def step_process")
+        assert idx >= 0
+        end = src.find("\nasync def ", idx + 1)
+        body = src[idx:end if end > 0 else len(src)]
+
+        assert "should_halt_for_budget" in body, (
+            "step_process must call should_halt_for_budget between "
+            "iterations so the daily egress cap can halt the step "
+            "mid-run. Without this, the cap only fires at step "
+            "boundaries — useless if a single step burns 1+ GB."
+        )
+
+    def test_step_classify_content_type_checks_budget(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "auto_maintenance.py"
+        ).read_text()
+        idx = src.find("async def step_classify_content_type")
+        assert idx >= 0
+        end = src.find("\nasync def ", idx + 1)
+        body = src[idx:end if end > 0 else len(src)]
+
+        assert "should_halt_for_budget" in body, (
+            "step_classify_content_type must call should_halt_for_budget "
+            "between iterations — same pattern as step_process."
+        )
+
+
 class TestStrictRetention:
     """Phase G follow-up (Parham 2026-05-12) — strict retention rule.
     Only stories that earned homepage time are kept (up to 30 days

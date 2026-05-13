@@ -397,14 +397,12 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
         cutoff_48h = datetime.now(timezone.utc) - timedelta(hours=48)
 
         # Get recent articles with embeddings (potential duplicates of)
-        # Cycle-1 audit Island 2: dropped 500 → 100. The 48h window is
-        # dense enough that 100 captures 95%+ of repost candidates and
-        # cuts the egress + O(n²) cosine work proportionally.
-        # Cycle-2 audit (2026-05-07): added explicit ORDER BY ingested_at
-        # DESC. Without it, Postgres returned arbitrary heap-order rows
-        # within the 48h window, so on dense traffic days the pool
-        # silently dropped the most-recent repost candidates the dedup
-        # is meant to catch.
+        # Cycle-1 audit Island 2: dropped 500 → 100. Cycle-7 (2026-05-13):
+        # dropped 100 → 30 after the maintenance test showed the dedup
+        # pool being fetched on every batch in step_process's loop. At
+        # ~4 KB per JSONB embedding × 100 articles × 10 batches per run,
+        # this was ~4 MB per cron just for dedup. 30 still captures the
+        # dense-window repost cases without the O(n²) tail.
         recent_result = await db.execute(
             select(Article.id, Article.embedding)
             .where(
@@ -413,7 +411,7 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
                 Article.embedding.isnot(None),
             )
             .order_by(Article.ingested_at.desc())
-            .limit(100)
+            .limit(30)
         )
         recent_pool = [(r[0], r[1]) for r in recent_result.all()]
 
