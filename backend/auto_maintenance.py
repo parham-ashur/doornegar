@@ -8322,6 +8322,44 @@ async def run_maintenance(mode: str = "full"):
                 results[key] = err
                 await maintenance_state.end_step(display, "error", err)
 
+            # Parham 2026-05-14: per-step budget re-check. The preflight
+            # check at the top of run_maintenance fires once; without
+            # this loop-end probe, a single step that crosses the cap
+            # mid-run continues running every subsequent step until the
+            # pipeline naturally ends. Today's runaway burned ~5 GB
+            # past the 2.0 cap because of this gap.
+            #
+            # consume_override=False: this is a read-only probe so a
+            # one-shot "clear" set by the operator before the run isn't
+            # silently consumed by these mid-run rechecks.
+            try:
+                async with _async_session() as _re_db:
+                    re_halt, re_reason, _re_sig = await should_halt_for_budget(
+                        _re_db, consume_override=False
+                    )
+                if re_halt and (
+                    re_reason == "manual_lock"
+                    or re_reason.startswith("daily_egress_cap")
+                ):
+                    logger.error(
+                        f"MID-PIPELINE HALT after step '{key}' "
+                        f"({re_reason}). Remaining steps will be "
+                        f"skipped this run."
+                    )
+                    results["_mid_pipeline_halt"] = {
+                        "halted_after_step": key,
+                        "reason": re_reason,
+                    }
+                    break
+            except Exception as _re:
+                # Tolerate probe failures — don't kill the run because
+                # the budget guard had a transient DB blip. Log and
+                # continue; next iteration will retry.
+                logger.warning(
+                    f"Mid-pipeline budget recheck after '{key}' "
+                    f"failed (continuing): {_re}"
+                )
+
         # Doc update is full-pipeline-only; skip in ingest-only mode.
         if mode == "full":
             await maintenance_state.begin_step("Update project docs")

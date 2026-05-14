@@ -3649,6 +3649,62 @@ class TestStepProcessBounded:
         )
 
 
+class TestMidPipelineBudgetRecheck:
+    """Parham 2026-05-14: the preflight `should_halt_for_budget` check
+    at the top of run_maintenance fires once. Without a per-step
+    re-check, a step that blows past the 2.0 GB cap mid-run continues
+    burning egress through the remaining ~40 pipeline steps. Today's
+    runaway burned ~5 GB past the cap before the pipeline naturally
+    ended.
+
+    The fix: at the end of the for-loop body in run_maintenance, probe
+    should_halt_for_budget (consume_override=False). If the cap or
+    manual_lock fires, break out of the loop and record the halt.
+
+    Tripwire:
+    1. run_maintenance contains a mid-pipeline re-check after each step.
+    2. The re-check uses consume_override=False so it doesn't silently
+       consume a one-shot operator clear during a single cron firing.
+    3. The re-check on cap-cross writes a `_mid_pipeline_halt` entry
+       to results so /admin/maintenance/logs surfaces where the run
+       stopped.
+    """
+
+    def test_run_maintenance_has_mid_pipeline_budget_recheck(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "auto_maintenance.py"
+        ).read_text()
+        # Locate the run_maintenance function.
+        idx = src.find("async def run_maintenance")
+        assert idx >= 0
+        # The mid-pipeline recheck lives inside the function body; bound
+        # the search to it.
+        end = src.find("\nasync def ", idx + 1)
+        body = src[idx:end if end > 0 else len(src)]
+
+        assert "MID-PIPELINE HALT" in body, (
+            "run_maintenance must log a 'MID-PIPELINE HALT' message "
+            "when the per-step budget recheck fires. Without this "
+            "log line, the regression is invisible until the bill "
+            "arrives."
+        )
+        assert "_mid_pipeline_halt" in body, (
+            "Mid-pipeline halt must record `_mid_pipeline_halt` in "
+            "results so /admin/maintenance/logs surfaces where the "
+            "run stopped. Phase G follow-up 2026-05-14."
+        )
+        # The recheck must use consume_override=False so a one-shot
+        # operator clear isn't silently consumed by these probes.
+        assert "consume_override=False" in body, (
+            "Mid-pipeline recheck must call should_halt_for_budget "
+            "with consume_override=False so it doesn't silently "
+            "consume the operator's one-shot clear override."
+        )
+
+
 class TestStrictRetention:
     """Phase G follow-up (Parham 2026-05-12) — strict retention rule.
     Only stories that earned homepage time are kept (up to 30 days
