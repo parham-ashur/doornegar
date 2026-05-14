@@ -7769,9 +7769,29 @@ async def step_delete_aged():
 
 
 async def _delete_old_telegram(db, cutoff):
-    """Helper: delete telegram_posts older than cutoff. Returns rowcount."""
+    """Helper: delete telegram_posts older than cutoff. Returns rowcount.
+
+    FK ordering (Parham 2026-05-14): analyst_takes.telegram_post_id has
+    a NOT-NULL-allowed FK to telegram_posts, but the constraint blocks
+    DELETE if any referencing row still exists. The clean-slate SQL
+    discovered this exact issue on 2026-05-12 and the cron run on
+    2026-05-13/14 has been hitting the same FK violation every run.
+    NULL the FK first, then delete the posts.
+    """
     from sqlalchemy import text as _text
 
+    # NULL out the FK on analyst_takes so the delete can proceed.
+    # social_sentiment_snapshots is by story_id, not telegram_post_id —
+    # nothing to do there. The only blocking FK was analyst_takes.
+    await db.execute(
+        _text(
+            "UPDATE analyst_takes SET telegram_post_id = NULL "
+            "WHERE telegram_post_id IN ("
+            "  SELECT id FROM telegram_posts WHERE created_at < :c"
+            ")"
+        ),
+        {"c": cutoff},
+    )
     res = await db.execute(
         _text("DELETE FROM telegram_posts WHERE created_at < :c"),
         {"c": cutoff},
