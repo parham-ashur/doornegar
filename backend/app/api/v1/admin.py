@@ -3587,6 +3587,30 @@ async def trigger_recompute_centroids():
         return {"status": "error", "error": str(e)}
 
 
+@router.post("/maintenance/recompute-homepage-aggregates", dependencies=[Depends(require_admin)])
+async def trigger_recompute_homepage_aggregates():
+    """Recompute the denormalized homepage_aggregates blob on every
+    eligible Story. Targets the listing endpoints' display (image,
+    coverage %, narrative groups). Pure DB read+write, no LLM.
+
+    Added 2026-05-14 so the homepage can be refreshed without a full
+    cron firing when the cron is locked or a prior run errored on
+    this specific step.
+    """
+    try:
+        import sys
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[3]
+        if str(root) not in sys.path:
+            sys.path.insert(0, str(root))
+        from auto_maintenance import step_recompute_homepage_aggregates
+        stats = await step_recompute_homepage_aggregates()
+        return {"status": "ok", "stats": stats}
+    except Exception as e:
+        logger.exception("recompute-homepage-aggregates failed")
+        return {"status": "error", "error": str(e)}
+
+
 @router.get("/neutrality/export", dependencies=[Depends(require_admin)])
 async def export_neutrality_audit(
     top: int = 20,

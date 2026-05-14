@@ -7844,7 +7844,6 @@ async def step_recompute_homepage_aggregates():
                     _defer(Story.summary_en),
                     _defer(Story.summary_fa),
                     _defer(Story.centroid_embedding),
-                    _defer(Story.audit_notes),
                     _defer(Story.homepage_aggregates),
                 )
                 .where(Story.id == sid)
