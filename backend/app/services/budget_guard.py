@@ -167,31 +167,46 @@ async def get_neon_egress_estimate_mtd(db: AsyncSession) -> tuple[float, float]:
     BYTES_PER_GB_USD = 0.065
 
     try:
-        row = (await db.execute(_sa_text(
-            """
-            SELECT
-              tup_returned,
-              EXTRACT(EPOCH FROM (NOW() - GREATEST(
-                stats_reset, date_trunc('month', NOW())
-              ))) AS seconds_since_anchor
-            FROM pg_stat_database
-            WHERE datname = current_database()
-            """
-        ))).mappings().one_or_none()
-        if not row:
+        # Current cumulative counter. NOTE: pg_stat_database.tup_returned
+        # is cumulative since the last stats reset (which, on this Neon
+        # instance, is never — stats_reset IS NULL). So tup_returned on
+        # its own is an ALL-TIME total, NOT month-to-date.
+        cur = (await db.execute(_sa_text(
+            "SELECT tup_returned FROM pg_stat_database "
+            "WHERE datname = current_database()"
+        ))).first()
+        current_tup = int(cur.tup_returned or 0) if cur else 0
+
+        # Month-to-date baseline = the earliest daily snapshot captured
+        # this calendar month. egress_daily_snapshot stores tup_returned
+        # at the first call of each UTC day (see get_daily_egress_estimate),
+        # so the earliest row of the month ≈ the cumulative counter at
+        # month start. current - that = the rows returned THIS MONTH.
+        #
+        # Pre-2026-05-29 bug: this function multiplied the full cumulative
+        # tup_returned by the row size and called it "MTD". With stats_reset
+        # NULL that reported ~all-time (~778 GB) as the month total, which
+        # — via combined_mtd >= HALT_HARD_USD in should_halt_for_budget —
+        # would auto-halt the cron the instant manual_lock was cleared.
+        base = (await db.execute(_sa_text(
+            "SELECT tup_returned_start FROM egress_daily_snapshot "
+            "WHERE day >= date_trunc('month', NOW())::date "
+            "ORDER BY day ASC LIMIT 1"
+        ))).first()
+        if base is None:
+            # No snapshot yet this month — we cannot derive a true MTD
+            # baseline. Return 0 rather than the all-time cumulative (the
+            # old bug). The daily cap (get_daily_egress_estimate, 2 GB/day)
+            # remains the live survival guard; this self-heals once today's
+            # snapshot is written by get_daily_egress_estimate.
             return 0.0, 0.0
 
-        # tup_returned counts rows scanned (including index scans that
-        # don't touch heap). Each row averages roughly the table heap
-        # size / row count. Conservative: assume average row weight of
-        # 4 KB (between articles ~10 KB and stories ~22 KB and
-        # llm_usage_logs ~360 B and bias_scores ~1 KB). Calibration
-        # via the 2026-05-07 incident confirms this is in the right
-        # order of magnitude.
-        AVG_ROW_BYTES = 4 * 1024
-
-        tup_returned_mtd = int(row["tup_returned"] or 0)
-        bytes_estimate = tup_returned_mtd * AVG_ROW_BYTES
+        baseline_tup = int(base.tup_returned_start or 0)
+        # max(0, …) guards the rare case where stats were reset mid-month
+        # (counter drops below the snapshot). Undercounts that month, then
+        # self-heals next month — safe relative to the old overcount.
+        mtd_rows = max(0, current_tup - baseline_tup)
+        bytes_estimate = mtd_rows * DAILY_EGRESS_AVG_ROW_BYTES
         gb_estimate = bytes_estimate / GB
         cost_estimate = gb_estimate * BYTES_PER_GB_USD
         return gb_estimate, cost_estimate
