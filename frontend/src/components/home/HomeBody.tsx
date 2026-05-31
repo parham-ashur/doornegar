@@ -622,10 +622,25 @@ export default async function HomeBody({
 
   // Most disputed: F1: 14d cap. A 3-week-old disputed story isn't
   // disputed news anymore, it's history.
-  const disputeFresh = withinAge(DISPUTE_MAX_AGE_MS);
-  const disputedCandidates = [...stories]
-    .filter(s => s.state_pct > 0 && s.diaspora_pct > 0 && !s.is_blindspot && !usedIds.has(s.id) && disputeFresh(s))
-    .sort((a, b) => Math.abs(b.state_pct - b.diaspora_pct) - Math.abs(a.state_pct - a.diaspora_pct));
+  //
+  // Adaptive window (2026-05-31): the strict 14d cap goes bare during a
+  // content drought (e.g. after the May cron lockdown most two-sided war
+  // stories were 17-25d old). So we try 14d first; only if that yields
+  // fewer than 3 disputed slots do we widen to DISPUTE_DROUGHT_AGE_MS so
+  // the section fills from slightly-older two-sided stories. As soon as
+  // the now-live cron brings ≥3 fresh disputed stories this auto-tightens
+  // back to 14d — no permanent weakening of the freshness rule.
+  const DISPUTE_DROUGHT_AGE_MS = 26 * 86400 * 1000; // recovery fallback only
+  const disputeTwoSided = (s: StoryBrief, maxAgeMs: number) =>
+    s.state_pct > 0 && s.diaspora_pct > 0 && !s.is_blindspot && !usedIds.has(s.id) && withinAge(maxAgeMs)(s);
+  const byDisputeSpread = (a: StoryBrief, b: StoryBrief) =>
+    Math.abs(b.state_pct - b.diaspora_pct) - Math.abs(a.state_pct - a.diaspora_pct);
+  const freshDisputed = [...stories]
+    .filter(s => disputeTwoSided(s, DISPUTE_MAX_AGE_MS))
+    .sort(byDisputeSpread);
+  const disputedCandidates = freshDisputed.length >= 3
+    ? freshDisputed
+    : [...stories].filter(s => disputeTwoSided(s, DISPUTE_DROUGHT_AGE_MS)).sort(byDisputeSpread);
   let mostDisputed = disputedCandidates[0] || null;
   let secondDisputed = disputedCandidates[1] || null;
   let thirdDisputed = disputedCandidates[2] || null;

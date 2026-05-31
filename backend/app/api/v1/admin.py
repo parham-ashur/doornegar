@@ -1984,6 +1984,11 @@ class _EditStoryRequest(_BaseModel):
     title_en: str | None = None
     summary_fa: str | None = None
     priority: int | None = None
+    # Editorial hide/restore. archived_at IS NOT NULL removes a story from
+    # /trending + /blindspots (F3). Use to retire an incoherent grab-bag
+    # cluster (one "story" that actually mixes several unrelated events)
+    # that auto-clustering produced. archived=False clears it (restore).
+    archived: bool | None = None
     # Narrative fields — live inside the JSON blob stored in story.summary_en
     state_summary_fa: str | None = None
     diaspora_summary_fa: str | None = None
@@ -2341,6 +2346,12 @@ async def edit_story(story_id: str, request: _EditStoryRequest, db: AsyncSession
         editorial_change = True
     if request.priority is not None:
         story.priority = request.priority
+    if request.archived is not None:
+        from datetime import datetime as _dt_arch
+        # Editorial archive/restore. Not a content edit, so it does NOT
+        # flip editorial_change / write summary_anchor — purely a
+        # visibility toggle handled by the trending/blindspot F3 filter.
+        story.archived_at = _dt_arch.utcnow() if request.archived else None
 
     # Narrative fields live inside the JSON blob in summary_en.
     # All five long-form FA fields share this storage; the doornama
@@ -2416,6 +2427,7 @@ async def edit_story(story_id: str, request: _EditStoryRequest, db: AsyncSession
         "title_fa": story.title_fa,
         "title_en": story.title_en,
         "priority": story.priority,
+        "archived_at": story.archived_at.isoformat() if story.archived_at else None,
     }
 
 
