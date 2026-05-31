@@ -2924,6 +2924,32 @@ class TestPhaseFOptimizationsLanded:
             "raises a swallowed NameError and records tup_delta=0 every step."
         )
 
+    def test_dedup_articles_batches_title_lookup(self):
+        """2026-05-31 egress fix: step_deduplicate_articles Layer 1 must fetch
+        all duplicate-title articles in ONE `title_fa IN (...)` query, not run
+        `SELECT * WHERE title_fa = X` inside a loop. title_fa is unindexed, so
+        the per-title version was ~50 full seq-scans of the articles table
+        (~425K rows ≈ 1.7 GB) — the #1 fixable egress driver in the 2026-05-31
+        per-step measurement.
+        """
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent / "auto_maintenance.py"
+        ).read_text()
+        idx = src.find("async def step_deduplicate_articles")
+        assert idx >= 0, "step_deduplicate_articles must exist"
+        end = src.find("\nasync def ", idx + 1)
+        body = src[idx:end if end > 0 else len(src)]
+        assert "title_fa.in_(" in body, (
+            "Layer 1 dedup must batch dup-title lookups via title_fa.in_(...) "
+            "(one scan), not a per-title SELECT in a loop."
+        )
+        assert "Article.title_fa == title" not in body, (
+            "Layer 1 must NOT run `SELECT ... WHERE title_fa == title` inside "
+            "the loop — that was 50 full seq-scans (~1.7 GB egress)."
+        )
+
     def test_trending_endpoint_caps_limit_at_30(self):
         """Phase F.3: max trending limit dropped 50→30."""
         from pathlib import Path

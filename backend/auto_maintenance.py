@@ -5124,7 +5124,7 @@ async def step_deduplicate_articles():
     Layer 2: Same URL (different titles, same article)
     Layer 3: Embedding cosine similarity > 0.92 within 48h (paraphrased reposts)
     """
-    from sqlalchemy import select, func
+    from sqlalchemy import select, func, update
     from datetime import timedelta
 
     from app.database import async_session
@@ -5133,9 +5133,18 @@ async def step_deduplicate_articles():
     stats = {"title_dupes": 0, "url_dupes": 0, "embedding_dupes": 0, "removed": 0}
 
     async with async_session() as db:
-        # Layer 1: Exact title match
-        result = await db.execute(
-            select(Article.title_fa, func.count(Article.id))
+        # Layer 1: Exact title match.
+        # Egress fix (2026-05-31, measured): the prior version ran
+        # `SELECT * FROM articles WHERE title_fa = X` INSIDE the loop, up
+        # to 50×. title_fa is unindexed, so each was a full seq-scan of the
+        # articles table — ~50 × 8.5K ≈ 425K rows scanned ≈ 1.7 GB egress,
+        # the #1 fixable driver in the 2026-05-31 per-step measurement.
+        # Now: one GROUP BY for the dup titles, then ONE light SELECT
+        # (id/title_fa/story_id/ingested_at only) over `title_fa IN (...)`,
+        # grouped in Python, with a single bulk UPDATE to detach. Same
+        # dedup semantics; ~50× less egress (one scan instead of fifty).
+        dup_title_rows = await db.execute(
+            select(Article.title_fa)
             .where(
                 Article.title_fa.isnot(None),
                 func.length(func.trim(Article.title_fa)) >= 10,
@@ -5144,19 +5153,38 @@ async def step_deduplicate_articles():
             .having(func.count(Article.id) > 1)
             .limit(50)
         )
-        for title, count in result.all():
-            stats["title_dupes"] += 1
-            dupes = await db.execute(
-                select(Article).where(Article.title_fa == title).order_by(Article.ingested_at)
-            )
-            articles = list(dupes.scalars().all())
-            if len(articles) <= 1:
-                continue
-            keeper = articles[0]
-            for dupe in articles[1:]:
-                if dupe.story_id and dupe.story_id == keeper.story_id:
-                    dupe.story_id = None
-                    stats["removed"] += 1
+        dup_titles = [r[0] for r in dup_title_rows.all()]
+        if dup_titles:
+            from itertools import groupby as _groupby
+            dup_rows = (await db.execute(
+                select(
+                    Article.id, Article.title_fa,
+                    Article.story_id, Article.ingested_at,
+                )
+                .where(Article.title_fa.in_(dup_titles))
+                .order_by(Article.title_fa, Article.ingested_at.asc())
+            )).all()
+            title_detach_ids: list = []
+            # rows are ordered by title_fa then ingested_at, so the first
+            # member of each group is the keeper (earliest); detach any
+            # later member that shares the keeper's story_id.
+            for _title, grp in _groupby(dup_rows, key=lambda r: r[1]):
+                members = list(grp)
+                if len(members) <= 1:
+                    continue
+                stats["title_dupes"] += 1
+                keeper_story = members[0][2]
+                for m in members[1:]:
+                    if m[2] is not None and m[2] == keeper_story:
+                        title_detach_ids.append(m[0])
+            if title_detach_ids:
+                await db.execute(
+                    update(Article)
+                    .where(Article.id.in_(title_detach_ids))
+                    .values(story_id=None)
+                    .execution_options(synchronize_session=False)
+                )
+                stats["removed"] += len(title_detach_ids)
 
         # Layer 2: URL match
         url_result = await db.execute(
