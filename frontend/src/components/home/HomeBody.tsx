@@ -598,7 +598,16 @@ export default async function HomeBody({
   // anything older than 14d so this section reflects the past week,
   // not the past month.
   const briefingFresh = withinAge(BRIEFING_MAX_AGE_MS);
-  const leftTextStories = sorted.filter(s => !usedIds.has(s.id) && briefingFresh(s)).slice(0, 3);
+  let leftTextStories = sorted.filter(s => !usedIds.has(s.id) && briefingFresh(s)).slice(0, 3);
+  if (leftTextStories.length < 3) {
+    // Drought fallback (2026-05-31): after a content gap (e.g. the May
+    // cron lockdown left most stories 16-25d old) the 14d cap leaves
+    // this block empty once hero + disputed consume the few fresh ones.
+    // Widen to 26d so «در روزهای گذشته» isn't bare — same recovery logic
+    // as the disputed box; auto-tightens once fresh content returns.
+    const briefingDrought = withinAge(26 * 86400 * 1000);
+    leftTextStories = sorted.filter(s => !usedIds.has(s.id) && briefingDrought(s)).slice(0, 3);
+  }
   leftTextStories.forEach(s => usedIds.add(s.id));
 
   // Most viewed: top 3. Narrower half-column now (grid-cols-2 cell in
@@ -815,6 +824,24 @@ export default async function HomeBody({
     out.sort((a, b) => a.length - b.length);
     return out.slice(0, 6);
   };
+  // Cross-card variety (2026-05-31): the diaspora framing vocabulary
+  // genuinely converges — «سرکوب» / «حقوق بشر» recur across most
+  // government stories, and buildWordList's shortest-first sort surfaces
+  // the short stock word («سرکوب») first, so every card showed the same
+  // outside-border word. preferUnused reorders each story's list to lead
+  // with a word no prior card has shown yet, falling back to the
+  // shortest-first order only when every word is already taken. Keeps
+  // the rotation list intact (RotatingWord still cycles all of them) —
+  // only the FIRST, most-visible word is diversified across cards.
+  const _usedOppWords = new Set<string>();
+  const _usedConsWords = new Set<string>();
+  const preferUnused = (ws: string[], used: Set<string>): string[] => {
+    const fresh = ws.filter(w => !used.has(w));
+    const stale = ws.filter(w => used.has(w));
+    const ordered = fresh.length ? [...fresh, ...stale] : ws;
+    if (ordered[0]) used.add(ordered[0]);
+    return ordered;
+  };
   // Scan the top 12 disputed candidates so we can reliably fill the
   // 4-story تقابل روایت‌ها box — previously 2 slots here + 2 in the
   // separate بیشترین اختلاف نگاه box. The two boxes shared ~80% of
@@ -838,8 +865,8 @@ export default async function HomeBody({
         battleItems.push({
           storyId: story.id,
           title: localizedStoryTitle(story, locale) || "",
-          conservativeWords: cw,
-          oppositionWords: ow,
+          conservativeWords: preferUnused(cw, _usedConsWords),
+          oppositionWords: preferUnused(ow, _usedOppWords),
           stateSummary,
           diasporaSummary,
         });
@@ -859,8 +886,8 @@ export default async function HomeBody({
           battleItems.push({
             storyId: story.id,
             title: localizedStoryTitle(story, locale) || "",
-            conservativeWords: cw,
-            oppositionWords: ow,
+            conservativeWords: preferUnused(cw, _usedConsWords),
+            oppositionWords: preferUnused(ow, _usedOppWords),
             stateSummary,
             diasporaSummary,
           });
