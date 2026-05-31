@@ -364,9 +364,9 @@ export default async function HomeBody({
   // the ISR cache for 300s. Throwing would be cleaner but kills the
   // initial `next build` prerender (no prior cached version exists
   // then), so we retry instead and accept occasional empty caches.
-  const [trendingFirst, _blindspots, weeklyDigestData] = await Promise.all([
+  const [trendingFirst, blindspotsFirst, weeklyDigestData] = await Promise.all([
     fetchAPI<StoryBrief[]>("/api/v1/stories/trending?limit=30"),
-    fetchAPI<StoryBrief[]>("/api/v1/stories/blindspots?limit=10").then(d => d || []),
+    fetchAPI<StoryBrief[]>("/api/v1/stories/blindspots?limit=10"),
     fetchAPI<{ status: string; content?: string }>("/api/v1/stories/weekly-digest"),
   ]);
   let _stories: StoryBrief[] | null = trendingFirst;
@@ -374,16 +374,29 @@ export default async function HomeBody({
     await new Promise((r) => setTimeout(r, 1500 * attempt));
     _stories = await fetchAPI<StoryBrief[]>("/api/v1/stories/trending?limit=30");
   }
-  // If trending is genuinely null after retries, the API is down. Opt
-  // OUT of the ISR cache for this response so the empty state isn't
-  // served for the next 300s — the next request triggers a fresh SSR
-  // attempt instead. We still render the empty state to keep the
-  // initial `next build` prerender working when no data is available.
-  const apiIsDown = _stories === null;
-  if (apiIsDown) {
-    noStore();
-    _stories = [];
+  // Blindspots get the SAME retry treatment as trending (2026-05-31).
+  // Previously this fetch coalesced null→[] with no retry, so a single
+  // transient backend blip — e.g. a homepage ISR regen that happened to
+  // run mid-Railway-redeploy — returned [] and baked an empty «نگاه
+  // یک‌جانبه» section into the 30-min cache (Parham saw it empty while
+  // the API actually had 9 blindspots). A genuine quiet day returns an
+  // empty ARRAY (truthy) and is respected; only a null FETCH FAILURE
+  // triggers retry, and a persistent failure opts the page out of cache
+  // below rather than baking the empty section.
+  let _blindspots: StoryBrief[] | null = blindspotsFirst;
+  for (let attempt = 1; _blindspots === null && attempt <= 3; attempt++) {
+    await new Promise((r) => setTimeout(r, 1500 * attempt));
+    _blindspots = await fetchAPI<StoryBrief[]>("/api/v1/stories/blindspots?limit=10");
   }
+  // If trending OR blindspots is genuinely null after retries, the API
+  // is down. Opt OUT of the ISR cache so the empty state isn't served
+  // for the next 30 min — the next request triggers a fresh SSR attempt.
+  const apiIsDown = _stories === null;
+  if (apiIsDown || _blindspots === null) {
+    noStore();
+  }
+  if (_stories === null) _stories = [];
+  if (_blindspots === null) _blindspots = [];
 
   // Skip stories that only have a source-logo fallback as their cover.
   // Per Parham's rule, a story without a real image should never surface
