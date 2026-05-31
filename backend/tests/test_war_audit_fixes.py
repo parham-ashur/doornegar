@@ -3024,6 +3024,36 @@ class TestDailyEgressCap3GB:
             "— see strict rule 2gb-daily-egress-cap in CLAUDE.md."
         )
 
+    def test_mtd_egress_uses_month_baseline_not_cumulative(self):
+        """2026-05-29 fix: get_neon_egress_estimate_mtd must compute MTD from
+        the earliest egress_daily_snapshot of the current month, NOT the raw
+        cumulative pg_stat_database.tup_returned.
+
+        Bug: with stats_reset NULL, tup_returned is an ALL-TIME total (~778 GB).
+        Multiplying it and calling it 'MTD' made combined_mtd ($55) exceed
+        HALT_HARD_USD ($25.50), which would auto-halt the cron the instant
+        manual_lock was cleared — silently blocking the June 1 unlock.
+        """
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "app" / "services" / "budget_guard.py"
+        ).read_text()
+        idx = src.find("async def get_neon_egress_estimate_mtd")
+        assert idx >= 0, "get_neon_egress_estimate_mtd must exist"
+        end = src.find("\nasync def ", idx + 1)
+        body = src[idx:end if end > 0 else len(src)]
+        assert "egress_daily_snapshot" in body, (
+            "MTD egress must be derived from the egress_daily_snapshot month "
+            "baseline (current tup_returned minus the earliest snapshot this "
+            "month), NOT the raw cumulative tup_returned counter."
+        )
+        assert "date_trunc('month'" in body or 'date_trunc("month"' in body, (
+            "MTD egress must anchor its baseline to the start of the current "
+            "month (date_trunc('month', NOW()))."
+        )
+
     def test_should_halt_for_budget_returns_daily_egress_cap_reason(self):
         from pathlib import Path
 
