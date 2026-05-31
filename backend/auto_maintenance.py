@@ -8145,6 +8145,13 @@ async def run_maintenance(mode: str = "full"):
     # steps. The website may go stale, but the project survives.
     # Override via POST /admin/budget/override?action=clear (one-shot).
     from app.database import async_session as _async_session
+    # NOTE: _sa_text MUST be imported here (unconditionally, before the
+    # pipeline loop) — not only inside the full-halt branch below. The
+    # per-step egress instrumentation probe calls `_sa_text(...)`; when this
+    # import lived only in the halt branch, every NON-halted run hit a
+    # NameError that the probe's `except` swallowed → tup_delta=0 on every
+    # step → /admin/egress/per-step always empty. Fixed 2026-05-31.
+    from sqlalchemy import text as _sa_text
     from app.services.budget_guard import (
         should_halt_for_budget,
         HALT_SKIP_STEPS,

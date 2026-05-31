@@ -2900,6 +2900,30 @@ class TestPhaseFOptimizationsLanded:
             "Phase F.1 /admin/egress/per-step endpoint must exist."
         )
 
+    def test_sa_text_imported_before_pipeline_loop(self):
+        """2026-05-31 fix: the per-step egress probe calls `_sa_text(...)`.
+        That import must be UNCONDITIONAL and BEFORE the pipeline loop.
+
+        Bug: `_sa_text` was imported only inside the full-halt branch
+        (which returns early), so on every NON-halted run the probe hit a
+        NameError that its `except` swallowed → tup_delta=0 on every step →
+        /admin/egress/per-step always empty. The meter never worked on a
+        successful run.
+        """
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent / "auto_maintenance.py"
+        ).read_text()
+        loop_idx = src.find("for key, display, func in pipeline:")
+        import_idx = src.find("from sqlalchemy import text as _sa_text")
+        assert import_idx != -1, "auto_maintenance must import text as _sa_text"
+        assert 0 <= import_idx < loop_idx, (
+            "`from sqlalchemy import text as _sa_text` must appear BEFORE the "
+            "pipeline for-loop (unconditionally), or the per-step egress probe "
+            "raises a swallowed NameError and records tup_delta=0 every step."
+        )
+
     def test_trending_endpoint_caps_limit_at_30(self):
         """Phase F.3: max trending limit dropped 50→30."""
         from pathlib import Path
