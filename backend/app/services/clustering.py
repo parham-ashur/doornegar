@@ -158,6 +158,7 @@ STRICT RULES (follow all):
    - Article about a follow-up days/weeks later → separate story
    - Article about a related but distinct event → separate story
    - Article mentioning Iran but primarily about another country → separate story
+   - Article about the SAME KIND of event in a DIFFERENT place/theater (e.g. US strikes a drug boat in the eastern Pacific vs. US strikes on Iran) → separate story, even if the wording is nearly identical
 4. Examples of what to ACCEPT:
    - Same specific speech by the same official → match
    - Different outlets covering the exact same announcement → match
@@ -189,6 +190,7 @@ Return valid JSON with this exact structure:
 Rules:
 - ONLY include articles directly related to Iran
 - EXCLUDE articles about other countries with no Iran connection
+- GEOGRAPHY: the SAME TYPE of event in a DIFFERENT place is a DIFFERENT story, and must NOT be relabeled as the Iran one. Example: "US strikes a boat in the eastern Pacific / Latin America (drug interdiction)" is NOT about Iran — exclude it; never fold its casualty numbers into an Iran strike story.
 - CRITICAL: Each group must be about ONE SINGLE specific event. Do NOT combine different events even if they are related. For example:
   - "Attack on Sharif University" and "Killing of IRGC Quds Force commander" are TWO SEPARATE stories, not one
   - "Missile attack on Tel Aviv" and "Missile attack on Isfahan" are TWO SEPARATE stories
@@ -403,6 +405,110 @@ async def _call_openai(prompt: str, max_tokens: int = 4096, *, purpose: str = "c
     return parsed
 
 
+# ── Layer 2: headline grounding check (2026-05-31) ─────────────────────
+# Even with the Layer 1 geo gate, a contaminated cluster (or an over-eager
+# title model) can produce a headline that fuses a NUMBER from one article
+# onto a SUBJECT from another — the «۲۰۰ کشته در حملات به شناورهای ایرانی»
+# failure, where the 200 came from eastern-Pacific drug-boat strikes, not
+# Iran. This check runs ONLY when a generated title contains a number
+# (where dangerous composites happen), so cost stays near zero, and
+# rewrites the headline to drop any unsupported figure/subject.
+GROUNDING_PROMPT = """\
+You are a meticulous Persian-language fact-checking news editor.
+
+A proposed headline (تیتر) was generated to summarize a cluster of news \
+articles. Verify it ONLY against the SOURCE HEADLINES below — assume nothing \
+that is not written there.
+
+Proposed headline:
+{title}
+
+Source headlines:
+{articles_block}
+
+Check, in order:
+1. Every NUMBER in the proposed headline (casualty counts, amounts, dates) must \
+appear in at least one source headline AND be attached to the SAME subject/event. \
+A number describing one event must NOT be attached to a different subject or place.
+2. Every named SUBJECT, PLACE, or ACTOR in the proposed headline must be supported \
+by at least one source headline.
+
+Return ONLY valid JSON:
+{{"grounded": true_or_false, "reason": "short Persian explanation", "corrected_title_fa": "..."}}
+
+- If everything is supported → grounded=true and corrected_title_fa = the original headline unchanged.
+- If a number or subject is NOT supported → grounded=false and corrected_title_fa = a faithful, specific Persian headline that REMOVES or CORRECTS the unsupported claim (no questions, no vague summaries).
+"""
+
+
+async def _call_openai_grounding(prompt: str) -> dict | None:
+    """Cheap-tier (gpt-4.1-nano) JSON call for the headline grounding
+    check. Returns the parsed dict, or None on ANY failure — no silent
+    fallback: the caller keeps the original title and logs when this is
+    None, rather than trusting a fabricated 'grounded' verdict."""
+    if not settings.openai_api_key:
+        return None
+    from app.services.llm_helper import build_openai_params
+    from app.services.llm_usage import log_llm_usage
+
+    def _sync_call():
+        client = OpenAI(api_key=settings.openai_api_key)
+        try:
+            params = build_openai_params(
+                model=settings.content_type_model,
+                prompt=prompt,
+                max_tokens=400,
+                temperature=0,
+            )
+            response = client.chat.completions.create(**params)
+            return _parse_llm_response(response.choices[0].message.content), response.usage
+        except Exception as e:
+            logger.error(f"Title grounding LLM error: {e}")
+            return None, None
+
+    parsed, usage = await asyncio.get_event_loop().run_in_executor(None, _sync_call)
+    if usage is not None:
+        await log_llm_usage(
+            model=settings.content_type_model,
+            purpose="clustering.title_grounding",
+            usage=usage,
+        )
+    return parsed or None
+
+
+async def verify_title_grounding(title_fa: str, article_titles: list[str]) -> str:
+    """Layer 2 — return a headline whose hard claims are grounded in the
+    cluster's source headlines.
+
+    No-op (returns the original) unless the title contains a NUMBER — that
+    is where fabricated composites (a casualty figure from the wrong
+    event) occur, and number-gating keeps this near-free. Best-effort:
+    a missing key, an LLM error, or an empty article list returns the
+    original title unchanged — we never block cluster creation on it."""
+    if not title_fa or not _number_tokens(title_fa):
+        return title_fa
+    titles = [t.strip() for t in article_titles if t and t.strip()][:12]
+    if not titles:
+        return title_fa
+    block = "\n".join(f"- {t}" for t in titles)
+    result = await _call_openai_grounding(
+        GROUNDING_PROMPT.format(title=title_fa, articles_block=block)
+    )
+    if not result:
+        logger.warning("Title grounding check unavailable; keeping original title")
+        return title_fa
+    if result.get("grounded") is True:
+        return title_fa
+    corrected = (result.get("corrected_title_fa") or "").strip()
+    if corrected and corrected != title_fa:
+        logger.info(
+            "Title grounding rewrote a headline (reason: %s): %r -> %r",
+            result.get("reason", ""), title_fa, corrected,
+        )
+        return corrected
+    return title_fa
+
+
 # ---------------------------------------------------------------------------
 # Step 2: Match new articles to existing stories
 # ---------------------------------------------------------------------------
@@ -461,6 +567,78 @@ def _jaccard(a: set, b: set) -> float:
     if not a or not b:
         return 0.0
     return len(a & b) / len(a | b)
+
+
+# ── Layer 1: geographic-theater gate (2026-05-31) ──────────────────────
+# The embedding matcher is blind to geography: "US strikes a boat, N
+# killed" reads the same whether it's the Iran/Persian-Gulf theater or
+# US drug-interdiction strikes in the eastern Pacific / Latin America.
+# That blindness merged an eastern-Pacific drug-boat article (cumulative
+# "200 killed") into an Iran-strikes story, and the headline generator
+# fused them into the FALSE «حمله آمریکا به شناورهای ایرانی؛ ۲۰۰ کشته».
+#
+# This lexicon tags text with a coarse THEATER. Ubiquitous actors that
+# appear across every theater (USA, Trump, "America") are deliberately
+# EXCLUDED — they don't discriminate. Iran-entangled regions (Levant:
+# Gaza/Israel/Lebanon/Syria; Europe, where the diaspora lives) are also
+# excluded so a normal Iran-axis story is never wrongly split. The gate
+# only acts on CLEARLY non-Iran theaters where a cross-merge is almost
+# always an error.
+_THEATER_LEXICON: dict[str, tuple[str, ...]] = {
+    "iran": (
+        "ایران", "تهران", "بندرعباس", "هرمز", "خلیج فارس", "سپاه",
+        "خامنه", "نطنز", "فردو", "اصفهان", "مشهد", "تبریز", "شیراز",
+        "پزشکیان", "irgc", "tehran", "iran", "bandar abbas", "hormuz",
+    ),
+    "americas": (
+        "اقیانوس آرام", "آمریکای لاتین", "ونزوئلا", "کارائیب", "کلمبیا",
+        "اکوادور", "پاناما", "مکزیک", "کارتل", "مواد مخدر", "قاچاق مواد",
+        "pacific", "venezuela", "caribbean", "latin america", "colombia",
+        "cartel", "drug traffic", "drug boat", "southcom",
+    ),
+    "ukraine_russia": (
+        "اوکراین", "روسیه", "مسکو", "کی‌یف", "کیف", "پوتین", "زلنسکی",
+        "ukraine", "russia", "moscow", "kyiv", "putin", "zelensk",
+    ),
+    "east_asia": (
+        "تایوان", "کره شمالی", "کره جنوبی", "پکن", "ژاپن",
+        "taiwan", "north korea", "south korea", "beijing",
+    ),
+    "south_asia": (
+        "پاکستان", "افغانستان", "کابل", "هند", "کشمیر",
+        "pakistan", "afghanistan", "kabul", "kashmir",
+    ),
+}
+
+
+def _locus_set(text: str | None) -> set[str]:
+    """Tag text with the coarse geographic theaters it references.
+
+    Substring match on a curated bilingual lexicon. Returns the set of
+    theater keys present (often empty for generic text, occasionally
+    several). Empty result = "no strong geographic signal" → the gate
+    stays silent (conservative)."""
+    if not text:
+        return set()
+    t = text.replace("‌", " ").lower()
+    out: set[str] = set()
+    for theater, markers in _THEATER_LEXICON.items():
+        for m in markers:
+            if m in t:
+                out.add(theater)
+                break
+    return out
+
+
+def _locus_conflict(a_loci: set[str], b_loci: set[str]) -> bool:
+    """True when both sides carry a geographic signal and they are
+    DISJOINT — i.e. they're about different theaters of the world.
+
+    Conservative by construction: if either side has no locus tag, this
+    returns False (no conflict), so generic articles are never blocked.
+    Only fires when both name a theater and share none — the exact shape
+    of the eastern-Pacific-vs-Iran mis-merge."""
+    return bool(a_loci) and bool(b_loci) and a_loci.isdisjoint(b_loci)
 
 
 def _find_new_story_subclusters(
@@ -897,6 +1075,7 @@ async def _match_to_existing_stories(
             "tokens": _title_tokens(corpus),
             "quotes": _quoted_phrases(corpus),
             "numbers": _number_tokens(corpus),
+            "loci": _locus_set(corpus),  # Layer 1 geographic-theater gate
             "last_updated_at": row[5],
             "article_count": row[3],
         }
@@ -921,6 +1100,8 @@ async def _match_to_existing_stories(
     auto_reject_count = 0
     negative_block_count = 0
     low_trust_block_count = 0
+    locus_block_count = 0           # Layer 1 geographic-theater rejects
+    locus_blocks: list[tuple] = []  # (article_id, story_id) for the event log
     # Cycle-1 audit Island 3: count which threshold tier was selected
     # for each candidate pair so the dashboard can spot tier-distribution
     # drift (e.g. all candidates suddenly land in the strict
@@ -976,6 +1157,7 @@ async def _match_to_existing_stories(
         a_tokens = _title_tokens(a_title)
         a_quotes = _quoted_phrases(a_title)
         a_numbers = _number_tokens(a_title)
+        a_loci = _locus_set(a_title)  # Layer 1 geographic-theater gate
 
         # Source-specific cosine multiplier — high-error sources have
         # cluster_quality_score < 1.0, which raises the effective
@@ -1004,6 +1186,20 @@ async def _match_to_existing_stories(
             # AUTO-REJECT: low cosine OR too old. Skip this pair entirely.
             if sim < AUTO_REJECT_COSINE or age_days > AUTO_REJECT_MAX_AGE_DAYS:
                 auto_reject_count += 1
+                continue
+
+            # Layer 1 — geographic-theater gate (2026-05-31). Even at very
+            # high cosine, a cross-theater pairing (e.g. eastern-Pacific
+            # drug-boat strikes vs an Iran-strikes story) is almost always
+            # a mis-merge the embedding can't see. Skip this story entirely
+            # for this article — it can still form its own cluster or match
+            # a same-theater story. Mirrors the prompt's "REJECTION IS THE
+            # DEFAULT" stance. Conservative: only fires when BOTH sides name
+            # a theater and share none.
+            if _locus_conflict(a_loci, sig.get("loci") or set()):
+                locus_block_count += 1
+                if len(locus_blocks) < 50:
+                    locus_blocks.append((article.id, story_id))
                 continue
 
             # AUTO-MATCH: very high cosine AND a concrete shared signal
@@ -1075,6 +1271,7 @@ async def _match_to_existing_stories(
     logger.info(
         f"Match gating — auto-match: {auto_match_count}, auto-reject: {auto_reject_count}, "
         f"negative-blocked: {negative_block_count}, low-trust-blocked: {low_trust_block_count}, "
+        f"geo-theater-blocked: {locus_block_count}, "
         f"to LLM: {len(article_candidates)} articles × {total_candidate_pairs} pairs "
         f"(+{len(articles_without_embedding)} without embedding), "
         f"{len(articles) - pre_filtered_articles - auto_match_count} articles → new cluster"
@@ -1112,6 +1309,15 @@ async def _match_to_existing_stories(
             story_id=sid,
             article_id=art_id,
             signals={"reason": "rejected_pair_within_90d"},
+        )
+    for art_id, sid in locus_blocks[:50]:
+        await _log_event(
+            db,
+            event_type="cluster_block_geo_theater",
+            actor="clustering",
+            story_id=sid,
+            article_id=art_id,
+            signals={"reason": "cross_theater_geography_conflict"},
         )
     for art_id, sid, sim, thr in low_trust_blocks[:50]:
         await _log_event(
@@ -1877,11 +2083,22 @@ async def _cluster_new_articles(
     hidden = 0
 
     for group in all_groups:
+        # Layer 2 — verify the generated headline's numbers/subjects are
+        # grounded in the cluster's source headlines before it's saved.
+        # Number-gated inside verify_title_grounding, so this is a no-op
+        # (no LLM call) for the common case of a number-free title.
+        grounded_title_fa = await verify_title_grounding(
+            group.get("title_fa") or "",
+            [
+                (a.get("title_original") or a.get("title_fa") or a.get("title_en") or "")
+                for a in group["articles"]
+            ],
+        )
         story = await _create_story_from_dicts(
             db,
             group["articles"],
             source_lookup=source_lookup,
-            title_fa=group["title_fa"],
+            title_fa=grounded_title_fa,
             title_en=group["title_en"],
             topics=group["topics"],
         )

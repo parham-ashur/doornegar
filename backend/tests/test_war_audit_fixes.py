@@ -4104,3 +4104,98 @@ class TestRecountAfterDeleteAged:
             "step_deduplicate_articles Layer 1 title cap regressed below 300. "
             "The 50-cap left a visible duplicate-headline backlog (2026-05-31)."
         )
+
+
+# ═════════════════════════════════════════════════════════════════════
+# Clustering accuracy — geo-theater gate (L1) + headline grounding (L2)
+# (2026-05-31, after the false «۲۰۰ کشته در حملات به شناورهای ایرانی»)
+# ═════════════════════════════════════════════════════════════════════
+
+class TestGeoTheaterGate:
+    """Layer 1: the embedding matcher is geography-blind, so an
+    eastern-Pacific drug-boat strike merged into an Iran-strikes story.
+    _locus_conflict blocks cross-theater merges while staying silent on
+    same-theater and generic articles."""
+
+    def test_drug_boat_vs_iran_conflicts(self):
+        from app.services.clustering import _locus_set, _locus_conflict
+        drug = _locus_set("حمله مجدد آمریکا به یک شناور در شرق اقیانوس آرام")
+        iran = _locus_set("گزارش‌ها از حملات جدید آمریکا به بندرعباس؛ کنترل تنگه هرمز")
+        assert drug == {"americas"} and iran == {"iran"}
+        assert _locus_conflict(drug, iran) is True
+
+    def test_same_theater_does_not_conflict(self):
+        from app.services.clustering import _locus_set, _locus_conflict
+        assert _locus_conflict(_locus_set("حمله به بندرعباس"),
+                               _locus_set("حملات آمریکا به ایران")) is False
+
+    def test_generic_article_never_blocked(self):
+        # No locus tag on either side → never a conflict (conservative).
+        from app.services.clustering import _locus_set, _locus_conflict
+        assert _locus_conflict(_locus_set("قیمت دلار امروز"),
+                               _locus_set("بازار بورس سقوط کرد")) is False
+        assert _locus_conflict(set(), {"iran"}) is False
+
+    def test_other_cross_theater_generalizes(self):
+        from app.services.clustering import _locus_set, _locus_conflict
+        assert _locus_conflict(_locus_set("حمله روسیه به اوکراین"),
+                               _locus_set("تنش در تنگه هرمز")) is True
+
+    def test_gate_wired_into_matcher(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "app" / "services" / "clustering.py").read_text()
+        assert "_locus_conflict(a_loci" in src, (
+            "geo-theater gate no longer applied in _match_to_existing_stories"
+        )
+        assert '"loci": _locus_set(corpus)' in src, "story signature lost its loci set"
+
+
+class TestHeadlineGrounding:
+    """Layer 2: a title with a number gets fact-checked against the
+    cluster's source headlines; an unsupported figure is rewritten out."""
+
+    def test_no_number_is_noop(self):
+        import asyncio
+        from app.services import clustering
+        # No number → returns original, never calls the LLM.
+        called = {"n": 0}
+        async def _boom(*a, **k):
+            called["n"] += 1
+            return None
+        clustering._call_openai_grounding = _boom
+        out = asyncio.run(clustering.verify_title_grounding(
+            "حمله آمریکا به بندرعباس", ["حمله به بندرعباس"]))
+        assert out == "حمله آمریکا به بندرعباس"
+        assert called["n"] == 0, "grounding LLM must not run for number-free titles"
+
+    def test_ungrounded_number_is_rewritten(self):
+        import asyncio
+        from app.services import clustering
+        async def _fake(prompt):
+            return {"grounded": False, "reason": "۲۰۰ از خبر دیگری است",
+                    "corrected_title_fa": "حملات آمریکا به بندرعباس"}
+        clustering._call_openai_grounding = _fake
+        out = asyncio.run(clustering.verify_title_grounding(
+            "حملات آمریکا به شناورهای ایرانی؛ کشته‌شدگان از ۲۰۰ نفر فراتر رفت",
+            ["حمله مجدد آمریکا به یک شناور در شرق اقیانوس آرام", "حمله به بندرعباس"]))
+        assert out == "حملات آمریکا به بندرعباس"
+
+    def test_grounded_keeps_original(self):
+        import asyncio
+        from app.services import clustering
+        async def _fake(prompt):
+            return {"grounded": True, "corrected_title_fa": "ignored"}
+        clustering._call_openai_grounding = _fake
+        title = "کشته شدن ۳ نفر در حمله به بندرعباس"
+        out = asyncio.run(clustering.verify_title_grounding(title, ["حمله به بندرعباس؛ ۳ کشته"]))
+        assert out == title
+
+    def test_llm_failure_keeps_original_no_silent_fabrication(self):
+        import asyncio
+        from app.services import clustering
+        async def _fail(prompt):
+            return None  # no key / LLM error
+        clustering._call_openai_grounding = _fail
+        title = "کشته‌شدگان از ۲۰۰ نفر فراتر رفت"
+        out = asyncio.run(clustering.verify_title_grounding(title, ["خبر مرتبط"]))
+        assert out == title  # never blocks, never fabricates a verdict
