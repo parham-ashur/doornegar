@@ -651,8 +651,14 @@ export default async function HomeBody({
   // forever after its real moment passed.
   const popularFresh = withinAge(POPULAR_MAX_AGE_MS);
   const now = Date.now();
-  const mostViewed = [...sorted]
-    .filter(s => !usedIds.has(s.id) && popularFresh(s))
+  let popularPool = [...sorted].filter(s => !usedIds.has(s.id) && popularFresh(s));
+  if (popularPool.length < 3) {
+    // Drought fallback (2026-05-31): when the 14d window can't fill the 3
+    // «پرمخاطب‌ترین» slots (post-lockdown content gap), widen to 26d so the
+    // section isn't blank. Auto-tightens once fresh news returns.
+    popularPool = [...sorted].filter(s => !usedIds.has(s.id) && withinAge(26 * 86400 * 1000)(s));
+  }
+  const mostViewed = popularPool
     .map(s => {
       const views = s.view_count || 0;
       const recencyHours = s.updated_at ? (now - new Date(s.updated_at).getTime()) / 3600000 : 100;
