@@ -5165,7 +5165,15 @@ async def step_deduplicate_articles():
             )
             .group_by(Article.title_fa)
             .having(func.count(Article.id) > 1)
-            .limit(50)
+            # Bumped 50 → 300 (2026-05-31): the 50-cap was being hit every
+            # run (title_dupes:50 exactly), leaving a backlog of same-title
+            # pairs visibly attached to the same story (Parham spotted a
+            # duplicate headline on a story page). Egress-neutral: the
+            # GROUP BY scans the whole table regardless of LIMIT, and the
+            # follow-up `title_fa IN (...)` select is still ONE scan no
+            # matter how long the IN list is — so a larger batch drains the
+            # backlog faster at the same ~2-scan cost.
+            .limit(300)
         )
         dup_titles = [r[0] for r in dup_title_rows.all()]
         if dup_titles:
@@ -7611,6 +7619,7 @@ async def step_delete_aged():
         "bias_scores_deleted": 0,
         "story_events_deleted": 0,
         "analyst_takes_deleted": 0,
+        "recounted_after_delete": 0,
     }
 
     now = _dt.now(_tz.utc)
@@ -7803,6 +7812,42 @@ async def step_delete_aged():
         stats["stories_deleted_never_homepage_7d"] = (
             total_stories - stats["stories_deleted_archived_30d"]
         )
+
+        # ── E. Final recount (drift fix, 2026-05-31) ─────────────
+        # delete_aged removes orphan + aged articles AFTER the
+        # mid-pipeline recount_after_dedup (step 29). A surviving story
+        # that lost an article here would otherwise carry a stale
+        # article_count until the NEXT run's step-2 recount — a ~12h
+        # window where the story-page badge over-counts vs the articles
+        # actually shown (Parham spotted 7-vs-5 on 2026-05-31). Recount
+        # in the SAME transaction so counts are correct the instant this
+        # last destructive step commits. Same UPDATE…FROM as
+        # step_recount_stories; idempotent; touches only drifted rows.
+        rc = await db.execute(_text("""
+            UPDATE stories s
+               SET article_count = sub.c
+              FROM (
+                SELECT story_id, COUNT(*)::int AS c
+                  FROM articles
+                 WHERE story_id IS NOT NULL
+                 GROUP BY story_id
+              ) sub
+             WHERE s.id = sub.story_id
+               AND s.article_count <> sub.c
+        """))
+        stats["recounted_after_delete"] = rc.rowcount or 0
+        await db.execute(_text("""
+            UPDATE stories s
+               SET source_count = sub.c
+              FROM (
+                SELECT story_id, COUNT(DISTINCT source_id)::int AS c
+                  FROM articles
+                 WHERE story_id IS NOT NULL
+                 GROUP BY story_id
+              ) sub
+             WHERE s.id = sub.story_id
+               AND s.source_count <> sub.c
+        """))
 
         await db.commit()
 

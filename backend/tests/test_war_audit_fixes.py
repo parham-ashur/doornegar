@@ -4056,3 +4056,51 @@ class TestDisputeScoreDeterministic:
         from app.services.story_analysis import compute_dispute_score as f
         s = f({"state": {"framing": ["جنگ", "صلح"]}, "diaspora": {"framing": ["جنگ", "صلح"]}})
         assert s is not None and s < 0.45, f"identical framings should be < 0.45, got {s}"
+
+
+# ═════════════════════════════════════════════════════════════════════
+# article_count drift after delete_aged (2026-05-31, Parham 7-vs-5)
+# ═════════════════════════════════════════════════════════════════════
+
+class TestRecountAfterDeleteAged:
+    """step_delete_aged is the LAST destructive step (deletes orphan +
+    aged articles) and runs ~30 steps after recount_after_dedup. A
+    surviving story that loses an article here carried a stale
+    article_count until the NEXT run — a ~12h window where the story-page
+    badge over-counted vs the articles actually rendered. The fix recounts
+    inside step_delete_aged's own transaction. This tripwire keeps it.
+    """
+
+    def _delete_aged_body(self) -> str:
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "auto_maintenance.py").read_text()
+        start = src.find("async def step_delete_aged")
+        assert start >= 0, "step_delete_aged not found"
+        end = src.find("\nasync def ", start + 10)
+        return src[start:end]
+
+    def test_delete_aged_recounts_before_commit(self):
+        body = self._delete_aged_body()
+        assert "recounted_after_delete" in body, (
+            "step_delete_aged no longer recounts article_count after its "
+            "deletes. Surviving stories that lose aged/orphan articles will "
+            "carry a stale count for ~12h until the next run. Restore the "
+            "final UPDATE…FROM recount before db.commit()."
+        )
+        # The recount must update article_count from a live COUNT(*).
+        assert "SET article_count = sub.c" in body, (
+            "step_delete_aged recount lost its article_count UPDATE."
+        )
+
+    def test_dedup_title_cap_not_back_to_50(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "auto_maintenance.py").read_text()
+        start = src.find("async def step_deduplicate_articles")
+        end = src.find("\nasync def ", start + 10)
+        body = src[start:end]
+        # Layer 1 title cap was bumped 50 -> 300 because the 50-cap was hit
+        # every run, leaving same-title pairs attached to one story.
+        assert ".limit(300)" in body, (
+            "step_deduplicate_articles Layer 1 title cap regressed below 300. "
+            "The 50-cap left a visible duplicate-headline backlog (2026-05-31)."
+        )
