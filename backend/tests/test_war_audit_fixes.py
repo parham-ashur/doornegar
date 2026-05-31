@@ -3032,22 +3032,22 @@ class TestDailyEgressCap3GB:
     failure mode regardless of which steps are tagged where.
     """
 
-    def test_constant_set_to_2gb(self):
+    def test_constant_set_to_5gb(self):
         from pathlib import Path
 
         src = (
             Path(__file__).parent.parent
             / "app" / "services" / "budget_guard.py"
         ).read_text()
-        assert 'os.getenv("DN_DAILY_EGRESS_CAP_GB", "2.0")' in src, (
-            "DAILY_EGRESS_CAP_GB default must remain 2.0 after Phase G.4 "
-            "(Parham 2026-05-12). The 100 GB Neon free tier / 30 "
-            "days = 3.33 GB/day; 2.0 is the post-Phase G target "
-            "with 40% headroom. The DN_DAILY_EGRESS_CAP_GB env override "
-            "(Parham 2026-05-31) lets the operator temporarily raise it for "
-            "a one-off run, but the CODE DEFAULT must stay 2.0. Future cycles "
-            "must not change the default without explicit Parham acknowledgement "
-            "— see strict rule 2gb-daily-egress-cap in CLAUDE.md."
+        assert 'os.getenv("DN_DAILY_EGRESS_CAP_GB", "5.0")' in src, (
+            "DAILY_EGRESS_CAP_GB default is 5.0 GB (raised 2.0 → 5.0 on "
+            "2026-05-31 by explicit Parham acknowledgement: the estimate "
+            "overcounts ~1.5×, so 5.0 EST ≈ ~3.3 GB ACTUAL ≈ the 100 GB/mo "
+            "free-tier daily budget — headroom for a normal full run to "
+            "finish without halting). The DN_DAILY_EGRESS_CAP_GB env var "
+            "still overrides this for one-offs. Future cycles must not change "
+            "the default without explicit Parham acknowledgement — see strict "
+            "rule 2gb-daily-egress-cap in CLAUDE.md."
         )
 
     def test_mtd_egress_uses_month_baseline_not_cumulative(self):

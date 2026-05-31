@@ -59,19 +59,20 @@ HALT_HARD_USD = MONTHLY_BUDGET_USD * 0.85  # $25.50
 # hard rule that survived the 2026-05-09 30 GB egress incident
 # (caused by HALT_SKIP_STEPS only covering LLM-heavy steps; the
 # ~41 non-LLM steps still ran on every cron fire under the lock).
-# DEFAULT survival floor = 2.0 GB/day (the code floor — unchanged).
-# Operator escape hatch (Parham 2026-05-31): for a deliberate one-off — e.g. a
-# full backlog catch-up run that would otherwise halt partway — set
-# DN_DAILY_EGRESS_CAP_GB on the SERVICE env to temporarily raise it, then
-# REMOVE the var to restore the floor. Requires explicit Parham acknowledgement
-# per strict-rule "2gb-daily-egress-cap". The loud warning below fires whenever
-# the active cap != 2.0 so an un-removed override can't silently disable the
-# survival floor.
-DAILY_EGRESS_CAP_GB = float(os.getenv("DN_DAILY_EGRESS_CAP_GB", "2.0"))
-if DAILY_EGRESS_CAP_GB != 2.0:
+# DEFAULT floor = 5.0 GB/day (estimate). Raised 2.0 → 5.0 on 2026-05-31 by
+# explicit Parham acknowledgement: the meter overcounts ~1.5×, so 5.0 ESTIMATE
+# ≈ ~3.3 GB ACTUAL ≈ the 100 GB/mo free-tier daily budget — enough headroom for
+# a normal full run to finish without halting partway, while still bounding a
+# runaway. (The 2026-05-09 30 GB incident class is still caught well below 5.)
+# Operator escape hatch: DN_DAILY_EGRESS_CAP_GB on the SERVICE env temporarily
+# overrides this for a one-off, then REMOVE the var to restore the floor. The
+# loud warning below fires whenever the active cap != 5.0 so an un-removed
+# override can't silently disable the floor.
+DAILY_EGRESS_CAP_GB = float(os.getenv("DN_DAILY_EGRESS_CAP_GB", "5.0"))
+if DAILY_EGRESS_CAP_GB != 5.0:
     logger.warning(
         "DAILY_EGRESS_CAP_GB OVERRIDDEN to %.1f GB via DN_DAILY_EGRESS_CAP_GB "
-        "— the 2.0 GB survival floor is DISABLED. REMOVE the env var to restore it.",
+        "— the 5.0 GB floor is overridden. REMOVE the env var to restore it.",
         DAILY_EGRESS_CAP_GB,
     )
 # Same calibration anchor as MTD: 4 KB average row weight, mapping
@@ -89,10 +90,11 @@ if DAILY_EGRESS_CAP_GB != 2.0:
 # in CLAUDE.md, which now reads "2gb-daily-egress-cap").
 DAILY_EGRESS_AVG_ROW_BYTES = 4 * 1024
 
-# Warning threshold (Phase G.4 — 50% of cap). When today's egress
-# crosses this, surface a warning in /admin/budget/status without
-# halting. Lets the operator see the trajectory before the cap fires.
-DAILY_EGRESS_WARN_GB = 1.0
+# Warning threshold (50% of cap). When today's egress crosses this,
+# surface a warning in /admin/budget/status without halting. Lets the
+# operator see the trajectory before the cap fires. Scaled 1.0 → 2.5
+# with the 2.0 → 5.0 cap raise (2026-05-31).
+DAILY_EGRESS_WARN_GB = 2.5
 
 # Cron RUNS the cheap-only steps even when budget halts. The two
 # tiers below let us continue ingest+classify (which keep the
