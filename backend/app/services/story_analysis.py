@@ -20,6 +20,41 @@ from app.services.narrative_groups import narrative_group as _narrative_group
 
 logger = logging.getLogger(__name__)
 
+
+def compute_dispute_score(scores: dict | None) -> float | None:
+    """Deterministic dispute score (0-1) from per-side framing words.
+
+    The LLM was asked for dispute_score directly but clustered on ~0.5 for
+    almost every story (the prompt example anchors on 0.5), which made the
+    homepage's «تقابل روایت‌ها» / most-disputed ordering meaningless. This
+    derives it instead from the already-extracted framing words in
+    `scores.{state,diaspora}.framing` — no extra LLM call:
+
+      - high  → both sides have rich, DISTINCT framing (state «مقاومت/پیروزی»
+                vs diaspora «سرکوب/تهدید» → genuinely opposed narratives)
+      - low   → one side has no framing, or the two framings overlap
+
+    Returns None when there's no scores blob to derive from (callers fall
+    back to whatever the LLM returned).
+    """
+    if not isinstance(scores, dict):
+        return None
+
+    def _words(side: str) -> set:
+        v = scores.get(side) or {}
+        fr = v.get("framing") if isinstance(v, dict) else None
+        return {w.strip() for w in (fr or []) if isinstance(w, str) and w.strip()}
+
+    sw, dw = _words("state"), _words("diaspora")
+    if not sw or not dw:
+        # No opposing view on one side → little to dispute.
+        return 0.15
+    union = len(sw | dw)
+    distinctness = 1.0 - (len(sw & dw) / union if union else 0.0)  # 1 = fully opposed
+    depth = min(len(sw), len(dw), 3) / 3.0  # 0..1 — both sides substantively framed
+    score = 0.35 + 0.55 * distinctness * depth + 0.10 * depth
+    return round(min(1.0, max(0.0, score)), 2)
+
 # Subgroup labels for prompt presentation. The LLM sees articles tagged
 # with these Farsi strings and is asked to cluster its bullet output by
 # the same labels.

@@ -1439,7 +1439,14 @@ async def step_summarize_newly_visible():
                     "scores": analysis.get("scores"),
                     "llm_model_used": settings.story_analysis_model,
                 }
-                if analysis.get("dispute_score") is not None:
+                # Deterministic dispute_score from framing-word divergence —
+                # the LLM clustered on ~0.5 for everything, breaking the
+                # «تقابل روایت‌ها» ordering. See story_analysis.compute_dispute_score.
+                from app.services.story_analysis import compute_dispute_score as _cds
+                _det_dispute = _cds(analysis.get("scores"))
+                if _det_dispute is not None:
+                    extras["dispute_score"] = _det_dispute
+                elif analysis.get("dispute_score") is not None:
                     extras["dispute_score"] = analysis["dispute_score"]
                 if analysis.get("loaded_words"):
                     extras["loaded_words"] = analysis["loaded_words"]
@@ -1981,7 +1988,14 @@ async def step_summarize():
                 if analysis.get("article_evidence"):
                     extras["article_evidence"] = analysis["article_evidence"]
                 # Store dispute score for homepage "most disputed" section
-                if analysis.get("dispute_score") is not None:
+                # Deterministic dispute_score from framing-word divergence —
+                # the LLM clustered on ~0.5 for everything, breaking the
+                # «تقابل روایت‌ها» ordering. See story_analysis.compute_dispute_score.
+                from app.services.story_analysis import compute_dispute_score as _cds
+                _det_dispute = _cds(analysis.get("scores"))
+                if _det_dispute is not None:
+                    extras["dispute_score"] = _det_dispute
+                elif analysis.get("dispute_score") is not None:
                     extras["dispute_score"] = analysis["dispute_score"]
                 # Store loaded words for homepage "words of the week" section
                 if analysis.get("loaded_words"):

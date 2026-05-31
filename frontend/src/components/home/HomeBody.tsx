@@ -722,15 +722,22 @@ export default async function HomeBody({
     allSummaries[id] = tl || allAnalyses[id]?.summary_fa || null;
   }
 
-  // Re-sort disputed candidates by dispute_score (higher = more disputed), falling back to pct gap
-  const disputedResorted = [...disputedCandidates].sort((a, b) => {
-    const scoreA = allAnalyses[a.id]?.dispute_score ?? null;
-    const scoreB = allAnalyses[b.id]?.dispute_score ?? null;
-    if (scoreA !== null && scoreB !== null) return scoreB - scoreA;
-    if (scoreA !== null) return -1;
-    if (scoreB !== null) return 1;
-    return Math.abs(b.state_pct - b.diaspora_pct) - Math.abs(a.state_pct - a.diaspora_pct);
-  });
+  // Pick disputed stories by the real dispute_score (state-vs-diaspora
+  // framing divergence, backfilled deterministically — the LLM had clustered
+  // every story on ~0.5, so this box used to just show the top-trending
+  // two-sided stories rather than the genuinely-contested ones). Sort by
+  // dispute desc (tiebreak: coverage-% gap), then PREFER the genuinely-
+  // disputed subset (>= floor); fall back to the full sorted list if too few
+  // qualify so the box isn't empty on calm news days.
+  const DISPUTE_FLOOR = 0.45;
+  const byDispute = [...disputedCandidates].sort((a, b) =>
+    ((allAnalyses[b.id]?.dispute_score ?? 0) - (allAnalyses[a.id]?.dispute_score ?? 0))
+    || (Math.abs(b.state_pct - b.diaspora_pct) - Math.abs(a.state_pct - a.diaspora_pct)),
+  );
+  const genuinelyDisputed = byDispute.filter(
+    s => (allAnalyses[s.id]?.dispute_score ?? 0) >= DISPUTE_FLOOR,
+  );
+  const disputedResorted = genuinelyDisputed.length >= 2 ? genuinelyDisputed : byDispute;
   mostDisputed = disputedResorted[0] || null;
   secondDisputed = disputedResorted[1] || null;
   thirdDisputed = disputedResorted[2] || null;

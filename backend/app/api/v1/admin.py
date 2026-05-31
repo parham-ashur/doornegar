@@ -3611,6 +3611,50 @@ async def trigger_recompute_homepage_aggregates():
         return {"status": "error", "error": str(e)}
 
 
+@router.post("/stories/recompute-dispute-scores", dependencies=[Depends(require_admin)])
+async def recompute_dispute_scores(db: AsyncSession = Depends(get_db)):
+    """Backfill deterministic dispute_score on every story from its stored
+    framing words (no LLM). The LLM had clustered dispute_score on ~0.5 for
+    almost everything, breaking the homepage «تقابل روایت‌ها» / most-disputed
+    ordering. story_analysis.compute_dispute_score derives it from the
+    state-vs-diaspora framing-word divergence already stored in the blob.
+    """
+    import json as _json
+    from sqlalchemy import select as _select, update as _update
+    from app.models.story import Story as _Story
+    from app.services.story_analysis import compute_dispute_score as _cds
+
+    rows = (await db.execute(
+        _select(_Story.id, _Story.summary_en).where(_Story.summary_en.isnot(None))
+    )).all()
+    updated = 0
+    skipped = 0
+    for sid, raw in rows:
+        try:
+            blob = _json.loads(raw) if isinstance(raw, str) else (raw or {})
+        except Exception:
+            skipped += 1
+            continue
+        if not isinstance(blob, dict):
+            skipped += 1
+            continue
+        ds = _cds(blob.get("scores"))
+        if ds is None:
+            skipped += 1
+            continue
+        if blob.get("dispute_score") == ds:
+            continue
+        blob["dispute_score"] = ds
+        await db.execute(
+            _update(_Story).where(_Story.id == sid)
+            .values(summary_en=_json.dumps(blob, ensure_ascii=False))
+            .execution_options(synchronize_session=False)
+        )
+        updated += 1
+    await db.commit()
+    return {"status": "ok", "updated": updated, "skipped": skipped, "total": len(rows)}
+
+
 @router.get("/neutrality/export", dependencies=[Depends(require_admin)])
 async def export_neutrality_audit(
     top: int = 20,

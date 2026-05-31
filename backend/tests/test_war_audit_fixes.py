@@ -4028,3 +4028,31 @@ class TestStoryDetailIsrAtLeast30Min:
             f"{seconds}. Phase G.3.4 — June 2 GB/day target requires "
             "this path stays at >= 30 min cache age."
         )
+
+
+class TestDisputeScoreDeterministic:
+    """2026-05-31: dispute_score is derived deterministically from per-side
+    framing-word divergence (story_analysis.compute_dispute_score), not the
+    LLM's value which clustered on ~0.5 and broke «تقابل روایت‌ها» ordering.
+    """
+
+    def test_opposed_framings_score_high(self):
+        from app.services.story_analysis import compute_dispute_score as f
+        s = f({"state": {"framing": ["مقاومت", "پیروزی", "اقتصادی"]},
+               "diaspora": {"framing": ["تهدید", "سرکوب", "حقوق بشر"]}})
+        assert s is not None and s >= 0.9, f"fully-opposed framings should be high, got {s}"
+
+    def test_one_sided_scores_low(self):
+        from app.services.story_analysis import compute_dispute_score as f
+        assert f({"state": {"framing": ["مقاومت"]}, "diaspora": {"framing": []}}) == 0.15
+
+    def test_no_scores_returns_none(self):
+        from app.services.story_analysis import compute_dispute_score as f
+        assert f(None) is None and f({}) == 0.15 or f(None) is None
+
+    def test_overlapping_framings_below_dispute_floor(self):
+        # The frontend تقابل box uses a 0.45 floor; identical framings must
+        # fall below it so non-contested stories don't show as «disputed».
+        from app.services.story_analysis import compute_dispute_score as f
+        s = f({"state": {"framing": ["جنگ", "صلح"]}, "diaspora": {"framing": ["جنگ", "صلح"]}})
+        assert s is not None and s < 0.45, f"identical framings should be < 0.45, got {s}"
