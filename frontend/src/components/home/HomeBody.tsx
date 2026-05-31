@@ -998,50 +998,53 @@ export default async function HomeBody({
           <div className="col-span-6 py-6 px-5">
             {wrapStory({ storyId: hero.id, title: localizedStoryTitle(hero, locale), imageUrl: hero.image_url }, (
               <Link href={storyHref(hero.id)} className="group block">
-                <div className="aspect-[16/9] overflow-hidden bg-slate-100 dark:bg-slate-800">
+                <div className="relative aspect-[16/9] overflow-hidden bg-slate-100 dark:bg-slate-800">
                   <SafeImage
                     src={hero.image_url}
                     className="h-full w-full object-cover"
                     sizes="(max-width: 1024px) 100vw, 50vw"
                     priority
                   />
+                  {/* Update badge overlaid on the image, bottom-right.
+                      Same staleness gate as UpdateBadge: a closed/frozen
+                      story (no new article in >7d) must not show «بروزرسانی»
+                      from a pure metric recompute. */}
+                  {(() => {
+                    const heroLuStale = hero.last_updated_at
+                      ? Date.now() - new Date(hero.last_updated_at).getTime() >= 7 * 86400 * 1000
+                      : false;
+                    if (!heroLuStale && isUpdateBadgeFresh(hero.update_signal)) {
+                      const heroReason = formatUpdateReason(hero.update_signal!);
+                      return (
+                        <div className="absolute bottom-2 right-2 inline-flex items-center gap-1.5 bg-orange-500/95 px-2 py-1 shadow-sm">
+                          <span className="inline-block h-1.5 w-1.5 bg-white" />
+                          <span className="text-[12px] font-bold text-white">بروزرسانی</span>
+                          {heroReason && (
+                            <span className="text-[12px] text-white/90">{heroReason}</span>
+                          )}
+                        </div>
+                      );
+                    }
+                    if (
+                      hero.last_updated_at &&
+                      Date.now() - new Date(hero.last_updated_at).getTime() < 2 * 3600 * 1000
+                    ) {
+                      return (
+                        <div className="absolute bottom-2 right-2 inline-flex items-center gap-1.5 bg-emerald-500/95 px-2 py-1 shadow-sm">
+                          <span className="inline-block h-1.5 w-1.5 bg-white" />
+                          <span className="text-[12px] font-bold text-white">مقالهٔ جدید</span>
+                          <span className="text-[12px] text-white/90">{formatRelativeTime(hero.last_updated_at, "fa")}</span>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
                 </div>
                 <h1 className="mt-4 text-[28px] font-black leading-snug text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 line-clamp-3">
                   {localizedStoryTitle(hero, locale)}
                 </h1>
               </Link>
             ))}
-            {/* Two-tier hero update chip. Orange "بروزرسانی" fires when
-                a trigger is flagged (side flip, coverage shift, burst,
-                or a rewritten bias comparison). Green "مقالهٔ جدید"
-                fires when new articles arrived within the last 2h but
-                no trigger qualified — still useful to show the hero is
-                actively gaining coverage. */}
-            {isUpdateBadgeFresh(hero.update_signal) ? (() => {
-              const heroReason = formatUpdateReason(hero.update_signal!);
-              return (
-                <div className="mt-2 inline-flex items-center gap-2 border border-orange-300 dark:border-orange-700 bg-orange-50 dark:bg-orange-900/20 px-2 py-1">
-                  <span className="inline-block h-1.5 w-1.5 bg-orange-500" />
-                  <span className="text-[12px] font-bold text-orange-700 dark:text-orange-300">بروزرسانی</span>
-                  {heroReason && (
-                    <span className="text-[12px] text-orange-700/80 dark:text-orange-300/80">
-                      {heroReason}
-                    </span>
-                  )}
-                </div>
-              );
-            })() : (
-              hero.last_updated_at &&
-              Date.now() - new Date(hero.last_updated_at).getTime() < 2 * 3600 * 1000 && (
-                <div className="mt-2 inline-flex items-center gap-2 border border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/20 px-2 py-1">
-                  <span className="inline-block h-1.5 w-1.5 bg-emerald-500" />
-                  <span className="text-[12px] font-bold text-emerald-700 dark:text-emerald-300">مقالهٔ جدید</span>
-                  <span className="text-[12px] text-emerald-700/80 dark:text-emerald-300/80">
-                    {formatRelativeTime(hero.last_updated_at, "fa")}
-                  </span>
-                </div>
-              )
-            )}
             <Meta story={hero} />
             {/* Two-side bias comparison (flat, homepage-density) */}
             {(() => {
