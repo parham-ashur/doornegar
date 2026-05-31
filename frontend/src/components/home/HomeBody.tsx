@@ -285,8 +285,18 @@ function isUpdateBadgeFresh(sig: NonNullable<StoryBrief["update_signal"]> | null
 }
 
 function UpdateBadge({ story, className = "mt-1.5" }: { story: StoryBrief; className?: string }) {
+  // «بروزرسانی» must mean NEW REPORTING arrived. A closed/frozen story
+  // (no new article in >7d) can still carry a fresh update_signal from a
+  // pure metric recompute — e.g. the 2026-05-31 dispute_score methodology
+  // rollout restamped detected_at on 70 stories, lighting up «اختلاف
+  // روایت‌ها افزایش یافت» on month-old frozen clusters that received no
+  // articles. New coverage ticks last_updated_at; a recompute doesn't. So
+  // suppress the orange badge when last_updated_at is definitively stale.
+  const luStale = story.last_updated_at
+    ? Date.now() - new Date(story.last_updated_at).getTime() >= 7 * 86400 * 1000
+    : false; // missing timestamp → don't suppress (legacy rows)
   // Orange — significant update
-  if (isUpdateBadgeFresh(story.update_signal)) {
+  if (!luStale && isUpdateBadgeFresh(story.update_signal)) {
     const reason = formatUpdateReason(story.update_signal!);
     return (
       <span
@@ -455,6 +465,7 @@ export default async function HomeBody({
   // falls off the prime slots even when picks would otherwise be
   // empty. Anything beyond MAX_AGE is dropped from every pick.
   const HERO_MAX_AGE_MS = 72 * 3600 * 1000;        // 3d — hero must be hot
+  const HERO_DROUGHT_AGE_MS = 26 * 86400 * 1000;   // 26d — last-resort hero only when nothing fresher exists
   const BLINDSPOT_MAX_AGE_MS = 7 * 86400 * 1000;   // 7d — F7 mirror
   const DISPUTE_MAX_AGE_MS = 14 * 86400 * 1000;    // 14d — disputed slot
   const BRIEFING_MAX_AGE_MS = 14 * 86400 * 1000;   // 14d — weekly briefing
@@ -603,7 +614,18 @@ export default async function HomeBody({
     sorted.find(s => heroFresh(s) && s.state_pct >= 5 && s.diaspora_pct >= 5) ||
     sorted.find(s => heroSafe(s) && s.state_pct >= 5 && s.diaspora_pct >= 5) ||
     sorted.find(heroFresh) ||
-    sorted.find(heroSafe);
+    sorted.find(heroSafe) ||
+    // Drought fallback (2026-05-31): the 14d cap above leaves the marquee
+    // EMPTY when every trending story is older — which is exactly what
+    // happened after the May cron lockdown left the freshest stories at
+    // 16-25d AND the two genuinely-fresh ones were archived (a grab-bag +
+    // a false geo-merge). An empty hero reads as broken, so fall back to
+    // the best older story: prefer a two-sided bias narrative, else the
+    // freshest available within the wider window. Auto-tightens back to
+    // 14d the moment the now-live cron brings fresh news.
+    sorted.find(s => withinAge(HERO_DROUGHT_AGE_MS)(s) && hasBiasNarrative(s) && s.state_pct >= 5 && s.diaspora_pct >= 5) ||
+    sorted.find(s => withinAge(HERO_DROUGHT_AGE_MS)(s) && hasBiasNarrative(s)) ||
+    sorted.find(withinAge(HERO_DROUGHT_AGE_MS));
   if (hero) usedIds.add(hero.id);
 
   // Weekly briefing: left-text "در روزهای گذشته" block. 3 hero-style
