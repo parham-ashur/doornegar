@@ -152,11 +152,11 @@ The cron halts all LLM/egress-heavy steps when month-to-date LLM spend reaches 8
 </strict-rule>
 
 <strict-rule name="2gb-daily-egress-cap">
-Hard rule (Parham 2026-05-09; tightened 2026-05-12). Neon free tier = 100 GB/month outbound; 100 / 30 = 3.33 GB/day. After Phase G structural cuts shipped 2026-05-11, the cap was lowered from 3.0 → **2.0 GB/day** with warning at 1.0 GB. When today's egress (from `pg_stat_database.tup_returned` delta against start-of-day snapshot in `egress_daily_snapshot`) crosses 2.0 GB, `should_halt_for_budget` returns `daily_egress_cap_*` and `run_maintenance` halts the ENTIRE pipeline (same semantics as `manual_lock` — NOT just LLM steps). Resets at UTC midnight.
+Hard rule (Parham 2026-05-09; tightened 2026-05-12; raised 2026-05-31). Neon free tier = 100 GB/month outbound; 100 / 30 = 3.33 GB/day. The cap went 3.0 → 2.0 GB/day (Phase G.4, 2026-05-12), then **raised to 5.0 GB/day on 2026-05-31** by explicit Parham acknowledgement (warning scaled to 2.5 GB). Rationale: the `tup_returned`-based estimate overcounts ~1.5×, so 5.0 ESTIMATE ≈ ~3.3 GB ACTUAL ≈ the free-tier daily budget — enough headroom for a normal full run to finish without halting partway. When today's egress (from `pg_stat_database.tup_returned` delta against start-of-day snapshot in `egress_daily_snapshot`) crosses the cap, `should_halt_for_budget` returns `daily_egress_cap_*` and `run_maintenance` halts the ENTIRE pipeline (same semantics as `manual_lock` — NOT just LLM steps). Resets at UTC midnight. The `DN_DAILY_EGRESS_CAP_GB` env var overrides the default for one-off runs (remove it afterward).
 <why>2026-05-09 incident: `HALT_SKIP_STEPS` only blocked LLM-heavy steps; ~41 non-LLM heavy steps (cluster, recompute_centroids, ingest, audit_clusters) still ran on every cron fire under `manual_lock`, burning ~10 GB/fire × 3 fires/day = 30 GB. Phase G.4 lowered the cap from 3.0 → 2.0 as the post-Phase G survival floor.</why>
 <location>`DAILY_EGRESS_CAP_GB` and `get_daily_egress_estimate()` in `budget_guard.py`.</location>
-<verification>Tripwire `TestDailyEgressCap3GB::test_constant_set_to_2gb` (class still named for history) blocks any cycle that weakens the constant or removes the early-exit.</verification>
-<antipattern>NEVER raise the cap above 2.0 without an explicit acknowledgement from Parham. Lowering further is fine; the rule prevents weakening, not tightening.</antipattern>
+<verification>Tripwire `TestDailyEgressCap3GB::test_constant_set_to_5gb` (class still named for history) blocks any cycle that changes the constant or removes the early-exit.</verification>
+<antipattern>NEVER change the cap (currently 5.0) without an explicit acknowledgement from Parham. Lowering is fine; the rule prevents silent changes either way.</antipattern>
 </strict-rule>
 
 <strict-rule name="manual-lock-stops-everything">
