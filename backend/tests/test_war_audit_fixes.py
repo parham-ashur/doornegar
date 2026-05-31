@@ -2989,13 +2989,15 @@ class TestDailyEgressCap3GB:
             Path(__file__).parent.parent
             / "app" / "services" / "budget_guard.py"
         ).read_text()
-        assert "DAILY_EGRESS_CAP_GB = 2.0" in src, (
-            "DAILY_EGRESS_CAP_GB must be 2.0 after Phase G.4 "
+        assert 'os.getenv("DN_DAILY_EGRESS_CAP_GB", "2.0")' in src, (
+            "DAILY_EGRESS_CAP_GB default must remain 2.0 after Phase G.4 "
             "(Parham 2026-05-12). The 100 GB Neon free tier / 30 "
             "days = 3.33 GB/day; 2.0 is the post-Phase G target "
-            "with 40% headroom. Future cycles must not raise this "
-            "without explicit Parham acknowledgement — see strict "
-            "rule 3gb-daily-egress-cap in CLAUDE.md."
+            "with 40% headroom. The DN_DAILY_EGRESS_CAP_GB env override "
+            "(Parham 2026-05-31) lets the operator temporarily raise it for "
+            "a one-off run, but the CODE DEFAULT must stay 2.0. Future cycles "
+            "must not change the default without explicit Parham acknowledgement "
+            "— see strict rule 2gb-daily-egress-cap in CLAUDE.md."
         )
 
     def test_should_halt_for_budget_returns_daily_egress_cap_reason(self):

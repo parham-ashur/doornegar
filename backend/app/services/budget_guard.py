@@ -28,6 +28,7 @@ Manual override / reset:
 """
 
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -58,7 +59,21 @@ HALT_HARD_USD = MONTHLY_BUDGET_USD * 0.85  # $25.50
 # hard rule that survived the 2026-05-09 30 GB egress incident
 # (caused by HALT_SKIP_STEPS only covering LLM-heavy steps; the
 # ~41 non-LLM steps still ran on every cron fire under the lock).
-DAILY_EGRESS_CAP_GB = 2.0
+# DEFAULT survival floor = 2.0 GB/day (the code floor — unchanged).
+# Operator escape hatch (Parham 2026-05-31): for a deliberate one-off — e.g. a
+# full backlog catch-up run that would otherwise halt partway — set
+# DN_DAILY_EGRESS_CAP_GB on the SERVICE env to temporarily raise it, then
+# REMOVE the var to restore the floor. Requires explicit Parham acknowledgement
+# per strict-rule "2gb-daily-egress-cap". The loud warning below fires whenever
+# the active cap != 2.0 so an un-removed override can't silently disable the
+# survival floor.
+DAILY_EGRESS_CAP_GB = float(os.getenv("DN_DAILY_EGRESS_CAP_GB", "2.0"))
+if DAILY_EGRESS_CAP_GB != 2.0:
+    logger.warning(
+        "DAILY_EGRESS_CAP_GB OVERRIDDEN to %.1f GB via DN_DAILY_EGRESS_CAP_GB "
+        "— the 2.0 GB survival floor is DISABLED. REMOVE the env var to restore it.",
+        DAILY_EGRESS_CAP_GB,
+    )
 # Same calibration anchor as MTD: 4 KB average row weight, mapping
 # tup_returned (rows) to bytes-on-the-wire estimate. Estimate runs
 # ~30-50% high vs Neon's actual billing — that's intentional. The
