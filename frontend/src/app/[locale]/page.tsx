@@ -12,9 +12,10 @@ import HomeBody from "@/components/home/HomeBody";
 // Bumped 600 → 900 (15 min) on 2026-05-06 as Vercel headroom for the
 // upcoming /en/ + /fr/ rollout. Per-locale ISR caches multiply
 // page-regen work; this bump pre-pays for the multiplier. Underlying
-// data shifts only on the 6-hourly cron, so 15-min freshness still
-// doesn't affect what readers see.
-export const revalidate = 900;
+// data shifts only on the 2×/day cron (0 3,15 UTC), so 30-min freshness
+// still doesn't affect what readers see — and halves homepage regen
+// fan-out (Lever 1 egress cut, 2026-05-31).
+export const revalidate = 1800;
 
 export default async function HomePage({
   params: { locale },

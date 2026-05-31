@@ -43,7 +43,7 @@ router = APIRouter()
 import asyncio as _asyncio
 _stories_cache: dict[str, dict] = {}
 _stories_cache_lock = _asyncio.Lock()
-_STORIES_CACHE_TTL = 120  # 2 minutes
+_STORIES_CACHE_TTL = 600  # 10 minutes — data changes 2×/day; longer TTL cuts origin egress (Lever 1, 2026-05-31)
 _STORIES_CACHE_MAX_ENTRIES = 64  # hard ceiling — sweep when exceeded
 
 
@@ -215,13 +215,15 @@ async def trending_stories(
 ):
     # Phase F.3 (Parham 2026-05-09): Cloudflare CDN cache. Without
     # this header, every Vercel-region ISR regen hits Railway → Neon
-    # independently. With s-maxage=300, Cloudflare absorbs cross-region
-    # duplicates and Neon only sees one regen per 5-min window globally.
-    # stale-while-revalidate=600 lets the edge serve a slightly stale
+    # independently. With s-maxage, Cloudflare absorbs cross-region
+    # duplicates and Neon only sees one regen per window globally.
+    # stale-while-revalidate lets the edge serve a slightly stale
     # response while it fetches a fresh one in the background — keeps
     # latency low under cache miss.
+    # Lever 1 (2026-05-31): bumped 300→600 s-maxage (+600→1200 swr) —
+    # data changes 2×/day, so one global regen per 10-min window is plenty.
     response.headers["Cache-Control"] = (
-        "public, s-maxage=300, stale-while-revalidate=600"
+        "public, s-maxage=600, stale-while-revalidate=1200"
     )
 
     cache_key = f"trending:{limit}:{min_articles}"

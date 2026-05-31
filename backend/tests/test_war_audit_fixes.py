@@ -2931,9 +2931,10 @@ class TestPhaseFOptimizationsLanded:
         idx = src.find('@router.get("/trending"')
         next_dec = src.find("@router.", idx + 1)
         body = src[idx:next_dec if next_dec > 0 else idx + 3000]
-        assert "s-maxage=300" in body, (
-            "Trending response must set Cache-Control: s-maxage=300 "
-            "so Cloudflare absorbs cross-region duplicate fetches."
+        assert "s-maxage=600" in body, (
+            "Trending response must set Cache-Control: s-maxage=600 "
+            "so Cloudflare absorbs cross-region duplicate fetches "
+            "(bumped 300→600 in Lever 1, 2026-05-31 — data changes 2×/day)."
         )
         assert "stale-while-revalidate" in body, (
             "Trending response must include stale-while-revalidate "

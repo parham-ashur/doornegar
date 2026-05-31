@@ -4357,7 +4357,10 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
 
     recent_runs_rows = (await db.execute(_t(
         "SELECT run_at, status, elapsed_s, steps, error "
-        "FROM maintenance_logs ORDER BY run_at DESC LIMIT 5"
+        # Lever 1 (2026-05-31): 5→3 trims the 2 heaviest old `steps` JSONB
+        # blobs per health/overview call; 3 still covers last + 2 priors
+        # for any "fails ≤ prior run" comparison.
+        "FROM maintenance_logs ORDER BY run_at DESC LIMIT 3"
     ))).all()
 
     recent_runs: list[dict] = []

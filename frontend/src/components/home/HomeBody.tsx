@@ -34,9 +34,9 @@ const AUTH_HEADERS: HeadersInit = BACKEND_API_TOKEN
 // the API is slow). Next.js ISR caches those fallback values as if they
 // were real, which can leave the homepage stuck on empty-state for up
 // to the TTL window. Short TTLs heal that within a few minutes.
-const TRENDING_TTL = 300;        // 5 min
-const ANALYSIS_TTL = 300;        // 5 min
-const TELEGRAM_TTL = 300;        // 5 min
+const TRENDING_TTL = 600;        // 10 min — data changes 2×/day; longer TTL halves regen egress (Lever 1, 2026-05-31)
+const ANALYSIS_TTL = 600;        // 10 min
+const TELEGRAM_TTL = 600;        // 10 min
 
 async function fetchAPI<T>(path: string): Promise<T | null> {
   try {
