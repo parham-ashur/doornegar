@@ -3307,6 +3307,171 @@ async def _nullctx():
     yield
 
 
+# ── Niloofar coherence audit that ACTS (2026-06-01) ────────────────────
+# The flag-only audit above skips frozen stories — but a frozen grab-bag
+# still shows on the homepage during a content drought (frozen-stays-
+# visible). So this pass audits the HOMEPAGE-VISIBLE set (incl. frozen),
+# and for a story that's both (a) deterministically incoherent (articles
+# scatter away from the centroid) AND (b) confirmed a grab-bag by a cheap
+# LLM, it ARCHIVES it. Double-gated so a legitimately big coherent story
+# (e.g. the 161-article Hormuz cluster, whose articles hug its centroid)
+# is never touched. Archive is reversible (PATCH archived=false).
+COHERENCE_ACT_PROMPT = """\
+You are a meticulous Persian news editor checking whether a story cluster is \
+ABOUT ONE STORY or is a grab-bag of unrelated events mislabeled with one title.
+
+Cluster title:
+{title}
+
+Sample of article headlines in the cluster:
+{headlines_block}
+
+A coherent cluster: the headlines are all about the SAME specific event/topic the \
+title names. A grab-bag: the headlines span several unrelated events (different \
+places, different topics) and the title only matches a minority.
+
+Return ONLY valid JSON:
+{{"grab_bag": true_or_false, "off_topic_ratio": 0.0_to_1.0, "dominant_topic": "...", "reason": "short Persian"}}
+
+- off_topic_ratio = fraction of headlines NOT about the title's specific event.
+- grab_bag = true only when the cluster clearly mixes several unrelated events.
+"""
+
+
+async def _call_openai_coherence(prompt: str) -> dict | None:
+    """Cheap-tier (gpt-4.1-nano) JSON call for the coherence-act audit.
+    Returns parsed dict, or None on ANY failure — no silent fallback:
+    the caller NEVER archives on a None (no LLM confirm = no action)."""
+    if not settings.openai_api_key:
+        return None
+    from app.services.llm_helper import build_openai_params
+    from app.services.llm_usage import log_llm_usage
+
+    def _sync_call():
+        client = OpenAI(api_key=settings.openai_api_key)
+        try:
+            params = build_openai_params(
+                model=settings.content_type_model,
+                prompt=prompt,
+                max_tokens=300,
+                temperature=0,
+            )
+            response = client.chat.completions.create(**params)
+            return _parse_llm_response(response.choices[0].message.content), response.usage
+        except Exception as e:
+            logger.error(f"Coherence-audit LLM error: {e}")
+            return None, None
+
+    parsed, usage = await asyncio.get_event_loop().run_in_executor(None, _sync_call)
+    if usage is not None:
+        await log_llm_usage(
+            model=settings.content_type_model,
+            purpose="clustering.coherence_audit",
+            usage=usage,
+        )
+    return parsed or None
+
+
+async def audit_homepage_coherence(
+    db: AsyncSession,
+    *,
+    min_articles: int = 15,
+    sample_size: int = 8,
+    centroid_cohesion_floor: float = 0.55,
+    off_topic_archive_ratio: float = 0.5,
+) -> dict:
+    """Audit homepage-visible stories and ARCHIVE confirmed grab-bags.
+
+    Per story (homepage scope, article_count >= min_articles):
+    1. Deterministic pre-filter — mean cosine of sampled articles to the
+       story centroid. Coherent clusters hug the centroid (>floor); only
+       LOW-cohesion stories advance, so cost + risk stay on the suspects.
+    2. LLM confirm (cheap) — title vs sampled headlines → grab_bag verdict.
+       No LLM key / LLM error → None → NEVER archive (fail-safe).
+    3. Archive (+priority=-100) when both gates agree, logging the
+       evidence to story_events (coherence_archive). Reversible.
+    """
+    from app.nlp.embeddings import cosine_similarity as _cos
+    from app.services.homepage_scope import homepage_story_ids
+    from app.services.events import log_event as _log_event
+
+    stats = {"checked": 0, "low_cohesion": 0, "llm_confirmed": 0,
+             "archived": 0, "archived_titles": []}
+
+    hp_ids = await homepage_story_ids(db, trending_top_n=25, blindspot_top_n=20)
+    if not hp_ids:
+        return stats
+
+    rows = (await db.execute(
+        select(Story.id, Story.title_fa, Story.article_count, Story.centroid_embedding)
+        .where(
+            Story.id.in_(hp_ids),
+            Story.article_count >= min_articles,
+            Story.archived_at.is_(None),
+            Story.priority <= 0,  # respect manual pins
+        )
+    )).all()
+
+    for sid, title_fa, ac, centroid in rows:
+        if not centroid:
+            continue
+        stats["checked"] += 1
+        art_q = await db.execute(
+            select(Article.embedding, Article.title_fa, Article.title_original)
+            .where(Article.story_id == sid, Article.embedding.isnot(None))
+            .order_by(Article.published_at.desc().nullslast())
+            .limit(sample_size)
+        )
+        sample = [r for r in art_q.all() if r[0]]
+        if len(sample) < 5:
+            continue
+        cohesion = sum(_cos(r[0], centroid) for r in sample) / len(sample)
+        if cohesion >= centroid_cohesion_floor:
+            continue  # hugs the centroid → coherent → skip (no LLM)
+        stats["low_cohesion"] += 1
+
+        headlines = [(r[1] or r[2] or "").strip() for r in sample]
+        headlines = [h for h in headlines if h]
+        block = "\n".join(f"- {h}" for h in headlines)
+        verdict = await _call_openai_coherence(
+            COHERENCE_ACT_PROMPT.format(title=title_fa or "", headlines_block=block)
+        )
+        if not verdict:
+            continue  # fail-safe: no LLM confirm → no archive
+        if not (verdict.get("grab_bag") is True
+                and float(verdict.get("off_topic_ratio") or 0) >= off_topic_archive_ratio):
+            continue
+        stats["llm_confirmed"] += 1
+
+        from datetime import datetime as _dt_c, timezone as _tz_c
+        await db.execute(
+            update(Story).where(Story.id == sid).values(
+                archived_at=_dt_c.now(_tz_c.utc), priority=-100,
+            )
+        )
+        await _log_event(
+            db, event_type="coherence_archive", actor="maintenance",
+            story_id=sid,
+            signals={
+                "article_count": int(ac or 0),
+                "centroid_cohesion": round(cohesion, 3),
+                "off_topic_ratio": float(verdict.get("off_topic_ratio") or 0),
+                "reason": str(verdict.get("reason") or "")[:200],
+                "title_fa": (title_fa or "")[:120],
+            },
+        )
+        stats["archived"] += 1
+        stats["archived_titles"].append((title_fa or "")[:60])
+        logger.info(
+            "Coherence-archive: %s (ac=%s, cohesion=%.2f, off_topic=%.2f) — %s",
+            (title_fa or "")[:50], ac, cohesion,
+            float(verdict.get("off_topic_ratio") or 0), verdict.get("reason", ""),
+        )
+    await db.commit()
+    logger.info(f"Homepage coherence act: {stats}")
+    return stats
+
+
 # ---------------------------------------------------------------------------
 # Phase 4: agglomerative-clustering experimental path
 # ---------------------------------------------------------------------------

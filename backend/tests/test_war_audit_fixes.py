@@ -4199,3 +4199,48 @@ class TestHeadlineGrounding:
         title = "کشته‌شدگان از ۲۰۰ نفر فراتر رفت"
         out = asyncio.run(clustering.verify_title_grounding(title, ["خبر مرتبط"]))
         assert out == title  # never blocks, never fabricates a verdict
+
+
+# ═════════════════════════════════════════════════════════════════════
+# Niloofar coherence audit that ACTS (2026-06-01, Phase 2)
+# ═════════════════════════════════════════════════════════════════════
+
+class TestCoherenceAuditActs:
+    """audit_homepage_coherence archives confirmed grab-bags from the
+    homepage-visible set (incl. frozen, which the flag-only drift pass
+    skips), double-gated: low centroid cohesion AND an LLM grab_bag
+    verdict. No LLM confirm (None) => never archives (fail-safe)."""
+
+    def test_function_and_prompt_exist(self):
+        from app.services import clustering
+        assert hasattr(clustering, "audit_homepage_coherence")
+        assert "grab_bag" in clustering.COHERENCE_ACT_PROMPT
+
+    def test_wired_into_pipeline_step(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "auto_maintenance.py").read_text()
+        i = src.find("async def step_audit_cluster_coherence")
+        body = src[i:i+2000]
+        assert "audit_homepage_coherence" in body, (
+            "coherence-act audit no longer called from step_audit_cluster_coherence"
+        )
+
+    def test_no_archive_without_llm_confirm(self):
+        # Source-level guarantee: the archive path requires a non-None
+        # verdict AND grab_bag is True. A None verdict must `continue`.
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "app" / "services" / "clustering.py").read_text()
+        i = src.find("async def audit_homepage_coherence")
+        body = src[i:i+3000]
+        assert "if not verdict:" in body and "no archive" in body.lower(), (
+            "fail-safe (no LLM confirm => no archive) was removed"
+        )
+        assert 'grab_bag") is True' in body, "archive no longer requires grab_bag=True"
+
+    def test_respects_manual_pins_and_skips_small(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "app" / "services" / "clustering.py").read_text()
+        i = src.find("async def audit_homepage_coherence")
+        body = src[i:i+3000]
+        assert "Story.priority <= 0" in body, "coherence-act must respect manual pins (priority>0)"
+        assert "min_articles: int = 15" in body, "coherence-act should skip small stories"

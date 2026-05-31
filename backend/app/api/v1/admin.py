@@ -3773,6 +3773,8 @@ _LEARNING_EVENT_TYPES = (
     "feedback_niloofar_dismiss",
     "cluster_block_negative",
     "cluster_block_low_trust",
+    "cluster_block_geo_theater",
+    "coherence_archive",
     "source_trust_change",
 )
 
