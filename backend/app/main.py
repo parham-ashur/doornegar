@@ -120,6 +120,22 @@ async def lifespan(app: FastAPI):
                 "ALTER TABLE articles ADD COLUMN IF NOT EXISTS content_type VARCHAR(20)",
                 "ALTER TABLE articles ADD COLUMN IF NOT EXISTS content_type_confidence DOUBLE PRECISION",
                 "CREATE INDEX IF NOT EXISTS idx_articles_content_type ON articles(content_type) WHERE content_type IS NOT NULL",
+                # Ingest egress fix (migration a2b3c4d5e6f7, 2026-06-01).
+                # convert_telegram_posts_to_articles re-read every 7-day
+                # telegram post (full text rows) every run = 4.6 GB/run.
+                # converted_at lets it load only unprocessed posts; the
+                # partial index serves that exact query. ingested_at index
+                # turns the aggregator URL-dedup scan into an index range.
+                "ALTER TABLE telegram_posts ADD COLUMN IF NOT EXISTS converted_at TIMESTAMPTZ",
+                "CREATE INDEX IF NOT EXISTS idx_telegram_posts_unconverted ON telegram_posts(date) WHERE converted_at IS NULL",
+                "CREATE INDEX IF NOT EXISTS idx_articles_ingested_at ON articles(ingested_at)",
+                # One-time backfill (idempotent + guarded): mark posts older
+                # than 1 day as already-processed — prior convert runs have
+                # seen them — so the FIRST run after deploy doesn't reprocess
+                # the whole 7-day backlog. The <1d guard never marks genuinely
+                # fresh posts, so they still get a conversion pass.
+                "UPDATE telegram_posts SET converted_at = COALESCE(date, created_at, NOW()) "
+                "WHERE converted_at IS NULL AND COALESCE(date, created_at) < NOW() - INTERVAL '1 day'",
                 "ALTER TABLE sources ADD COLUMN IF NOT EXISTS content_filters JSONB",
                 "UPDATE sources SET content_filters = '{\"allowed\": [\"news\"]}'::jsonb WHERE content_filters IS NULL",
                 "UPDATE articles SET content_type = 'news', content_type_confidence = 1.0 WHERE content_type IS NULL",

@@ -108,6 +108,15 @@ class TelegramPost(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+    # Set once convert_telegram_posts_to_articles has PROCESSED this post
+    # (whether it became an article or was deliberately skipped). The
+    # conversion only loads posts where this IS NULL, so it no longer
+    # re-reads every 7-day post (full text rows) on every ingest — the
+    # 4.6 GB/run egress driver fixed 2026-06-01.
+    converted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     # Relationships
     channel: Mapped["TelegramChannel"] = relationship(back_populates="posts")
     story: Mapped["Story | None"] = relationship()  # noqa: F821

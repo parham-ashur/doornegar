@@ -90,6 +90,10 @@ class Article(Base):
 
     __table_args__ = (
         Index("idx_articles_published", "published_at"),
+        # Recency-filtered scans (aggregator dedup `WHERE ingested_at >= cutoff`,
+        # unclustered-retry) were full seq-scans without this — part of the
+        # 4.6 GB/run ingest egress fixed 2026-06-01.
+        Index("idx_articles_ingested_at", "ingested_at"),
     )
 
     def __repr__(self) -> str:

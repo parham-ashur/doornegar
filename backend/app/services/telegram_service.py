@@ -745,15 +745,28 @@ async def convert_telegram_posts_to_articles(db: AsyncSession) -> dict:
     # appear in the pipeline anyway. Loading all posts here used to scan
     # the entire telegram_posts table on every cron fire (full seq scan).
     recent_cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+    # Only load posts we haven't PROCESSED yet (converted_at IS NULL).
+    # Previously this re-read every 7-day post — full `text` rows — on
+    # every ingest run (the 4.6 GB/run egress driver). Now each post is
+    # processed once and stamped below, so steady-state loads only the
+    # handful ingested since the last run.
     posts_result = await db.execute(
         select(TelegramPost)
-        .where(TelegramPost.date >= recent_cutoff)
+        .where(
+            TelegramPost.date >= recent_cutoff,
+            TelegramPost.converted_at.is_(None),
+        )
         .order_by(TelegramPost.date.asc())
     )
     posts = posts_result.scalars().all()
+    _processed_at = datetime.now(timezone.utc)
 
     for post in posts:
         stats["checked"] += 1
+        # Stamp as processed up front so EVERY decision below (convert or
+        # any `continue` skip) marks the post done — it won't be re-read
+        # next run. A crash before db.commit() rolls this back → retried.
+        post.converted_at = _processed_at
 
         # Resolve channel username
         channel = channels_by_id.get(post.channel_id)
@@ -1129,7 +1142,11 @@ async def extract_articles_from_aggregators(db: AsyncSession) -> dict:
     # Limited to 30-day window — articles older than that are deleted by
     # step_delete_aged per the strict retention rule, so loading all URLs
     # was scanning the whole articles table on every cron fire.
-    existing_urls_cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+    # 30d → 7d (2026-06-01): aggregator posts are only mined from the last
+    # ~3 days, so a 30-day URL dedup set was needless. With the new
+    # idx_articles_ingested_at index this is now a small index range scan
+    # instead of a full articles seq-scan every run.
+    existing_urls_cutoff = datetime.now(timezone.utc) - timedelta(days=7)
     existing_urls_result = await db.execute(
         select(Article.url).where(Article.ingested_at >= existing_urls_cutoff)
     )

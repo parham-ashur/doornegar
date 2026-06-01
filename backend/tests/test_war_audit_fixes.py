@@ -4244,3 +4244,45 @@ class TestCoherenceAuditActs:
         body = src[i:i+3000]
         assert "Story.priority <= 0" in body, "coherence-act must respect manual pins (priority>0)"
         assert "min_articles: int = 15" in body, "coherence-act should skip small stories"
+
+
+# ═════════════════════════════════════════════════════════════════════
+# Ingest egress fix — telegram convert sentinel + recency indexes
+# (2026-06-01: the `ingest` step was 4.6 GB/run, 1.2M rows scanned)
+# ═════════════════════════════════════════════════════════════════════
+
+class TestIngestEgressFix:
+    def test_telegrampost_has_converted_at(self):
+        from app.models.social import TelegramPost
+        assert hasattr(TelegramPost, "converted_at")
+
+    def test_convert_filters_unprocessed_only(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "app" / "services" / "telegram_service.py").read_text()
+        i = src.find("async def convert_telegram_posts_to_articles")
+        body = src[i:i+3000]
+        assert "TelegramPost.converted_at.is_(None)" in body, (
+            "convert no longer filters to unprocessed posts — reintroduces the "
+            "re-read-every-7-day-post egress driver"
+        )
+        assert "post.converted_at = _processed_at" in body, "posts no longer stamped processed"
+
+    def test_aggregator_window_tightened(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "app" / "services" / "telegram_service.py").read_text()
+        assert "existing_urls_cutoff = datetime.now(timezone.utc) - timedelta(days=7)" in src, (
+            "aggregator URL-dedup window regressed above 7d"
+        )
+
+    def test_ingested_at_indexed(self):
+        from app.models.article import Article
+        names = {ix.name for ix in Article.__table__.indexes}
+        assert "idx_articles_ingested_at" in names
+
+    def test_selfheal_and_migration_present(self):
+        from pathlib import Path
+        main_src = (Path(__file__).parent.parent / "app" / "main.py").read_text()
+        assert "idx_telegram_posts_unconverted" in main_src
+        assert "telegram_posts ADD COLUMN IF NOT EXISTS converted_at" in main_src
+        mig = Path(__file__).parent.parent / "alembic" / "versions" / "a2b3c4d5e6f7_ingest_egress_converted_at_and_indexes.py"
+        assert mig.is_file(), "alembic migration missing"
