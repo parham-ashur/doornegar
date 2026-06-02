@@ -4836,6 +4836,47 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
     ))).scalar() or 0)
 
     # ── CANARIES ──────────────────────────────────────────────────────
+    # ── Self-running canaries (2026-06-02): grab-bag / drought / off-topic leak ──
+    # Turn "discover breakage by chance" into "get told in the morning briefing".
+    # All pure SQL (no LLM). Visible = the homepage-eligible scope (archived_at
+    # IS NULL AND article_count >= 5); frozen stories stay visible by design
+    # (frozen-stays-on-homepage rule) so they're INCLUDED — that's deliberate,
+    # because frozen mega-umbrellas (e.g. 82c03e04 at 161 art) are exactly the
+    # grab-bags oversized_active MISSES (it filters frozen_at IS NULL).
+    _hp = (await db.execute(_t("""
+        SELECT
+          COUNT(*) FILTER (
+            WHERE article_count >= 5 AND archived_at IS NULL
+              AND last_updated_at >= NOW() - INTERVAL '7 days'
+          ) AS fresh_visible,
+          COUNT(*) FILTER (
+            WHERE article_count >= :grabbag AND archived_at IS NULL
+          ) AS grabbag_visible,
+          COUNT(*) FILTER (
+            WHERE is_blindspot AND article_count >= 4 AND archived_at IS NULL
+              AND last_updated_at >= NOW() - INTERVAL '7 days'
+          ) AS fresh_blindspots
+        FROM stories
+    """), {"grabbag": 120})).mappings().one()
+    hp_fresh = int(_hp["fresh_visible"] or 0)
+    hp_grabbag = int(_hp["grabbag_visible"] or 0)
+    hp_blindspots = int(_hp["fresh_blindspots"] or 0)
+
+    # Off-topic / non-allowed articles sitting INSIDE visible stories — the
+    # precise measure of the cluster-pollution leak that the 2026-06-02 scope
+    # filter (off_topic label) + clustering content_type gate prevent going
+    # forward. Mirrors the cluster gate exactly: content_type set but NOT in the
+    # source's allowed list. A coherent homepage should trend toward 0 as the
+    # gate keeps new junk out and re-clustering drains the legacy clustered junk.
+    homepage_offtopic = int((await db.execute(_t("""
+        SELECT COUNT(*) FROM articles a
+        JOIN sources s ON s.id = a.source_id
+        JOIN stories st ON st.id = a.story_id
+        WHERE st.archived_at IS NULL AND st.article_count >= 5
+          AND a.content_type IS NOT NULL
+          AND NOT ((s.content_filters -> 'allowed') @> to_jsonb(a.content_type))
+    """))).scalar() or 0)
+
     def _canary(_id, name, value, threshold, status, why):
         return {
             "id": _id, "name": name, "value": value,
@@ -4858,6 +4899,46 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
             f"The 2026-05-02 fix added per-story capacity to step_recluster_orphans. Any > 0 = "
             f"regression. Note: {oversized_total} historical oversized stories exist in total "
             "but most are frozen and harmless.",
+        ),
+        _canary(
+            "homepage_grabbag", "Homepage grab-bag risk (visible story ≥120 articles)",
+            hp_grabbag, "= 0 (eyeball if > 0)",
+            "warn" if hp_grabbag > 0 else "ok",
+            "Visible stories (incl. frozen — frozen-stays-on-homepage) with article_count "
+            "≥ 120. oversized_active MISSES these because it filters frozen_at IS NULL, yet "
+            "the frozen mega-umbrellas (82c03e04 at 161 art) are the worst grab-bags. A single "
+            "coherent story rarely exceeds 120; > 0 = eyeball it (could be a legit large arc "
+            "like a merged negotiation cluster, or a grab-bag the coherence audit should archive). "
+            "Warn, not error — size is a proxy; the Phase-2 coherence audit does the real "
+            "cohesion check and archives true grab-bags (event_type=coherence_archive).",
+        ),
+        _canary(
+            "homepage_offtopic_leak", "Off-topic articles inside visible stories",
+            homepage_offtopic, "≈ 0",
+            "error" if homepage_offtopic > 50 else ("warn" if homepage_offtopic > 10 else "ok"),
+            "Articles whose content_type is set but NOT in the source's allowed list, yet still "
+            "clustered into a visible homepage story — the exact pollution (sports/weather/"
+            "off_topic) the 2026-06-02 scope filter + clustering content_type gate prevent going "
+            "forward. Should trend to 0 as the gate blocks new junk and re-clustering drains "
+            "legacy. Sustained growth = a leak (gate bypassed, or classifier mislabeling).",
+        ),
+        _canary(
+            "homepage_fresh_pool", "Fresh visible stories (drought signal)",
+            hp_fresh, "≥ 8",
+            "warn" if hp_fresh < 8 else "ok",
+            "Visible stories updated in the last 7 days — the pool the hero / پرمخاطب‌ترین / "
+            "تقابل sections draw from. Below 8 means content drought: the homepage falls back to "
+            "stale 26-day-window content and sections look thin/empty. Signals an ingest or "
+            "clustering stall, or a genuinely quiet news period — either way, worth a look.",
+        ),
+        _canary(
+            "blindspot_fresh_pool", "Fresh blindspot pool (نگاه یک‌جانبه)",
+            hp_blindspots, "≥ 2",
+            "warn" if hp_blindspots < 2 else "ok",
+            "Fresh (≤7d) is_blindspot stories with ≥4 articles. The نگاه یک‌جانبه section needs "
+            "BOTH a درون‌مرزی (state_only) and a برون‌مرزی (diaspora_only) candidate; below 2 means "
+            "at least one side is empty and the section shows a single card or falls back. "
+            "(Missing-main-story / bellwether canary is Step B — needs the external outlet fetch.)",
         ),
         _canary(
             "frozen_recently_bumped", "Frozen stories bumped after freeze",
