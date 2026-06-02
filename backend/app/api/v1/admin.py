@@ -2979,6 +2979,14 @@ async def patch_article(
 
 class _DetachArticlesRequest(_BaseModel):
     article_ids: list[str]
+    # When true, ALSO set content_type='other' so the article is removed from
+    # the clustering pool entirely (nlp_pipeline gates on
+    # content_filters.allowed @> content_type, default ["news"]). Use for
+    # TOTALLY-irrelevant articles (sports, weather, virus, unrelated foreign)
+    # that would otherwise just re-cluster and re-pollute. Plain detach
+    # (mark_irrelevant=False) leaves them eligible to re-cluster into the
+    # correct story — use that for relevant-but-misclustered articles.
+    mark_irrelevant: bool = False
 
 
 @router.post("/articles/detach", dependencies=[Depends(require_admin)])
@@ -3039,12 +3047,17 @@ async def detach_articles_from_stories(
         if sid is not None:
             by_story[sid].append(aid)
 
-    # Detach: set story_id = NULL on every found article.
+    # Detach: set story_id = NULL on every found article. When
+    # mark_irrelevant, also stamp content_type='other' so nlp_pipeline's
+    # allowed-list gate excludes them from the pool (no re-clustering).
     if found_ids:
+        _vals = {"story_id": None}
+        if request.mark_irrelevant:
+            _vals["content_type"] = "other"
         await db.execute(
             _update(Article)
             .where(Article.id.in_(found_ids))
-            .values(story_id=None)
+            .values(**_vals)
             .execution_options(synchronize_session=False)
         )
 
@@ -3083,7 +3096,10 @@ async def detach_articles_from_stories(
                 "detached_article_ids": [str(a) for a in detached_ids[:50]],
                 "old_count": old_count,
                 "new_count": live,
-                "reason": "off-topic (manual detach)",
+                "reason": (
+                    "irrelevant (detached + removed from pool)"
+                    if request.mark_irrelevant else "off-topic (manual detach)"
+                ),
             },
         )
 
@@ -3091,6 +3107,7 @@ async def detach_articles_from_stories(
     return {
         "status": "ok",
         "detached": len(found_ids),
+        "removed_from_pool": len(found_ids) if request.mark_irrelevant else 0,
         "not_found": not_found,
         "story_recounts": recounts,
     }

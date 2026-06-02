@@ -4303,6 +4303,23 @@ class TestIngestEgressFix:
             "_build_article_url_map regressed to loading full Article rows"
         )
 
+    def test_detach_mark_irrelevant_removes_from_pool(self):
+        """mark_irrelevant=True must also set content_type='other' so the
+        article leaves the clustering pool (nlp_pipeline allowed-list gate)
+        instead of re-clustering and re-polluting (Parham, 2026-06-02)."""
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py").read_text()
+        i = src.find("class _DetachArticlesRequest")
+        assert "mark_irrelevant: bool = False" in src[i:i + 800], (
+            "_DetachArticlesRequest lost the mark_irrelevant flag"
+        )
+        j = src.find("async def detach_articles_from_stories")
+        body = src[j:j + 3500]
+        assert 'request.mark_irrelevant' in body and '_vals["content_type"] = "other"' in body, (
+            "detach no longer sets content_type='other' on mark_irrelevant — "
+            "irrelevant articles would re-cluster"
+        )
+
     def test_article_url_map_built_once_per_run(self):
         """ingest_all_channels must build the map ONCE and pass it into
         ingest_channel — not rebuild it for each of the 44 channels."""
