@@ -2836,12 +2836,24 @@ async def cluster_articles(db: AsyncSession, *, deadline_ts: float | None = None
     # Without this gate, articles with no duplicates (e.g. niche
     # single-source pieces) cycle through cluster_new on every
     # pipeline run, paying the LLM tax indefinitely.
+    # content_type gate (Niloofar audit 2026-06-02): mirror the NLP/embed
+    # gate (nlp_pipeline.py) so ONLY classified, in-scope articles cluster.
+    # Previously this pool took every unclustered article regardless of
+    # content_type — so unclassified (content_type IS NULL, e.g. fresh
+    # Telegram-converted posts) and off-topic articles (sports/weather)
+    # reached the LLM title-grouper (cluster_new needs no embedding) and got
+    # assigned to stories, polluting war/negotiation clusters. NULL rows now
+    # wait for the classifier pass that runs BEFORE this step; off_topic /
+    # non-allowed labels never cluster.
     result = await db.execute(
         select(Article)
+        .join(Source, Source.id == Article.source_id)
         .where(
             Article.story_id.is_(None),
             Article.ingested_at >= cutoff,
             Article.cluster_attempts < MAX_CLUSTER_ATTEMPTS,
+            Article.content_type.isnot(None),
+            text("(sources.content_filters -> 'allowed') @> to_jsonb(articles.content_type)"),
         )
         .order_by(Article.published_at.desc().nullslast())
     )

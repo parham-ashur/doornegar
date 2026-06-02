@@ -4303,6 +4303,47 @@ class TestIngestEgressFix:
             "_build_article_url_map regressed to loading full Article rows"
         )
 
+    def test_offtopic_scope_filter(self):
+        """Gap 2 (Niloofar 2026-06-02): the classifier must drop out-of-scope
+        topics (sports/weather) even when they're original reporting, so they
+        never reach the clustering pool."""
+        from app.services.content_type import (
+            LABELS, DEFAULT_ALLOWED, heuristic_classify,
+        )
+        assert "off_topic" in LABELS
+        assert "off_topic" not in DEFAULT_ALLOWED, "off_topic must be dropped, not allowed"
+
+        class _Stub:
+            def __init__(self, title):
+                self.title_original = title
+                self.content_text = None
+                self.summary = None
+                self.url = ""
+                self.rss_category = None
+        # Section-tag-free sports title (the Telegram junk pattern)
+        v = heuristic_classify(_Stub("کاسمیرو در مسیر میامی برای تجدید دیدار با مسی"))
+        assert v is not None and v.label == "off_topic", (
+            "content-keyword off-domain detection regressed — sports junk would cluster"
+        )
+        v2 = heuristic_classify(_Stub("ایران قهرمان مسابقات وزنه‌برداری جوانان جهان شد"))
+        assert v2 is not None and v2.label == "off_topic"
+
+    def test_clustering_pool_gates_content_type(self):
+        """Gap 1 (Niloofar 2026-06-02): cluster_articles must only pull
+        classified + allowed articles, mirroring the NLP/embed gate — else
+        unclassified (NULL) / off-topic articles reach the LLM title-grouper
+        and pollute clusters."""
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "app" / "services" / "clustering.py").read_text()
+        i = src.find("async def cluster_articles")
+        body = src[i:i + 4000]
+        assert "Article.content_type.isnot(None)" in body, (
+            "cluster_articles no longer gates on content_type IS NOT NULL"
+        )
+        assert "content_filters -> 'allowed') @> to_jsonb(articles.content_type)" in body, (
+            "cluster_articles no longer mirrors the source allowed-list gate"
+        )
+
     def test_detach_mark_irrelevant_removes_from_pool(self):
         """mark_irrelevant=True must also set content_type='other' so the
         article leaves the clustering pool (nlp_pipeline allowed-list gate)

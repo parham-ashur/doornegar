@@ -48,7 +48,7 @@ from app.models.source import Source
 logger = logging.getLogger(__name__)
 
 
-LABELS = ("news", "opinion", "discussion", "aggregation", "other")
+LABELS = ("news", "opinion", "discussion", "aggregation", "other", "off_topic")
 DEFAULT_ALLOWED = ("news",)
 HEURISTIC_CONFIDENCE_FLOOR = 0.8
 LLM_BATCH_SIZE = 10
@@ -145,6 +145,27 @@ _OFF_DOMAIN_TITLE_PREFIXES = (
     # Lifestyle
     "آشپزی", "طالع", "فال", "گردشگری",
 )
+# High-precision off-domain terms that can appear ANYWHERE in the title,
+# not just as a section-label prefix. Catches Telegram-converted posts and
+# feeds that carry no rss_category/section tag (e.g. «کاسمیرو در مسیر میامی»,
+# «ایران قهرمان وزنه‌برداری جهان شد») — the exact junk that slipped past the
+# prefix/rss checks into war clusters (Niloofar audit 2026-06-02). Kept tight:
+# sports-specific terms + unambiguous club/athlete proper nouns + a few
+# lifestyle tells. Anything ambiguous falls through to the LLM scope check.
+_OFF_DOMAIN_CONTENT = (
+    # Sports — competitions, roles, transfers
+    "لیگ برتر", "لیگ قهرمانان", "جام جهانی", "جام ملت", "سرمربی", "نیمکت ذخیره",
+    "نقل و انتقالات", "وزنه‌برداری", "وزنه برداری", "گل‌زنی", "هتریک",
+    "تیم ملی فوتبال", "تیم ملی والیبال", "تیم ملی کشتی", "قهرمان جهان شد",
+    "قهرمانی جوانان وزنه", "مسابقات وزنه‌برداری", "مدال طلا گرفت", "صعود به لیگ برتر",
+    # Clubs / athletes (almost always sports in an Iran-news feed)
+    "رئال مادرید", "بارسلونا", "منچسترسیتی", "منچستر یونایتد", "گواردیولا",
+    "آرتتا", "لیونل مسی", "کریستیانو رونالدو", "رافائل نادال", "کاسمیرو",
+    "اینفانتینو", "قلعه‌نویی", "لامین یامال", "کی‌روش",
+    # Entertainment / film / lifestyle fluff
+    "جشنواره فیلم", "باکس آفیس", "اکران کمدی", "آلبوم موسیقی", "مولتی ویتامین",
+    "طالع بینی", "فال روز",
+)
 
 # Lede news verbs. Strong signal that the article opens with a
 # reported fact rather than an opinion/quote framing.
@@ -198,11 +219,17 @@ def heuristic_classify(article: Article) -> _Verdict | None:
     if rss_cat:
         for kw in _OFF_DOMAIN_RSS:
             if kw in rss_cat:
-                return _Verdict("other", 0.9)
+                return _Verdict("off_topic", 0.9)
     title_head_for_off = title[:60]
     for kw in _OFF_DOMAIN_TITLE_PREFIXES:
         if _title_label_match(title_head_for_off, kw):
-            return _Verdict("other", 0.9)
+            return _Verdict("off_topic", 0.9)
+    # c) content keywords anywhere in the title — section-tag-free junk
+    #    (Telegram posts, untagged feeds). High precision; ambiguous cases
+    #    defer to the LLM.
+    for kw in _OFF_DOMAIN_CONTENT:
+        if kw in title:
+            return _Verdict("off_topic", 0.9)
 
     # 1. URL-slug patterns — highest precision when they fire.
     for pat in _OPINION_URL_PATTERNS:
@@ -281,15 +308,24 @@ def _title_label_match(title_head: str, keyword: str) -> bool:
 _LLM_PROMPT = """\
 You are a content-type classifier for an Iranian news aggregator.
 
+This aggregator covers IRAN's politics, governance, economy & policy, the
+ongoing conflict/war, foreign relations, human rights, and society of political
+significance. Anything outside that scope is off_topic, even if it is genuine
+reporting.
+
 For each numbered article, label it with ONE of:
-- news: original reporting on a current event (kept)
+- news: original reporting on an in-scope current event (kept)
 - opinion: op-eds, columns, editorials, personal commentary
 - discussion: interviews, panel discussions, talk-show transcripts, Q&As
 - aggregation: primarily summarizes or quotes other outlets without adding original reporting
 - other: analysis pieces, explainers, listicles, service journalism
+- off_topic: outside the aggregator's scope — sports, weather forecasts,
+  entertainment/celebrity, arts/culture features, horoscopes, routine consumer
+  prices, lifestyle/health tips, local accidents/fires with no political angle,
+  unrelated foreign news. Use this even when the piece is original reporting.
 
 Return a JSON array. One object per article, in the same order:
-  {{"id": <int>, "label": "<one of the five>", "confidence": <float 0-1>}}
+  {{"id": <int>, "label": "<one of the six>", "confidence": <float 0-1>}}
 
 No prose, no markdown fences, no commentary — JSON array only.
 
