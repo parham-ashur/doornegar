@@ -6768,6 +6768,7 @@ async def step_audit_cluster_coherence():
     from app.services.clustering import (
         audit_cluster_coherence,
         audit_homepage_coherence,
+        detach_offtopic_from_visible_stories,
     )
 
     async with async_session() as db:
@@ -6779,6 +6780,16 @@ async def step_audit_cluster_coherence():
         except Exception as e:
             logger.exception("Homepage coherence act failed (non-fatal): %s", e)
             stats["homepage_act"] = {"error": str(e)[:200]}
+    # Cluster hygiene (2026-06-02): drain off-topic articles already clustered
+    # into visible stories — the content_type cluster gate stops new junk but
+    # can't retro-remove it, so this self-heals the homepage_offtopic_leak
+    # canary toward 0. Non-fatal: a failure here must not fail the audit step.
+    async with async_session() as db:
+        try:
+            stats["offtopic_drained"] = await detach_offtopic_from_visible_stories(db)
+        except Exception as e:
+            logger.exception("Off-topic cluster hygiene failed (non-fatal): %s", e)
+            stats["offtopic_drained"] = {"error": str(e)[:200]}
     logger.info(f"Cluster coherence audit: {stats}")
     return stats
 

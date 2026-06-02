@@ -3384,6 +3384,68 @@ async def _call_openai_coherence(prompt: str) -> dict | None:
     return parsed or None
 
 
+async def detach_offtopic_from_visible_stories(
+    db: AsyncSession, *, limit: int = 500
+) -> dict:
+    """Cluster hygiene: detach articles sitting INSIDE visible homepage stories
+    whose content_type is NOT in the source's allowed list (off_topic / opinion /
+    discussion / aggregation / other).
+
+    These were clustered BEFORE the 2026-06-02 content_type cluster gate existed.
+    The gate stops NEW junk from clustering, but already-clustered articles don't
+    re-cluster, so legacy off-topic pollution persists (the homepage_offtopic_leak
+    canary surfaces it — 173 at install time). This drains it so the canary
+    self-heals to 0. Detach only (story_id=NULL): their content_type is already
+    non-allowed, so the cluster gate keeps them from rejoining — no mark needed.
+    Recounts affected stories and clears their translations (article set changed).
+    Mirrors the canary SQL exactly (= the cluster gate predicate)."""
+    rows = (await db.execute(text("""
+        SELECT a.id AS aid, a.story_id AS sid
+        FROM articles a
+        JOIN sources s ON s.id = a.source_id
+        JOIN stories st ON st.id = a.story_id
+        WHERE st.archived_at IS NULL AND st.article_count >= 5
+          AND a.content_type IS NOT NULL
+          AND NOT ((s.content_filters -> 'allowed') @> to_jsonb(a.content_type))
+        LIMIT :lim
+    """), {"lim": limit})).mappings().all()
+    if not rows:
+        return {"detached": 0, "stories_touched": 0}
+    aids = [r["aid"] for r in rows]
+    affected = {r["sid"] for r in rows if r["sid"]}
+    await db.execute(
+        update(Article).where(Article.id.in_(aids)).values(story_id=None)
+        .execution_options(synchronize_session=False)
+    )
+    from app.services.translate_multilocale import clear_translations_for_story
+    for sid in affected:
+        live = (await db.execute(
+            select(func.count(Article.id)).where(Article.story_id == sid)
+        )).scalar() or 0
+        st = await db.get(Story, sid)
+        if st is not None:
+            st.article_count = live
+        try:
+            await clear_translations_for_story(db, sid)
+        except Exception:
+            pass
+    await db.commit()
+    try:
+        from app.services.events import log_event
+        await log_event(
+            db, event_type="cluster_hygiene_offtopic", actor="cron",
+            signals={"detached": len(aids), "stories_touched": len(affected)},
+        )
+        await db.commit()
+    except Exception:
+        pass
+    logger.info(
+        "cluster hygiene: detached %d off-topic articles from %d visible stories",
+        len(aids), len(affected),
+    )
+    return {"detached": len(aids), "stories_touched": len(affected)}
+
+
 async def audit_homepage_coherence(
     db: AsyncSession,
     *,

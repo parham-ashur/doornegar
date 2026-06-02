@@ -80,6 +80,28 @@ class TestScopeFilterRegressions:
         assert "off_topic" not in DEFAULT_ALLOWED
 
 
+class TestClusterHygiene:
+    def test_offtopic_drain_exists_and_mirrors_gate(self):
+        """SYMPTOM: homepage_offtopic_leak canary = 173 — off-topic articles
+        clustered before the 2026-06-02 gate persist in visible stories
+        (clustered articles don't re-cluster). ROOT CAUSE: the gate prevents
+        NEW pollution but nothing drains legacy. RESPONSIBLE: step_audit_cluster_
+        coherence. FIX: detach_offtopic_from_visible_stories, wired into the
+        coherence step, self-heals the canary to 0."""
+        from app.services import clustering
+        assert hasattr(clustering, "detach_offtopic_from_visible_stories")
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "app" / "services" / "clustering.py").read_text()
+        i = src.find("async def detach_offtopic_from_visible_stories")
+        body = src[i:i + 2000]
+        # Must mirror the canary / cluster-gate predicate exactly.
+        assert "content_filters -> 'allowed') @> to_jsonb(a.content_type)" in body
+        assert "st.archived_at IS NULL AND st.article_count >= 5" in body
+        # Wired into the coherence step.
+        am = (Path(__file__).parent.parent / "auto_maintenance.py").read_text()
+        assert "detach_offtopic_from_visible_stories" in am
+
+
 class TestSelfRunningCanaries:
     def test_canaries_present_in_health_overview(self):
         """The 2026-06-02 self-running canaries must stay wired into
