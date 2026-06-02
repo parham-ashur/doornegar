@@ -542,9 +542,18 @@ export default async function HomeBody({
   // same 60/40 source threshold the heuristic uses so we never show a
   // «نگاه یک‌جانبه» card whose own percentages contradict the label.
   const blindFresh = withinAge(BLINDSPOT_MAX_AGE_MS);
+  // Prefer a real-image candidate (`blindspots` is image-filtered), but fall
+  // back to a PHOTO-LESS one-sided blindspot from the unfiltered `_blindspots`
+  // before leaving the slot empty. Diaspora outlets reaching us only via t.me
+  // mirrors usually have no OG image, so _pick_image returns their source LOGO
+  // with has_real_image=false — which the `hasImage` filter strips, silently
+  // emptying the برون‌مرزی column even when a perfect 100%-diaspora blindspot
+  // exists (Parham, 2026-06-02: «نگاه یک‌جانبه has only one story»). The card
+  // renders the newspaper placeholder for these via the has_real_image gate.
   const conservativeBlind =
     blindspots.find(s => s.blindspot_type === "state_only" && blindFresh(s) && hasUpdate(s) && stateHeavyLoose(s)) ||
     blindspots.find(s => s.blindspot_type === "state_only" && blindFresh(s) && stateHeavyLoose(s)) ||
+    _blindspots.find(s => s.blindspot_type === "state_only" && blindFresh(s) && stateHeavyLoose(s)) ||
     [...stories].filter(stateHeavy).filter(blindFresh).sort((a, b) =>
       (b.state_pct - b.diaspora_pct) - (a.state_pct - a.diaspora_pct)
     )[0] ||
@@ -552,6 +561,7 @@ export default async function HomeBody({
   const oppositionBlind =
     blindspots.find(s => s.blindspot_type === "diaspora_only" && blindFresh(s) && hasUpdate(s) && diasporaHeavyLoose(s)) ||
     blindspots.find(s => s.blindspot_type === "diaspora_only" && blindFresh(s) && diasporaHeavyLoose(s)) ||
+    _blindspots.find(s => s.blindspot_type === "diaspora_only" && blindFresh(s) && diasporaHeavyLoose(s)) ||
     [...stories].filter(diasporaHeavy).filter(blindFresh).sort((a, b) =>
       (b.diaspora_pct - b.state_pct) - (a.diaspora_pct - a.state_pct)
     )[0] ||
@@ -1136,7 +1146,7 @@ export default async function HomeBody({
               className="group block border border-inside-border transition-shadow hover:shadow-md"
             >
               <div className="relative aspect-[4/3] overflow-hidden bg-slate-100 dark:bg-slate-800">
-                <SafeImageStatic src={conservativeBlind.image_url} alt={localizedStoryTitle(conservativeBlind, locale)} className="h-full w-full object-cover" />
+                <SafeImageStatic src={conservativeBlind.has_real_image === false ? null : conservativeBlind.image_url} alt={localizedStoryTitle(conservativeBlind, locale)} className="h-full w-full object-cover" />
                 {isUpdateBadgeFresh(conservativeBlind.update_signal) && (
                   <span className="absolute bottom-2 right-2 border border-orange-300 dark:border-orange-700 bg-orange-50/95 dark:bg-orange-900/80 px-1.5 py-0.5 text-[10px] font-bold text-orange-700 dark:text-orange-200 backdrop-blur-sm">
                     بروزرسانی{formatUpdateReason(conservativeBlind.update_signal!) ? ` · ${formatUpdateReason(conservativeBlind.update_signal!)}` : ""}
@@ -1160,7 +1170,7 @@ export default async function HomeBody({
               className="group block border border-outside-border transition-shadow hover:shadow-md"
             >
               <div className="relative aspect-[4/3] overflow-hidden bg-slate-100 dark:bg-slate-800">
-                <SafeImageStatic src={oppositionBlind.image_url} alt={localizedStoryTitle(oppositionBlind, locale)} className="h-full w-full object-cover" />
+                <SafeImageStatic src={oppositionBlind.has_real_image === false ? null : oppositionBlind.image_url} alt={localizedStoryTitle(oppositionBlind, locale)} className="h-full w-full object-cover" />
                 {isUpdateBadgeFresh(oppositionBlind.update_signal) && (
                   <span className="absolute bottom-2 right-2 border border-orange-300 dark:border-orange-700 bg-orange-50/95 dark:bg-orange-900/80 px-1.5 py-0.5 text-[10px] font-bold text-orange-700 dark:text-orange-200 backdrop-blur-sm">
                     بروزرسانی{formatUpdateReason(oppositionBlind.update_signal!) ? ` · ${formatUpdateReason(oppositionBlind.update_signal!)}` : ""}
@@ -1656,7 +1666,7 @@ function MobileHome({
               >
                 <div className="flex gap-3 p-3">
                   <div className="relative w-20 h-20 shrink-0 overflow-hidden bg-slate-100 dark:bg-slate-800">
-                    <SafeImageStatic src={conservativeBlind.image_url} alt={localizedStoryTitle(conservativeBlind, locale)} className="h-full w-full object-cover" />
+                    <SafeImageStatic src={conservativeBlind.has_real_image === false ? null : conservativeBlind.image_url} alt={localizedStoryTitle(conservativeBlind, locale)} className="h-full w-full object-cover" />
                     {isUpdateBadgeFresh(conservativeBlind.update_signal) && (
                       <span className="absolute bottom-0 inset-x-0 bg-orange-500/95 text-white text-center text-[9px] font-bold py-0.5">
                         بروزرسانی
@@ -1682,7 +1692,7 @@ function MobileHome({
               >
                 <div className="flex gap-3 p-3">
                   <div className="relative w-20 h-20 shrink-0 overflow-hidden bg-slate-100 dark:bg-slate-800">
-                    <SafeImageStatic src={oppositionBlind.image_url} alt={localizedStoryTitle(oppositionBlind, locale)} className="h-full w-full object-cover" />
+                    <SafeImageStatic src={oppositionBlind.has_real_image === false ? null : oppositionBlind.image_url} alt={localizedStoryTitle(oppositionBlind, locale)} className="h-full w-full object-cover" />
                     {isUpdateBadgeFresh(oppositionBlind.update_signal) && (
                       <span className="absolute bottom-0 inset-x-0 bg-orange-500/95 text-white text-center text-[9px] font-bold py-0.5">
                         بروزرسانی
