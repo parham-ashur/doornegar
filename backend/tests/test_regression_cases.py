@@ -114,5 +114,29 @@ class TestSelfRunningCanaries:
             "homepage_offtopic_leak",
             "homepage_fresh_pool",
             "blindspot_fresh_pool",
+            "bellwether_missing_story",
         ):
             assert f'"{cid}"' in src, f"self-running canary '{cid}' missing from health/overview"
+
+
+class TestBellwether:
+    def test_bellwether_step_wired_and_service_exists(self):
+        """Step B: the missing-main-story monitor — the only failure mode the
+        internal canaries can't catch (a story we never ingested). Service +
+        pipeline step + canary must all be present."""
+        from app.services import bellwether
+        assert hasattr(bellwether, "run_bellwether_check")
+        assert bellwether.EVENT_TYPE == "bellwether_check"
+        from pathlib import Path
+        am = (Path(__file__).parent.parent / "auto_maintenance.py").read_text()
+        assert "async def step_bellwether_check" in am
+        assert '("bellwether", "Bellwether missing-main-story check", "step_bellwether_check")' in am
+
+    def test_bellwether_headline_extraction(self):
+        """Headline extraction must pull <h1>/<h2>/<title> text without an LLM."""
+        from app.services.bellwether import _extract_headlines
+        html = "<title>Outlet — صفحه اصلی</title><h1>توافق ایران و آمریکا نزدیک است</h1>" \
+               "<h2>حمله به تنگه هرمز ادامه دارد</h2><div>noise</div>"
+        heads = _extract_headlines(html)
+        assert any("توافق ایران و آمریکا" in h for h in heads)
+        assert any("تنگه هرمز" in h for h in heads)

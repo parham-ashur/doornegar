@@ -4283,6 +4283,15 @@ async def egress_audit(db: AsyncSession = Depends(get_db)):
     return out
 
 
+@router.post("/bellwether/check", dependencies=[Depends(require_admin)])
+async def trigger_bellwether_check(db: AsyncSession = Depends(get_db)):
+    """Run the bellwether / missing-main-story check on demand and return the
+    verdict. The cron runs this each pass via step_bellwether_check; this is for
+    manual/chat triggering and testing reachability from the server."""
+    from app.services.bellwether import run_bellwether_check
+    return await run_bellwether_check(db)
+
+
 @router.get("/health/overview")
 async def health_overview(db: AsyncSession = Depends(get_db)):
     """Comprehensive health snapshot for the /dashboard/health page.
@@ -4877,6 +4886,35 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
           AND NOT ((s.content_filters -> 'allowed') @> to_jsonb(a.content_type))
     """))).scalar() or 0)
 
+    # Bellwether / missing-main-story (Step B): read the latest verdict logged
+    # by step_bellwether_check (a per-cron outlet-fetch + nano compare). Cheap
+    # here — just reads the most recent story_events row.
+    _bw_row = (await db.execute(_t("""
+        SELECT signals, created_at FROM story_events
+        WHERE event_type = 'bellwether_check'
+        ORDER BY created_at DESC LIMIT 1
+    """))).first()
+    bw_status, bw_value = "ok", "no check yet"
+    if _bw_row is not None:
+        _sig = _bw_row[0]
+        if isinstance(_sig, str):
+            try:
+                _sig = _hj.loads(_sig)
+            except Exception:
+                _sig = {}
+        _sig = _sig or {}
+        _bw_age_h = (datetime.now(timezone.utc) - _bw_row[1]).total_seconds() / 3600 if _bw_row[1] else 999
+        if _sig.get("missing"):
+            bw_status = "warn"
+            bw_value = f"MISSING: {str(_sig.get('missed_story') or '')[:80]} (conf {_sig.get('confidence')})"
+        elif _sig.get("status") == "unable" or _bw_age_h > 36:
+            bw_status = "warn"
+            bw_value = f"stale/unable ({round(_bw_age_h,1)}h old; reachable={_sig.get('outlets_reachable')})"
+        else:
+            bw_value = f"covered (reachable={_sig.get('outlets_reachable')}, {round(_bw_age_h,1)}h ago)"
+    else:
+        bw_status = "warn"
+
     def _canary(_id, name, value, threshold, status, why):
         return {
             "id": _id, "name": name, "value": value,
@@ -4937,8 +4975,18 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
             "warn" if hp_blindspots < 2 else "ok",
             "Fresh (≤7d) is_blindspot stories with ≥4 articles. The نگاه یک‌جانبه section needs "
             "BOTH a درون‌مرزی (state_only) and a برون‌مرزی (diaspora_only) candidate; below 2 means "
-            "at least one side is empty and the section shows a single card or falls back. "
-            "(Missing-main-story / bellwether canary is Step B — needs the external outlet fetch.)",
+            "at least one side is empty and the section shows a single card or falls back.",
+        ),
+        _canary(
+            "bellwether_missing_story", "Bellwether: main story we missed",
+            bw_value, "covered + fresh check",
+            bw_status,
+            "step_bellwether_check fetches a few balanced outlet homepages each cron and asks a "
+            "cheap LLM whether a major Iran story prominent across them is MISSING from our top "
+            "stories — the only failure our internal canaries can't catch (a story we never "
+            "ingested). 'MISSING' → eyeball the outlets and seed+pin if real "
+            "(reference_bellwether_outlet_check workflow). 'stale/unable' = outlets geo-blocked "
+            "from Railway or no check in 36h. Action stays manual — this only raises the flag.",
         ),
         _canary(
             "frozen_recently_bumped", "Frozen stories bumped after freeze",

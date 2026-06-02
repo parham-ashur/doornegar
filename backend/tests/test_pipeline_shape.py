@@ -267,10 +267,15 @@ class TestIngestOnlyPipelineShape:
     dashboard's progress bar shows wrong percentages but the run still
     completes — silent UI bug."""
 
-    def test_full_pipeline_total_steps_is_60(self):
+    def test_full_pipeline_total_steps_is_61(self):
         """The 6h-cron progress bar pins to this count. Same drift
         risk as INGEST_ONLY — keep both this number and the parent
-        `CLAUDE.md` (`full=60`) in lockstep with the actual list.
+        `CLAUDE.md` (`full=61`) in lockstep with the actual list.
+
+        Bumped 60 → 61 on 2026-06-02 (self-running roadmap Step B):
+        added `bellwether` (missing-main-story monitor) after
+        `source_health`. Fetches a few outlet homepages + 1 nano call;
+        logs a bellwether_check event the canary reads.
 
         Bumped 56 → 57 on 2026-05-07 (EN+FR rollout Phase 2):
         added `translate_homepage_visible` after `niloofar_polish_telegram`.
@@ -288,11 +293,11 @@ class TestIngestOnlyPipelineShape:
         Neon storage + egress lean.
         """
         m = _import_pipelines()
-        assert len(m.FULL_PIPELINE) == 60, (
+        assert len(m.FULL_PIPELINE) == 61, (
             f"FULL_PIPELINE step count drifted: found "
             f"{len(m.FULL_PIPELINE)} steps. If this is intentional, "
             f"update both this test AND the parent CLAUDE.md verification "
-            f"step #4 (`full=60`)."
+            f"step #4 (`full=61`)."
         )
 
     def test_total_steps_is_13(self):

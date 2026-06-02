@@ -2506,6 +2506,24 @@ async def step_story_quality():
     return stats
 
 
+async def step_bellwether_check():
+    """Bellwether / missing-main-story monitor (Step B of the self-running
+    roadmap, 2026-06-02). Fetches a few balanced outlet homepages and asks a
+    cheap LLM whether a major story prominent across them is missing from our
+    top homepage stories — the one failure our internal canaries can't catch
+    (a story we never ingested). Non-fatal; logs a bellwether_check event the
+    `bellwether_missing_story` canary reads. Action (seed+pin) stays manual."""
+    from app.database import async_session
+    from app.services.bellwether import run_bellwether_check
+
+    async with async_session() as db:
+        try:
+            return await run_bellwether_check(db)
+        except Exception as e:
+            logger.exception("Bellwether check failed (non-fatal): %s", e)
+            return {"error": str(e)[:200]}
+
+
 async def step_source_health():
     """Step 4d: Monitor source/feed health — track which feeds consistently fail."""
     from sqlalchemy import select, func, text
@@ -8106,6 +8124,7 @@ FULL_PIPELINE = [
     ("detect_silences", "Detect coverage silences", "step_detect_silences"),
     ("detect_coordination", "Detect coordinated messaging", "step_detect_coordination"),
     ("source_health", "Source health", "step_source_health"),
+    ("bellwether", "Bellwether missing-main-story check", "step_bellwether_check"),
     ("prune_stagnant", "Prune 1-article (>48h) and 2-4-article (>14d) stagnant stories", "step_prune_stagnant"),
     # Cycle-1 audit Phase B: archive_stale must run BEFORE demote.
     # archive_stale sets `frozen_at` on newly-aged stories and on
