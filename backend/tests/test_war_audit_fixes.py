@@ -4286,3 +4286,35 @@ class TestIngestEgressFix:
         assert "telegram_posts ADD COLUMN IF NOT EXISTS converted_at" in main_src
         mig = Path(__file__).parent.parent / "alembic" / "versions" / "a2b3c4d5e6f7_ingest_egress_converted_at_and_indexes.py"
         assert mig.is_file(), "alembic migration missing"
+
+    def test_article_url_map_projects_two_columns(self):
+        """The REAL ingest egress hog (2026-06-02): _build_article_url_map
+        loaded full Article ORM rows (incl. ~30 KB embedding JSONB) for every
+        clustered article. It must project only (url, story_id)."""
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "app" / "services" / "telegram_service.py").read_text()
+        i = src.find("async def _build_article_url_map")
+        body = src[i:i + 1200]
+        assert "select(Article.url, Article.story_id)" in body, (
+            "_build_article_url_map no longer projects 2 columns — reintroduces "
+            "the full-row (embedding JSONB) load that burned ~4.6 GB/run"
+        )
+        assert "select(Article).where" not in body, (
+            "_build_article_url_map regressed to loading full Article rows"
+        )
+
+    def test_article_url_map_built_once_per_run(self):
+        """ingest_all_channels must build the map ONCE and pass it into
+        ingest_channel — not rebuild it for each of the 44 channels."""
+        from pathlib import Path
+        import inspect
+        from app.services import telegram_service as ts
+        # ingest_channel accepts the prebuilt map
+        params = inspect.signature(ts.ingest_channel).parameters
+        assert "article_url_map" in params, "ingest_channel must accept a prebuilt map"
+        src = inspect.getsource(ts.ingest_all_channels)
+        assert "_build_article_url_map(db)" in src, "map no longer built once at run level"
+        assert "ingest_channel(channel, db, article_url_map)" in src, (
+            "ingest_all_channels no longer passes the shared map into ingest_channel — "
+            "the per-channel rebuild (44× multiplier) is back"
+        )

@@ -226,10 +226,20 @@ async def fetch_channel_posts(
         return []
 
 
-async def ingest_channel(channel: TelegramChannel, db: AsyncSession) -> dict:
+async def ingest_channel(
+    channel: TelegramChannel,
+    db: AsyncSession,
+    article_url_map: dict | None = None,
+) -> dict:
     """Fetch new posts from a channel and store them.
 
     Returns stats: {found, new, linked}.
+
+    ``article_url_map`` (normalized URL -> story_id) is built ONCE per run by
+    ``ingest_all_channels`` and passed in, so we don't reload every clustered
+    article's URL set on every one of the 44 channels (see
+    ``_build_article_url_map`` for the egress history). Falls back to building
+    its own when called standalone.
     """
     stats = {"found": 0, "new": 0, "linked": 0}
 
@@ -243,8 +253,9 @@ async def ingest_channel(channel: TelegramChannel, db: AsyncSession) -> dict:
     if not posts:
         return stats
 
-    # Get all known article URLs for matching
-    article_url_map = await _build_article_url_map(db)
+    # Get all known article URLs for matching (reuse the run-level map if given)
+    if article_url_map is None:
+        article_url_map = await _build_article_url_map(db)
 
     max_message_id = channel.last_message_id or 0
 
@@ -266,8 +277,7 @@ async def ingest_channel(channel: TelegramChannel, db: AsyncSession) -> dict:
         for url in post_data["urls"]:
             normalized = normalize_url(url)
             if normalized in article_url_map:
-                article = article_url_map[normalized]
-                story_id = article.story_id
+                story_id = article_url_map[normalized]
                 shares_news_link = True
                 break
 
@@ -343,6 +353,11 @@ async def ingest_all_channels(db: AsyncSession) -> dict:
     )
     channels = result.scalars().all()
 
+    # Build the URL→story_id map ONCE for the whole run and reuse it across all
+    # channels. Rebuilding it per channel was the ~4.6 GB/run egress hog that
+    # halted the pipeline (see _build_article_url_map).
+    article_url_map = await _build_article_url_map(db)
+
     total_stats: dict = {
         "channels": len(channels), "found": 0, "new": 0, "linked": 0,
         "channels_succeeded": 0, "channels_failed": 0, "auth_failures": 0,
@@ -356,7 +371,7 @@ async def ingest_all_channels(db: AsyncSession) -> dict:
     try:
         for channel in channels:
             try:
-                channel_stats = await ingest_channel(channel, db)
+                channel_stats = await ingest_channel(channel, db, article_url_map)
                 total_stats["found"] += channel_stats["found"]
                 total_stats["new"] += channel_stats["new"]
                 total_stats["linked"] += channel_stats["linked"]
@@ -442,8 +457,7 @@ async def link_unlinked_posts(db: AsyncSession) -> int:
         for url in (post.urls or []):
             normalized = normalize_url(url)
             if normalized in article_url_map:
-                article = article_url_map[normalized]
-                post.story_id = article.story_id
+                post.story_id = article_url_map[normalized]
                 post.shares_news_link = True
                 linked += 1
                 break
@@ -1237,15 +1251,22 @@ async def extract_articles_from_aggregators(db: AsyncSession) -> dict:
 
 
 async def _build_article_url_map(db: AsyncSession) -> dict:
-    """Build a map of normalized URL -> Article for matching."""
+    """Build a map of normalized URL -> story_id for Telegram→article matching.
+
+    Projects ONLY (url, story_id) — NOT full Article ORM rows. Loading whole
+    rows here pulled the ~30 KB embedding / content_text / keywords JSONB of
+    every clustered article, and ``ingest_all_channels`` rebuilt this map once
+    PER CHANNEL (44 active channels × ~6 K clustered articles). That was the
+    ~4.6 GB-per-run Neon egress that tripped the 5 GB daily cap and halted the
+    pipeline before clustering on 2026-06-01/02 — NOT the telegram-convert step
+    a prior session "fixed". Two-column projection drops the per-row bytes ~100×;
+    building it once (passed into ``ingest_channel``) removes the 44× multiplier.
+    Callers only ever need ``story_id``, so we store that directly.
+    """
     result = await db.execute(
-        select(Article).where(Article.story_id.isnot(None))
+        select(Article.url, Article.story_id).where(Article.story_id.isnot(None))
     )
-    articles = result.scalars().all()
-
-    url_map = {}
-    for article in articles:
-        normalized = normalize_url(article.url)
-        url_map[normalized] = article
-
+    url_map: dict = {}
+    for url, story_id in result.all():
+        url_map[normalize_url(url)] = story_id
     return url_map
