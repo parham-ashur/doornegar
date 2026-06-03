@@ -332,6 +332,70 @@ INITIAL_SOURCES = [
         "description_en": "Long-running Persian-language left/socialist diaspora publication. Paris-based; political commentary and opinion.",
         "description_fa": "نشریهٔ قدیمی چپ و سوسیالیست برون‌مرزی. مستقر در پاریس؛ تحلیل سیاسی و مقالهٔ نظری.",
     },
+    # === Human-rights & ethnic-minority monitors (added 2026-06-03) ===
+    # Closes the protests/HR coverage gap (incident protest-hr-coverage-gap):
+    # HRANA was our only HR outlet, and Baluch/Kurdish-rights coverage was zero.
+    # Classified `independent` (non-partisan HR documentation) to match HRANA,
+    # not `diaspora`, so HR-monitor volume doesn't skew the diaspora bias bucket.
+    {
+        "name_en": "Iran Human Rights (IHRNGO)",
+        "name_fa": "سازمان حقوق بشر ایران",
+        "slug": "iran-human-rights",
+        "website_url": "https://iranhr.net",
+        "rss_urls": ["https://iranhr.net/en/rss/"],  # verified Atom; /en/feed/ 403s, use /en/rss/
+        "state_alignment": "independent",
+        "irgc_affiliated": False,
+        "production_location": "outside_iran",
+        "factional_alignment": None,
+        "language": "both",
+        "description_en": "Oslo-based, non-partisan. The authoritative execution / death-penalty monitor for Iran, cited by the UN and wire services.",
+        "description_fa": "مستقر در اسلو، غیرجناحی. مرجع پایش اعدام و مجازات مرگ در ایران؛ مورد استناد سازمان ملل.",
+    },
+    {
+        "name_en": "Center for Human Rights in Iran (CHRI)",
+        "name_fa": "مرکز حقوق بشر در ایران",
+        "slug": "chri",
+        "website_url": "https://iranhumanrights.org",
+        "rss_urls": ["https://iranhumanrights.org/feed/"],  # verified RSS 2.0
+        "state_alignment": "independent",
+        "irgc_affiliated": False,
+        "production_location": "outside_iran",
+        "factional_alignment": None,
+        "language": "both",
+        "description_en": "New York-based, nonpartisan. High-quality English HR journalism (free expression, political prisoners, due process), heavily cited by academics.",
+        "description_fa": "مستقر در نیویورک، غیرجناحی. روزنامه‌نگاری باکیفیت حقوق بشر؛ پراستناد نزد پژوهشگران.",
+    },
+    {
+        "name_en": "Kurdistan Human Rights Network (KHRN)",
+        "name_fa": "شبکهٔ حقوق بشر کردستان",
+        "slug": "khrn",
+        "website_url": "https://kurdistanhumanrights.org",
+        "rss_urls": ["https://kurdistanhumanrights.org/en/feed/"],  # verified RSS 2.0
+        "state_alignment": "independent",
+        "irgc_affiliated": False,
+        "production_location": "outside_iran",
+        "factional_alignment": None,
+        "language": "both",
+        "description_en": "Paris-based monitor of Kurdish-region rights (kolbars, political prisoners) — a minority-rights blind spot none of our other sources cover.",
+        "description_fa": "ناظر مستقر در پاریس بر حقوق مناطق کردنشین (کولبران، زندانیان سیاسی).",
+    },
+    {
+        "name_en": "Haalvsh",
+        "name_fa": "هالووش",
+        "slug": "haalvsh",
+        "website_url": "https://haalvsh.org",
+        # Baluch-rights monitor. Feed sits behind Cloudflare (403 to a static
+        # fetch) — kept here so the post-deploy ingest TESTS it from Railway;
+        # if Railway also gets 403, blank rss_urls and rely on its Telegram.
+        "rss_urls": ["https://haalvsh.org/en/feed/"],
+        "state_alignment": "independent",
+        "irgc_affiliated": False,
+        "production_location": "outside_iran",
+        "factional_alignment": None,
+        "language": "both",
+        "description_en": "Baluch-rights monitor for Sistan-Baluchestan / Sunni community — our biggest geographic blind spot (Zahedan context).",
+        "description_fa": "ناظر حقوق بلوچ در سیستان‌وبلوچستان و جامعهٔ اهل‌سنت — بزرگ‌ترین نقطهٔ کور جغرافیایی ما.",
+    },
 ]
 
 
