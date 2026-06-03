@@ -384,10 +384,10 @@ INITIAL_SOURCES = [
         "name_fa": "هالووش",
         "slug": "haalvsh",
         "website_url": "https://haalvsh.org",
-        # Baluch-rights monitor. Feed sits behind Cloudflare (403 to a static
-        # fetch) — kept here so the post-deploy ingest TESTS it from Railway;
-        # if Railway also gets 403, blank rss_urls and rely on its Telegram.
-        "rss_urls": ["https://haalvsh.org/en/feed/"],
+        # Baluch-rights monitor. Feed CONFIRMED Cloudflare-blocked from Railway
+        # (2026-06-03 ingest pulled 0 articles, 403) — rss_urls left empty;
+        # re-add via its Telegram channel in a future Telegram batch.
+        "rss_urls": [],
         "state_alignment": "independent",
         "irgc_affiliated": False,
         "production_location": "outside_iran",
