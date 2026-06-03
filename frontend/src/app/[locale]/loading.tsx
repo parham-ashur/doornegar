@@ -46,7 +46,7 @@ export default async function Loading() {
             <animate attributeName="x2" values="58;62;58" dur="4s" repeatCount="indefinite" />
           </line>
         </svg>
-        <p className="text-xs text-slate-400 dark:text-slate-500 mt-2">در حال شکل‌گیری تصویر...</p>
+        <p className="text-xs text-slate-400 dark:text-slate-500 mt-2">در حال گردآوری و مقایسهٔ روایت‌ها…</p>
       </div>
 
       <div className="animate-pulse">

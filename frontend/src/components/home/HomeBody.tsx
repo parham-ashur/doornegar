@@ -844,7 +844,11 @@ export default async function HomeBody({
     /^پوشش\s+(برون‌مرزی|درون‌مرزی)/,
     /روایت[^.]{0,40}(متمایز|شکل\s+نگرفت|غایب)/,
     /هیچ\s+رسانه/,
-    /در\s+این\s+خبر\s+حضور\s+ندارن/,
+    /در\s+این\s+(خبر|مجموعه)[^.]{0,20}حضور\s+ندارن/,
+    // "رسانه‌های اصول‌گرا/اصلاح‌طلب … در این مجموعه مقالات حضور ندارند" —
+    // the summary states the ABSENCE of a side's media, not a narrative.
+    // (2026-06-03: the «در این خبر» variant above missed «مجموعه مقالات».)
+    /رسانه[^.]{0,50}حضور\s+ندار/,
   ];
   const hasTwoRealNarratives = (
     a: { state_summary_fa?: string | null; diaspora_summary_fa?: string | null } | null | undefined,
