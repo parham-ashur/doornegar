@@ -159,6 +159,7 @@ STRICT RULES (follow all):
    - Article about a related but distinct event → separate story
    - Article mentioning Iran but primarily about another country → separate story
    - Article about the SAME KIND of event in a DIFFERENT place/theater (e.g. US strikes a drug boat in the eastern Pacific vs. US strikes on Iran) → separate story, even if the wording is nearly identical
+   - Two articles sharing only a BROAD THEME but about DIFFERENT subjects → separate. The death of singer Homa Mirafshar and Marilyn Monroe's 100th birthday are BOTH "a cultural figure" but are SEPARATE stories. "PS752 victims' families" and "a Taliban divorce law" both touch "families/regulation" but are SEPARATE stories. They must share the SAME specific person/place/incident, not just a category.
 4. Examples of what to ACCEPT:
    - Same specific speech by the same official → match
    - Different outlets covering the exact same announcement → match
@@ -195,6 +196,8 @@ Rules:
   - "Attack on Sharif University" and "Killing of IRGC Quds Force commander" are TWO SEPARATE stories, not one
   - "Missile attack on Tel Aviv" and "Missile attack on Isfahan" are TWO SEPARATE stories
   - "Dollar price today" and "Stock market crash" are TWO SEPARATE stories
+  - Two DIFFERENT people's obituaries (e.g. singer Homa Mirafshar vs Marilyn Monroe) are SEPARATE stories — sharing the theme "a cultural figure died" is NOT enough
+  - Articles sharing only a broad category (aviation, families, weather, sports) but about different specific events are SEPARATE
   - Multiple articles about the SAME attack on the SAME target = one group
 - Be very precise: only group articles describing the exact same incident/event/announcement
 - Titles must be specific and descriptive of the single event, NOT vague summaries
@@ -694,6 +697,7 @@ def _find_new_story_subclusters(
             "tokens": _title_tokens(title),
             "quotes": _quoted_phrases(title),
             "numbers": _number_tokens(title),
+            "loci": _locus_set(title),  # #6 geo-gate in the union-find too
         }
 
     # Union-find over articles connected by cosine ≥ threshold.
@@ -718,6 +722,11 @@ def _find_new_story_subclusters(
             except Exception:
                 continue
             if sim < cosine_threshold:
+                continue
+            # #6 — never union across geographic theaters even at high cosine
+            # (e.g. an eastern-Pacific drug-boat strike with an Iran-strikes
+            # article). Mirrors the match-to-existing locus gate.
+            if _locus_conflict(sigs[a_i.id]["loci"], sigs[a_j.id]["loci"]):
                 continue
             _union(a_i.id, a_j.id)
 
@@ -843,7 +852,13 @@ async def _match_to_existing_stories(
     EMBEDDING_SIM_THRESHOLD_NEAR_FREEZE = 0.65
     NEAR_FREEZE_CANDIDATE_DAYS = 5
     AUTO_MATCH_COSINE = 0.85
-    AUTO_REJECT_COSINE = 0.60
+    # Raised 0.60 → 0.63 (2026-06-03 clustering-quality pass). The 0.60-0.85
+    # LLM band was rubber-stamping same-theme-different-event pairs (two
+    # celebrity obituaries, PS752 vs Taliban). The shared-anchor gate below
+    # (#1) is the primary fix; this modest bump shrinks the permissive band
+    # so fewer borderline pairs ever reach the LLM. Kept conservative to
+    # avoid over-fragmenting legitimate fresh-story accretion.
+    AUTO_REJECT_COSINE = 0.63
     AUTO_MATCH_JACCARD = 0.35
     AUTO_MATCH_MAX_AGE_DAYS = 2
     AUTO_REJECT_MAX_AGE_DAYS = 7
@@ -1100,6 +1115,7 @@ async def _match_to_existing_stories(
     auto_reject_count = 0
     negative_block_count = 0
     low_trust_block_count = 0
+    anchor_block_count = 0          # #1 shared-anchor gate rejects (no shared entity/token/number)
     locus_block_count = 0           # Layer 1 geographic-theater rejects
     locus_blocks: list[tuple] = []  # (article_id, story_id) for the event log
     # Cycle-1 audit Island 3: count which threshold tier was selected
@@ -1245,14 +1261,34 @@ async def _match_to_existing_stories(
                 threshold_tier_counts["fresh"] += 1
             effective_threshold = min(base_threshold * trust_factor, 0.95)
             if sim >= effective_threshold:
+                # #1 shared-anchor gate (2026-06-03 clustering-quality pass):
+                # EVERY LLM candidate must share at least one concrete identity
+                # anchor with the story — a content token (entity/place/
+                # distinctive word, stopwords already stripped by _title_tokens),
+                # a «quoted» phrase, or a number. Embeddings capture THEME
+                # ("celebrity death", "aviation, families"), so without this gate
+                # the 0.63-0.85 band glued different EVENTS that share a theme:
+                # «هما میرافشار» + «مرلین مونرو», «خانواده‌های ۷۵۲» + Taliban
+                # divorce law. Small stories keep the stricter jaccard≥0.15
+                # floor; all others require ≥1 shared content token. The LLM
+                # still confirms — this only stops it from ever seeing
+                # anchorless same-theme pairs it tends to rubber-stamp.
+                s_tokens = sig.get("tokens") or set()
+                shared_quote = bool(a_quotes & (sig.get("quotes") or set()))
+                shared_number = bool(a_numbers & (sig.get("numbers") or set()))
                 if target_small:
-                    has_signal = (
-                        _jaccard(a_tokens, sig.get("tokens") or set()) >= 0.15
-                        or bool(a_quotes & (sig.get("quotes") or set()))
-                        or bool(a_numbers & (sig.get("numbers") or set()))
+                    has_anchor = (
+                        _jaccard(a_tokens, s_tokens) >= 0.15
+                        or shared_quote or shared_number
                     )
-                    if not has_signal:
-                        continue
+                else:
+                    has_anchor = (
+                        len(a_tokens & s_tokens) >= 1
+                        or shared_quote or shared_number
+                    )
+                if not has_anchor:
+                    anchor_block_count += 1
+                    continue
                 candidates.add(story_id)
             elif sim >= base_threshold and trust_factor > 1.0:
                 # Would have qualified at baseline but source's penalty
@@ -1820,8 +1856,19 @@ async def _refresh_stories_metadata_batch(
             )
 
 
+MEDOID_CENTROID_MIN = 25
+
+
 def _compute_centroid(embeddings: list[list[float] | None]) -> list[float] | None:
-    """Compute the mean (centroid) of a list of embedding vectors.
+    """Centroid of a list of embedding vectors.
+
+    Small clusters: L2-normalized MEAN (cheap, representative).
+    Large clusters (>= MEDOID_CENTROID_MIN): the MEDOID — the actual member
+    nearest all others — instead of the mean. (#5, 2026-06-03 clustering-
+    quality pass.) A mean centroid of a big cluster blurs into a topic-average
+    that attracts ever more loosely-related articles (the grab-bag snowball);
+    the medoid stays anchored to a real, representative article, so accretion
+    needs genuine similarity to a concrete member, not to a blurry average.
 
     Returns None if no valid embeddings are provided.
     """
@@ -1829,8 +1876,14 @@ def _compute_centroid(embeddings: list[list[float] | None]) -> list[float] | Non
     if not valid:
         return None
     import numpy as np
-    matrix = np.array(valid)
-    centroid = matrix.mean(axis=0)
+    matrix = np.array(valid, dtype=float)
+    if len(valid) >= MEDOID_CENTROID_MIN:
+        norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+        normed = matrix / np.clip(norms, 1e-9, None)
+        sims = normed @ normed.T  # pairwise cosine
+        centroid = matrix[int(sims.sum(axis=1).argmax())].copy()
+    else:
+        centroid = matrix.mean(axis=0)
     norm = np.linalg.norm(centroid)
     if norm > 0:
         centroid = centroid / norm  # L2-normalize the centroid
@@ -3444,6 +3497,52 @@ async def detach_offtopic_from_visible_stories(
         len(aids), len(affected),
     )
     return {"detached": len(aids), "stories_touched": len(affected)}
+
+
+async def freeze_oversized_active_stories(db) -> dict:
+    """#5 — size-based umbrella freeze (2026-06-03 clustering-quality pass).
+
+    Freeze (set frozen_at) any ACTIVE, NON-edited story whose article_count
+    has reached settings.max_cluster_size. The match-to-existing query already
+    refuses to attach to stories >= max_cluster_size, so this mostly clears the
+    `oversized_active_stories` canary and demotes the umbrella — but it also
+    closes the brief window where recompute/merge paths could re-inflate one.
+
+    is_edited stories are EXEMPT: those are human-curated heroes (e.g. the
+    pinned war story Parham chose NOT to freeze). Frozen-stays-on-homepage, so
+    a frozen umbrella still renders; it just stops absorbing new articles.
+    """
+    from sqlalchemy import update as _update
+    from app.config import settings as _settings
+    from app.models.story import Story as _Story
+
+    rows = (await db.execute(
+        select(_Story.id, _Story.article_count).where(
+            _Story.frozen_at.is_(None),
+            _Story.archived_at.is_(None),
+            _Story.is_edited.is_(False),
+            _Story.article_count >= _settings.max_cluster_size,
+        )
+    )).all()
+    ids = [r[0] for r in rows]
+    if not ids:
+        return {"frozen": 0}
+    now = datetime.now(timezone.utc)
+    await db.execute(
+        _update(_Story).where(_Story.id.in_(ids)).values(frozen_at=now)
+        .execution_options(synchronize_session=False)
+    )
+    try:
+        from app.services.events import log_event
+        await log_event(
+            db, event_type="cluster_hygiene_freeze_oversized", actor="cron",
+            signals={"frozen": len(ids), "cap": _settings.max_cluster_size},
+        )
+        await db.commit()
+    except Exception:
+        await db.commit()
+    logger.info("cluster hygiene: froze %d oversized active non-edited stories", len(ids))
+    return {"frozen": len(ids)}
 
 
 async def audit_homepage_coherence(

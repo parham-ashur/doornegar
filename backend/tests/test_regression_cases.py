@@ -168,6 +168,94 @@ class TestBellwether:
         )
 
 
+class TestClusteringQuality:
+    """The 2026-06-03 clustering-quality pass (6 fixes). Parham found grab-bags:
+    a singer's obituary holding Marilyn Monroe + weather + Cuba flights; PS752
+    families holding a Taliban divorce law; the negotiations cluster holding a
+    Japan bear attack. Root cause: embeddings capture THEME not EVENT, and the
+    0.60-0.85 LLM band approved same-theme-different-event pairs. These lock the
+    six fixes."""
+
+    def test_case_2026_06_03_obituary_grabbag_no_shared_anchor(self):
+        """SYMPTOM: «هما میرافشار» obituary clustered with «مرلین مونرو»,
+        weather, Cuba flights. ROOT CAUSE: no shared-anchor requirement in the
+        LLM band — two 'celebrity death' titles sit ~0.7 cosine. RESPONSIBLE:
+        clustering match-to-existing gate. FIX (#1): every LLM candidate must
+        share ≥1 content token / quote / number. These two titles share none."""
+        from app.services.clustering import _title_tokens
+        a = _title_tokens("هما میرافشار، ملکه ترانه‌سرایی ایران، در ۸۹ سالگی درگذشت")
+        b = _title_tokens("صدمین سالگرد تولد مرلین مونرو؛ راز مرگ او")
+        assert len(a & b) == 0, "obituary titles must share no content token (anchor)"
+        # and the gate must be wired for non-small stories, not just small ones
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "app" / "services" / "clustering.py").read_text()
+        assert "has_anchor" in src and "len(a_tokens & s_tokens) >= 1" in src
+
+    def test_auto_reject_cosine_raised_to_063(self):
+        """#3: the permissive 0.60-0.85 band was shrunk to 0.63-0.85."""
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "app" / "services" / "clustering.py").read_text()
+        assert "AUTO_REJECT_COSINE = 0.63" in src
+
+    def test_case_2026_06_03_drugboat_union_find_geo_gate(self):
+        """#6: the new-cluster union-find now geo-gates too, so an eastern-
+        Pacific drug-boat strike can't union with an Iran-strikes article even
+        at high cosine."""
+        from app.services.clustering import _locus_set, _locus_conflict
+        boat = _locus_set("حمله نظامی آمریکا به قایق قاچاق مواد مخدر در شرق اقیانوس آرام")
+        iran = _locus_set("حملات ایران به پایگاه‌های نظامی آمریکا؛ سپاه")
+        assert "americas" in boat and "iran" in iran
+        assert _locus_conflict(boat, iran) is True
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "app" / "services" / "clustering.py").read_text()
+        # geo-gate present inside the union-find loop
+        assert '"loci": _locus_set(title),  # #6' in src
+
+    def test_roundup_headlines_are_aggregation(self):
+        """#4: multi-topic roundups ('تازه‌ترین خبرهای جهان', 'چند خبر کوتاه')
+        glue onto any cluster — classified aggregation (dropped)."""
+        from app.services.content_type import heuristic_classify
+
+        class _Stub:
+            def __init__(self, t):
+                self.title_original = t
+                self.content_text = self.summary = None
+                self.url = ""
+                self.rss_category = None
+        for t in (
+            "تازه‌ترین خبرهای جهان دوشنبه ۱۱ خرداد از رادیو بی‌بی‌سی",
+            "چند خبر کوتاه از ایران",
+        ):
+            v = heuristic_classify(_Stub(t))
+            assert v is not None and v.label == "aggregation", t
+
+    def test_medoid_centroid_for_large_clusters(self):
+        """#5a: large clusters use the medoid (anchored to a real member), not
+        the blurry mean, so accretion needs similarity to a concrete article."""
+        from app.services.clustering import _compute_centroid, MEDOID_CENTROID_MIN
+        assert MEDOID_CENTROID_MIN == 25
+        # mean of a big set with one outlier would drift; medoid stays anchored.
+        base = [[1.0, 0.0, 0.0]] * 30
+        c = _compute_centroid(base)
+        assert c and abs(c[0] - 1.0) < 1e-6
+
+    def test_freeze_oversized_exempts_edited_heroes(self):
+        """#5b: the size-freeze guardrail freezes auto-grown umbrellas but
+        EXEMPTS is_edited (human-curated) stories like the pinned war hero
+        Parham chose not to freeze."""
+        from app.services import clustering
+        assert hasattr(clustering, "freeze_oversized_active_stories")
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "app" / "services" / "clustering.py").read_text()
+        i = src.find("async def freeze_oversized_active_stories")
+        body = src[i:i + 1600]
+        assert "is_edited.is_(False)" in body
+        assert "article_count >= _settings.max_cluster_size" in body
+        # wired into the coherence step
+        am = (Path(__file__).parent.parent / "auto_maintenance.py").read_text()
+        assert "freeze_oversized_active_stories" in am
+
+
 class TestC3LearningLoop:
     """The incident ledger + self-review packet (C3, 2026-06-03): the durable
     'learn from mistakes' record. Each real defect becomes an incident mapped to

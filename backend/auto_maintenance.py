@@ -6787,6 +6787,7 @@ async def step_audit_cluster_coherence():
         audit_cluster_coherence,
         audit_homepage_coherence,
         detach_offtopic_from_visible_stories,
+        freeze_oversized_active_stories,
     )
 
     async with async_session() as db:
@@ -6808,6 +6809,16 @@ async def step_audit_cluster_coherence():
         except Exception as e:
             logger.exception("Off-topic cluster hygiene failed (non-fatal): %s", e)
             stats["offtopic_drained"] = {"error": str(e)[:200]}
+    # #5 size-based umbrella freeze (2026-06-03): freeze active, non-edited
+    # stories that hit the cluster-size cap so auto-grown grab-bags stop
+    # absorbing and the oversized_active canary self-heals. is_edited heroes
+    # are exempt (human-curated). Non-fatal.
+    async with async_session() as db:
+        try:
+            stats["oversized_frozen"] = await freeze_oversized_active_stories(db)
+        except Exception as e:
+            logger.exception("Oversized-freeze hygiene failed (non-fatal): %s", e)
+            stats["oversized_frozen"] = {"error": str(e)[:200]}
     logger.info(f"Cluster coherence audit: {stats}")
     return stats
 

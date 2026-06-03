@@ -186,6 +186,16 @@ _NEWS_VERBS = (
 
 # Aggregation tells in body — heavy attribution to other outlets.
 _AGGREGATION_VERBS = ("به نقل از", "به گزارش", "نقل از")
+# Multi-topic ROUNDUP headlines (2026-06-03 clustering-quality pass). These
+# bundle many unrelated items under one title, so their embedding sits near
+# "general news" and they glue onto whatever cluster is nearby (a BBC world
+# roundup landed in a singer's obituary). Drop as aggregation. High-precision
+# multi-word phrases only — avoid bare "خبرهای جهان" which appears in real leads.
+_ROUNDUP_TITLE_PATTERNS = (
+    "تازه‌ترین خبرهای جهان", "خبرهای کوتاه", "چند خبر کوتاه", "اخبار کوتاه",
+    "مرور مطبوعات", "نگاهی به مطبوعات", "گزیده اخبار", "بسته خبری",
+    "تیتر روزنامه‌ها", "مهم‌ترین عناوین", "مرور رسانه‌ها",
+)
 # Persian quote chars («...») that aggregators string together.
 _PERSIAN_QUOTE_RE = re.compile(r"«[^»]+»")
 
@@ -230,6 +240,12 @@ def heuristic_classify(article: Article) -> _Verdict | None:
     for kw in _OFF_DOMAIN_CONTENT:
         if kw in title:
             return _Verdict("off_topic", 0.9)
+
+    # 0b. Multi-topic roundup headlines → aggregation (drop). Cluster-pollution
+    #     guard: these bundle unrelated items and attach to any nearby cluster.
+    for kw in _ROUNDUP_TITLE_PATTERNS:
+        if kw in title:
+            return _Verdict("aggregation", 0.9)
 
     # 1. URL-slug patterns — highest precision when they fire.
     for pat in _OPINION_URL_PATTERNS:
