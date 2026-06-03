@@ -288,3 +288,49 @@ class TestC3LearningLoop:
         src = (Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py").read_text()
         for route in ('"/incidents"', '"/incidents/seed"', '"/self-review"'):
             assert route in src, f"self-review route {route} not wired into admin.py"
+
+
+class TestDoornamaBackfill:
+    """2026-06-03: the pinned hero f5088d84 showed bias bullets instead of the
+    دورنما prose Parham asked for. ROOT CAUSE: doornama is generated INSIDE the
+    per-story summarize loop, but a stable/pinned hero whose article set hasn't
+    changed is skipped by the maturity/hash gate — so the doornama block never
+    runs for the #1 card. CURE: a decoupled backfill pass at the end of
+    step_summarize that generates a briefing for any doornama_top_id missing one,
+    driven by the pure predicate doornama.needs_briefing_backfill()."""
+
+    def test_case_2026_06_03_stable_hero_with_narratives_needs_briefing(self):
+        """SYMPTOM: #1 hero had narratives but empty briefing_fa, so the card
+        fell back to bias bullets. RESPONSIBLE: step_summarize doornama gating."""
+        from app.services.doornama import needs_briefing_backfill
+        extras = {
+            "state_summary_fa": "این سمت ...",
+            "diaspora_summary_fa": "آن سمت ...",
+            "bias_explanation_fa": "تحلیل ...",
+            # no briefing_fa — the exact production state of f5088d84 at 15:00
+        }
+        assert needs_briefing_backfill(extras) is True
+
+    def test_existing_briefing_is_not_repaid(self):
+        """Idempotency: a hero that already has a briefing must be skipped so the
+        backfill never re-pays the LLM on a stable day."""
+        from app.services.doornama import needs_briefing_backfill
+        assert needs_briefing_backfill({
+            "state_summary_fa": "x", "briefing_fa": "روایت یکپارچه ...",
+        }) is False
+        # whitespace-only briefing counts as missing
+        assert needs_briefing_backfill({
+            "state_summary_fa": "x", "briefing_fa": "   ",
+        }) is True
+
+    def test_no_narrative_inputs_means_nothing_to_synthesize(self):
+        from app.services.doornama import needs_briefing_backfill
+        assert needs_briefing_backfill({}) is False
+        assert needs_briefing_backfill(None) is False
+        assert needs_briefing_backfill("not a dict") is False
+
+    def test_backfill_pass_wired_into_step_summarize(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "auto_maintenance.py").read_text()
+        assert "needs_briefing_backfill" in src, "backfill predicate not used in pipeline"
+        assert "doornama_backfilled" in src, "backfill stat not reported"

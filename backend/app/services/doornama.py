@@ -99,6 +99,30 @@ DOORNAMA_PROMPT = """\
 """
 
 
+def needs_briefing_backfill(extras: Any) -> bool:
+    """True when a top-trending story has narrative inputs but no
+    ``briefing_fa`` yet.
+
+    دورنما is generated INSIDE the per-story summarize loop, gated on the
+    maturity/hash skip check. A pinned or otherwise stable hero whose
+    article set hasn't changed is skipped by that gate, so it never gets a
+    briefing even though it's the #1 homepage card — the user sees the
+    fallback bias bullets instead of the prose synthesis (Parham
+    2026-06-03: hero f5088d84). The decoupled backfill pass at the end of
+    step_summarize uses this predicate to catch exactly those stories and
+    synthesize from the narratives already stored in their summary blob.
+    """
+    if not isinstance(extras, dict):
+        return False
+    if (extras.get("briefing_fa") or "").strip():
+        return False
+    return bool(
+        extras.get("state_summary_fa")
+        or extras.get("diaspora_summary_fa")
+        or extras.get("bias_explanation_fa")
+    )
+
+
 def _format_input_field(value: Any) -> str:
     """Render a structured field (str | dict | list | None) for the prompt."""
     if value is None or value == "":

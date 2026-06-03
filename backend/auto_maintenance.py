@@ -2087,11 +2087,67 @@ async def step_summarize():
                 except Exception:
                     await db.rollback()
 
+        # دورنما backfill — decoupled from the per-story summarize gate.
+        # The inline call above only fires for a top story that actually
+        # ENTERS the summarize loop. A pinned/stable hero whose article
+        # set hasn't changed is skipped by the maturity/hash gate, so it
+        # would never get a briefing even though it's the #1 card — and
+        # the hero falls back to bias bullets (Parham 2026-06-03,
+        # f5088d84). This pass guarantees every doornama_top_id has a
+        # briefing_fa, synthesizing from already-stored narratives when
+        # missing. Idempotent: needs_briefing_backfill() returns False
+        # once a briefing exists, so a stable hero re-pays nothing.
+        doornama_backfilled = 0
+        from app.services.doornama import (
+            generate_doornama_briefing as _gen_briefing,
+            needs_briefing_backfill as _needs_briefing,
+        )
+        for _dn_id in doornama_top_ids:
+            try:
+                _res = await db.execute(select(Story).where(Story.id == _dn_id))
+                _sty = _res.scalar_one_or_none()
+                if _sty is None or not _sty.summary_en:
+                    continue
+                try:
+                    _ex = _json.loads(_sty.summary_en)
+                except Exception:
+                    continue
+                if not _needs_briefing(_ex):
+                    continue
+                _anchor_b = None
+                if isinstance(_sty.summary_anchor, dict):
+                    _anchor_b = _sty.summary_anchor.get("briefing_fa")
+                await _keepalive(db)
+                _r = await _gen_briefing(
+                    story_id=str(_sty.id),
+                    title_fa=_sty.title_fa,
+                    state_summary_fa=_ex.get("state_summary_fa"),
+                    diaspora_summary_fa=_ex.get("diaspora_summary_fa"),
+                    independent_summary_fa=_ex.get("independent_summary_fa"),
+                    bias_explanation_fa=_ex.get("bias_explanation_fa"),
+                    silence_analysis=_ex.get("silence_analysis"),
+                    narrative_arc=_ex.get("narrative_arc"),
+                    summary_anchor_briefing_fa=_anchor_b,
+                )
+                if _r and _r.get("briefing_fa"):
+                    _ex["briefing_fa"] = _r["briefing_fa"]
+                    _ex["briefing_hash"] = _r.get("briefing_hash")
+                    _sty.summary_en = _json.dumps(_ex, ensure_ascii=False)
+                    await db.commit()
+                    doornama_backfilled += 1
+            except Exception as _e:
+                logger.warning(f"doornama backfill failed for {_dn_id}: {_e}")
+                try:
+                    await db.rollback()
+                except Exception:
+                    pass
+
         return {
             "generated": success,
             "premium": premium_used,
             "baseline": baseline_used,
             "failed": failed,
+            "doornama_backfilled": doornama_backfilled,
         }
 
 
