@@ -140,3 +140,29 @@ class TestBellwether:
         heads = _extract_headlines(html)
         assert any("توافق ایران و آمریکا" in h for h in heads)
         assert any("تنگه هرمز" in h for h in heads)
+
+    def test_case_2026_06_03_bellwether_compares_fresh_not_just_prominent(self):
+        """SYMPTOM: the FIRST cron bellwether (2026-06-03) reported 'Iran missile
+        attacks on US bases' MISSING at conf 0.9 — but we covered it in TWO
+        stories (22e0a9cb, f2f72a09). They were demoted (priority = -50), so
+        they sorted below the top-12-by-priority window the comparator saw.
+        ROOT CAUSE: _our_top_titles fed the LLM only the most-prominent slice,
+        so demoted-but-present coverage read as absent. RESPONSIBLE:
+        bellwether._our_top_titles. FIX: union the top-by-priority slice with
+        ALL fresh stories (≤ fresh_days, any priority) before the comparison —
+        the prompt's own rule is 'covered if we have anything on the event'."""
+        import inspect
+        from app.services.bellwether import _our_top_titles
+        sig = inspect.signature(_our_top_titles)
+        # The fresh-coverage union is parameterised — its absence is the bug.
+        assert "fresh_days" in sig.parameters, (
+            "bellwether must include fresh stories (any priority), not just "
+            "the top-by-priority slice, or demoted coverage reads as missing"
+        )
+        src = inspect.getsource(_our_top_titles)
+        assert "first_published_at" in src, "fresh-window filter must be present"
+        # Must NOT re-filter the fresh set by priority (that would reintroduce the bug).
+        fresh_block = src.split("fresh = ")[-1].split("prominent = ")[0]
+        assert "priority" not in fresh_block, (
+            "the fresh-coverage query must be priority-agnostic"
+        )

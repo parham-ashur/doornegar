@@ -75,14 +75,49 @@ async def _fetch_outlet(client: httpx.AsyncClient, url: str) -> list[str] | None
         return None
 
 
-async def _our_top_titles(db: AsyncSession, limit: int = 12) -> list[str]:
-    rows = (await db.execute(
+async def _our_top_titles(
+    db: AsyncSession, limit: int = 12, fresh_days: int = 4, fresh_limit: int = 40
+) -> list[str]:
+    """Titles the comparator checks an outlet lead against.
+
+    The prompt says a story counts as covered if we have ANYTHING on the same
+    event — so this must reflect our *coverage*, not just our most prominent
+    slice. Two parts, unioned:
+      1. top-`limit` by priority (what's prominent on the homepage), and
+      2. all fresh stories (≤ fresh_days) regardless of priority.
+
+    Part 2 fixes a real false-positive (observed 2026-06-03): demoted war
+    clusters (priority = -50, e.g. "Iran missile attacks on US bases") sort
+    below the top-12 by priority, so the LLM never saw them and reported the
+    event MISSING even though we covered it twice. Demoted ≠ absent.
+    """
+    from datetime import timedelta
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=fresh_days)
+    prominent = (await db.execute(
         select(Story.title_fa)
         .where(Story.archived_at.is_(None), Story.article_count >= 5)
         .order_by(Story.priority.desc(), Story.trending_score.desc())
         .limit(limit)
     )).scalars().all()
-    return [t for t in rows if t]
+    fresh = (await db.execute(
+        select(Story.title_fa)
+        .where(
+            Story.archived_at.is_(None),
+            Story.article_count >= 5,
+            Story.first_published_at >= cutoff,
+        )
+        .order_by(Story.trending_score.desc())
+        .limit(fresh_limit)
+    )).scalars().all()
+    # Preserve order (prominent first), dedup.
+    seen: set[str] = set()
+    out: list[str] = []
+    for t in [*prominent, *fresh]:
+        if t and t not in seen:
+            seen.add(t)
+            out.append(t)
+    return out
 
 
 _COMPARE_PROMPT = """\
