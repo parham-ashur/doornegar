@@ -338,6 +338,26 @@ INITIAL_SOURCES = [
     # Classified `independent` (non-partisan HR documentation) to match HRANA,
     # not `diaspora`, so HR-monitor volume doesn't skew the diaspora bias bucket.
     {
+        "name_en": "Human Rights Activists News Agency (HRANA)",
+        "name_fa": "خبرگزاری هرانا",
+        "slug": "hrana",
+        "website_url": "https://www.hra-news.org",
+        # PERSIAN feed (verified 2026-06-03: 30 entries, same-day, native fa).
+        # The English monitors (IHR/CHRI/KHRN) publish in English, which the
+        # Persian-first pipeline drops as off-topic / fails to cluster — so HR
+        # coverage never reached the homepage. HRANA is the premier inside-Iran
+        # HR wire IN PERSIAN, so its protest/execution/kolbar reporting actually
+        # clusters. The /en feed (en-hrana.org) is the English sibling — NOT used.
+        "rss_urls": ["https://www.hra-news.org/feed/"],
+        "state_alignment": "independent",
+        "irgc_affiliated": False,
+        "production_location": "both",
+        "factional_alignment": None,
+        "language": "fa",
+        "description_en": "Persian-language Human Rights Activists News Agency — the premier inside-Iran HR wire (protests, executions, political prisoners, labor & kolbar deaths). Native Persian, so it clusters onto the homepage where our English HR monitors can't.",
+        "description_fa": "خبرگزاری فعالان حقوق بشر (هرانا) — مرجع فارسی‌زبان پایش حقوق بشر در ایران؛ اعتراض‌ها، اعدام‌ها، زندانیان سیاسی، و جان‌باختن کارگران و کولبران.",
+    },
+    {
         "name_en": "Iran Human Rights (IHRNGO)",
         "name_fa": "سازمان حقوق بشر ایران",
         "slug": "iran-human-rights",
@@ -370,7 +390,7 @@ INITIAL_SOURCES = [
         "name_fa": "شبکهٔ حقوق بشر کردستان",
         "slug": "khrn",
         "website_url": "https://kurdistanhumanrights.org",
-        "rss_urls": ["https://kurdistanhumanrights.org/en/feed/"],  # verified RSS 2.0
+        "rss_urls": ["https://kurdistanhumanrights.org/en/feed"],  # no trailing slash — /en/feed/ 301-redirects (2026-06-03)
         "state_alignment": "independent",
         "irgc_affiliated": False,
         "production_location": "outside_iran",
