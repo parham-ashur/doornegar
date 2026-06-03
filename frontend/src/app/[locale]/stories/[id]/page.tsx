@@ -307,13 +307,17 @@ export default async function StoryDetailPage({
             const updSrc = story.last_updated_at || story.updated_at;
             const showUpdated = pubSrc && updSrc
               && Math.abs(new Date(updSrc).getTime() - new Date(pubSrc).getTime()) > 3600000;
-            return (
+            // Lead with freshness: an ongoing story updated today must not
+            // read as «نشر ۶ روز پیش» off its first article (Parham 2026-06-03).
+            return showUpdated ? (
               <>
-                {pubSrc && <span>نشر {formatRelativeTime(pubSrc, "fa")}</span>}
-                {showUpdated && (
-                  <span className="text-sm text-slate-500">به‌روز {formatRelativeTime(updSrc!, "fa")}</span>
+                <span>به‌روزرسانی {formatRelativeTime(updSrc!, "fa")}</span>
+                {pubSrc && (
+                  <span className="text-sm text-slate-400 dark:text-slate-600">نشر {formatRelativeTime(pubSrc, "fa")}</span>
                 )}
               </>
+            ) : (
+              <>{pubSrc && <span>نشر {formatRelativeTime(pubSrc, "fa")}</span>}</>
             );
           })()}
         </div>

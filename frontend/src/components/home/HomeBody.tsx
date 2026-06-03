@@ -179,8 +179,21 @@ function Meta({ story }: { story: StoryBrief }) {
       <div className="flex items-center justify-between text-[15px] leading-6">
         <p className="text-slate-400 dark:text-slate-500">
           {tabularNum(story.source_count)} رسانه · {tabularNum(story.article_count)} مقاله
-          {published && <span>{" · "}نشر {published}</span>}
-          {showUpdated && <span>{" · "}به‌روز {updated}</span>}
+          {/* Lead with freshness: an ongoing story that got new articles today
+              must not read as «۶ روز پیش» just because its first article is old
+              (Parham 2026-06-03: today's Kuwait news showed «نشر ۶ روز پیش»).
+              When there's recent activity, show «به‌روزرسانی» first and keep the
+              start date faint; otherwise just the publish date. */}
+          {showUpdated ? (
+            <>
+              <span>{" · "}به‌روزرسانی {updated}</span>
+              {published && (
+                <span className="text-slate-300 dark:text-slate-600">{" · "}نشر {published}</span>
+              )}
+            </>
+          ) : (
+            published && <span>{" · "}نشر {published}</span>
+          )}
         </p>
         {hasSides && (
           <p className="shrink-0">
