@@ -166,3 +166,37 @@ class TestBellwether:
         assert "priority" not in fresh_block, (
             "the fresh-coverage query must be priority-agnostic"
         )
+
+
+class TestC3LearningLoop:
+    """The incident ledger + self-review packet (C3, 2026-06-03): the durable
+    'learn from mistakes' record. Each real defect becomes an incident mapped to
+    the responsible prompt/step; the self-review packet surfaces non-ok canaries
+    + open incidents in one read for the chat ritual."""
+
+    def test_incident_ledger_service_exists(self):
+        from app.services import incident_ledger as il
+        for fn in ("log_incident", "list_incidents", "self_review_packet", "seed_incidents"):
+            assert hasattr(il, fn), f"incident_ledger.{fn} missing"
+        assert il.INCIDENT_EVENT == "incident"
+
+    def test_seed_incidents_cover_this_sessions_defects(self):
+        """The seed ledger must carry the real 2026-06 defects so the loop
+        starts populated, each naming its responsible prompt/step."""
+        from app.services.incident_ledger import SEED_INCIDENTS
+        slugs = {i["slug"] for i in SEED_INCIDENTS}
+        assert {
+            "pinned-umbrella-accretion",
+            "bellwether-demoted-coverage-false-positive",
+            "offtopic-label-produces-zero",
+        } <= slugs
+        for inc in SEED_INCIDENTS:
+            # the mapping to a responsible prompt/step is the load-bearing field
+            assert inc.get("responsible"), f"incident {inc['slug']} names no responsible step"
+            assert inc.get("symptom") and inc.get("root_cause")
+
+    def test_self_review_endpoints_wired(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py").read_text()
+        for route in ('"/incidents"', '"/incidents/seed"', '"/self-review"'):
+            assert route in src, f"self-review route {route} not wired into admin.py"

@@ -4292,6 +4292,59 @@ async def trigger_bellwether_check(db: AsyncSession = Depends(get_db)):
     return await run_bellwether_check(db)
 
 
+# ── Incident ledger + self-review loop (C3: learn from mistakes) ──────────
+class _IncidentRequest(_BaseModel):
+    slug: str
+    title: str
+    symptom: str
+    root_cause: str
+    responsible: str
+    fix: str | None = None
+    regression_case: str | None = None
+    severity: str = "med"
+    status: str = "open"
+
+
+@router.post("/incidents", dependencies=[Depends(require_admin)])
+async def log_incident_endpoint(
+    request: _IncidentRequest, db: AsyncSession = Depends(get_db)
+):
+    """Record one defect in the incident ledger (story_events event_type=
+    'incident'). Called from the chat self-review ritual. To update an
+    incident's status, POST the same slug again with the new status — the
+    ledger reads newest-per-slug."""
+    from app.services.incident_ledger import log_incident
+    await log_incident(db, **request.model_dump(), commit=True)
+    return {"status": "ok", "slug": request.slug}
+
+
+@router.get("/incidents", dependencies=[Depends(require_admin)])
+async def list_incidents_endpoint(
+    limit: int = 50, include_fixed: bool = True, db: AsyncSession = Depends(get_db)
+):
+    """Most-recent incidents first (newest-per-slug)."""
+    from app.services.incident_ledger import list_incidents
+    items = await list_incidents(db, limit=limit, include_fixed=include_fixed)
+    return {"count": len(items), "incidents": items}
+
+
+@router.post("/incidents/seed", dependencies=[Depends(require_admin)])
+async def seed_incidents_endpoint(db: AsyncSession = Depends(get_db)):
+    """One-shot: write the seed incidents from the 2026-06 sessions
+    (idempotent by slug)."""
+    from app.services.incident_ledger import seed_incidents
+    n = await seed_incidents(db, commit=True)
+    return {"status": "ok", "seeded": n}
+
+
+@router.get("/self-review", dependencies=[Depends(require_admin)])
+async def self_review_endpoint(db: AsyncSession = Depends(get_db)):
+    """One-read review packet for the chat self-review ritual: non-ok
+    canaries + open incidents + recent maintenance fails + the ritual steps."""
+    from app.services.incident_ledger import self_review_packet
+    return await self_review_packet(db)
+
+
 @router.get("/health/overview")
 async def health_overview(db: AsyncSession = Depends(get_db)):
     """Comprehensive health snapshot for the /dashboard/health page.
