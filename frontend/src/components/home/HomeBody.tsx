@@ -66,7 +66,7 @@ async function fetchSummary(storyId: string): Promise<string | null> {
   }
 }
 
-async function fetchAnalysis(storyId: string): Promise<{ summary_fa?: string; bias_explanation_fa?: string; state_summary_fa?: string; diaspora_summary_fa?: string; dispute_score?: number; loaded_words?: { conservative: string[]; opposition: string[] } } | null> {
+async function fetchAnalysis(storyId: string): Promise<{ summary_fa?: string; briefing_fa?: string | null; bias_explanation_fa?: string; state_summary_fa?: string; diaspora_summary_fa?: string; dispute_score?: number; loaded_words?: { conservative: string[]; opposition: string[] } } | null> {
   try {
     const res = await fetch(`${API}/api/v1/stories/${storyId}/analysis`, { next: { revalidate: ANALYSIS_TTL }, headers: AUTH_HEADERS });
     if (!res.ok) return null;
@@ -76,7 +76,7 @@ async function fetchAnalysis(storyId: string): Promise<{ summary_fa?: string; bi
   }
 }
 
-async function fetchAnalysesBatch(storyIds: string[]): Promise<Record<string, { summary_fa?: string; bias_explanation_fa?: string; state_summary_fa?: string; diaspora_summary_fa?: string; dispute_score?: number; loaded_words?: { conservative: string[]; opposition: string[] } } | null>> {
+async function fetchAnalysesBatch(storyIds: string[]): Promise<Record<string, { summary_fa?: string; briefing_fa?: string | null; bias_explanation_fa?: string; state_summary_fa?: string; diaspora_summary_fa?: string; dispute_score?: number; loaded_words?: { conservative: string[]; opposition: string[] } } | null>> {
   if (storyIds.length === 0) return {};
   // Dedupe + stable-sort so identical sets share a cache key.
   const ids = Array.from(new Set(storyIds)).sort();
@@ -1066,31 +1066,37 @@ export default async function HomeBody({
               </Link>
             ))}
             <Meta story={hero} />
-            {/* Two-side bias comparison (flat, homepage-density) */}
+            {/* Hero leads with the دورنما prose synthesis (briefing_fa) when
+                it exists, replacing the loaded-words bias bullets (Parham
+                2026-06-03); bullets stay the fallback until doornama runs. */}
             {(() => {
               const analysis = allAnalyses[hero.id];
               const stateSummary = analysis?.state_summary_fa;
               const diasporaSummary = analysis?.diaspora_summary_fa;
+              const doornama = analysis?.briefing_fa;
               const bias = analysis?.bias_explanation_fa;
+              const points = doornama ? [] : splitBiasPoints(bias).slice(0, 2);
               if (!stateSummary && !diasporaSummary) {
-                const points = splitBiasPoints(bias).slice(0, 2);
-                if (!points.length) return null;
+                if (!doornama && !points.length) return null;
                 return (
                   <div className="mt-3 space-y-1">
                     <UpdateDeltaCallout story={hero} field="bias" />
-                    {points.map((point, i) => (
+                    {doornama ? (
+                      <p className="text-[15px] leading-7 text-slate-600 dark:text-slate-300 line-clamp-5">{doornama}</p>
+                    ) : points.map((point, i) => (
                       <p key={i} className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-1">• {point}</p>
                     ))}
                   </div>
                 );
               }
-              const biasPoints = splitBiasPoints(bias).slice(0, 2);
               return (
                 <div className="mt-3">
                   <UpdateDeltaCallout story={hero} field="bias" />
-                  {biasPoints.length > 0 && (
+                  {doornama ? (
+                    <p className="mb-3 text-[15px] leading-7 text-slate-600 dark:text-slate-300 line-clamp-4">{doornama}</p>
+                  ) : points.length > 0 && (
                     <div className="mb-3 space-y-1">
-                      {biasPoints.map((point, i) => (
+                      {points.map((point, i) => (
                         <p key={i} className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-1">• {point}</p>
                       ))}
                     </div>
@@ -1501,7 +1507,7 @@ function MobileHome({
   locale: string;
   conservativeBlind: StoryBrief | undefined;
   oppositionBlind: StoryBrief | undefined;
-  allAnalyses: Record<string, { bias_explanation_fa?: string; state_summary_fa?: string; diaspora_summary_fa?: string } | null>;
+  allAnalyses: Record<string, { briefing_fa?: string | null; bias_explanation_fa?: string; state_summary_fa?: string; diaspora_summary_fa?: string } | null>;
   heroTelegram: { discourse_summary?: string; predictions?: any[]; key_claims?: any[] } | null;
   prefetchedTelegram: { storyId: string; analysis: TelegramAnalysis }[];
   telegramAnalysisIds: string[];
@@ -1528,7 +1534,9 @@ function MobileHome({
   const heroStateSummary = heroAnalysis?.state_summary_fa;
   const heroDiasporaSummary = heroAnalysis?.diaspora_summary_fa;
   const heroBias = heroAnalysis?.bias_explanation_fa;
-  const heroBiasPoints = splitBiasPoints(heroBias).slice(0, 2);
+  const heroDoornama = heroAnalysis?.briefing_fa;
+  // دورنما prose replaces the bias bullets in the hero (Parham 2026-06-03).
+  const heroBiasPoints = heroDoornama ? [] : splitBiasPoints(heroBias).slice(0, 2);
 
   // Weekly briefing stories ("در روزهای گذشته"): stories 1–3
   const briefingStories = stories.slice(1, 4);
@@ -1592,7 +1600,9 @@ function MobileHome({
         <div className="px-4 pt-3">
           {(heroStateSummary || heroDiasporaSummary) ? (
             <>
-              {heroBiasPoints.length > 0 && (
+              {heroDoornama ? (
+                <p className="mb-3 text-[15px] leading-7 text-slate-600 dark:text-slate-300 line-clamp-5">{heroDoornama}</p>
+              ) : heroBiasPoints.length > 0 && (
                 <div className="mb-3 space-y-1">
                   {heroBiasPoints.map((point, i) => (
                     <p key={i} className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-2">• {point}</p>
@@ -1614,6 +1624,8 @@ function MobileHome({
                 )}
               </div>
             </>
+          ) : heroDoornama ? (
+            <p className="text-[15px] leading-7 text-slate-600 dark:text-slate-300 line-clamp-5">{heroDoornama}</p>
           ) : heroBiasPoints.length > 0 ? (
             <div className="space-y-1">
               {heroBiasPoints.map((point, i) => (

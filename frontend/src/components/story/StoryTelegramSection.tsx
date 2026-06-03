@@ -253,6 +253,11 @@ function TelegramReferences({ posts, channels, totalPosts }: TelegramReferencesP
     const map = new Map<string, { title: string; type: string; username: string; posts: SocialPost[] }>();
     for (const p of posts) {
       if (!p.channel || !p.text) continue;
+      // Telegram summaries show ANALYSTS only (Parham 2026-06-03): exclude
+      // newspaper / news-agency channels (e.g. روزنامه اطلاعات) which are
+      // already represented in the news bias panel. channel_type 'commentary'
+      // is the analyst/تحلیلگر tier; news/aggregator are dropped here.
+      if (p.channel.channel_type !== "commentary") continue;
       const key = p.channel.username;
       const entry = map.get(key);
       if (entry) {
@@ -271,7 +276,13 @@ function TelegramReferences({ posts, channels, totalPosts }: TelegramReferencesP
     return arr;
   }, [posts]);
 
-  const totalChannels = channels.length || grouped.length;
+  // Analyst-only (Parham 2026-06-03): the chip fallback + count mirror the
+  // commentary filter applied to `grouped`, so newspapers never show here.
+  const analystChannels = channels.filter((c) => c.type === "commentary");
+  const analystPostCount = grouped.reduce((n, g) => n + g.posts.length, 0);
+  const totalChannels = analystChannels.length || grouped.length;
+  // Nothing analyst-authored on this story → don't render the section at all.
+  if (grouped.length === 0 && analystChannels.length === 0) return null;
 
   return (
     <div className="border-t border-slate-200 dark:border-slate-800 mt-2">
@@ -279,7 +290,7 @@ function TelegramReferences({ posts, channels, totalPosts }: TelegramReferencesP
         onClick={() => setOpen(!open)}
         className="flex items-center justify-between w-full py-2 text-[13px] font-bold text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
       >
-        <span>منابع تلگرامی — {totalChannels} کانال، {totalPosts} پست</span>
+        <span>تحلیل‌گران تلگرام — {totalChannels} تحلیل‌گر، {analystPostCount || totalPosts} پست</span>
         <ChevronDown className={`h-3 w-3 transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
       {open && (
@@ -292,7 +303,7 @@ function TelegramReferences({ posts, channels, totalPosts }: TelegramReferencesP
             </ul>
           ) : (
             <div className="flex flex-wrap gap-1.5 mt-1">
-              {channels.map((ch, i) => (
+              {analystChannels.map((ch, i) => (
                 <span
                   key={i}
                   className="inline-flex items-center gap-1.5 px-2 py-0.5 text-[12px] border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300"
