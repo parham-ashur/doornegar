@@ -1389,10 +1389,27 @@ async def step_summarize_newly_visible():
         from app.services.narrative_groups import narrative_group as _ng
 
         for story in stories:
-            top_articles = sorted(
+            # Stratify the sample across media alignments — same as the main
+            # step_summarize. Pure recency top-10 let a side fall outside the
+            # sample on a big story, so the analysis falsely declared a
+            # subgroup absent (Parham 2026-06-03: d8489917 had inside-border
+            # articles but the narrative said «این زیرگروه ... حضوری ندارد»).
+            # Reserve ≥2 slots per alignment present, newest-first within each.
+            _recent = sorted(
                 [a for a in (story.articles or []) if a.published_at],
                 key=lambda a: a.published_at, reverse=True,
-            )[:MAX_ARTICLES_PER_STORY]
+            )
+            _by_align: dict = {}
+            for a in _recent:
+                _al = a.source.state_alignment if a.source else "unknown"
+                _by_align.setdefault(_al, []).append(a)
+            _slots = max(2, MAX_ARTICLES_PER_STORY // max(len(_by_align), 1))
+            top_articles = []
+            for _al_articles in _by_align.values():
+                top_articles.extend(_al_articles[:_slots])
+            top_articles = top_articles[:MAX_ARTICLES_PER_STORY]
+            if not top_articles:
+                top_articles = _recent[:MAX_ARTICLES_PER_STORY]
             if not top_articles:
                 stats["no_articles"] += 1
                 continue
@@ -1426,8 +1443,15 @@ async def step_summarize_newly_visible():
                     continue
 
                 story.summary_fa = analysis.get("summary_fa")
-                if analysis.get("title_fa") and analysis["title_fa"].strip():
-                    story.title_fa = analysis["title_fa"].strip()
+                from app.services.story_analysis import pick_clean_title as _pick_title
+                _fallbacks = [(_a.title_original or _a.title_fa or "") for _a in top_articles]
+                _clean_t = _pick_title(analysis.get("title_fa"), story.title_fa, _fallbacks)
+                if _clean_t:
+                    if analysis.get("title_fa") and _clean_t != (analysis["title_fa"] or "").strip():
+                        logger.warning(
+                            f"  rejected meta-title for {story.id}: {analysis.get('title_fa')!r}"
+                        )
+                    story.title_fa = _clean_t
                 if analysis.get("title_en") and analysis["title_en"].strip():
                     story.title_en = analysis["title_en"].strip()
 
@@ -1959,8 +1983,15 @@ async def step_summarize():
                                 f"Title cohesion check failed for {story.id}: {_ce}"
                             )
                     if title_cohesion_ok:
-                        if proposed_title_fa:
-                            story.title_fa = proposed_title_fa
+                        from app.services.story_analysis import pick_clean_title as _pick_title2
+                        _fb2 = [(_a.title_original or _a.title_fa or "") for _a in top_articles]
+                        _clean2 = _pick_title2(proposed_title_fa, story.title_fa, _fb2)
+                        if _clean2:
+                            if proposed_title_fa and _clean2 != (proposed_title_fa or "").strip():
+                                logger.warning(
+                                    f"  rejected meta-title for {story.id}: {proposed_title_fa!r}"
+                                )
+                            story.title_fa = _clean2
                         if proposed_title_en:
                             story.title_en = proposed_title_en
                 # Preserve Claude-scored neutrality across LLM re-runs —
@@ -5599,9 +5630,15 @@ async def step_quality_postprocess():
 
                 title_suggestion = review.get("title_suggestion")
                 if title_suggestion and isinstance(title_suggestion, str) and title_suggestion.strip():
-                    story.title_fa = title_suggestion.strip()
-                    stats["titles_improved"] += 1
-                    logger.info(f"  QC improved title: '{title_suggestion[:40]}'")
+                    from app.services.story_analysis import is_meta_title as _is_meta
+                    if _is_meta(title_suggestion):
+                        logger.warning(
+                            f"  QC rejected meta-title for {story.id}: {title_suggestion!r}"
+                        )
+                    else:
+                        story.title_fa = title_suggestion.strip()
+                        stats["titles_improved"] += 1
+                        logger.info(f"  QC improved title: '{title_suggestion[:40]}'")
 
                 # Store quality score
                 quality_score = review.get("quality_score")

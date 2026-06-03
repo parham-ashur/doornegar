@@ -334,3 +334,73 @@ class TestDoornamaBackfill:
         src = (Path(__file__).parent.parent / "auto_maintenance.py").read_text()
         assert "needs_briefing_backfill" in src, "backfill predicate not used in pipeline"
         assert "doornama_backfilled" in src, "backfill stat not reported"
+
+
+class TestMetaTitleGuardrail:
+    """2026-06-03: three homepage stories carried titles like «تحلیل سوگیری در
+    پوشش خبری اعدام فتح‌الله آوری و مقایسه رویکرد رسانه‌ها» — describing OUR bias
+    analysis instead of the news event. ROOT CAUSE: the title prompt forbids
+    those words but gpt-5-mini ignores the negative instruction. CURE: a
+    deterministic gate (story_analysis.is_meta_title / pick_clean_title) rejects
+    meta-titles at every write site and falls back to a real article headline."""
+
+    def test_case_2026_06_03_real_meta_titles_are_caught(self):
+        from app.services.story_analysis import is_meta_title
+        for bad in (
+            "تحلیل سوگیری در پوشش خبری اعدام فتح‌الله آوری و مقایسه رویکرد رسانه‌ها",
+            "تحلیل سوگیری و ارزیابی خبر توافق صلح احتمالی",
+            "تحلیل سوگیری و چالش‌های خبری",
+        ):
+            assert is_meta_title(bad) is True, f"missed meta-title: {bad}"
+
+    def test_real_news_headlines_pass(self):
+        from app.services.story_analysis import is_meta_title
+        for good in (
+            "فتح‌الله آوری، معترض دی‌ماه ۱۴۰۴، اعدام شد",
+            "حملات موشکی و پهپادی ایران به کویت؛ ۱ کشته و ۶۳ زخمی",
+            "تبادل آتش در تنگه هرمز؛ ترامپ آتش‌بس را اعلام کرد",
+        ):
+            assert is_meta_title(good) is False, f"false positive on: {good}"
+
+    def test_pick_clean_title_falls_back_to_article_headline(self):
+        from app.services.story_analysis import pick_clean_title
+        # LLM proposed a meta-title; current is also meta → use the real headline
+        out = pick_clean_title(
+            "تحلیل سوگیری در پوشش خبری اعدام فتح‌الله آوری",
+            "تحلیل سوگیری و چالش‌های خبری",
+            ["اعتراضات دی‌ماه ۱۴۰۴؛ فتح‌الله آوری اعدام شد"],
+        )
+        assert out == "اعتراضات دی‌ماه ۱۴۰۴؛ فتح‌الله آوری اعدام شد"
+
+    def test_pick_clean_title_prefers_clean_proposed(self):
+        from app.services.story_analysis import pick_clean_title
+        out = pick_clean_title("فتح‌الله آوری اعدام شد", "عنوان قدیمی", ["x"])
+        assert out == "فتح‌الله آوری اعدام شد"
+
+    def test_pick_clean_title_returns_none_when_all_meta(self):
+        from app.services.story_analysis import pick_clean_title
+        assert pick_clean_title("تحلیل سوگیری الف", "پوشش خبری ب", ["مقایسه رویکرد رسانه‌ها"]) is None
+
+    def test_guardrail_wired_at_all_title_write_sites(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "auto_maintenance.py").read_text()
+        # both summarize paths + QC use the gate
+        assert src.count("pick_clean_title") >= 2, "title guardrail missing from a summarize path"
+        assert "is_meta_title" in src, "QC path not gated against meta-titles"
+
+
+class TestNarrativeSampleStratification:
+    """2026-06-03: story d8489917 had inside-border articles (and Telegram) yet
+    the narrative said «این زیرگروه در مجموعهٔ مقالات حاضر حضوری ندارد». ROOT
+    CAUSE: step_summarize_newly_visible sampled the 10 MOST RECENT articles
+    (pure recency); on a big story a whole alignment fell outside the sample, so
+    the LLM correctly-per-its-input declared that subgroup absent. CURE: both
+    summarize paths now stratify the sample by alignment (≥2 slots each)."""
+
+    def test_both_summarize_paths_stratify_by_alignment(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "auto_maintenance.py").read_text()
+        # main step_summarize uses by_align; newly_visible now uses _by_align too
+        assert "by_align" in src and "_by_align" in src, "a summarize path is not stratified"
+        assert src.count("slots") >= 2 or src.count("slots_per_align") + src.count("_slots") >= 2, \
+            "alignment slotting missing from a summarize path"

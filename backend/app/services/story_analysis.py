@@ -21,6 +21,61 @@ from app.services.narrative_groups import narrative_group as _narrative_group
 logger = logging.getLogger(__name__)
 
 
+# Meta-titles describe Doornegar's OWN analysis function ("bias analysis of
+# the coverage of X", "comparison of media approaches to Y") instead of the
+# news event itself. The title prompt explicitly forbids these words, but
+# gpt-5-mini ignores the negative instruction every so often (Parham
+# 2026-06-03: three homepage stories titled «تحلیل سوگیری در پوشش خبری …»).
+# A prompt plea isn't a guarantee, so we gate deterministically: any title
+# built around these tokens is rejected and the caller falls back to a real
+# article headline. Keep this list in sync with the banned-words clause in
+# STORY_ANALYSIS_PROMPT's title_fa instruction.
+_META_TITLE_TOKENS = (
+    "تحلیل سوگیری",
+    "سوگیری در پوشش",
+    "پوشش خبری",
+    "پوشش رسانه",
+    "رویکرد رسانه",
+    "مقایسه رویکرد",
+    "مقایسه روایت",
+    "بررسی رسانه",
+    "چالش‌های خبری",
+    "ارزیابی خبر",
+    "نقش عوامل خارجی",
+)
+
+
+def is_meta_title(title: str | None) -> bool:
+    """True when an LLM-proposed story title describes our analysis rather
+    than the news event (forbidden meta-framing). Callers must fall back to
+    a real article headline instead of writing it to the story."""
+    if not title:
+        return False
+    t = title.strip()
+    return any(tok in t for tok in _META_TITLE_TOKENS)
+
+
+def pick_clean_title(
+    proposed: str | None,
+    current: str | None,
+    fallback_titles: list[str] | None = None,
+) -> str | None:
+    """Best non-meta title for a story.
+
+    Prefer a clean LLM-proposed title; else keep the current title if it's
+    clean; else the first clean real article headline; else None (caller
+    keeps whatever it already had rather than writing a meta-title).
+    """
+    if proposed and proposed.strip() and not is_meta_title(proposed):
+        return proposed.strip()
+    if current and current.strip() and not is_meta_title(current):
+        return current.strip()
+    for t in fallback_titles or []:
+        if t and t.strip() and not is_meta_title(t):
+            return t.strip()
+    return None
+
+
 def compute_dispute_score(scores: dict | None) -> float | None:
     """Deterministic dispute score (0-1) from per-side framing words.
 
@@ -231,7 +286,7 @@ bias_explanation_fa باید **عمیق، مشخص و بدون هم‌پوشان
 فقط JSON. بدون توضیح اضافی، بدون بلوک کد markdown.
 
 {{
-  "title_fa": "<تیتر خبری ۸-۱۲ کلمه — فقط جوهره رویداد: چه اتفاقی افتاد، کجا، چه ارقامی. هرگز از این واژه‌ها استفاده نکن: تحلیل، سوگیری، پوشش رسانه‌ای، روایت، بررسی، مقایسه، نقش عوامل خارجی. تیتر باید مثل روزنامه باشد نه عنوان پژوهش>",
+  "title_fa": "<تیتر خبری ۸-۱۲ کلمه — فقط جوهره رویداد: چه اتفاقی افتاد، کجا، چه ارقامی. هرگز از این واژه‌ها استفاده نکن: تحلیل، سوگیری، پوشش رسانه‌ای، پوشش خبری، روایت، بررسی، مقایسه، رویکرد رسانه‌ها، نقش عوامل خارجی. تیتر باید مثل روزنامهٔ خبری باشد، نه عنوان پژوهش دربارهٔ خود خبر. مثال غلط: «تحلیل سوگیری در پوشش خبری اعدام فلانی و مقایسه رویکرد رسانه‌ها». مثال درست: «فتح‌الله آوری، معترض دی‌ماه ۱۴۰۴، اعدام شد». تیتر باید خودِ رویداد را بگوید، نه اینکه ما داریم آن را تحلیل می‌کنیم>",
   "title_en": "<English translation>",
   "summary_fa": "<۱-۲ جمله، ۲۰-۳۰ کلمه — فقط حقایق اصلی برای کارت صفحه اصلی>",
   "narrative": {{
