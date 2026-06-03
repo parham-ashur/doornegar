@@ -2245,7 +2245,19 @@ async def seed_story_manually(
         last_updated_at=datetime.now(timezone.utc),
         trending_score=float(len(arts)),  # decay step will normalize on next run
         priority=0,
-        is_edited=True,  # protect from pipeline overwrite
+        is_edited=True,  # protect title/summary from pipeline overwrite
+        # Anchor the seeded curation so step_summarize STILL analyzes the
+        # story (narratives + دورنما) while preserving the curated title.
+        # Without an anchor, is_edited stories are skipped by the summarize
+        # pool filter `(is_edited=False) | (summary_anchor IS NOT NULL)`, so a
+        # seeded/pinned hero would get NO narratives and NO doornama — exactly
+        # why f5088d84's hero showed bias bullets instead of دورنما
+        # (Parham 2026-06-03). is_edited stays True; the OR-branch admits it.
+        summary_anchor={
+            "title_fa": request.title_fa.strip(),
+            **({"summary_fa": request.summary_fa} if request.summary_fa else {}),
+            "anchored_at": datetime.now(timezone.utc).isoformat(),
+        },
         centroid_embedding=centroid,
         covered_by_state=covered_by_state,
         covered_by_diaspora=covered_by_diaspora,
