@@ -655,6 +655,56 @@ export default async function HomeBody({
   // cards — two-side narratives + telegram strip, no image. F1: drop
   // anything older than 14d so this section reflects the past week,
   // not the past month.
+  // ── تقابل روایت‌ها reservation (Parham 2026-06-03) ──────────────
+  // The «clash of narratives» box needs two genuinely-opposed sides. On a
+  // war-news day EVERY story is two-sided, and the most-viewed / left-text
+  // strips below were consuming the fresh disputed stories before this box
+  // was computed — so تقابل rendered just 1 card despite plenty of qualifying
+  // stories. Reserve its picks HERE, before those strips, so it gets the
+  // strongest disputed stories; the strips then fill from the remainder.
+  // (The old separate «بیشترین اختلاف» box was merged into this one — its
+  // mostDisputed/secondDisputed/thirdDisputed vars are no longer rendered.)
+  const META_PATTERNS = [
+    /^پوشش\s+(برون‌مرزی|درون‌مرزی)/,
+    /روایت[^.]{0,40}(متمایز|شکل\s+نگرفت|غایب)/,
+    /هیچ\s+رسانه/,
+    /در\s+این\s+(خبر|مجموعه)[^.]{0,20}حضور\s+ندارن/,
+    /رسانه[^.]{0,50}حضور\s+ندار/,
+  ];
+  const hasTwoRealNarratives = (
+    a: { state_summary_fa?: string | null; diaspora_summary_fa?: string | null } | null | undefined,
+  ): boolean => {
+    if (!a) return false;
+    const ss = (a.state_summary_fa || "").trim();
+    const ds = (a.diaspora_summary_fa || "").trim();
+    if (ss.length < 60 || ds.length < 60) return false;
+    for (const re of META_PATTERNS) {
+      if (re.test(ss) || re.test(ds)) return false;
+    }
+    return true;
+  };
+  const _battleGate = (s: StoryBrief, maxAgeMs: number): boolean => {
+    if (!(s.state_pct > 0 && s.diaspora_pct > 0) || s.is_blindspot) return false;
+    if (usedIds.has(s.id)) return false;
+    if (ageMs(s) >= maxAgeMs) return false;
+    const a = allAnalyses[s.id];
+    if (!hasTwoRealNarratives(a)) return false;
+    const lw = a?.loaded_words;
+    if (lw?.conservative?.length && lw?.opposition?.length) return true;
+    // Bias-text quote fallback (matches the battle loop below).
+    const quotes = a?.bias_explanation_fa?.match(/«[^»]+»/g);
+    return !!(quotes && quotes.length >= 2);
+  };
+  const _battleSpread = (a: StoryBrief, b: StoryBrief) =>
+    Math.abs(b.state_pct - b.diaspora_pct) - Math.abs(a.state_pct - a.diaspora_pct);
+  let battleReserved = [...sorted].filter(s => _battleGate(s, DISPUTE_MAX_AGE_MS)).sort(_battleSpread);
+  if (battleReserved.length < 3) {
+    // Drought widen — same recovery logic as the other boxes.
+    battleReserved = [...sorted].filter(s => _battleGate(s, 26 * 86400 * 1000)).sort(_battleSpread);
+  }
+  battleReserved = battleReserved.slice(0, 4);
+  battleReserved.forEach(s => usedIds.add(s.id));
+
   const briefingFresh = withinAge(BRIEFING_MAX_AGE_MS);
   let leftTextStories = sorted.filter(s => !usedIds.has(s.id) && briefingFresh(s)).slice(0, 3);
   if (leftTextStories.length < 3) {
@@ -846,35 +896,6 @@ export default async function HomeBody({
     stateSummary: string;
     diasporaSummary: string;
   };
-  // Gate for both تقابل and بیشترین اختلاف — require real narratives on
-  // both sides. Empty summaries fail. Meta-commentary like «پوشش
-  // برون‌مرزی در این خبر محدود به ...» or «روایت برون‌مرزی متمایزی شکل
-  // نگرفت» is factually correct but describes the absence of a view
-  // rather than being the view itself — it reads cut off next to the
-  // opposing side's real narrative. A story missing one side's view
-  // belongs in the main list, not in a «compare two narratives» slot.
-  const META_PATTERNS = [
-    /^پوشش\s+(برون‌مرزی|درون‌مرزی)/,
-    /روایت[^.]{0,40}(متمایز|شکل\s+نگرفت|غایب)/,
-    /هیچ\s+رسانه/,
-    /در\s+این\s+(خبر|مجموعه)[^.]{0,20}حضور\s+ندارن/,
-    // "رسانه‌های اصول‌گرا/اصلاح‌طلب … در این مجموعه مقالات حضور ندارند" —
-    // the summary states the ABSENCE of a side's media, not a narrative.
-    // (2026-06-03: the «در این خبر» variant above missed «مجموعه مقالات».)
-    /رسانه[^.]{0,50}حضور\s+ندار/,
-  ];
-  const hasTwoRealNarratives = (
-    a: { state_summary_fa?: string | null; diaspora_summary_fa?: string | null } | null | undefined,
-  ): boolean => {
-    if (!a) return false;
-    const ss = (a.state_summary_fa || "").trim();
-    const ds = (a.diaspora_summary_fa || "").trim();
-    if (ss.length < 60 || ds.length < 60) return false;
-    for (const re of META_PATTERNS) {
-      if (re.test(ss) || re.test(ds)) return false;
-    }
-    return true;
-  };
   const battleItems: BattleItem[] = [];
   const buildWordList = (ws: string[]): string[] => {
     // Strip «», dedupe, drop too-short, sort shortest-first so the first
@@ -917,7 +938,9 @@ export default async function HomeBody({
   // percentage); merging into one 4-story box reduces duplication
   // and keeps the stronger word-pair affordance. On quiet news days
   // the box may render 2-3 items instead of 4 — acceptable.
-  for (const story of disputedResorted.slice(0, 12)) {
+  // battleReserved was gated + sorted + reserved up top (before the
+  // most-viewed/left-text strips could eat these stories).
+  for (const story of battleReserved) {
     if (battleItems.length >= 4) break;
     const analysis = allAnalyses[story.id];
     if (!analysis) continue;
