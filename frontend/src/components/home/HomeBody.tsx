@@ -731,6 +731,15 @@ export default async function HomeBody({
     // section isn't blank. Auto-tightens once fresh news returns.
     popularPool = [...sorted].filter(s => !usedIds.has(s.id) && withinAge(26 * 86400 * 1000)(s));
   }
+  if (popularPool.length < 3) {
+    // Second tier (Parham 2026-06-04): «پرمخاطب‌ترین» is about POPULARITY,
+    // which accumulates over weeks — the genuinely most-viewed stories are
+    // often the 27-30d war umbrellas, and on a thin war-homepage the fresh
+    // pool is also claimed by the hero + تقابل + recent-days strips. Since
+    // popularity isn't freshness-sensitive, widen to any homepage-eligible
+    // story (retention already caps the DB at 30d) so this box never blanks.
+    popularPool = [...sorted].filter(s => !usedIds.has(s.id));
+  }
   const mostViewed = popularPool
     .map(s => {
       const views = s.view_count || 0;
