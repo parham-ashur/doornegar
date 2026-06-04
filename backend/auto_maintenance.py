@@ -105,6 +105,25 @@ LOCK_KEY_INT = 7263482917      # arbitrary unique key for this lock row
 LOCK_STALE_SEC = 1 * 3600      # 1 hour
 
 
+def _summary_sample_cap(article_count: int | None) -> int:
+    """How many articles to feed the analysis LLM for a story.
+
+    The sample is a representative (alignment-stratified) subset, not the
+    whole cluster — it caps prompt cost. Parham 2026-06-03: 10 was too thin
+    for big war stories (a 55-article story's narrative read shallow and
+    once even declared a present side absent). Scale the cap with story
+    size, mirroring the bias-bullet count tiers in the prompt; small stories
+    stay cheap at 10. Articles are already loaded via selectinload, so this
+    only adds LLM prompt tokens, not DB egress.
+    """
+    n = article_count or 0
+    if n >= 60:
+        return 20
+    if n >= 30:
+        return 16
+    return 10
+
+
 async def _try_acquire_lock_async(label: str) -> bool:
     """Acquire the maintenance lock. Single row in `maintenance_lock`;
     INSERT...ON CONFLICT DO NOTHING is atomic test-and-set in one round trip.
@@ -1403,13 +1422,16 @@ async def step_summarize_newly_visible():
             for a in _recent:
                 _al = a.source.state_alignment if a.source else "unknown"
                 _by_align.setdefault(_al, []).append(a)
-            _slots = max(2, MAX_ARTICLES_PER_STORY // max(len(_by_align), 1))
+            # Scale the sample with story size (Parham 2026-06-03): big
+            # stories get a richer 16-20 article sample, small ones stay at 10.
+            _cap = _summary_sample_cap(story.article_count)
+            _slots = max(2, _cap // max(len(_by_align), 1))
             top_articles = []
             for _al_articles in _by_align.values():
                 top_articles.extend(_al_articles[:_slots])
-            top_articles = top_articles[:MAX_ARTICLES_PER_STORY]
+            top_articles = top_articles[:_cap]
             if not top_articles:
-                top_articles = _recent[:MAX_ARTICLES_PER_STORY]
+                top_articles = _recent[:_cap]
             if not top_articles:
                 stats["no_articles"] += 1
                 continue
@@ -1848,14 +1870,17 @@ async def step_summarize():
                 align = a.source.state_alignment if a.source else "unknown"
                 by_align.setdefault(align, []).append(a)
 
+            # Scale the sample with story size (Parham 2026-06-03): big
+            # stories get a richer 16-20 article sample, small ones stay at 10.
+            _cap = _summary_sample_cap(story.article_count)
             top_articles = []
-            slots_per_align = max(2, MAX_ARTICLES_PER_STORY // max(len(by_align), 1))
+            slots_per_align = max(2, _cap // max(len(by_align), 1))
             for align_articles in by_align.values():
                 top_articles.extend(align_articles[:slots_per_align])
-            top_articles = top_articles[:MAX_ARTICLES_PER_STORY]
+            top_articles = top_articles[:_cap]
 
             if not top_articles:
-                top_articles = candidates[:MAX_ARTICLES_PER_STORY]
+                top_articles = candidates[:_cap]
 
             # Tier selection — decide BEFORE building articles_info so
             # we can send more content to premium-tier stories

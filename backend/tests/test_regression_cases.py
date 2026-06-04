@@ -404,3 +404,21 @@ class TestNarrativeSampleStratification:
         assert "by_align" in src and "_by_align" in src, "a summarize path is not stratified"
         assert src.count("slots") >= 2 or src.count("slots_per_align") + src.count("_slots") >= 2, \
             "alignment slotting missing from a summarize path"
+
+    def test_sample_cap_scales_with_story_size(self):
+        """Parham 2026-06-04: 10 was too thin for big stories. The cap now
+        scales — small stories stay cheap at 10, big ones get 16-20."""
+        import auto_maintenance as am
+        assert am._summary_sample_cap(0) == 10
+        assert am._summary_sample_cap(29) == 10
+        assert am._summary_sample_cap(30) == 16
+        assert am._summary_sample_cap(59) == 16
+        assert am._summary_sample_cap(60) == 20
+        assert am._summary_sample_cap(150) == 20
+        assert am._summary_sample_cap(None) == 10
+
+    def test_both_summarize_paths_use_scaled_cap(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "auto_maintenance.py").read_text()
+        assert src.count("_summary_sample_cap(story.article_count)") >= 2, \
+            "scaled cap not applied to both summarize paths"
