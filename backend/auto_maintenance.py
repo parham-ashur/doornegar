@@ -124,6 +124,41 @@ def _summary_sample_cap(article_count: int | None) -> int:
     return 10
 
 
+def _narrative_absence_marker(text) -> bool:
+    """True when a per-side summary is really an absence statement («این
+    زیرگروه … حضوری ندارد», «… پوششی … ندارد») rather than a narrative."""
+    if not text:
+        return False
+    t = str(text)
+    if "حضور" in t and "ندار" in t:
+        return True
+    if "پوشش" in t and "ندار" in t:
+        return True
+    if "زیرگروه" in t and ("ندار" in t or "نیست" in t):
+        return True
+    return False
+
+
+def narrative_contradicts_coverage(
+    state_summary_fa, diaspora_summary_fa, inside_pct, outside_pct
+) -> str | None:
+    """Return 'state'/'diaspora' when that side's narrative declares ABSENCE
+    while the coverage bar shows it PRESENT (≥15%), else None.
+
+    Such a story has a stale / mis-sampled analysis — generated before the
+    alignment-stratified sample fix, when a whole side could fall outside the
+    LLM sample so it wrongly reported «این زیرگروه … حضوری ندارد» (Parham
+    2026-06-04, د8489917 was 40% inside yet its state narrative said absent).
+    step_summarize uses this to force a re-analysis past the maturity lock;
+    the canary `narrative_coverage_contradiction` reports any that remain.
+    """
+    if _narrative_absence_marker(state_summary_fa) and (inside_pct or 0) >= 15:
+        return "state"
+    if _narrative_absence_marker(diaspora_summary_fa) and (outside_pct or 0) >= 15:
+        return "diaspora"
+    return None
+
+
 async def _try_acquire_lock_async(label: str) -> bool:
     """Acquire the maintenance lock. Single row in `maintenance_lock`;
     INSERT...ON CONFLICT DO NOTHING is atomic test-and-set in one round trip.
@@ -1712,10 +1747,42 @@ async def step_summarize():
         all_candidates: list[Story] = []
         newly_locked = 0
         split_candidates = 0
+        contradiction_fixes = 0
+        MAX_CONTRADICTION_FIXES = 3  # bound the extra LLM spend per run
         for s in scan_candidates:
             if s.summary_fa is None:
                 all_candidates.append(s)
                 continue
+            # Narrative-coverage contradiction self-heal: a stored narrative
+            # that declares a side ABSENT while the coverage shows it PRESENT
+            # is a stale, mis-sampled analysis (Parham 2026-06-04, د8489917 was
+            # 40% inside yet its state side said «حضوری ندارد»). Force a
+            # re-analysis PAST the maturity lock — the stratified sample will
+            # produce a correct narrative, so it converges and stops triggering.
+            if contradiction_fixes < MAX_CONTRADICTION_FIXES:
+                try:
+                    _cb = _json.loads(s.summary_en) if s.summary_en else {}
+                except Exception:
+                    _cb = {}
+                _agg = s.homepage_aggregates if isinstance(s.homepage_aggregates, dict) else {}
+                _contra = narrative_contradicts_coverage(
+                    _cb.get("state_summary_fa") if isinstance(_cb, dict) else None,
+                    _cb.get("diaspora_summary_fa") if isinstance(_cb, dict) else None,
+                    _agg.get("inside_border_pct"),
+                    _agg.get("outside_border_pct"),
+                )
+                if _contra and isinstance(_cb, dict):
+                    # Drop the lock + hash so the normal path re-analyzes it.
+                    _cb.pop("analysis_locked_at", None)
+                    _cb.pop("articles_hash", None)
+                    s.summary_en = _json.dumps(_cb, ensure_ascii=False)
+                    all_candidates.append(s)
+                    contradiction_fixes += 1
+                    logger.info(
+                        f"  forcing re-analysis (narrative says {_contra} absent "
+                        f"but coverage present): {(s.title_fa or '')[:40]}"
+                    )
+                    continue
             # Check blob for the last-run article hash. If missing or
             # different → re-analyze. Also read the lock timestamp.
             # Fail loud on parse error (Parham 2026-05-03 audit): the
@@ -2204,6 +2271,7 @@ async def step_summarize():
             "baseline": baseline_used,
             "failed": failed,
             "doornama_backfilled": doornama_backfilled,
+            "contradiction_fixes": contradiction_fixes,
         }
 
 

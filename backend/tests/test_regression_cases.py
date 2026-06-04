@@ -443,3 +443,49 @@ class TestStaleAggregatesAfterPostprocess:
         assert "recompute_story_aggregates(db, story.id)" in src, \
             "quality_postprocess does not recompute aggregates after flagging an article"
         assert "_removed_any" in src, "article-removal tracking flag missing"
+
+
+class TestNarrativeContradictionSelfHeal:
+    """2026-06-04: stale pinned/umbrella stories kept old narratives that
+    contradicted their coverage — د8489917 was 40% inside yet its state side
+    said «این زیرگروه … حضوری ندارد». ROOT CAUSE: the analysis was generated
+    before the alignment-stratified sample fix and the maturity lock then froze
+    it. CURE: step_summarize detects the contradiction and forces a re-analysis
+    past the lock (bounded per run); the stratified sample then yields a correct
+    narrative, so it converges."""
+
+    def test_case_2026_06_04_absent_state_with_inside_coverage(self):
+        from auto_maintenance import narrative_contradicts_coverage
+        # د8489917's real state: 40% inside, state narrative says absent.
+        assert narrative_contradicts_coverage(
+            "این زیرگروه در مجموعهٔ مقالات حاضر حضوری ندارد.", "روایت واقعی برون‌مرزی …",
+            40, 60,
+        ) == "state"
+
+    def test_genuine_one_sided_story_is_not_flagged(self):
+        from auto_maintenance import narrative_contradicts_coverage
+        # A real diaspora-only blindspot: 0% inside, state side absent — correct.
+        assert narrative_contradicts_coverage(
+            "این زیرگروه حضوری ندارد.", "روایت برون‌مرزی واقعی …", 0, 100,
+        ) is None
+
+    def test_two_real_narratives_not_flagged(self):
+        from auto_maintenance import narrative_contradicts_coverage
+        assert narrative_contradicts_coverage(
+            "روایت درون‌مرزی واقعی و مفصل …", "روایت برون‌مرزی واقعی …", 40, 60,
+        ) is None
+
+    def test_absence_marker_detects_variants(self):
+        from auto_maintenance import _narrative_absence_marker
+        for t in ("حضوری ندارد", "حضور ندارند", "پوششی درباره این رویداد ندارد",
+                  "این زیرگروه نمایندگی ندارد"):
+            assert _narrative_absence_marker(t) is True, f"missed: {t}"
+        assert _narrative_absence_marker("روایت کامل و واقعی از رویداد") is False
+        assert _narrative_absence_marker(None) is False
+
+    def test_self_heal_wired_into_step_summarize(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "auto_maintenance.py").read_text()
+        assert "narrative_contradicts_coverage(" in src, "contradiction detector not used in pipeline"
+        assert "contradiction_fixes" in src, "contradiction self-heal stat not reported"
+        assert "MAX_CONTRADICTION_FIXES" in src, "self-heal is not budget-bounded"
