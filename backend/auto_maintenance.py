@@ -5644,12 +5644,14 @@ async def step_quality_postprocess():
                 review = _json.loads(text_out)
 
                 # Apply corrections
+                _removed_any = False
                 irrelevant = review.get("irrelevant_articles", [])
                 if irrelevant and isinstance(irrelevant, list):
                     for idx in irrelevant:
                         if isinstance(idx, int) and 1 <= idx <= len(story.articles):
                             article = story.articles[idx - 1]
                             article.story_id = None
+                            _removed_any = True
                             stats["articles_flagged"] += 1
                             logger.info(f"  QC flagged article #{idx} in '{(story.title_fa or '')[:30]}'")
 
@@ -5674,6 +5676,21 @@ async def step_quality_postprocess():
                         story.summary_en = _json.dumps(extras, ensure_ascii=False)
                     except Exception:
                         pass
+
+                # Removing an article changes the coverage split, but the
+                # homepage_aggregates step already ran earlier in the cron —
+                # so without this the story keeps serving stale percentages +
+                # a contradictory coverage badge (Parham 2026-06-03: 538d848c
+                # showed «درون‌مرزی آغاز شد» at 0% inside). Recompute the blob
+                # now, before detect_hourly_updates reads it.
+                if _removed_any:
+                    try:
+                        await db.flush()
+                        from app.services.homepage_aggregates import recompute_story_aggregates
+                        if await recompute_story_aggregates(db, story.id):
+                            stats["aggregates_recomputed"] = stats.get("aggregates_recomputed", 0) + 1
+                    except Exception as _re:
+                        logger.warning(f"  QC aggregate recompute failed for {story.id}: {_re}")
 
                 await db.commit()
 

@@ -297,6 +297,28 @@ function isUpdateBadgeFresh(sig: NonNullable<StoryBrief["update_signal"]> | null
   return Date.now() - t < UPDATE_BADGE_TTL_MS;
 }
 
+// Defense-in-depth (Parham 2026-06-03): a stale coverage-shift signal can
+// outlive the articles that triggered it — e.g. «پوشش درون‌مرزی آغاز شد» on a
+// story that's now 0% inside (538d848c, after QC dropped its only inside
+// article). A badge that contradicts the current split is worse than no badge,
+// so suppress a «… آغاز/تقویت شد» reason when the side it names has ~no current
+// coverage. (The backend recompute-after-postprocess fixes the source; this
+// guards any signal that's stale at read time.)
+function coverageBadgeContradicts(story: StoryBrief): boolean {
+  const sig = story.update_signal;
+  if (!sig?.has_update || sig.kind !== "coverage_shift") return false;
+  const r = sig.reason_fa || "";
+  if (!r.includes("شد") || r.includes("کمرنگ")) return false; // only "began/strengthened"
+  const inside = story.inside_border_pct ?? story.state_pct ?? 0;
+  const outside = story.outside_border_pct ?? story.diaspora_pct ?? 0;
+  if (r.includes("درون‌مرزی") && inside <= 2) return true;
+  if (r.includes("برون‌مرزی") && outside <= 2) return true;
+  return false;
+}
+function showCoverageBadge(story: StoryBrief): boolean {
+  return isUpdateBadgeFresh(story.update_signal) && !coverageBadgeContradicts(story);
+}
+
 function UpdateBadge({ story, className = "mt-1.5" }: { story: StoryBrief; className?: string }) {
   // «بروزرسانی» must mean NEW REPORTING arrived. A closed/frozen story
   // (no new article in >7d) can still carry a fresh update_signal from a
@@ -309,7 +331,7 @@ function UpdateBadge({ story, className = "mt-1.5" }: { story: StoryBrief; class
     ? Date.now() - new Date(story.last_updated_at).getTime() >= 7 * 86400 * 1000
     : false; // missing timestamp → don't suppress (legacy rows)
   // Orange — significant update
-  if (!luStale && isUpdateBadgeFresh(story.update_signal)) {
+  if (!luStale && isUpdateBadgeFresh(story.update_signal) && !coverageBadgeContradicts(story)) {
     const reason = formatUpdateReason(story.update_signal!);
     return (
       <span
@@ -1078,7 +1100,7 @@ export default async function HomeBody({
                     const heroLuStale = hero.last_updated_at
                       ? Date.now() - new Date(hero.last_updated_at).getTime() >= 7 * 86400 * 1000
                       : false;
-                    if (!heroLuStale && isUpdateBadgeFresh(hero.update_signal)) {
+                    if (!heroLuStale && showCoverageBadge(hero)) {
                       const heroReason = formatUpdateReason(hero.update_signal!);
                       return (
                         <div className="absolute bottom-2 right-2 inline-flex items-center gap-1.5 bg-orange-500/95 px-2 py-1 shadow-sm">
@@ -1202,7 +1224,7 @@ export default async function HomeBody({
             >
               <div className="relative aspect-[4/3] overflow-hidden bg-slate-100 dark:bg-slate-800">
                 <SafeImageStatic src={conservativeBlind.has_real_image === false ? null : conservativeBlind.image_url} alt={localizedStoryTitle(conservativeBlind, locale)} className="h-full w-full object-cover" />
-                {isUpdateBadgeFresh(conservativeBlind.update_signal) && (
+                {showCoverageBadge(conservativeBlind) && (
                   <span className="absolute bottom-2 right-2 border border-orange-300 dark:border-orange-700 bg-orange-50/95 dark:bg-orange-900/80 px-1.5 py-0.5 text-[10px] font-bold text-orange-700 dark:text-orange-200 backdrop-blur-sm">
                     بروزرسانی{formatUpdateReason(conservativeBlind.update_signal!) ? ` · ${formatUpdateReason(conservativeBlind.update_signal!)}` : ""}
                   </span>
@@ -1226,7 +1248,7 @@ export default async function HomeBody({
             >
               <div className="relative aspect-[4/3] overflow-hidden bg-slate-100 dark:bg-slate-800">
                 <SafeImageStatic src={oppositionBlind.has_real_image === false ? null : oppositionBlind.image_url} alt={localizedStoryTitle(oppositionBlind, locale)} className="h-full w-full object-cover" />
-                {isUpdateBadgeFresh(oppositionBlind.update_signal) && (
+                {showCoverageBadge(oppositionBlind) && (
                   <span className="absolute bottom-2 right-2 border border-orange-300 dark:border-orange-700 bg-orange-50/95 dark:bg-orange-900/80 px-1.5 py-0.5 text-[10px] font-bold text-orange-700 dark:text-orange-200 backdrop-blur-sm">
                     بروزرسانی{formatUpdateReason(oppositionBlind.update_signal!) ? ` · ${formatUpdateReason(oppositionBlind.update_signal!)}` : ""}
                   </span>
@@ -1728,7 +1750,7 @@ function MobileHome({
                 <div className="flex gap-3 p-3">
                   <div className="relative w-20 h-20 shrink-0 overflow-hidden bg-slate-100 dark:bg-slate-800">
                     <SafeImageStatic src={conservativeBlind.has_real_image === false ? null : conservativeBlind.image_url} alt={localizedStoryTitle(conservativeBlind, locale)} className="h-full w-full object-cover" />
-                    {isUpdateBadgeFresh(conservativeBlind.update_signal) && (
+                    {showCoverageBadge(conservativeBlind) && (
                       <span className="absolute bottom-0 inset-x-0 bg-orange-500/95 text-white text-center text-[9px] font-bold py-0.5">
                         بروزرسانی
                       </span>
@@ -1754,7 +1776,7 @@ function MobileHome({
                 <div className="flex gap-3 p-3">
                   <div className="relative w-20 h-20 shrink-0 overflow-hidden bg-slate-100 dark:bg-slate-800">
                     <SafeImageStatic src={oppositionBlind.has_real_image === false ? null : oppositionBlind.image_url} alt={localizedStoryTitle(oppositionBlind, locale)} className="h-full w-full object-cover" />
-                    {isUpdateBadgeFresh(oppositionBlind.update_signal) && (
+                    {showCoverageBadge(oppositionBlind) && (
                       <span className="absolute bottom-0 inset-x-0 bg-orange-500/95 text-white text-center text-[9px] font-bold py-0.5">
                         بروزرسانی
                       </span>

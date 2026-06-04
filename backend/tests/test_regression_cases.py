@@ -422,3 +422,24 @@ class TestNarrativeSampleStratification:
         src = (Path(__file__).parent.parent / "auto_maintenance.py").read_text()
         assert src.count("_summary_sample_cap(story.article_count)") >= 2, \
             "scaled cap not applied to both summarize paths"
+
+
+class TestStaleAggregatesAfterPostprocess:
+    """2026-06-03: story 538d848c sat in نگاه یک‌جانبه (a diaspora-only blindspot,
+    0% inside) yet carried a «پوشش درون‌مرزی آغاز شد» badge and served state_pct=17.
+    ROOT CAUSE: quality_postprocess (FULL_PIPELINE step 50) drops an article AFTER
+    homepage_aggregates (step 31) already recomputed coverage, so the denormalized
+    percentages + the downstream update_signal went stale until the next cron.
+    CURE: recompute the affected story's aggregates blob right after the removal."""
+
+    def test_recompute_helper_exists(self):
+        from app.services import homepage_aggregates as ha
+        assert hasattr(ha, "recompute_story_aggregates"), "per-story recompute helper missing"
+
+    def test_quality_postprocess_recomputes_after_removal(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "auto_maintenance.py").read_text()
+        # the QC step must call the recompute when it drops an article
+        assert "recompute_story_aggregates(db, story.id)" in src, \
+            "quality_postprocess does not recompute aggregates after flagging an article"
+        assert "_removed_any" in src, "article-removal tracking flag missing"

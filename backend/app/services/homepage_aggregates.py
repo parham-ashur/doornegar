@@ -203,3 +203,55 @@ def compute_homepage_aggregates(
         "outside_border_pct": outside,
         "computed_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+async def recompute_story_aggregates(db, story_id) -> bool:
+    """Recompute + persist one story's homepage_aggregates blob NOW.
+
+    The cron's `step_recompute_homepage_aggregates` (FULL_PIPELINE step 31)
+    runs BEFORE the article-removing steps `quality_postprocess` (50) and
+    leaves the blob stale when those steps drop an article — so a story that
+    loses its only inside-border article still served state_pct=17 and a
+    «پوشش درون‌مرزی آغاز شد» badge while actually being 0% inside (Parham
+    2026-06-03, story 538d848c in نگاه یک‌جانبه). Call this for any story you
+    just changed the article set of, so the percentages + signal downstream
+    reflect reality. Returns False if the story has no articles left.
+    """
+    from sqlalchemy import func as _f, select as _sel
+    from sqlalchemy.orm import defer as _defer, selectinload as _sel_in
+    from app.models.article import Article as _Art
+    from app.models.source import Source as _Src
+    from app.models.story import Story as _Sty
+
+    story = (await db.execute(
+        _sel(_Sty).where(_Sty.id == story_id)
+    )).scalar_one_or_none()
+    if not story:
+        return False
+
+    articles = list((await db.execute(
+        _sel(_Art)
+        .options(
+            _defer(_Art.embedding), _defer(_Art.content_text),
+            _defer(_Art.keywords), _defer(_Art.named_entities),
+            _sel_in(_Art.source),
+        )
+        .where(_Art.story_id == story_id)
+        .order_by(_Art.published_at.desc().nullslast(), _Art.ingested_at.desc())
+        .limit(50)
+    )).scalars().all())
+    if not articles:
+        return False
+
+    source_count_rows = list((await db.execute(
+        _sel(_Src, _f.count(_Art.id))
+        .join(_Art, _Art.source_id == _Src.id)
+        .where(_Art.story_id == story_id)
+        .group_by(_Src.id)
+    )).all())
+
+    blob = compute_homepage_aggregates(story, articles, source_count_rows)
+    await db.execute(
+        _Sty.__table__.update().where(_Sty.id == story_id).values(homepage_aggregates=blob)
+    )
+    return True
