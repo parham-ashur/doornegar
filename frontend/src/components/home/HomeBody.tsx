@@ -692,6 +692,14 @@ export default async function HomeBody({
     /هیچ\s+رسانه/,
     /در\s+این\s+(خبر|مجموعه)[^.]{0,20}حضور\s+ندارن/,
     /رسانه[^.]{0,50}حضور\s+ندار/,
+    // 2026-06-04: «این زیرگروه در مجموعهٔ مقالات حاضر حضوری ندارد» / «…
+    // پوششی درباره این رویداد ندارد» — the summary IS the absence statement,
+    // not a narrative. The earlier patterns required «در این مجموعه» or a
+    // «رسانه» subject and missed «این زیرگروه … حضوری ندارد» (د8489917 leaked
+    // into تقابل with a contradictory state side).
+    /حضور[ی]?\s+ندار/,
+    /پوششی[^.]{0,30}ندار/,
+    /زیرگروه[^.]{0,40}(ندار|نیست|غایب)/,
   ];
   const hasTwoRealNarratives = (
     a: { state_summary_fa?: string | null; diaspora_summary_fa?: string | null } | null | undefined,
@@ -1103,7 +1111,7 @@ export default async function HomeBody({
                     if (!heroLuStale && showCoverageBadge(hero)) {
                       const heroReason = formatUpdateReason(hero.update_signal!);
                       return (
-                        <div className="absolute bottom-2 right-2 inline-flex items-center gap-1.5 bg-orange-500/95 px-2 py-1 shadow-sm">
+                        <div className="absolute bottom-2 right-2 inline-flex items-center gap-1.5 bg-slate-900/95 px-2 py-1 shadow-sm">
                           <span className="inline-block h-1.5 w-1.5 bg-white" />
                           <span className="text-[12px] font-bold text-white">بروزرسانی</span>
                           {heroReason && (
@@ -1751,7 +1759,7 @@ function MobileHome({
                   <div className="relative w-20 h-20 shrink-0 overflow-hidden bg-slate-100 dark:bg-slate-800">
                     <SafeImageStatic src={conservativeBlind.has_real_image === false ? null : conservativeBlind.image_url} alt={localizedStoryTitle(conservativeBlind, locale)} className="h-full w-full object-cover" />
                     {showCoverageBadge(conservativeBlind) && (
-                      <span className="absolute bottom-0 inset-x-0 bg-orange-500/95 text-white text-center text-[9px] font-bold py-0.5">
+                      <span className="absolute bottom-0 inset-x-0 bg-slate-900/95 text-white text-center text-[9px] font-bold py-0.5">
                         بروزرسانی
                       </span>
                     )}
@@ -1777,7 +1785,7 @@ function MobileHome({
                   <div className="relative w-20 h-20 shrink-0 overflow-hidden bg-slate-100 dark:bg-slate-800">
                     <SafeImageStatic src={oppositionBlind.has_real_image === false ? null : oppositionBlind.image_url} alt={localizedStoryTitle(oppositionBlind, locale)} className="h-full w-full object-cover" />
                     {showCoverageBadge(oppositionBlind) && (
-                      <span className="absolute bottom-0 inset-x-0 bg-orange-500/95 text-white text-center text-[9px] font-bold py-0.5">
+                      <span className="absolute bottom-0 inset-x-0 bg-slate-900/95 text-white text-center text-[9px] font-bold py-0.5">
                         بروزرسانی
                       </span>
                     )}
