@@ -910,7 +910,17 @@ async def _match_to_existing_stories(
             Story.centroid_embedding, Story.last_updated_at, Story.summary_fa,
         )
         .where(
-            Story.article_count >= 5,
+            # Catch-22 break (Parham 2026-06-05): the floor used to be >= 5, but
+            # a freshly-formed story can't REACH 5 if nothing can match into it —
+            # so post-war, fresh news fragmented into tiny hidden stories that
+            # could never grow, matched_to_existing went to 0, existing stories
+            # stopped updating, and the homepage froze 4 days stale. Lowered to
+            # >= 3 so a small recent story can accumulate toward visibility
+            # (3 → 4 visible → 5+), while keeping enough articles for a stable
+            # centroid. Quality is still gated by cosine + the STRICTER
+            # small-story anchor floor (jaccard >= 0.15, line ~1280) and the
+            # 7-day umbrella/last_updated caps below.
+            Story.article_count >= 3,
             Story.article_count < settings.max_cluster_size,
             Story.last_updated_at >= time_cutoff,
             Story.frozen_at.is_(None),

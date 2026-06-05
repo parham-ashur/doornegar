@@ -142,9 +142,17 @@ class TestMatcherWhereClauseGuards:
 
     def test_enforces_visibility_floor(self):
         body = _matcher_body()
-        assert "Story.article_count >= 5" in body, (
-            "Matcher must only consider stories with article_count >= 5. "
-            "Below that the cluster isn't visible enough to anchor matches."
+        # Lowered 5 → 3 on 2026-06-05 to break the growth catch-22: a story
+        # couldn't reach the old floor of 5 if nothing was allowed to match
+        # into it, so post-war fresh news fragmented into tiny hidden stories
+        # that never grew and the homepage froze stale. 3 keeps a stable
+        # centroid; quality stays gated by cosine + the stricter small-story
+        # anchor floor (jaccard >= 0.15). Must NOT drop below 3 (a 2-article
+        # centroid is too noisy to anchor matches).
+        assert "Story.article_count >= 3" in body, (
+            "Matcher must only consider stories with article_count >= 3 — low "
+            "enough that fresh small stories can accumulate toward visibility, "
+            "high enough for a stable centroid."
         )
 
     def test_enforces_age_cap_via_last_updated_at(self):
