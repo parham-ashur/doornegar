@@ -48,7 +48,7 @@ STEP_TIMEOUTS_SEC = {
     "recount": 60,                 # two UPDATE…FROM (GROUP BY) queries, no LLM
     "classify_content_type": 600,  # heuristic + small LLM batches, capped per run
     "detect_hourly_updates": 120,  # pure SQL aggregate, no LLM
-    "audit_clusters": 300,         # sample + cosine, no LLM
+    "audit_clusters": 600,         # cosine cohesion + LLM low-cohesion confirm + freeze/drain (was 300, timed out 2026-06-05)
     "process": 1800,               # embeddings + translation over many articles
     "cluster": 2400,               # LLM matching + new-story clustering. Bumped from 1200s
                                    # 2026-04-29: backlog catchup needs more room; deadline_ts
@@ -2226,7 +2226,19 @@ async def step_summarize():
                     story.llm_failed_at = datetime.now(timezone.utc)
                     await db.commit()
                 except Exception:
-                    await db.rollback()
+                    # The connection may be dead (Neon idle reaper on a long
+                    # run) — a failing rollback would greenlet-crash the whole
+                    # step and lose the run (Parham 2026-06-05). Guard it; if
+                    # the rollback itself fails the session is unusable, so stop
+                    # the loop and return the summaries already committed.
+                    try:
+                        await db.rollback()
+                    except Exception:
+                        logger.warning(
+                            "  summarize: DB connection lost mid-run; "
+                            f"returning partial results ({success} done, {failed} failed)"
+                        )
+                        break
 
         # دورنما backfill — decoupled from the per-story summarize gate.
         # The inline call above only fires for a top story that actually

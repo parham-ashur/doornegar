@@ -569,3 +569,25 @@ class TestTelegramQualityPass:
         assert "کمپِ غایب را اختراع نکن" in src, "pass-2 grounding rule missing"
         am = (Path(__file__).parent.parent / "auto_maintenance.py").read_text()
         assert "cleared_stale" in am, "stale telegram analyses are not cleared when the pool goes thin"
+
+
+class TestPipelineResilience:
+    """2026-06-05: the 15:55 cron failed two steps — summarize greenlet-crashed
+    when Neon killed the connection mid-run (an unguarded rollback), and
+    audit_clusters timed out at 300s (it does LLM cohesion confirmation now, so
+    the 'no LLM / 300s' budget was stale). A long run must degrade gracefully,
+    not lose the whole step."""
+
+    def test_summarize_survives_dead_connection(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "auto_maintenance.py").read_text()
+        # the per-story failure path must guard its rollback and break, not
+        # let a failing rollback greenlet-crash the step
+        assert "returning partial results" in src, "summarize does not degrade gracefully on connection loss"
+
+    def test_audit_clusters_timeout_raised(self):
+        from pathlib import Path
+        import re
+        src = (Path(__file__).parent.parent / "auto_maintenance.py").read_text()
+        m = re.search(r'"audit_clusters":\s*(\d+)', src)
+        assert m and int(m.group(1)) >= 600, "audit_clusters timeout must be >= 600s (LLM cohesion confirm)"
