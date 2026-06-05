@@ -4315,6 +4315,9 @@ class _IncidentRequest(_BaseModel):
     regression_case: str | None = None
     severity: str = "med"
     status: str = "open"
+    # WHO/WHAT first surfaced it: human|canary|self_heal|audit|claude|unknown.
+    # Feeds the Human-Intervention Rate (HIR) North-Star metric.
+    detected_by: str = "unknown"
 
 
 @router.post("/incidents", dependencies=[Depends(require_admin)])

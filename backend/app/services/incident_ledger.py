@@ -38,6 +38,11 @@ INCIDENT_EVENT = "incident"
 # status lifecycle: open -> monitoring -> fixed (or wontfix)
 _STATUSES = ("open", "monitoring", "fixed", "wontfix")
 _SEVERITIES = ("low", "med", "high")
+# WHO/WHAT first surfaced the defect — the input to the Human-Intervention Rate
+# (HIR) North-Star metric. `human` = Parham caught it by eye (the thing we want
+# to drive to zero); `canary`/`self_heal` = an automated signal caught it first
+# (what a self-running product should do); `audit` = a Niloofar/review pass.
+_DETECTORS = ("canary", "self_heal", "audit", "human", "claude", "unknown")
 
 
 async def log_incident(
@@ -52,6 +57,7 @@ async def log_incident(
     regression_case: str | None = None,
     severity: str = "med",
     status: str = "open",
+    detected_by: str = "unknown",
     actor: str = "claude",
     commit: bool = False,
 ) -> None:
@@ -68,6 +74,8 @@ async def log_incident(
         severity = "med"
     if status not in _STATUSES:
         status = "open"
+    if detected_by not in _DETECTORS:
+        detected_by = "unknown"
     await log_event(
         db,
         event_type=INCIDENT_EVENT,
@@ -82,6 +90,7 @@ async def log_incident(
             "regression_case": regression_case,
             "severity": severity,
             "status": status,
+            "detected_by": detected_by,
         },
         commit=commit,
     )
@@ -122,6 +131,50 @@ async def list_incidents(
     return out
 
 
+async def human_intervention_rate(db: AsyncSession, *, days: int = 7) -> dict[str, Any]:
+    """HIR — the North-Star self-running metric ([[project_self_running_kpis]]).
+
+    Counts distinct defects FIRST surfaced by Parham (`detected_by='human'`) in
+    the trailing window. A self-running product drives this to 0 — canaries and
+    self-heals should be catching things instead of his eye. Also returns the
+    detection-source breakdown so we can watch the canary-vs-human ratio climb.
+    """
+    from datetime import timedelta
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, days))
+    rows = (
+        await db.execute(
+            select(StoryEvent.created_at, StoryEvent.signals)
+            .where(StoryEvent.event_type == INCIDENT_EVENT)
+            .order_by(StoryEvent.created_at.desc())
+            .limit(500)
+        )
+    ).all()
+    human_slugs: set[str] = set()
+    by_source: dict[str, int] = {}
+    for created_at, signals in rows:
+        if created_at is None:
+            continue
+        ts = created_at if created_at.tzinfo else created_at.replace(tzinfo=timezone.utc)
+        if ts < cutoff:
+            continue
+        sig = dict(signals or {})
+        src = sig.get("detected_by") or "unknown"
+        by_source[src] = by_source.get(src, 0) + 1
+        if src == "human" and sig.get("slug"):
+            human_slugs.add(sig["slug"])
+    total = sum(by_source.values())
+    auto = by_source.get("canary", 0) + by_source.get("self_heal", 0)
+    return {
+        "days": days,
+        "hir": len(human_slugs),  # North-Star: target 0
+        "human_slugs": sorted(human_slugs),
+        "by_source": by_source,
+        # share of incidents an automated signal caught first (target >= 0.9)
+        "auto_detection_ratio": round(auto / total, 2) if total else None,
+    }
+
+
 async def self_review_packet(db: AsyncSession) -> dict[str, Any]:
     """One-read review packet: non-ok canaries + open incidents + recent
     maintenance fails. The chat ritual reads this, maps each signal to a
@@ -154,7 +207,12 @@ async def self_review_packet(db: AsyncSession) -> dict[str, Any]:
         i for i in await list_incidents(db, limit=100)
         if i.get("status") in ("open", "monitoring")
     ]
+    try:
+        hir = await human_intervention_rate(db, days=7)
+    except Exception as e:  # never let the packet error
+        hir = {"error": str(e)[:200]}
     return {
+        "hir_7d": hir,  # North-Star: distinct human-caught defects in 7d (target 0)
         "non_ok_canaries": non_ok,
         "open_incidents": open_incidents,
         "recent_maintenance_fails": recent_fails,
@@ -190,6 +248,7 @@ SEED_INCIDENTS = [
         "regression_case": None,
         "severity": "high",
         "status": "monitoring",
+        "detected_by": "audit",
     },
     {
         "slug": "bellwether-demoted-coverage-false-positive",
@@ -203,6 +262,7 @@ SEED_INCIDENTS = [
         "regression_case": "test_case_2026_06_03_bellwether_compares_fresh_not_just_prominent",
         "severity": "med",
         "status": "fixed",
+        "detected_by": "canary",
     },
     {
         "slug": "offtopic-label-produces-zero",
@@ -217,6 +277,7 @@ SEED_INCIDENTS = [
         "regression_case": "test_case_2026_06_02_sports_title_is_offtopic",
         "severity": "low",
         "status": "monitoring",
+        "detected_by": "canary",
     },
 ]
 

@@ -251,7 +251,19 @@ async def recompute_story_aggregates(db, story_id) -> bool:
     )).all())
 
     blob = compute_homepage_aggregates(story, articles, source_count_rows)
+    # Reconcile the denormalized counts too — the same QC removal that made the
+    # coverage blob stale also left article_count/source_count drifted (it's
+    # only fixed by the next cron's step_recount, ~12h later, and the canary
+    # reads the drift in between). Recompute from the same live data.
+    _live_articles = sum(int(c) for _, c in source_count_rows)
+    _live_sources = len(source_count_rows)
     await db.execute(
-        _Sty.__table__.update().where(_Sty.id == story_id).values(homepage_aggregates=blob)
+        _Sty.__table__.update()
+        .where(_Sty.id == story_id)
+        .values(
+            homepage_aggregates=blob,
+            article_count=_live_articles,
+            source_count=_live_sources,
+        )
     )
     return True

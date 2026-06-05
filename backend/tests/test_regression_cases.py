@@ -489,3 +489,39 @@ class TestNarrativeContradictionSelfHeal:
         assert "narrative_contradicts_coverage(" in src, "contradiction detector not used in pipeline"
         assert "contradiction_fixes" in src, "contradiction self-heal stat not reported"
         assert "MAX_CONTRADICTION_FIXES" in src, "self-heal is not budget-bounded"
+
+
+class TestSelfRunningInstrumentation:
+    """2026-06-05: closing the KPI instrumentation gaps ([[project_self_running_kpis]]).
+    (1) detected_by on incidents makes the Human-Intervention-Rate North-Star real;
+    (2) article_count_drift gets a self-heal (it had a canary but no fix)."""
+
+    def test_incident_detected_by_and_hir(self):
+        from app.services import incident_ledger as il
+        assert "human" in il._DETECTORS and "canary" in il._DETECTORS
+        assert hasattr(il, "human_intervention_rate"), "HIR computation missing"
+        # log_incident must accept detected_by (keyword)
+        import inspect
+        assert "detected_by" in inspect.signature(il.log_incident).parameters
+
+    def test_seed_incidents_tag_detection_source(self):
+        from app.services.incident_ledger import SEED_INCIDENTS
+        for inc in SEED_INCIDENTS:
+            assert inc.get("detected_by") in ("canary", "human", "audit", "self_heal"), \
+                f"seed incident {inc['slug']} not tagged with a detection source"
+
+    def test_admin_incident_schema_has_detected_by(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py").read_text()
+        assert 'detected_by: str = "unknown"' in src, "POST /incidents can't set detected_by"
+
+    def test_article_count_drift_self_heal_wired(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "auto_maintenance.py").read_text()
+        # recount now zeroes genuinely-empty stories (the 0-attached drift the
+        # canary flagged but recount used to skip)
+        assert "emptied_fixed" in src, "recount does not reconcile 0-attached stories"
+        assert "NOT EXISTS (SELECT 1 FROM articles" in src, "0-attached reconciliation query missing"
+        ha = (Path(__file__).parent.parent / "app" / "services" / "homepage_aggregates.py").read_text()
+        # QC-touched stories get their count reconciled immediately
+        assert "article_count=_live_articles" in ha, "recompute_story_aggregates doesn't fix article_count"

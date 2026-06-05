@@ -972,9 +972,27 @@ async def step_recount_stories():
              WHERE s.id = sub.story_id
                AND s.source_count <> sub.c
         """))
+        # 0-attached reconciliation (Parham 2026-06-05): the UPDATEs above only
+        # touch stories that HAVE articles (GROUP BY skips empty ones), so a
+        # story that lost ALL its articles to QC/dedup/detach kept a stale
+        # non-zero count — the `article_count_drift` canary (LEFT JOIN, counts
+        # 0-live) flagged exactly what recount refused to fix. Zero genuinely-
+        # empty stories: cached<>0 yet no rows in articles = always wrong (a
+        # legit empty scaffold already has count=0, so it isn't matched).
+        r3 = await db.execute(_text("""
+            UPDATE stories s
+               SET article_count = 0, source_count = 0
+             WHERE s.archived_at IS NULL
+               AND (s.article_count <> 0 OR s.source_count <> 0)
+               AND NOT EXISTS (SELECT 1 FROM articles a WHERE a.story_id = s.id)
+        """))
         await db.commit()
 
-    stats = {"articles_fixed": r1.rowcount or 0, "sources_fixed": r2.rowcount or 0}
+    stats = {
+        "articles_fixed": r1.rowcount or 0,
+        "sources_fixed": r2.rowcount or 0,
+        "emptied_fixed": r3.rowcount or 0,
+    }
     logger.info(f"Recount stories: {stats}")
     return stats
 
