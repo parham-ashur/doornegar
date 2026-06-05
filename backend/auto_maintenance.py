@@ -5198,6 +5198,12 @@ async def step_telegram_deep_analysis():
                     .where(TelegramPost.text != "")
                 )
                 pool = list(pool_q.scalars().all())
+                # (b) Exclude emoji-spam/stub posts from the hash so a story
+                # whose only posts are spam re-evaluates (hash changes) and gets
+                # its stale analysis cleared below, instead of being skipped as
+                # "unchanged" forever (Parham 2026-06-05).
+                from app.services.telegram_analysis import is_low_quality_telegram_post as _is_spam_tg
+                pool = [p for p in pool if not _is_spam_tg(p.text)]
                 cur_hash = _posts_hash(pool) if pool else ""
 
                 if story_obj and isinstance(story_obj.telegram_analysis, dict):
@@ -5219,6 +5225,12 @@ async def step_telegram_deep_analysis():
                     tier = "premium" if is_premium else "baseline"
                     logger.info(f"Telegram analysis [{tier}] for '{title}': {len(analysis.get('predictions', []))} predictions")
                 else:
+                    # (c) Thin/spam pool → clear any stale stored analysis so the
+                    # frontend stops showing a now-ungrounded summary (Parham
+                    # 2026-06-05: 9db0e678 kept a 3-camp summary from one spam post).
+                    if story_obj and story_obj.telegram_analysis:
+                        story_obj.telegram_analysis = None
+                        stats["cleared_stale"] = stats.get("cleared_stale", 0) + 1
                     stats["skipped_no_data"] += 1
             except Exception as e:
                 stats["errors"] += 1

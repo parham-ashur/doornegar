@@ -20,6 +20,67 @@ from app.models.story import Story
 
 logger = logging.getLogger(__name__)
 
+# ── Telegram link-relevance gates (Parham 2026-06-05) ──
+# A story with more than this many RECENT (7d) articles is "broad": its
+# centroid already represents the dominant theme, so the per-article rescue
+# (match against any one member article) is DISABLED for it — otherwise a
+# stray off-topic member article (a Pakistan article inside a Lebanon
+# umbrella) lets an off-topic post link to the whole story.
+BROAD_UMBRELLA_RECENT_ARTICLES = 12
+# Per-article-rescue links are a weaker signal than a centroid match (they
+# only prove the post matched ONE member article), so on the small/coherent
+# stories that still use the rescue, require a higher score than the base
+# threshold before attaching.
+RESCUE_MIN_SCORE = 0.50
+
+
+def _broad_umbrella_skips_rescue(recent_article_count: int) -> bool:
+    """True when a story is broad enough that the per-article rescue should be
+    skipped (centroid-only matching). See BROAD_UMBRELLA_RECENT_ARTICLES."""
+    return (recent_article_count or 0) > BROAD_UMBRELLA_RECENT_ARTICLES
+
+
+def _passes_link_threshold(
+    best_score: float, best_via_article: bool, effective_threshold: float
+) -> bool:
+    """Whether a post-to-story match is strong enough to attach. A rescue
+    (per-article) match must clear the higher RESCUE_MIN_SCORE bar; a centroid
+    match only needs the (age-adjusted) base threshold."""
+    floor = max(effective_threshold, RESCUE_MIN_SCORE) if best_via_article else effective_threshold
+    return best_score >= floor
+
+
+import re as _re_tg
+
+# Emoji + pictographic symbol ranges (incl. arrows / dingbats) used to detect
+# emoji-spam posts that shouldn't link to stories or feed the analyst summary.
+_EMOJI_RE = _re_tg.compile(
+    "[\U0001F000-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF"
+    "←-⇿⬀-⯿⌀-⏿■-◿✀-➿]"
+)
+
+
+def is_low_quality_telegram_post(text) -> bool:
+    """True for emoji-spam / stub posts that must not link to a story or feed
+    the analyst summary (Parham 2026-06-05: a channel posting «❌🔴🏃‍♀️🏃‍♀️…»
+    cruft polluted a story's analyst section). Conservative — only flags posts
+    that are essentially textless or emoji/symbol-dominated, so real commentary
+    (even with a few emojis) is kept."""
+    if not text:
+        return True
+    t = str(text).strip()
+    no_emoji = _EMOJI_RE.sub("", t)
+    # Meaningful = Persian/Arabic + Latin letters/digits, nothing else.
+    meaningful = _re_tg.sub(r"[^\w؀-ۿ]", "", no_emoji)
+    if len(meaningful) < 15:
+        return True  # essentially no text
+    emoji_count = len(_EMOJI_RE.findall(t))
+    words = [w for w in _re_tg.split(r"\s+", no_emoji) if len(w) >= 2]
+    if emoji_count >= 5 and emoji_count > len(words):
+        return True  # emoji-dominated
+    return False
+
+
 # ── Channel track records (historical reliability patterns) ──
 CHANNEL_TRACK_RECORDS = {
     "pro_regime": "کانال‌های حکومتی معمولاً: ارقام تلفات خودی را کمتر، دستاوردها را بزرگ‌تر نشان می‌دهند. از واژه «شهید» و «پیروزی» زیاد استفاده می‌کنند. اخبار منفی داخلی را سانسور یا تأخیر می‌اندازند.",
@@ -116,6 +177,9 @@ PASS2_PROMPT = """تو سردبیر ارشد خبری هستی. پست‌های 
 - به ارقام و اعداد توجه ویژه کن: آیا منطقی هستند؟ آیا طرف‌ها ارقام متفاوتی دارند؟
 - الگوهای تکراری بین کانال‌ها را شناسایی کن (پیام هماهنگ؟)
 - آنچه هیچ طرفی نگفته مهم‌تر از آنچه گفته‌اند است
+
+# قاعدهٔ استناد (سخت‌گیرانه):
+- فقط دربارهٔ طیف‌هایی بنویس که واقعاً در پست‌های ورودی حضور دارند. اگر هیچ پستی از تحلیلگرانِ یک طیف (دولتی، منتقد، یا مستقل) در ورودی نیست، آن کلید را در worldviews خالی («») بگذار — کمپِ غایب را اختراع نکن و موضع نساز. وقتی فقط یک یا دو صدا در ورودی هست، فقط همان را گزارش کن؛ یک «شکافِ سه‌طرفه» جعل نکن.
 
 # قوانین نگارشی مهم:
 - کل متن فارسی باشد. هرگز از کلمات انگلیسی مثل opposition، pro-regime، escalating استفاده نکن
@@ -467,6 +531,8 @@ async def analyze_story_telegram(
         .limit(60)
     )
     posts = list(posts_result.scalars().all())
+    # (b) Drop emoji-spam / stub posts before they can feed the analyst summary.
+    posts = [p for p in posts if not is_low_quality_telegram_post(p.text)]
 
     # Neighbor-story pool: the telegram linker writes each post to ONE
     # story_id (winner-takes-all by cosine score). Broad umbrella stories
@@ -579,8 +645,17 @@ async def analyze_story_telegram(
     )
     posts = [p for p, lb in zip(posts, labels) if lb == "analysis"]
 
-    if len(posts) < 1:
-        logger.info(f"Telegram analysis skipped for {story_id}: 0 analytical posts after pass-0 filter")
+    # (c) Require ≥2 posts from ≥2 DISTINCT analyst channels before producing a
+    # summary (Parham 2026-06-05: a single post — the «ML Strategy» spam — drove
+    # a 3-camp discourse summary that was pure hallucination). The summary
+    # compares analyst camps, so it needs at least two real voices; one voice
+    # can't support a multi-side comparison. Thinner than that → no section.
+    _distinct_channels = {p.channel_id for p in posts if p.channel_id}
+    if len(posts) < 2 or len(_distinct_channels) < 2:
+        logger.info(
+            f"Telegram analysis skipped for {story_id}: thin pool "
+            f"({len(posts)} posts, {len(_distinct_channels)} channels < 2 required)"
+        )
         return None
 
     # Build posts block
@@ -884,7 +959,12 @@ async def link_posts_by_embedding(
             .order_by(TelegramPost.created_at.desc())
             .limit(batch_limit)
         )
-        post_tuples = [(pid, txt) for pid, txt in post_result.all()]
+        # (b) Don't even attempt to link emoji-spam / stub posts — they should
+        # never attach to a story (Parham 2026-06-05).
+        post_tuples = [
+            (pid, txt) for pid, txt in post_result.all()
+            if not is_low_quality_telegram_post(txt)
+        ]
         # Backlog count uses the same 7-day cutoff so it reflects
         # actionable work, not historical artifacts.
         unlinked_total_result = await db.execute(
@@ -983,19 +1063,28 @@ async def link_posts_by_embedding(
             except Exception:
                 centroid_score = 0.0
 
-            # Per-article best match for this story (rescues broad clusters
-            # whose centroid is blurred by too many heterogeneous articles).
-            article_best = 0.0
-            for art_emb in story_article_embs.get(sid, []):
-                try:
-                    s = cosine_similarity(emb, art_emb)
-                except Exception:
-                    continue
-                if s > article_best:
-                    article_best = s
-
-            used_article = article_best > centroid_score
-            score = max(centroid_score, article_best)
+            recent_n = len(story_article_embs.get(sid, []))
+            if _broad_umbrella_skips_rescue(recent_n):
+                # BROAD umbrella (Parham 2026-06-05): the per-article rescue
+                # glued off-topic posts via a single stray member article — a
+                # Pakistan post linked to the Lebanon ceasefire umbrella through
+                # one Pakistan article among 40. On a broad story a post must
+                # match the DOMINANT-theme centroid, not any one member.
+                score = centroid_score
+                used_article = False
+            else:
+                # Small/coherent story: per-article best rescues a thin/diluted
+                # centroid by matching a post to one sharply-relevant article.
+                article_best = 0.0
+                for art_emb in story_article_embs.get(sid, []):
+                    try:
+                        s = cosine_similarity(emb, art_emb)
+                    except Exception:
+                        continue
+                    if s > article_best:
+                        article_best = s
+                used_article = article_best > centroid_score
+                score = max(centroid_score, article_best)
 
             if score > best_score:
                 best_score = score
@@ -1019,7 +1108,9 @@ async def link_posts_by_embedding(
                 ) / 86400.0
                 if age_days > AGED_TG_DAYS:
                     effective_threshold = threshold + AGED_TG_THRESHOLD_BUMP
-        if best_score >= effective_threshold and best_story_id:
+        if best_story_id and _passes_link_threshold(
+            best_score, best_via_article, effective_threshold
+        ):
             pending_updates.append((post_id, best_story_id))
             linked_by_embedding += 1
             if best_via_article:

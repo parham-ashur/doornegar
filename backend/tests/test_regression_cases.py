@@ -525,3 +525,47 @@ class TestSelfRunningInstrumentation:
         ha = (Path(__file__).parent.parent / "app" / "services" / "homepage_aggregates.py").read_text()
         # QC-touched stories get their count reconciled immediately
         assert "article_count=_live_articles" in ha, "recompute_story_aggregates doesn't fix article_count"
+
+
+class TestTelegramQualityPass:
+    """2026-06-05: story 9db0e678 (Lebanon ceasefire) showed off-topic + spam
+    telegram posts (a Pakistan «ML Strategy» post with «❌🔴🏃‍♀️…سیب دارم چه ۳۰بی»)
+    and a 3-camp analyst summary hallucinated from ~1 post. Three fixes:
+    (a) disable the per-article link rescue for broad umbrellas, (b) a spam-post
+    filter, (c) require ≥2 distinct analyst voices + clear stale analyses."""
+
+    def test_a_broad_umbrella_disables_rescue(self):
+        from app.services.telegram_analysis import _broad_umbrella_skips_rescue, BROAD_UMBRELLA_RECENT_ARTICLES
+        assert _broad_umbrella_skips_rescue(40) is True   # Lebanon umbrella
+        assert _broad_umbrella_skips_rescue(5) is False    # small coherent story
+        assert BROAD_UMBRELLA_RECENT_ARTICLES <= 20
+
+    def test_a_rescue_links_need_higher_score(self):
+        from app.services.telegram_analysis import _passes_link_threshold, RESCUE_MIN_SCORE
+        # a per-article rescue at the base threshold must NOT attach
+        assert _passes_link_threshold(0.40, True, 0.35) is False
+        # a centroid match at the same score DOES
+        assert _passes_link_threshold(0.40, False, 0.35) is True
+        # a strong rescue still attaches
+        assert _passes_link_threshold(RESCUE_MIN_SCORE + 0.01, True, 0.35) is True
+
+    def test_b_spam_post_filter(self):
+        from app.services.telegram_analysis import is_low_quality_telegram_post
+        assert is_low_quality_telegram_post("❌🔴🏃‍♀️🏃‍♀️") is True
+        assert is_low_quality_telegram_post("🔥🔥🔥🔥🔥🔥 برو") is True
+        assert is_low_quality_telegram_post("سلام") is True          # stub
+        assert is_low_quality_telegram_post(None) is True
+        # real commentary (even with an emoji) is kept
+        assert is_low_quality_telegram_post(
+            "این آتش‌بس شکست خواهد خورد چون هیچ تضمینی برای اجرای آن نیست 🔥"
+        ) is False
+
+    def test_c_floor_and_grounding_wired(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "app" / "services" / "telegram_analysis.py").read_text()
+        # require ≥2 posts AND ≥2 distinct channels
+        assert "len(_distinct_channels) < 2" in src, "analyst summary not gated on ≥2 voices"
+        # prompt grounding rule: don't invent absent camps
+        assert "کمپِ غایب را اختراع نکن" in src, "pass-2 grounding rule missing"
+        am = (Path(__file__).parent.parent / "auto_maintenance.py").read_text()
+        assert "cleared_stale" in am, "stale telegram analyses are not cleared when the pool goes thin"
