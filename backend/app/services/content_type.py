@@ -167,6 +167,16 @@ _OFF_DOMAIN_CONTENT = (
     "طالع بینی", "فال روز",
 )
 
+# Political/diplomatic override (Parham 2026-06-06): if any of these appear, the
+# article is treated as NEWS even when it also trips the sports blocklist —
+# they're diplomacy/statecraft terms that don't occur in a routine match
+# report, so they won't leak ordinary sports coverage. Caught the US-visa /
+# World-Cup-team story that was being dropped as off_topic.
+_POLITICAL_OVERRIDE_TERMS = (
+    "ویزا", "تحریم", "وزارت خارجه", "وزارت امور خارجه", "کاخ سفید",
+    "سفارت", "دیپلمات", "پاسپورت", "گذرنامه",
+)
+
 # Lede news verbs. Strong signal that the article opens with a
 # reported fact rather than an opinion/quote framing.
 _NEWS_VERBS = (
@@ -226,20 +236,32 @@ def heuristic_classify(article: Article) -> _Verdict | None:
     #    b) title section-label match — same precision rule as the
     #       opinion/discussion checks below, requires a separator after
     #       the keyword so "ورزشگاه" doesn't trip "ورزش".
-    if rss_cat:
-        for kw in _OFF_DOMAIN_RSS:
-            if kw in rss_cat:
+    #
+    # Political-diplomacy OVERRIDE (Parham 2026-06-06): a story carrying a
+    # clear diplomatic/political signal is NEWS even if it mentions the team.
+    # The «تیم ملی فوتبال» entry in the sports list was dropping a major Iran
+    # story — US visa diplomacy around the World Cup team (NYT / White House /
+    # sanctions) — as off_topic, so 12 articles never clustered. These signals
+    # are diplomatic, not sports, so they don't leak routine match reports.
+    _pol_blob = title + " " + body[:600]
+    _political_override = any(
+        kw in _pol_blob for kw in _POLITICAL_OVERRIDE_TERMS
+    )
+    if not _political_override:
+        if rss_cat:
+            for kw in _OFF_DOMAIN_RSS:
+                if kw in rss_cat:
+                    return _Verdict("off_topic", 0.9)
+        title_head_for_off = title[:60]
+        for kw in _OFF_DOMAIN_TITLE_PREFIXES:
+            if _title_label_match(title_head_for_off, kw):
                 return _Verdict("off_topic", 0.9)
-    title_head_for_off = title[:60]
-    for kw in _OFF_DOMAIN_TITLE_PREFIXES:
-        if _title_label_match(title_head_for_off, kw):
-            return _Verdict("off_topic", 0.9)
-    # c) content keywords anywhere in the title — section-tag-free junk
-    #    (Telegram posts, untagged feeds). High precision; ambiguous cases
-    #    defer to the LLM.
-    for kw in _OFF_DOMAIN_CONTENT:
-        if kw in title:
-            return _Verdict("off_topic", 0.9)
+        # c) content keywords anywhere in the title — section-tag-free junk
+        #    (Telegram posts, untagged feeds). High precision; ambiguous cases
+        #    defer to the LLM.
+        for kw in _OFF_DOMAIN_CONTENT:
+            if kw in title:
+                return _Verdict("off_topic", 0.9)
 
     # 0b. Multi-topic roundup headlines → aggregation (drop). Cluster-pollution
     #     guard: these bundle unrelated items and attach to any nearby cluster.

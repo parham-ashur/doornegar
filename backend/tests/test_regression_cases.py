@@ -591,3 +591,37 @@ class TestPipelineResilience:
         src = (Path(__file__).parent.parent / "auto_maintenance.py").read_text()
         m = re.search(r'"audit_clusters":\s*(\d+)', src)
         assert m and int(m.group(1)) >= 600, "audit_clusters timeout must be >= 600s (LLM cohesion confirm)"
+
+
+class TestPoliticalSportsOverride:
+    """2026-06-06: a MAJOR Iran story — US visa diplomacy around the World Cup
+    football team (NYT / White House / sanctions) — was dropped as off_topic
+    because the sports blocklist contains «تیم ملی فوتبال»; 12 articles never
+    clustered and the story never reached the site. CURE: a diplomatic-signal
+    override so political-football news classifies as news, while routine match
+    reports stay off_topic."""
+
+    def _mk(self, t):
+        from types import SimpleNamespace
+        return SimpleNamespace(title_fa=t, title_original=t, content_text="", summary="", url="", rss_category="")
+
+    def test_visa_diplomacy_football_is_not_offtopic(self):
+        from app.services.content_type import heuristic_classify
+        for t in (
+            "تیم ملی فوتبال ایران در جام جهانی مجوز ویزای آمریکا دریافت کرد",
+            "الجزیره: آمریکا به ۱۵ عضو کادر تیم ملی ویزا نداد",
+            "مهدی تاج: پاسپورت‌ها را به سفارت آمریکا دادیم",
+        ):
+            v = heuristic_classify(self._mk(t))
+            label = getattr(v, "label", v)
+            assert label != "off_topic", f"diplomatic football story dropped as off_topic: {t}"
+
+    def test_pure_sports_still_offtopic(self):
+        from app.services.content_type import heuristic_classify
+        for t in (
+            "تیم ملی فوتبال ایران برابر پرتغال به پیروزی رسید",
+            "لیگ برتر فوتبال؛ پرسپولیس قهرمان شد",
+        ):
+            v = heuristic_classify(self._mk(t))
+            label = getattr(v, "label", v)
+            assert label == "off_topic", f"routine sports leaked as non-off_topic: {t}"
