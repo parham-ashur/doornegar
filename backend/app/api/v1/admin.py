@@ -1630,6 +1630,37 @@ async def sources_stats(db: AsyncSession = Depends(get_db)):
     return {"sources": rows, "generated_at": now.isoformat()}
 
 
+class _ReclassifyRequest(_BaseModel):
+    article_ids: list[str]
+
+
+@router.post("/content-type/reclassify", dependencies=[Depends(require_admin)])
+async def reclassify_articles(
+    request: _ReclassifyRequest, db: AsyncSession = Depends(get_db)
+):
+    """Clear content_type (→ NULL) on the given articles so the next classify
+    run re-labels them with the CURRENT classifier. Used to rescue articles
+    mis-labelled by an older heuristic after a fix ships (Parham 2026-06-06:
+    the football-visa story was stuck off_topic before the political-override
+    fix). NULL content_type also means the off-topic drain skips them in the
+    meantime, so a seeded story won't be emptied before the reclassify lands."""
+    import uuid as _uuid
+    from app.models.article import Article as _Art
+    ids = []
+    for s in (request.article_ids or []):
+        try:
+            ids.append(_uuid.UUID(str(s)))
+        except Exception:
+            continue
+    if not ids:
+        return {"status": "ok", "cleared": 0, "message": "no valid article ids"}
+    res = await db.execute(
+        _Art.__table__.update().where(_Art.id.in_(ids)).values(content_type=None)
+    )
+    await db.commit()
+    return {"status": "ok", "cleared": res.rowcount or 0}
+
+
 @router.get("/content-type/stats", dependencies=[Depends(require_admin)])
 async def content_type_stats(
     days: int = Query(7, ge=1, le=90),
