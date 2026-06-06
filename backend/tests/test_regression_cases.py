@@ -625,3 +625,48 @@ class TestPoliticalSportsOverride:
             v = heuristic_classify(self._mk(t))
             label = getattr(v, "label", v)
             assert label == "off_topic", f"routine sports leaked as non-off_topic: {t}"
+
+class TestMergeProtectionAndGrabbagDetection:
+    """2026-06-06: the cron's merge step absorbed a hand-seeded, priority-50
+    visa story into a 35-article war umbrella («visa؛ drones»), erasing the
+    pin. Parham caught it by EYE — detection-source ratio was 0.0, because
+    the homepage_grabbag canary only fires at >= 120 articles, so the 35-art
+    grab-bag sailed under it.
+
+    Two-part fix:
+      PREVENT — merge-protect is_edited / pinned stories (see
+                test_clustering_safety.py::TestMergeProtectsPinnedStories).
+      DETECT  — a mid-size grab-bag canary (this class) so the NEXT one trips
+                a signal instead of needing Parham's eyes ([[project_self_running_kpis]]
+                Pillar 4 Detection)."""
+
+    def _admin_src(self):
+        from pathlib import Path
+        return (Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py").read_text()
+
+    def test_midsize_grabbag_canary_exists(self):
+        src = self._admin_src()
+        assert '"midsize_grabbag_risk"' in src, "mid-size grab-bag canary not registered"
+
+    def test_canary_targets_the_gap_below_120(self):
+        src = self._admin_src()
+        # Must cover the band the >=120 homepage_grabbag canary misses.
+        assert "BETWEEN :lo AND :hi" in src
+        assert '"lo": 12' in src and '"hi": 119' in src, \
+            "mid-size band must be 12-119 (the gap below the 120 grab-bag canary)"
+
+    def test_canary_uses_persian_semicolon_tell_on_auto_titles(self):
+        src = self._admin_src()
+        # The grab-bag tell: an auto-generated compound title joining two
+        # events with «؛». Scoped to is_edited = FALSE so hand-curated
+        # compound titles don't false-positive.
+        assert "title_fa LIKE '%؛%'" in src, "canary must use the «؛» compound-title tell"
+        assert "is_edited = FALSE" in src, \
+            "canary must scope to auto-titled stories so hand-edited «؛» titles are excluded"
+
+    def test_canary_surfaces_in_self_review(self):
+        # self_review_packet reuses health_overview canaries, so the new
+        # canary feeds the detection-source ratio with no extra wiring.
+        from pathlib import Path
+        il = (Path(__file__).parent.parent / "app" / "services" / "incident_ledger.py").read_text()
+        assert "from app.api.v1.admin import health_overview" in il

@@ -4976,6 +4976,32 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
     hp_grabbag = int(_hp["grabbag_visible"] or 0)
     hp_blindspots = int(_hp["fresh_blindspots"] or 0)
 
+    # Mid-size grab-bag detector (Parham 2026-06-06). The homepage_grabbag
+    # canary above only fires at >= 120 articles, so a mid-size two-event
+    # cluster sails under it and reaches Parham's eyes instead of a signal —
+    # exactly how the auto-merged «America rejected the football visas؛ four
+    # Iranian drones were shot down» story (35 art) was caught by eye, not a
+    # canary (detection-source ratio = 0.0). This closes the 12-119 band
+    # using the title LLM's grab-bag tell: when it can't find ONE headline
+    # for an incoherent cluster it joins two clauses with a Persian semicolon
+    # «؛». Scoped to is_edited = FALSE so hand-curated «؛» titles (e.g. an
+    # operator's deliberate compound headline) don't trip it. Pure SQL, no LLM.
+    _midgrab = (await db.execute(_t("""
+        SELECT id, title_fa, article_count
+        FROM stories
+        WHERE archived_at IS NULL
+          AND is_edited = FALSE
+          AND article_count BETWEEN :lo AND :hi
+          AND title_fa LIKE '%؛%'
+        ORDER BY article_count DESC
+        LIMIT 5
+    """), {"lo": 12, "hi": 119})).mappings().all()
+    midgrab_count = len(_midgrab)
+    midgrab_sample = (
+        f"{(_midgrab[0]['title_fa'] or '')[:70]} ({_midgrab[0]['article_count']} art)"
+        if _midgrab else "none"
+    )
+
     # Off-topic / non-allowed articles sitting INSIDE visible stories — the
     # precise measure of the cluster-pollution leak that the 2026-06-02 scope
     # filter (off_topic label) + clustering content_type gate prevent going
@@ -5054,6 +5080,19 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
             "like a merged negotiation cluster, or a grab-bag the coherence audit should archive). "
             "Warn, not error — size is a proxy; the Phase-2 coherence audit does the real "
             "cohesion check and archives true grab-bags (event_type=coherence_archive).",
+        ),
+        _canary(
+            "midsize_grabbag_risk", "Mid-size grab-bag risk (auto-titled «؛» story, 12-119 art)",
+            midgrab_sample if midgrab_count else 0, "= 0 (eyeball if > 0)",
+            "warn" if midgrab_count > 0 else "ok",
+            "Closes the gap below homepage_grabbag (which only fires at >= 120 art). When the "
+            "title LLM can't find ONE headline for an incoherent cluster it joins two events "
+            "with a Persian «؛» — exactly the 2026-06-06 auto-merged «visa؛ drones» story (35 "
+            "art) that reached Parham's eyes instead of a signal (detection-source ratio = 0.0). "
+            "Scoped to is_edited = FALSE so hand-curated «؛» compound titles are excluded. WARN — "
+            "«؛» is a proxy: eyeball it, split if it's two events, ignore if it's one event with "
+            "a sub-clause. Pairs with the merge-protection cure (42a7844) that stops pinned "
+            "stories being absorbed in the first place.",
         ),
         _canary(
             "homepage_offtopic_leak", "Off-topic articles inside visible stories",
