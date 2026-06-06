@@ -452,3 +452,79 @@ class TestClusteringSafetyBounds:
             f"MAX_CLUSTER_ATTEMPTS = {n} is out of safe range (1-5). "
             f"Above 5, a poison article can stall the queue indefinitely."
         )
+
+
+# ═════════════════════════════════════════════════════════════════════
+# Merge protection — human-curated / pinned stories are never auto-merged
+# ═════════════════════════════════════════════════════════════════════
+
+def _merge_visible_body() -> str:
+    """Body of `merge_similar_visible_stories` — the auto-merge that
+    consolidates duplicate visible clusters every cron tick."""
+    src = _clustering_src()
+    idx = src.find("async def merge_similar_visible_stories(")
+    assert idx >= 0, "merge_similar_visible_stories must exist in clustering.py"
+    end = src.find("\n\nasync def ", idx + 100)
+    if end < 0:
+        end = src.find("\n\ndef ", idx + 100)
+    return src[idx : end if end > 0 else len(src)]
+
+
+class TestMergeProtectsPinnedStories:
+    """Tripwire for the 2026-06-06 incident: the cron's merge_similar
+    step absorbed a hand-seeded, priority-50 visa story into a 35-article
+    war umbrella, erasing the operator pin and the single-topic curation.
+
+    A human-curated story (is_edited=True) or an operator pin
+    (priority >= floor) must NEVER be eligible for auto-merge — neither
+    as a candidate (so it can't be keeper or victim) nor, as a
+    belt-and-suspenders guard, as a victim in the absorb loop.
+    """
+
+    def test_pin_floor_constant_defined(self):
+        import re
+        m = re.search(
+            r"^_MERGE_PIN_PRIORITY_FLOOR\s*=\s*(\d+)", _clustering_src(), re.M
+        )
+        assert m, "_MERGE_PIN_PRIORITY_FLOOR must be defined in clustering.py"
+        floor = int(m.group(1))
+        # Seed/PATCH pins use priority 50; demoted stories use -50; normal 0.
+        # The floor must sit below 50 (so a pin is caught) and above 0 (so
+        # ordinary stories still merge).
+        assert 1 <= floor <= 50, (
+            f"_MERGE_PIN_PRIORITY_FLOOR = {floor} out of range; must catch "
+            f"priority-50 pins without freezing ordinary (priority-0) merges."
+        )
+
+    def test_candidate_query_excludes_is_edited(self):
+        body = _merge_visible_body()
+        assert "Story.is_edited.is_(False)" in body, (
+            "merge_similar_visible_stories must exclude is_edited stories from "
+            "the merge candidate pool — otherwise a hand-curated story can be "
+            "silently merged away (2026-06-06 visa-hero incident)."
+        )
+
+    def test_candidate_query_excludes_pinned(self):
+        body = _merge_visible_body()
+        assert "_MERGE_PIN_PRIORITY_FLOOR" in body, (
+            "merge_similar_visible_stories must exclude operator-pinned "
+            "stories (priority >= _MERGE_PIN_PRIORITY_FLOOR) from the merge "
+            "candidate pool."
+        )
+
+    def test_absorb_loop_has_protected_victim_guard(self):
+        body = _merge_visible_body()
+        # The defensive guard skips a protected story even if it reaches the
+        # absorb loop. Verify both the is_edited and priority checks gate a
+        # `continue` before the article-move UPDATE.
+        guard_idx = body.find("victim.is_edited")
+        assert guard_idx >= 0, (
+            "absorb loop must defensively check victim.is_edited before "
+            "deleting it."
+        )
+        assert "_MERGE_PIN_PRIORITY_FLOOR" in body[guard_idx:guard_idx + 700], (
+            "the victim guard must also check the priority pin floor."
+        )
+        assert "continue" in body[guard_idx:guard_idx + 700], (
+            "a protected victim must be skipped (continue), not merged."
+        )

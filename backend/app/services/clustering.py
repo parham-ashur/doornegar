@@ -34,6 +34,16 @@ _SMALL_CLUSTER_THRESHOLD = 6
 # coverage" than confidently claim balance we don't have.
 _MINORITY_PCT_THRESHOLD = 20
 
+# Pin floor: stories at or above this priority were manually pinned by an
+# operator (the seed/PATCH endpoints use 50). Together with is_edited=True,
+# these mark human-curated stories that auto-merge must NEVER touch — neither
+# as a keeper (it would inherit a foreign article mix) nor as a victim (it
+# would be deleted outright). Background (Parham 2026-06-06): the cron's
+# merge_similar step absorbed a hand-seeded, priority-50 visa story into a
+# 35-article war umbrella ("America rejected the football visas؛ four Iranian
+# drones were shot down"), erasing the pin and the single-topic curation.
+_MERGE_PIN_PRIORITY_FLOOR = 40
+
 
 def _compute_blindspot(
     *,
@@ -2484,6 +2494,13 @@ async def merge_similar_visible_stories(db: AsyncSession) -> int:
             Story.article_count < settings.max_cluster_size,
             Story.frozen_at.is_(None),
             Story.archived_at.is_(None),
+            # Never auto-merge human-curated stories. is_edited=True marks a
+            # hand-seeded / Niloofar-edited story; priority >= floor marks an
+            # operator pin. Excluding them from the candidate pool keeps them
+            # untouched — they can be neither keeper (absorbing a foreign mix)
+            # nor victim (silently deleted). See _MERGE_PIN_PRIORITY_FLOOR.
+            Story.is_edited.is_(False),
+            func.coalesce(Story.priority, 0) < _MERGE_PIN_PRIORITY_FLOOR,
             (
                 func.coalesce(Story.first_published_at, Story.created_at)
                 >= umbrella_cutoff
@@ -2604,6 +2621,21 @@ async def merge_similar_visible_stories(db: AsyncSession) -> int:
         to_absorb = valid_stories[1:]
 
         for victim in to_absorb:
+            # Belt-and-suspenders: the candidate query already excludes
+            # is_edited / pinned stories, but never delete a human-curated
+            # story even if one slips through (e.g. flagged between query and
+            # execution). Skip it rather than erase an operator's curation.
+            if victim.is_edited or (victim.priority or 0) >= _MERGE_PIN_PRIORITY_FLOOR:
+                logger.warning(
+                    "Refusing to merge protected story %s ('%s', is_edited=%s, "
+                    "priority=%s) into %s — left untouched",
+                    victim.id,
+                    (victim.title_fa or "")[:40],
+                    victim.is_edited,
+                    victim.priority,
+                    keeper.id,
+                )
+                continue
             # Move articles
             await db.execute(
                 update(Article)
