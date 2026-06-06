@@ -1111,11 +1111,11 @@ export default async function HomeBody({
                     if (!heroLuStale && showCoverageBadge(hero)) {
                       const heroReason = formatUpdateReason(hero.update_signal!);
                       return (
-                        <div className="absolute bottom-2 right-2 inline-flex items-center gap-1.5 bg-slate-900/95 px-2 py-1 shadow-sm">
-                          <span className="inline-block h-1.5 w-1.5 bg-white" />
-                          <span className="text-[12px] font-bold text-white">بروزرسانی</span>
+                        <div className="absolute bottom-2 right-2 inline-flex items-center gap-1.5 bg-white/70 dark:bg-slate-900/55 backdrop-blur-sm px-2 py-1 shadow-sm">
+                          <span className="inline-block h-1.5 w-1.5 bg-slate-900 dark:bg-white" />
+                          <span className="text-[12px] font-bold text-slate-900 dark:text-white">بروزرسانی</span>
                           {heroReason && (
-                            <span className="text-[12px] text-white/90">{heroReason}</span>
+                            <span className="text-[12px] text-slate-700 dark:text-white/90">{heroReason}</span>
                           )}
                         </div>
                       );
