@@ -616,7 +616,12 @@ async def force_resummarize(
             )
         )
         .where(Story.article_count >= 5)
-        .where(Story.is_edited.is_(False))
+        # Include anchored is_edited stories — same rule as step_summarize's
+        # pool. A seeded/pinned hero with a summary_anchor SHOULD be refreshable
+        # (bias summaries + doornama); the anchor preserves its curated title,
+        # which this path doesn't touch (Parham 2026-06-06: the seeded visa hero
+        # needed analysis on demand, not just on the cron).
+        .where((Story.is_edited.is_(False)) | (Story.summary_anchor.isnot(None)))
         .where(Story.archived_at.is_(None))
     )
     if order == "trending":
