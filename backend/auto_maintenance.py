@@ -1553,6 +1553,17 @@ async def step_summarize_newly_visible():
                     extras["narrative_arc"] = analysis["narrative_arc"]
                 if analysis.get("article_evidence"):
                     extras["article_evidence"] = analysis["article_evidence"]
+                # Preserve a curator's hand-picked image across re-analysis.
+                # Parham 2026-06-07: a manually-set story image reverted after
+                # every cron because step_summarize rebuilt summary_en from
+                # scratch, dropping the manual_image_url override the read-time
+                # path (stories.py / hitl.py) relies on. Carry it forward.
+                try:
+                    _prev_blob = _json.loads(story.summary_en) if story.summary_en else {}
+                    if _prev_blob.get("manual_image_url"):
+                        extras["manual_image_url"] = _prev_blob["manual_image_url"]
+                except Exception:
+                    pass
                 story.summary_en = _json.dumps(extras, ensure_ascii=False)
                 story.llm_failed_at = None
                 await db.commit()
@@ -2208,6 +2219,11 @@ async def step_summarize():
                             extras["briefing_fa"] = prior["briefing_fa"]
                             extras["briefing_hash"] = prior.get("briefing_hash")
 
+                # Preserve a curator's hand-picked image across re-analysis
+                # (Parham 2026-06-07 image-revert bug — see Path 1). old_extras
+                # was already read above for neutrality carry-forward.
+                if old_extras.get("manual_image_url") and not extras.get("manual_image_url"):
+                    extras["manual_image_url"] = old_extras["manual_image_url"]
                 story.summary_en = _json.dumps(extras, ensure_ascii=False)
                 story.llm_failed_at = None  # clear any previous failure
                 await db.commit()
@@ -2685,7 +2701,8 @@ async def step_story_quality():
                 "dispute_score": analysis.get("dispute_score"),
                 "loaded_words": analysis.get("loaded_words"),
             }
-            for k in ("source_neutrality", "article_neutrality", "neutrality_source", "neutrality_scored_at"):
+            for k in ("source_neutrality", "article_neutrality", "neutrality_source",
+                      "neutrality_scored_at", "manual_image_url"):
                 if isinstance(_old, dict) and _old.get(k) is not None:
                     _new[k] = _old[k]
             new_summary_en = _json.dumps(_new, ensure_ascii=False)

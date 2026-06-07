@@ -670,3 +670,45 @@ class TestMergeProtectionAndGrabbagDetection:
         from pathlib import Path
         il = (Path(__file__).parent.parent / "app" / "services" / "incident_ledger.py").read_text()
         assert "from app.api.v1.admin import health_overview" in il
+
+class TestManualImagePreservedAcrossResummarize:
+    """2026-06-07: Parham set a story image; it reverted after every cron.
+    Cause: step_summarize rebuilt the summary_en blob from scratch and
+    dropped the manual_image_url override that the read-time path
+    (stories.py / hitl.py) relies on. The admin force-resummarize path
+    preserved it; the cron's three summarize paths did not. All three must
+    carry manual_image_url forward now."""
+
+    def _src(self):
+        from pathlib import Path
+        return (Path(__file__).parent.parent / "auto_maintenance.py").read_text()
+
+    def test_all_summarize_paths_preserve_manual_image(self):
+        src = self._src()
+        # At least 3 carry-forward sites in step_summarize (Path 1, Path 2,
+        # Path 3) — one per re-analysis path that rewrites summary_en.
+        n = src.count("manual_image_url")
+        assert n >= 3, (
+            f"expected manual_image_url preserved in all 3 cron summarize "
+            f"paths, found {n} reference(s)"
+        )
+
+    def test_stale_clear_exempts_curated_stories(self):
+        src = self._src()
+        # The stale_cleared path nulls summary_en — it MUST stay scoped to
+        # is_edited=False so a curated story (manual images flip is_edited)
+        # never has its image wiped here.
+        idx = src.find("story.summary_en = None")
+        assert idx > 0, "stale_cleared null-out (summary_en = None) not found"
+        # the SELECT guarding the null-out is just above it
+        window = src[max(0, idx - 1200):idx]
+        assert "Story.is_edited.is_(False)" in window, (
+            "stale_cleared null-out must remain scoped to is_edited=False"
+        )
+
+    def test_read_time_override_still_trusted(self):
+        from pathlib import Path
+        st = (Path(__file__).parent.parent / "app" / "api" / "v1" / "stories.py").read_text()
+        assert 'get("manual_image_url")' in st, (
+            "read-time path must still apply the manual_image_url override"
+        )
