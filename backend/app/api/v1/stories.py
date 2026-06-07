@@ -1150,7 +1150,8 @@ def _is_bad_image(url: str) -> bool:
     bad_patterns = [
         "pixel", "1x1", "blank.", "spacer.", "transparent.",
         "placeholder", "default.jpg", "default.png", "no-image",
-        "logo-", "/logo.", "/icon.", "favicon",
+        "no_image", "noimage", "default-image", "default-thumb",
+        "logo-", "/logo.", "logo.png", "logo.jpg", "/icon.", "favicon",
         "apple-touch-icon",  # Source logos, not story images
         "google.com/s2/favicons",  # Tiny favicons (16-128px), often 404 for geo-blocked sites
         ".svg",  # SVGs are usually logos/icons
@@ -1159,6 +1160,10 @@ def _is_bad_image(url: str) -> bool:
         "cdn.telegram",  # Same story for the older Telegram CDN host
         # Icon/PWA patterns captured from broken RSS <media:content> tags
         "ico-192x192", "ico-512x512", "webapp/ico-", "manifest-icon",
+        # Avatars / sprites / share-defaults / ad creatives — never a cover
+        "avatar", "gravatar", "/sprite", "sprite.", "/emoji",
+        "share-default", "social-default", "og-default", "og_default",
+        "/ads/", "/advert",
     ]
     if any(p in lower for p in bad_patterns):
         return True
@@ -1277,6 +1282,7 @@ def _story_brief_with_extras(
         if a.image_url and not _is_bad_image(a.image_url)
     ]
     if candidates and not _skip_scorer:
+        from app.services.homepage_aggregates import image_quality_score as _iqs
         def _score(a) -> tuple:
             art_words = _title_words(a.title_fa or a.title_original or a.title_en)
             overlap = len(story_words & art_words)
@@ -1284,9 +1290,11 @@ def _story_brief_with_extras(
                 settings.r2_public_url
                 and a.image_url.startswith(settings.r2_public_url)
             )
-            # Tuple is sorted in priority order:
-            # (stable URL > higher overlap > longer URL)
-            return (1 if is_stable else 0, overlap, len(a.image_url))
+            # Mirror homepage_aggregates._pick_image: real image quality
+            # dominates (a crisp photo beats a thumbnail), then title
+            # relevance, then a stability bonus, URL length only on exact ties.
+            composite = _iqs(a.image_url) + overlap * 2 + (2 if is_stable else 0)
+            return (composite, overlap, len(a.image_url))
 
         best = max(candidates, key=_score)
         brief.image_url = best.image_url

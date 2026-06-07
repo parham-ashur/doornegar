@@ -712,3 +712,52 @@ class TestManualImagePreservedAcrossResummarize:
         assert 'get("manual_image_url")' in st, (
             "read-time path must still apply the manual_image_url override"
         )
+
+class TestImageQualityPicker:
+    """2026-06-07: the auto cover-image picker kept choosing low-quality
+    thumbnails because its only tiebreaker was URL length. image_quality_score
+    gives it a real URL-derived quality signal so big article photos win over
+    thumbnails / logos. Used by both homepage_aggregates._pick_image (cron →
+    blob) and the stories.py read-time scorer."""
+
+    def test_large_beats_thumbnail(self):
+        from app.services.homepage_aggregates import image_quality_score as q
+        big = q("https://cdn.example.com/news/photo-1200x800.jpg")
+        thumb = q("https://cdn.example.com/news/photo-150x150.jpg")
+        assert big > thumb, f"large({big}) should outrank thumbnail({thumb})"
+
+    def test_thumbnail_markers_penalized(self):
+        from app.services.homepage_aggregates import image_quality_score as q
+        assert q("https://x.com/thumb/a.jpg") < q("https://x.com/a.jpg")
+        assert q("https://x.com/large/a.jpg") > q("https://x.com/a.jpg")
+
+    def test_width_query_hint(self):
+        from app.services.homepage_aggregates import image_quality_score as q
+        assert q("https://img.x.com/a.jpg?w=1200") > q("https://img.x.com/a.jpg?w=120")
+
+    def test_picker_prefers_quality_over_stable_thumbnail(self):
+        # A stable (R2) 150px thumbnail must NOT beat a 1200px article photo.
+        from types import SimpleNamespace
+        from app.config import settings
+        from app.services import homepage_aggregates as ha
+        r2 = settings.r2_public_url or "https://r2.example.com"
+        story = SimpleNamespace(title_fa="حمله موشکی به پایگاه", title_en=None)
+        thumb = SimpleNamespace(
+            image_url=f"{r2}/cover-150x150.jpg",
+            title_fa="حمله موشکی به پایگاه", title_original=None, title_en=None,
+            source=SimpleNamespace(slug="a", logo_url=None, is_active=True),
+        )
+        big = SimpleNamespace(
+            image_url="https://news.example.com/photo-1200x800.jpg",
+            title_fa="حمله موشکی به پایگاه", title_original=None, title_en=None,
+            source=SimpleNamespace(slug="b", logo_url=None, is_active=True),
+        )
+        url, real = ha._pick_image(story, [thumb, big])
+        assert real is True
+        assert url == big.image_url, f"picker chose {url!r}, expected the 1200px photo"
+
+    def test_avatar_and_sprite_filtered(self):
+        from app.services.homepage_aggregates import _is_bad_image
+        assert _is_bad_image("https://x.com/users/avatar123.jpg")
+        assert _is_bad_image("https://x.com/assets/sprite.png")
+        assert not _is_bad_image("https://x.com/news/real-photo-1200x800.jpg")

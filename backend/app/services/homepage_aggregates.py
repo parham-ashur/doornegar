@@ -49,16 +49,78 @@ if TYPE_CHECKING:
 _BAD_IMAGE_PATTERNS = (
     "pixel", "1x1", "blank.", "spacer.", "transparent.",
     "placeholder", "default.jpg", "default.png", "no-image",
-    "logo-", "/logo.", "/icon.", "favicon",
+    "no_image", "noimage", "default-image", "default-thumb",
+    "logo-", "/logo.", "logo.png", "logo.jpg", "/icon.", "favicon",
     "apple-touch-icon",
     "google.com/s2/favicons",
     ".svg", ".ico",
     "telesco.pe", "cdn.telegram",
     "ico-192x192", "ico-512x512", "webapp/ico-", "manifest-icon",
+    # Avatars / sprites / share-defaults / ad creatives are never a story cover
+    "avatar", "gravatar", "/sprite", "sprite.", "/emoji",
+    "share-default", "social-default", "og-default", "og_default",
+    "/ads/", "/advert",
 )
 _IRANINTL_TRANSFORM_RE = re.compile(
     r"-\d+x\d+\.(jpg|jpeg|png|webp)(\?|$)"
 )
+
+# Dimension hints embedded in URLs: "1200x800", "150×150" (path or filename).
+_DIM_RE = re.compile(r"(?<!\d)(\d{2,4})\s*[x×]\s*(\d{2,4})(?!\d)")
+# Width-style query/path hints: ?w=1200, &width=800, /w_1200/, imwidth=600.
+_WIDTH_RE = re.compile(r"(?:[?&](?:w|width|imwidth)=|/w_)(\d{2,4})")
+_THUMB_MARKERS = (
+    "/thumb", "thumbnail", "/small", "/mini", "/preview", "/tiny",
+    "_s.", "-small", "/sq/", "/square", "/xs/", "/100/", "/150/",
+)
+_LARGE_MARKERS = (
+    "/large", "/original", "/orig", "/full", "/hd", "/xl",
+    "-1024x", "-2048x", "1920x", "maxres",
+)
+
+
+def image_quality_score(url: str | None) -> int:
+    """Heuristic, 0-centered quality score from URL signals alone — we store
+    no real image dimensions. Positive = likely a large article-grade photo;
+    negative = likely a thumbnail / logo / low-res crop.
+
+    Why URL-only: the only image metadata on Article is the URL + a HEAD
+    check; there are no width/height columns. Most Iranian-outlet CDNs and
+    WordPress sites embed the size in the path («…-150x150.jpg», «?w=1200»,
+    «/thumb/»), so the URL is a usable quality proxy. Parham 2026-06-07: the
+    auto-picker kept choosing tiny low-quality covers because its only
+    tiebreaker was URL length; this gives it a real quality signal.
+    """
+    if not url:
+        return -100
+    u = url.lower()
+    score = 0
+    biggest = 0
+    for w, h in _DIM_RE.findall(u):
+        try:
+            biggest = max(biggest, int(w), int(h))
+        except ValueError:
+            continue
+    _wm = _WIDTH_RE.search(u)
+    if _wm:
+        try:
+            biggest = max(biggest, int(_wm.group(1)))
+        except ValueError:
+            pass
+    if biggest:
+        if biggest >= 1000:
+            score += 4
+        elif biggest >= 600:
+            score += 2
+        elif biggest <= 200:
+            score -= 5  # thumbnail-sized — the low-quality covers we want gone
+        elif biggest <= 320:
+            score -= 2
+    if any(m in u for m in _THUMB_MARKERS):
+        score -= 4
+    if any(m in u for m in _LARGE_MARKERS):
+        score += 2
+    return score
 
 
 def _is_bad_image(url: str | None) -> bool:
@@ -106,7 +168,14 @@ def _pick_image(
             is_stable = a.image_url.startswith("/images/") or (
                 bool(r2_prefix) and a.image_url.startswith(r2_prefix)
             )
-            return (1 if is_stable else 0, overlap, len(a.image_url))
+            quality = image_quality_score(a.image_url)
+            # Composite (higher = better): real image quality dominates so a
+            # crisp 1200px photo beats a 150px thumbnail even when the thumb is
+            # the stable/R2 one (Parham 2026-06-07 low-quality-cover fix);
+            # title relevance is weighted next, stability is a tiebreak bonus,
+            # URL length only breaks exact ties.
+            composite = quality + overlap * 2 + (2 if is_stable else 0)
+            return (composite, overlap, len(a.image_url))
 
         best = max(candidates, key=_score)
         return best.image_url, True
