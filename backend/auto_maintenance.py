@@ -4594,45 +4594,108 @@ async def step_demote_umbrella_stories():
     means the demote rule is exactly as conservative as the freeze
     rule: any story whose chapter has closed gets sunk, none that's
     still actively narrating do.
+
+    Activity-aware exception (Parham 2026-06-09): a story can be frozen
+    for being >7d old (or >100 articles) yet still be the single biggest
+    breaking story — e.g. the Iran–Israel war, ongoing ~30 days, taking
+    40+ fresh articles/day. The old rule demoted it to -50 and buried it
+    for days under a stale pinned hero, and there was NO un-demote path,
+    so it stayed stuck. Now: a frozen story that absorbed
+    ACTIVE_MIN_ARTICLES+ articles in the last ACTIVE_WINDOW_DAYS is
+    treated as "still breaking" — it is NOT demoted, and if a prior run
+    already sank it to -50 it is RE-PROMOTED to 0. This changes ONLY the
+    sort priority; the story stays frozen (no new articles join), so the
+    runaway-umbrella protection the freeze rule provides is untouched.
     """
-    from sqlalchemy import select, update
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    from sqlalchemy import select, update, func as _func
     from app.database import async_session
     from app.models.story import Story
+    from app.models.article import Article
     from app.services.events import log_event as _log_event
 
-    stats = {"checked": 0, "demoted": 0}
+    ACTIVE_WINDOW_DAYS = 2
+    ACTIVE_MIN_ARTICLES = 4
+
+    stats = {"checked": 0, "demoted": 0, "exempt_active": 0, "repromoted": 0}
+    window_start = _dt.now(_tz.utc) - _td(days=ACTIVE_WINDOW_DAYS)
 
     async with async_session() as db:
+        # Candidates span BOTH bands so we can demote OR re-promote:
+        #   priority in (-100, 0]  — excludes manual pins (>0) and the
+        #   manual -100 hide. -50 (auto-demoted) is included so a story
+        #   that started breaking again can be lifted back to 0.
         rows = (await db.execute(
             select(Story).where(
                 Story.frozen_at.isnot(None),
-                Story.priority > -10,        # not already demoted/hidden
-                Story.priority <= 0,         # respect manual pins (priority>0)
-                Story.archived_at.is_(None),  # archived has its own removal
+                Story.archived_at.is_(None),
+                Story.priority <= 0,
+                Story.priority > -100,
             )
         )).scalars().all()
         stats["checked"] = len(rows)
-        for s in rows:
-            await db.execute(
-                update(Story).where(Story.id == s.id).values(priority=-50)
-            )
-            await _log_event(
-                db,
-                event_type="story_umbrella_demoted",
-                actor="maintenance",
-                story_id=s.id,
-                signals={
-                    "article_count": int(s.article_count or 0),
-                    "frozen_at": s.frozen_at.isoformat() if s.frozen_at else None,
-                    "first_published_at": s.first_published_at.isoformat() if s.first_published_at else None,
-                    "title_fa": (s.title_fa or "")[:120],
-                },
-            )
-            stats["demoted"] += 1
-            logger.info(f"  Frozen demote: {s.title_fa[:60] if s.title_fa else s.id} ({s.article_count} articles)")
+        if rows:
+            ids = [s.id for s in rows]
+            recent = dict((await db.execute(
+                select(Article.story_id, _func.count(Article.id))
+                .where(
+                    Article.story_id.in_(ids),
+                    Article.published_at >= window_start,
+                )
+                .group_by(Article.story_id)
+            )).all())
+            for s in rows:
+                n_recent = int(recent.get(s.id, 0))
+                active = n_recent >= ACTIVE_MIN_ARTICLES
+                already_demoted = (s.priority or 0) <= -10
+                if active:
+                    # Still breaking — must not be buried.
+                    if already_demoted:
+                        await db.execute(
+                            update(Story).where(Story.id == s.id).values(priority=0)
+                        )
+                        await _log_event(
+                            db,
+                            event_type="story_umbrella_repromoted",
+                            actor="maintenance",
+                            story_id=s.id,
+                            signals={
+                                "recent_articles": n_recent,
+                                "window_days": ACTIVE_WINDOW_DAYS,
+                                "title_fa": (s.title_fa or "")[:120],
+                            },
+                        )
+                        stats["repromoted"] += 1
+                        logger.info(
+                            f"  Frozen re-promote (active): {(s.title_fa or '')[:50]} "
+                            f"({n_recent} arts/{ACTIVE_WINDOW_DAYS}d)"
+                        )
+                    else:
+                        stats["exempt_active"] += 1
+                    continue
+                # Quiet frozen story — sink it (only if not already sunk).
+                if not already_demoted:
+                    await db.execute(
+                        update(Story).where(Story.id == s.id).values(priority=-50)
+                    )
+                    await _log_event(
+                        db,
+                        event_type="story_umbrella_demoted",
+                        actor="maintenance",
+                        story_id=s.id,
+                        signals={
+                            "article_count": int(s.article_count or 0),
+                            "recent_articles": n_recent,
+                            "frozen_at": s.frozen_at.isoformat() if s.frozen_at else None,
+                            "first_published_at": s.first_published_at.isoformat() if s.first_published_at else None,
+                            "title_fa": (s.title_fa or "")[:120],
+                        },
+                    )
+                    stats["demoted"] += 1
+                    logger.info(f"  Frozen demote: {(s.title_fa or '')[:50]} ({s.article_count} articles)")
         await db.commit()
-    if stats["demoted"]:
-        logger.info(f"Frozen demote: {stats}")
+    if stats["demoted"] or stats["repromoted"]:
+        logger.info(f"Frozen demote/promote: {stats}")
     return stats
 
 

@@ -363,8 +363,10 @@ class TestDemoteOnFreeze:
         marker = "async def step_demote_umbrella_stories"
         start = source.find(marker)
         assert start >= 0, "Could not locate step_demote_umbrella_stories"
-        # Function is small — ~2KB window covers it.
-        window = source[start : start + 2500]
+        # Window covers the function (grew with the 2026-06-09
+        # activity-aware logic + its docstring).
+        end = source.find("\nasync def ", start + 50)
+        window = source[start : end if end > 0 else start + 6000]
 
         assert "Story.frozen_at.isnot(None)" in window, (
             "step_demote_umbrella_stories no longer filters on "
@@ -377,6 +379,15 @@ class TestDemoteOnFreeze:
         assert "Story.first_published_at < cutoff" not in window, (
             "step_demote_umbrella_stories still uses the age-based "
             "cutoff. This was the prior overly-aggressive logic."
+        )
+
+        # 2026-06-09: demote is now activity-aware — a frozen story still
+        # taking heavy fresh coverage must NOT be sunk (and is re-promoted
+        # if already at -50). Sort-order only; freeze semantics untouched.
+        # See test_regression_cases.TestActiveFrozenStoriesNotBuried.
+        assert "ACTIVE_MIN_ARTICLES" in window, (
+            "demote step lost its activity-aware exemption — active frozen "
+            "stories (e.g. an ongoing war) will be buried again."
         )
 
 

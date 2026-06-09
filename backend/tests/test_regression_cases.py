@@ -761,3 +761,51 @@ class TestImageQualityPicker:
         assert _is_bad_image("https://x.com/users/avatar123.jpg")
         assert _is_bad_image("https://x.com/assets/sprite.png")
         assert not _is_bad_image("https://x.com/news/real-photo-1200x800.jpg")
+
+class TestActiveFrozenStoriesNotBuried:
+    """2026-06-09: the Iran–Israel war (ongoing ~30 days, 40+ fresh
+    articles/day) was frozen for being >7d old, demoted to priority -50,
+    and BURIED for days under a stale pinned hero — with no un-demote
+    path, so it stayed stuck. step_demote_umbrella_stories is now
+    activity-aware: a frozen story still absorbing fresh coverage is NOT
+    sunk, and one already at -50 that's breaking again is re-promoted.
+    Sort-order only — freeze still blocks new articles, so the
+    runaway-umbrella protection is intact ([[project_freshness_buries_active_wars]])."""
+
+    def _src(self):
+        from pathlib import Path
+        return (Path(__file__).parent.parent / "auto_maintenance.py").read_text()
+
+    def _demote_body(self):
+        src = self._src()
+        i = src.find("async def step_demote_umbrella_stories")
+        assert i >= 0
+        j = src.find("\nasync def ", i + 50)
+        return src[i:j if j > 0 else len(src)]
+
+    def test_demote_is_activity_aware(self):
+        b = self._demote_body()
+        assert "ACTIVE_MIN_ARTICLES" in b and "ACTIVE_WINDOW_DAYS" in b, \
+            "demote step must gate on recent article activity"
+        # Counts recent articles per candidate via published_at window.
+        assert "Article.published_at >= window_start" in b
+
+    def test_active_frozen_story_is_exempt_and_repromoted(self):
+        b = self._demote_body()
+        assert 'stats["repromoted"]' in b, "must re-promote frozen-but-active stories stuck at -50"
+        assert 'stats["exempt_active"]' in b, "must exempt active frozen stories from demotion"
+        assert "story_umbrella_repromoted" in b, "re-promotion must log an event"
+        # Re-promotion lifts back to priority 0.
+        assert "values(priority=0)" in b
+
+    def test_demote_still_respects_pins_and_manual_hide(self):
+        b = self._demote_body()
+        # Candidate range excludes manual pins (>0) and the -100 hide.
+        assert "Story.priority <= 0" in b and "Story.priority > -100" in b
+
+    def test_freeze_semantics_unchanged(self):
+        # The fix must NOT touch frozen_at or let new articles join — it
+        # only changes priority. Guard: no frozen_at writes in the body.
+        b = self._demote_body()
+        assert "frozen_at = " not in b and "values(frozen_at" not in b, \
+            "demote step must not alter freeze state — sort-order only"
