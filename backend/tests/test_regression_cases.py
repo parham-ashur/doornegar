@@ -884,3 +884,41 @@ class TestTrendingFreshnessMeasuresActivity:
         block = src[i:i + 400]
         assert "frozen_at IS NULL" in block
         assert "last_updated_at" in block  # column must be selected to use tr[1]
+
+class TestBlindspotLabelSelfHealAndCanary:
+    """2026-06-10: «نگاه یک‌جانبه» showed only ONE card while the
+    blindspot_fresh_pool canary read 9/green. Cause: is_blindspot/blindspot_type
+    are set once at clustering time and never recomputed, so stories tagged
+    state_only had drifted to ~56% diaspora; the homepage (which re-checks live
+    percentages) refused them, but the canary counted the stale label. Two
+    fixes: (a) self-heal the label from live source pcts each cron; (b) the
+    canary counts per-side by the SAME live gate the frontend uses."""
+
+    def test_blindspot_from_pcts(self):
+        from app.services.homepage_aggregates import blindspot_from_pcts
+        assert blindspot_from_pcts(90, 10) == (True, "state_only")
+        assert blindspot_from_pcts(5, 80) == (True, "diaspora_only")
+        # The drifted case that broke the page: tagged state_only but 44/56.
+        assert blindspot_from_pcts(44, 56) == (False, None)
+        assert blindspot_from_pcts(50, 50) == (False, None)
+        # Loose boundary mirrors the frontend (>=70 / <=30).
+        assert blindspot_from_pcts(70, 30) == (True, "state_only")
+
+    def test_self_heal_wired_into_both_write_paths(self):
+        from pathlib import Path
+        ha = (Path(__file__).parent.parent / "app" / "services" / "homepage_aggregates.py").read_text()
+        am = (Path(__file__).parent.parent / "auto_maintenance.py").read_text()
+        # recompute_story_aggregates (QC path) writes the healed label.
+        assert "is_blindspot=_is_blind" in ha and "blindspot_type=_blind_type" in ha
+        # The cron homepage_aggregates step writes it too.
+        assert "blindspot_from_pcts" in am and "is_blindspot=_is_blind" in am
+
+    def test_canary_counts_per_side_by_live_pcts(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py").read_text()
+        # Per-side counts using live homepage_aggregates percentages, not the
+        # stale is_blindspot label.
+        assert "blind_state_side" in src and "blind_diaspora_side" in src
+        assert "(homepage_aggregates->>'state_pct')::numeric >= 70" in src
+        # Canary goes non-green when EITHER side is empty.
+        assert "min(hp_blind_state, hp_blind_diaspora) < 1" in src

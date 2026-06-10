@@ -274,6 +274,25 @@ def compute_homepage_aggregates(
     }
 
 
+def blindspot_from_pcts(state_pct, diaspora_pct) -> tuple[bool, str | None]:
+    """Derive (is_blindspot, blindspot_type) from LIVE distinct-source coverage
+    percentages — the same basis the homepage «نگاه یک‌جانبه» gate uses
+    (state>=70 & diaspora<=30, or the mirror). Self-heal for label drift:
+    is_blindspot/blindspot_type are otherwise set ONLY at clustering time and
+    never recomputed as coverage shifts, so a story tagged `state_only` could
+    show 56% diaspora and the homepage would (correctly) refuse to render it as
+    a blindspot — leaving the slot empty while the canary read green
+    (Parham 2026-06-10). `state_only` = covered mostly by STATE (diaspora is the
+    blind spot); `diaspora_only` = the mirror."""
+    s = state_pct or 0
+    d = diaspora_pct or 0
+    if s >= 70 and d <= 30:
+        return True, "state_only"
+    if d >= 70 and s <= 30:
+        return True, "diaspora_only"
+    return False, None
+
+
 async def recompute_story_aggregates(db, story_id) -> bool:
     """Recompute + persist one story's homepage_aggregates blob NOW.
 
@@ -326,6 +345,9 @@ async def recompute_story_aggregates(db, story_id) -> bool:
     # reads the drift in between). Recompute from the same live data.
     _live_articles = sum(int(c) for _, c in source_count_rows)
     _live_sources = len(source_count_rows)
+    _is_blind, _blind_type = blindspot_from_pcts(
+        blob.get("state_pct"), blob.get("diaspora_pct")
+    )
     await db.execute(
         _Sty.__table__.update()
         .where(_Sty.id == story_id)
@@ -333,6 +355,8 @@ async def recompute_story_aggregates(db, story_id) -> bool:
             homepage_aggregates=blob,
             article_count=_live_articles,
             source_count=_live_sources,
+            is_blindspot=_is_blind,
+            blindspot_type=_blind_type,
         )
     )
     return True

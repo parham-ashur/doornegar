@@ -8377,11 +8377,22 @@ async def step_recompute_homepage_aggregates():
             blob = compute_homepage_aggregates(
                 story, articles, source_count_rows
             )
+            # Self-heal the blindspot label from live source percentages so it
+            # stops drifting from what «نگاه یک‌جانبه» actually renders (Parham
+            # 2026-06-10). Same gate the frontend + canary use.
+            from app.services.homepage_aggregates import blindspot_from_pcts
+            _is_blind, _blind_type = blindspot_from_pcts(
+                blob.get("state_pct"), blob.get("diaspora_pct")
+            )
 
             await db.execute(
                 Story.__table__.update()
                 .where(Story.id == sid)
-                .values(homepage_aggregates=blob)
+                .values(
+                    homepage_aggregates=blob,
+                    is_blindspot=_is_blind,
+                    blindspot_type=_blind_type,
+                )
             )
             stats["updated"] += 1
 

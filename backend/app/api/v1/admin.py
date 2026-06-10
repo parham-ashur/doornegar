@@ -4976,12 +4976,31 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
           COUNT(*) FILTER (
             WHERE is_blindspot AND article_count >= 4 AND archived_at IS NULL
               AND last_updated_at >= NOW() - INTERVAL '7 days'
-          ) AS fresh_blindspots
+          ) AS fresh_blindspots,
+          -- Per-side counts using LIVE source percentages, mirroring the
+          -- frontend's stateHeavyLoose / diasporaHeavyLoose gate (>=70 / <=30)
+          -- — the actual «نگاه یک‌جانبه» render path. Counting is_blindspot
+          -- (a stale article-based label) read green while the page showed one
+          -- card (Parham 2026-06-10).
+          COUNT(*) FILTER (
+            WHERE article_count >= 4 AND archived_at IS NULL
+              AND last_updated_at >= NOW() - INTERVAL '7 days'
+              AND (homepage_aggregates->>'state_pct')::numeric >= 70
+              AND (homepage_aggregates->>'diaspora_pct')::numeric <= 30
+          ) AS blind_state_side,
+          COUNT(*) FILTER (
+            WHERE article_count >= 4 AND archived_at IS NULL
+              AND last_updated_at >= NOW() - INTERVAL '7 days'
+              AND (homepage_aggregates->>'diaspora_pct')::numeric >= 70
+              AND (homepage_aggregates->>'state_pct')::numeric <= 30
+          ) AS blind_diaspora_side
         FROM stories
     """), {"grabbag": 120})).mappings().one()
     hp_fresh = int(_hp["fresh_visible"] or 0)
     hp_grabbag = int(_hp["grabbag_visible"] or 0)
     hp_blindspots = int(_hp["fresh_blindspots"] or 0)
+    hp_blind_state = int(_hp["blind_state_side"] or 0)
+    hp_blind_diaspora = int(_hp["blind_diaspora_side"] or 0)
 
     # Mid-size grab-bag detector (Parham 2026-06-06). The homepage_grabbag
     # canary above only fires at >= 120 articles, so a mid-size two-event
@@ -5121,12 +5140,17 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
             "clustering stall, or a genuinely quiet news period — either way, worth a look.",
         ),
         _canary(
-            "blindspot_fresh_pool", "Fresh blindspot pool (نگاه یک‌جانبه)",
-            hp_blindspots, "≥ 2",
-            "warn" if hp_blindspots < 2 else "ok",
-            "Fresh (≤7d) is_blindspot stories with ≥4 articles. The نگاه یک‌جانبه section needs "
-            "BOTH a درون‌مرزی (state_only) and a برون‌مرزی (diaspora_only) candidate; below 2 means "
-            "at least one side is empty and the section shows a single card or falls back.",
+            "blindspot_fresh_pool", "Fresh blindspot pool per side (نگاه یک‌جانبه)",
+            f"درون‌مرزی:{hp_blind_state} برون‌مرزی:{hp_blind_diaspora}",
+            "both sides ≥ 1",
+            "warn" if min(hp_blind_state, hp_blind_diaspora) < 1 else "ok",
+            "The نگاه یک‌جانبه section needs BOTH a درون‌مرزی (state-heavy) AND a برون‌مرزی "
+            "(diaspora-heavy) fresh candidate, or it shows only one card. Counted by LIVE source "
+            "percentages (state_pct>=70 & diaspora_pct<=30, and the mirror) — the SAME gate the "
+            "frontend uses — NOT the is_blindspot label, which is article-based and goes stale "
+            "(Parham 2026-06-10: read 9/green while the page showed one card). 0 on a side = that "
+            "column is empty (often honest: e.g. no fresh state-only story exists during a "
+            f"diaspora-led news cycle). Old is_blindspot count for reference: {hp_blindspots}.",
         ),
         _canary(
             "bellwether_missing_story", "Bellwether: main story we missed",
