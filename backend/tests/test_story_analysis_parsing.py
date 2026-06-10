@@ -18,6 +18,7 @@ from app.services.story_analysis import (
     _parse_analysis_response,
     _compute_article_evidence,
     _join_side_bullets,
+    _strip_side_references,
 )
 
 
@@ -248,3 +249,59 @@ class TestComputeArticleEvidence:
         for subgroup in LOADED_WORDS_FA.keys():
             assert subgroup in evidence["loaded_hits"]
             assert evidence["loaded_hits"][subgroup] == 0
+
+
+# ═════════════════════════════════════════════════════════════════════
+# Side-reference sanitizer — strip leaked «این سمت» self-references
+# (Parham 2026-06-10: visa-story side summaries opened with
+# «این سمت بر صدور ویزا تأکید دارد», awkward on the homepage). The
+# prompt forbids the phrase but gpt-5-mini emits it anyway, so the
+# parser strips it deterministically. Pro-drop keeps the remainder valid.
+# ═════════════════════════════════════════════════════════════════════
+
+class TestStripSideReferences:
+    def test_leading_in_samt_removed(self):
+        """The real visa-story leak: «این سمت بر …» → «بر …»."""
+        src = ("این سمت بر صدور ویزا برای بازیکنان تیم ملی تأکید دارد و "
+               "رفتار آمریکا را «تبعیض‌آمیز» توصیف می‌کند.")
+        out = _strip_side_references(src)
+        assert not out.startswith("این سمت")
+        assert "این سمت" not in out
+        assert out.startswith("بر صدور ویزا")
+
+    def test_in_samt_after_sentence_boundary_removed(self):
+        """Mid-text occurrence at a sentence start is also a subject slot."""
+        src = "حکومت اقدام را محکوم کرد. این سمت می‌گوید آمریکا غیرقانونی عمل کرده است."
+        out = _strip_side_references(src)
+        assert "این سمت" not in out
+        assert "می‌گوید آمریکا غیرقانونی" in out
+
+    def test_in_taraf_variant_removed(self):
+        src = "این طرف بر مقاومت تأکید دارد."
+        assert "این طرف" not in _strip_side_references(src)
+
+    def test_an_samt_contrast_preserved(self):
+        """«آن سمت» = the OTHER side (contrast/silence) — must stay."""
+        src = "آن سمت پوشش نداده است."
+        assert _strip_side_references(src) == src
+
+    def test_silence_statement_preserved(self):
+        """«این سمت سکوت کرده» — dropping the subject would break it."""
+        src = "این سمت سکوت کرده و چیزی نگفته است."
+        assert _strip_side_references(src) == src
+
+    def test_none_and_empty_passthrough(self):
+        assert _strip_side_references(None) is None
+        assert _strip_side_references("") == ""
+
+    def test_parser_scrubs_side_summaries(self):
+        """End-to-end: a leaked LLM response is cleaned by the parser."""
+        raw = json.dumps({
+            "title_fa": "x",
+            "state_summary_fa": "این سمت بر مقاومت تأکید دارد.",
+            "diaspora_summary_fa": "این سمت به حقوق بشر می‌پردازد.",
+        }, ensure_ascii=False)
+        result = _parse_analysis_response(raw)
+        assert "این سمت" not in result["state_summary_fa"]
+        assert "این سمت" not in result["diaspora_summary_fa"]
+        assert result["state_summary_fa"].startswith("بر مقاومت")

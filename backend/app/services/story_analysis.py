@@ -12,6 +12,7 @@ Generates rich Farsi analysis for stories including:
 
 import json
 import logging
+import re
 
 import openai
 
@@ -43,6 +44,39 @@ _META_TITLE_TOKENS = (
     "ارزیابی خبر",
     "نقش عوامل خارجی",
 )
+
+
+# The side summaries are written in the FIRST-PERSON voice OF each side
+# (state_summary_fa = what the inside-Iran media say, in their own words).
+# The prompt forbids self-referential framing like «این سمت می‌گوید…»
+# ("this side says…"), which reads awkwardly on the homepage — but the LLM
+# leaks it anyway (Parham 2026-06-10: visa-story summaries opened with
+# «این سمت بر صدور ویزا تأکید دارد»). A prompt plea isn't a guarantee, so we
+# strip it deterministically. Persian is pro-drop, so removing a leading
+# subject phrase at a sentence boundary leaves a valid, more direct sentence
+# («بر صدور ویزا تأکید دارد»). We only touch sentence-START positions (subject
+# slot) and only «این سمت/این طرف» (the awkward self-reference) — NOT «آن سمت»,
+# which legitimately means "the other side" in contrast/silence statements
+# («آن سمت پوشش نداده»). A negative lookahead also spares any «این سمت سکوت
+# کرده»-style silence note, where dropping the subject would break grammar.
+_SIDE_REF_LEAD_RE = re.compile(
+    r"(^|[.؟!؛\n]\s*)این\s+(?:سمت|طرف)\s+"
+    r"(?!سکوت|پوشش|حضور|نپرداخت|اشاره\s*نکرد|چیزی\s*نگفت|مطلبی\s*نگفت)"
+)
+
+
+def _strip_side_references(text: str | None) -> str | None:
+    """Remove leaked «این سمت / این طرف» self-references at sentence starts.
+
+    Defensive post-processing for the side-summary fields — the analysis
+    prompt forbids these phrases but gpt-5-mini emits them anyway. Only
+    sentence-initial subject occurrences are removed (pro-drop keeps the
+    remainder valid); silence statements are spared via the lookahead.
+    """
+    if not text or not isinstance(text, str):
+        return text
+    cleaned = _SIDE_REF_LEAD_RE.sub(lambda m: m.group(1), text)
+    return cleaned.strip()
 
 
 def is_meta_title(title: str | None) -> bool:
@@ -717,6 +751,28 @@ def _parse_analysis_response(response_text: str) -> dict:
             result["state_summary_fa"] = _join_side_bullets(narr.get("inside"))
         if not result.get("diaspora_summary_fa"):
             result["diaspora_summary_fa"] = _join_side_bullets(narr.get("outside"))
+
+    # Deterministically strip leaked «این سمت» self-references from every
+    # rendered Farsi narrative field (prompt forbids them; LLM leaks anyway).
+    for _f in (
+        "state_summary_fa",
+        "diaspora_summary_fa",
+        "independent_summary_fa",
+        "bias_explanation_fa",
+        "summary_fa",
+    ):
+        if result.get(_f):
+            result[_f] = _strip_side_references(result[_f])
+    # Narrative bullets are rendered too — clean them in place.
+    if isinstance(narr, dict):
+        for _side in narr.values():
+            if isinstance(_side, dict):
+                for _grp, _bullets in _side.items():
+                    if isinstance(_bullets, list):
+                        _side[_grp] = [
+                            _strip_side_references(b) if isinstance(b, str) else b
+                            for b in _bullets
+                        ]
 
     return result
 
