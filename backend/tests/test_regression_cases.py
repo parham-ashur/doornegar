@@ -854,3 +854,33 @@ class TestCanaryIncidentSync:
         assert "prev_open" in body and "if not prev_open" in body, \
             "sync must be transition-only (check prev open state before logging)"
         assert 'detected_by="canary"' in body
+
+class TestTrendingFreshnessMeasuresActivity:
+    """2026-06-10: trending_freshness fired RED (9.5d) during the Iran-Israel
+    war — a FALSE alarm. It measured story-START age (first_published_at), but
+    after the activity-aware demote fix, a 30-day war that's updated daily
+    legitimately sits in trending. The canary must measure LAST ACTIVITY
+    (last_updated_at), or it's permanently red during any long active story."""
+
+    def _admin_src(self):
+        from pathlib import Path
+        return (Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py").read_text()
+
+    def test_age_computed_from_last_updated(self):
+        src = self._admin_src()
+        i = src.find("oldest_trending_age_days = 0.0")
+        block = src[i:i + 900]
+        # The query selects (first_published_at, last_updated_at, ...) = tr[0], tr[1].
+        # Freshness must come from last activity (tr[1]), not story-start (tr[0]).
+        assert "pub = tr[1] or tr[0]" in block, (
+            "trending_freshness must measure last_updated_at (activity), not "
+            "first_published_at — else it false-fires during long active wars"
+        )
+
+    def test_query_still_excludes_frozen(self):
+        # The canary set is non-frozen trending stories; that invariant stays.
+        src = self._admin_src()
+        i = src.find("trending_rows = ")
+        block = src[i:i + 400]
+        assert "frozen_at IS NULL" in block
+        assert "last_updated_at" in block  # column must be selected to use tr[1]

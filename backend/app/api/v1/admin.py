@@ -4882,7 +4882,14 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
     oldest_trending_age_days = 0.0
     under_7d = 0
     for tr in trending_rows:
-        pub = tr[0]
+        # Measure freshness by LAST ACTIVITY (last_updated_at), not story-start
+        # (first_published_at). Parham 2026-06-10: a long-running war (started
+        # ~30d ago) that takes 40+ fresh articles/day is the FRESHEST news, not
+        # stale — but first_published made this canary fire RED for it. After
+        # the activity-aware demote fix, such active stories legitimately sit in
+        # trending, so the canary must track recency of activity. tr[1] =
+        # last_updated_at; fall back to first_published_at (tr[0]) if null.
+        pub = tr[1] or tr[0]
         if pub:
             age = (now - pub).total_seconds() / 86400.0
             if age > oldest_trending_age_days:
@@ -5313,12 +5320,15 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
             "Sustained high count = translation step throttled or LLM key missing.",
         ),
         _canary(
-            "trending_freshness", "Oldest trending story age (days)",
+            "trending_freshness", "Oldest trending story by last activity (days)",
             round(oldest_trending_age_days, 1), "< 7",
             "error" if oldest_trending_age_days >= 7.0 else "ok",
-            "Per the freshness model, anything >7d should be frozen and excluded from trending. "
-            "If oldest_trending >= 7d, the freeze writes aren't persisting (see "
-            "feedback_stats_vs_persistence memory).",
+            "Oldest LAST-ACTIVITY age among top trending stories (changed from "
+            "story-start to last_updated_at 2026-06-10). A homepage story not "
+            "updated in >7d is genuinely stale. NOTE: a long-running war started "
+            ">7d ago is NOT stale if it's still taking daily coverage — that's "
+            "why this measures activity, not first_published, after the "
+            "activity-aware demote fix kept active frozen stories in trending.",
         ),
         # ── Translation pipeline canaries (EN+FR rollout Phase 0h) ──
         # All 4 stay green while translation_phase_active is False
