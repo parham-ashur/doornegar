@@ -267,10 +267,15 @@ class TestIngestOnlyPipelineShape:
     dashboard's progress bar shows wrong percentages but the run still
     completes — silent UI bug."""
 
-    def test_full_pipeline_total_steps_is_61(self):
+    def test_full_pipeline_total_steps_is_62(self):
         """The 6h-cron progress bar pins to this count. Same drift
         risk as INGEST_ONLY — keep both this number and the parent
-        `CLAUDE.md` (`full=61`) in lockstep with the actual list.
+        `CLAUDE.md` (`full=62`) in lockstep with the actual list.
+
+        Bumped 61 → 62 on 2026-06-10: added `canary_incident_sync` at
+        the END — auto-logs detected_by='canary' incidents on canary
+        transitions so the self-running detection-source ratio can move
+        off 0.0 (project_self_running_kpis P4). Monitoring-only.
 
         Bumped 60 → 61 on 2026-06-02 (self-running roadmap Step B):
         added `bellwether` (missing-main-story monitor) after
@@ -293,11 +298,11 @@ class TestIngestOnlyPipelineShape:
         Neon storage + egress lean.
         """
         m = _import_pipelines()
-        assert len(m.FULL_PIPELINE) == 61, (
+        assert len(m.FULL_PIPELINE) == 62, (
             f"FULL_PIPELINE step count drifted: found "
             f"{len(m.FULL_PIPELINE)} steps. If this is intentional, "
             f"update both this test AND the parent CLAUDE.md verification "
-            f"step #4 (`full=61`)."
+            f"step #4 (`full=62`)."
         )
 
     def test_total_steps_is_13(self):

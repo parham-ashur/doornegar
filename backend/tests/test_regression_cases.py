@@ -809,3 +809,48 @@ class TestActiveFrozenStoriesNotBuried:
         b = self._demote_body()
         assert "frozen_at = " not in b and "values(frozen_at" not in b, \
             "demote step must not alter freeze state — sort-order only"
+
+class TestCanaryIncidentSync:
+    """2026-06-10: the detection-source ratio was stuck at 0.0 even though the
+    midsize_grabbag canary was actively firing — because canary catches were
+    never written to the ledger. step_sync_canary_incidents auto-logs a
+    detected_by='canary' incident on transition so the ratio can finally move
+    ([[project_self_running_kpis]] Pillar 4)."""
+
+    def test_sync_function_and_step_exist(self):
+        from app.services import incident_ledger as il
+        assert hasattr(il, "sync_canary_incidents")
+        assert hasattr(il, "INCIDENT_WORTHY_CANARIES")
+        import auto_maintenance as m
+        assert hasattr(m, "step_sync_canary_incidents")
+
+    def test_step_wired_into_pipeline_near_end(self):
+        import auto_maintenance as m
+        keys = [k for k, _, _ in m.FULL_PIPELINE]
+        assert "canary_incident_sync" in keys, "canary sync step not in FULL_PIPELINE"
+        # Runs just before delete_aged (which must stay last per strict
+        # retention) so it observes essentially final pipeline state.
+        assert keys[-1] == "delete_aged"
+        assert keys[keys.index("canary_incident_sync") + 1] == "delete_aged"
+
+    def test_only_quality_canaries_are_incident_worthy(self):
+        from app.services.incident_ledger import INCIDENT_WORTHY_CANARIES
+        # The content-quality signals must be covered…
+        assert {"midsize_grabbag_risk", "homepage_grabbag", "bellwether_missing_story",
+                "trending_freshness", "article_count_drift"} <= INCIDENT_WORTHY_CANARIES
+        # …and operational/cost noise must NOT be (would inflate the ratio).
+        for noisy in ("rss_silent_7d", "translation_orphan_articles",
+                      "translation_cost_rate_24h", "maintenance_fails_last_run"):
+            assert noisy not in INCIDENT_WORTHY_CANARIES
+
+    def test_transition_only_logging(self):
+        # Source guard: the sync only logs when status flips (prev not already
+        # open for a firing canary), so a persistent canary doesn't spam a new
+        # row every cron and game the row-counted ratio.
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "app" / "services" / "incident_ledger.py").read_text()
+        i = src.find("async def sync_canary_incidents")
+        body = src[i:i + 3000]
+        assert "prev_open" in body and "if not prev_open" in body, \
+            "sync must be transition-only (check prev open state before logging)"
+        assert 'detected_by="canary"' in body

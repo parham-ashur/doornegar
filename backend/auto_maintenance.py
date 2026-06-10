@@ -8401,6 +8401,25 @@ async def step_recompute_homepage_aggregates():
     return stats
 
 
+async def step_sync_canary_incidents():
+    """Auto-log `detected_by='canary'` incidents on canary transitions so the
+    self-running detection-source ratio reflects reality (Parham 2026-06-10).
+    Without this, content-quality canaries fire forever yet the scorecard still
+    reads 'every defect caught by a human'. Transition-only + idempotent; runs
+    near the end (just before delete_aged, which must stay last per the
+    strict-retention rule) so it observes essentially final state — the
+    content-quality canaries it tracks aren't affected by aged-out deletions.
+    Monitoring-only — never fails the run. See incident_ledger.sync_canary_incidents."""
+    from app.database import async_session
+    from app.services.incident_ledger import sync_canary_incidents
+    try:
+        async with async_session() as db:
+            return await sync_canary_incidents(db)
+    except Exception as e:
+        logger.warning("canary incident sync failed: %s", e)
+        return {"error": str(e)[:120]}
+
+
 FULL_PIPELINE = [
     ("ingest", "Ingest RSS + Telegram (may take 10-20 min)", "step_ingest"),
     ("prune_noise", "Drop too-short Telegram posts/articles before NLP", "step_prune_noise"),
@@ -8538,6 +8557,7 @@ FULL_PIPELINE = [
     # data they need before rows get deleted. Drops stories archived
     # >30 days, stories >7 days that never made the homepage, and
     # telegram_posts >7 days. See step_delete_aged docstring.
+    ("canary_incident_sync", "Log canary-detected incidents (detection-ratio KPI)", "step_sync_canary_incidents"),
     ("delete_aged", "Retention: delete aged-out stories + posts", "step_delete_aged"),
 ]
 

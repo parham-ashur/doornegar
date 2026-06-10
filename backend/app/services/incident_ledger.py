@@ -294,3 +294,89 @@ async def seed_incidents(db: AsyncSession, *, commit: bool = True) -> int:
     if commit and n:
         await db.commit()
     return n
+
+
+# Canaries worth turning into incidents — the content/quality signals that map
+# to defects Parham would otherwise catch BY EYE. Ops/cost/translation canaries
+# (rss_silent_7d, translation_*, budget, telegram fetch) are intentionally
+# excluded: they're operational noise, not the homepage-quality defects the
+# detection-source ratio is meant to track ([[project_self_running_kpis]] P4).
+INCIDENT_WORTHY_CANARIES = {
+    "midsize_grabbag_risk",
+    "homepage_grabbag",
+    "homepage_offtopic_leak",
+    "bellwether_missing_story",
+    "narrative_coverage_contradiction",
+    "article_count_drift",
+    "trending_freshness",
+    "homepage_fresh_pool",
+    "blindspot_fresh_pool",
+    "oversized_active_stories",
+}
+
+
+async def sync_canary_incidents(db: AsyncSession) -> dict[str, Any]:
+    """Auto-log a `detected_by='canary'` incident the moment a content-quality
+    canary flips non-ok, and close it when it recovers. This is what lets the
+    detection-source ratio move off 0.0: without it, canaries can fire forever
+    and the scorecard still reads "every defect caught by a human".
+
+    Transition-only + idempotent: ONE incident per firing episode, not one per
+    cron. We check the latest ledger status per canary slug, so a persistent
+    canary (e.g. trending_freshness during a long war) produces a single open
+    incident, not a new row every 12h — and because `human_intervention_rate`
+    counts rows in a trailing window, only genuine recent transitions move the
+    ratio. Only canaries in INCIDENT_WORTHY_CANARIES are managed.
+    """
+    from app.api.v1.admin import health_overview  # local: avoid import cycle
+
+    stats: dict[str, Any] = {"checked": 0, "opened": 0, "closed": 0}
+    try:
+        hov = await health_overview(db)
+    except Exception as e:  # never fail the cron over monitoring
+        return {**stats, "error": str(e)[:120]}
+
+    existing = {i.get("slug"): i for i in await list_incidents(db, limit=300)}
+    for c in (hov.get("canaries") or []):
+        cid = c.get("id")
+        if cid not in INCIDENT_WORTHY_CANARIES:
+            continue
+        stats["checked"] += 1
+        status = c.get("status")
+        slug = f"canary-{cid}"
+        prev = existing.get(slug)
+        prev_open = bool(prev) and prev.get("status") in ("open", "monitoring")
+        if status in ("warn", "error"):
+            if not prev_open:
+                await log_incident(
+                    db,
+                    slug=slug,
+                    title=f"Canary fired: {c.get('name') or cid}",
+                    symptom=f"{c.get('name') or cid} = {c.get('value')}",
+                    root_cause=(c.get("why") or "")[:600],
+                    responsible=f"canary:{cid}",
+                    severity="high" if status == "error" else "med",
+                    status="open",
+                    detected_by="canary",
+                    actor="maintenance",
+                    commit=False,
+                )
+                stats["opened"] += 1
+        elif prev_open:  # canary back to ok — close the open incident
+            await log_incident(
+                db,
+                slug=slug,
+                title=f"Canary recovered: {c.get('name') or cid}",
+                symptom=f"{c.get('name') or cid} back to ok ({c.get('value')})",
+                root_cause=(prev.get("root_cause") or "canary recovered")[:600],
+                responsible=f"canary:{cid}",
+                severity="low",
+                status="fixed",
+                detected_by="canary",
+                actor="maintenance",
+                commit=False,
+            )
+            stats["closed"] += 1
+    if stats["opened"] or stats["closed"]:
+        await db.commit()
+    return stats
