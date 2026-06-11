@@ -533,6 +533,29 @@ class TestWeeklyDigestUpsertEndpoint:
             "becomes a silent no-op."
         )
 
+    def test_cron_stub_does_not_clobber_editorial(self):
+        """The cron step_weekly_digest writes an ENGLISH stats stub. If it
+        shares status='weekly_digest' with the chat-authored editorial, the
+        Monday cron clobbers the Persian digest (reader = latest-by-run_at)
+        and the homepage shows the placeholder (Parham 2026-06-11). The stub
+        MUST write a different status so the two never compete."""
+        src = (
+            Path(__file__).parent.parent / "auto_maintenance.py"
+        ).read_text()
+        idx = src.find("async def step_weekly_digest(")
+        assert idx >= 0
+        end = src.find("\nasync def ", idx + 1)
+        body = src[idx : end if end > 0 else len(src)]
+        assert "'weekly_digest_ops'" in body, (
+            "step_weekly_digest must INSERT its stats stub under "
+            "status='weekly_digest_ops', NOT 'weekly_digest' — otherwise it "
+            "overwrites the chat-authored Persian editorial every Monday."
+        )
+        assert "VALUES (:id, NOW(), 'weekly_digest'," not in body, (
+            "step_weekly_digest must NOT write status='weekly_digest' — that "
+            "label is reserved for the public Niloofar editorial."
+        )
+
 
 class TestSchemaSerializationSmoke:
     """Construct a StoryBrief from the absolute minimum required
