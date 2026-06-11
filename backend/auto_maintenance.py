@@ -617,12 +617,13 @@ async def step_prune_noise():
         SHORT_THRESHOLD = 400
         rss_short_rows = (await db.execute(
             _text("""
-                SELECT id
-                FROM articles
-                WHERE story_id IS NULL
-                  AND url NOT LIKE 'https://t.me/%'
-                  AND ingested_at < NOW() - INTERVAL '1 hour'
-                  AND (content_text IS NULL OR LENGTH(content_text) < :th)
+                SELECT a.id, s.slug AS source_slug
+                FROM articles a
+                JOIN sources s ON s.id = a.source_id
+                WHERE a.story_id IS NULL
+                  AND a.url NOT LIKE 'https://t.me/%'
+                  AND a.ingested_at < NOW() - INTERVAL '1 hour'
+                  AND (a.content_text IS NULL OR LENGTH(a.content_text) < :th)
             """), {"th": SHORT_THRESHOLD}
         )).all()
         stats["rss_short_checked"] = len(rss_short_rows)
@@ -633,6 +634,16 @@ async def step_prune_noise():
             stats["rss_short_skipped_fk"] = len(ids) - deleted_n
             if fk_breakdown:
                 stats["rss_short_skipped_fk_breakdown"] = fk_breakdown
+            # Per-source counts: a single outlet dominating this list means
+            # its full-text fetch is systematically failing (geo-block, URL
+            # change) and we're silently deleting that outlet's coverage —
+            # not just pruning feed stubs. Top 10 keeps the stats blob small.
+            by_source: dict[str, int] = {}
+            for row in rss_short_rows:
+                by_source[row.source_slug] = by_source.get(row.source_slug, 0) + 1
+            stats["rss_short_by_source"] = dict(
+                sorted(by_source.items(), key=lambda kv: -kv[1])[:10]
+            )
 
         await db.commit()
 

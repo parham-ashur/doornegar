@@ -310,12 +310,19 @@ async def get_dashboard(db: AsyncSession = Depends(get_db)):
         })
         actions_needed.append("Check /admin/maintenance/logs and /admin/embedding/health")
 
-    # H2 — embedding null rate. Sample last 24h: if >10% of articles have NULL
-    # embeddings, the matcher can't find candidates and cluster_new can't group.
+    # H2 — embedding null rate among ELIGIBLE articles only. Articles whose
+    # content_type the source filter drops (off_topic/opinion/…) never reach
+    # the embedder and are NULL by design — counting them floated this
+    # warning to ~45% on a healthy system (2026-06-11 false alarm). Mirrors
+    # the eligibility predicate in nlp_pipeline.process_unprocessed_articles
+    # and the health-overview embedding_null_rate_24h canary — keep in sync.
     embed_row = (await db.execute(_sa_text(
         "SELECT count(*) AS total, "
-        "count(*) FILTER (WHERE embedding IS NULL) AS nulls "
-        "FROM articles WHERE ingested_at >= NOW() - interval '24 hours'"
+        "count(*) FILTER (WHERE a.embedding IS NULL) AS nulls "
+        "FROM articles a JOIN sources s ON s.id = a.source_id "
+        "WHERE a.ingested_at >= NOW() - interval '24 hours' "
+        "AND a.content_type IS NOT NULL "
+        "AND (s.content_filters -> 'allowed') @> to_jsonb(a.content_type)"
     ))).one()
     embed_total = embed_row.total or 0
     embed_nulls = embed_row.nulls or 0
@@ -324,16 +331,16 @@ async def get_dashboard(db: AsyncSession = Depends(get_db)):
         issues.append({
             "severity": "error",
             "message": (
-                f"{embed_nulls}/{embed_total} ({embed_null_pct}%) articles in last 24h "
-                "have NULL embedding — NLP pipeline likely crashing on import or first query."
+                f"{embed_nulls}/{embed_total} ({embed_null_pct}%) NLP-eligible articles in "
+                "last 24h have NULL embedding — NLP pipeline likely crashing on import or first query."
             ),
         })
     elif embed_total >= 50 and embed_null_pct >= 10:
         issues.append({
             "severity": "warning",
             "message": (
-                f"{embed_nulls}/{embed_total} ({embed_null_pct}%) articles in last 24h "
-                "have NULL embedding — NLP pipeline degraded."
+                f"{embed_nulls}/{embed_total} ({embed_null_pct}%) NLP-eligible articles in "
+                "last 24h have NULL embedding — NLP pipeline degraded."
             ),
         })
 
@@ -1307,19 +1314,35 @@ async def maintenance_logs(
     """
     from sqlalchemy import text
     try:
+        # Exclude editorial rows: POST /admin/weekly-digest and the cron ops
+        # stub store raw markdown / prose in `results`, not JSON. They share
+        # this table for the public digest endpoint but are not pipeline runs.
         result = await db.execute(text(
             "SELECT run_at, status, elapsed_s, results, steps, error "
-            "FROM maintenance_logs ORDER BY run_at DESC LIMIT :limit"
+            "FROM maintenance_logs "
+            "WHERE status NOT IN ('weekly_digest', 'weekly_digest_ops') "
+            "ORDER BY run_at DESC LIMIT :limit"
         ), {"limit": limit})
         rows = result.all()
         import json as _json
+
+        def _safe_json(raw):
+            if not raw:
+                return None
+            try:
+                return _json.loads(raw)
+            except (ValueError, TypeError):
+                # Non-JSON payload from a writer we didn't anticipate —
+                # return it raw instead of breaking the whole listing.
+                return {"_unparsed": str(raw)[:2000]}
+
         return [
             {
                 "run_at": str(r[0]),
                 "status": r[1],
                 "elapsed_s": r[2],
-                "results": _json.loads(r[3]) if r[3] else None,
-                "steps": _json.loads(r[4]) if r[4] else None,
+                "results": _safe_json(r[3]),
+                "steps": _safe_json(r[4]),
                 "error": r[5],
             }
             for r in rows
@@ -2550,34 +2573,59 @@ async def embedding_health(db: AsyncSession = Depends(get_db)):
     windows = [("1h", "1 hour"), ("24h", "24 hours"), ("7d", "7 days"), ("30d", "30 days")]
     out: dict = {}
     for label, interval in windows:
+        # `eligible` mirrors the gate in process_unprocessed_articles:
+        # classified AND in the source's allowed list. Only those rows are
+        # the pipeline's responsibility to embed — non-allowed labels are
+        # NULL by design and previously floated null_pct to ~45% on a
+        # healthy system (2026-06-11 false alarm). Keep in sync with the
+        # NLP gate and the health-overview embedding canaries.
         row = (await db.execute(_text(
             f"""
             SELECT
-              count(*) FILTER (WHERE embedding IS NOT NULL) AS with_emb,
-              count(*) FILTER (WHERE embedding IS NULL) AS null_emb,
+              count(*) AS total,
+              count(*) FILTER (WHERE a.content_type IS NULL) AS pending_classification,
               count(*) FILTER (
-                WHERE embedding IS NOT NULL
+                WHERE a.content_type IS NOT NULL
+                  AND NOT (s.content_filters -> 'allowed') @> to_jsonb(a.content_type)
+              ) AS skipped_by_design,
+              count(*) FILTER (
+                WHERE a.content_type IS NOT NULL
+                  AND (s.content_filters -> 'allowed') @> to_jsonb(a.content_type)
+              ) AS eligible,
+              count(*) FILTER (
+                WHERE a.content_type IS NOT NULL
+                  AND (s.content_filters -> 'allowed') @> to_jsonb(a.content_type)
+                  AND a.embedding IS NULL
+              ) AS null_emb,
+              count(*) FILTER (
+                WHERE a.content_type IS NOT NULL
+                  AND (s.content_filters -> 'allowed') @> to_jsonb(a.content_type)
+                  AND a.embedding IS NOT NULL
                   AND NOT EXISTS (
-                    SELECT 1 FROM jsonb_array_elements_text(embedding) v
+                    SELECT 1 FROM jsonb_array_elements_text(a.embedding) v
                     WHERE v::float <> 0
                   )
-              ) AS all_zero,
-              count(*) AS total
-            FROM articles
-            WHERE ingested_at >= NOW() - interval '{interval}'
+              ) AS all_zero
+            FROM articles a
+            JOIN sources s ON s.id = a.source_id
+            WHERE a.ingested_at >= NOW() - interval '{interval}'
             """
         ))).one()
         total = row.total or 0
+        eligible = row.eligible or 0
         all_zero = row.all_zero or 0
         null_emb = row.null_emb or 0
         out[label] = {
             "total": total,
-            "with_embedding": row.with_emb or 0,
+            "eligible": eligible,
+            "pending_classification": row.pending_classification or 0,
+            "skipped_by_design": row.skipped_by_design or 0,
+            "with_embedding": max(0, eligible - null_emb),
             "null_embedding": null_emb,
             "all_zero": all_zero,
-            "healthy": max(0, total - null_emb - all_zero),
-            "zero_pct": round(100 * all_zero / max(1, total), 1),
-            "null_pct": round(100 * null_emb / max(1, total), 1),
+            "healthy": max(0, eligible - null_emb - all_zero),
+            "zero_pct": round(100 * all_zero / max(1, eligible), 1),
+            "null_pct": round(100 * null_emb / max(1, eligible), 1),
         }
     # Worst-recent as the top-level alert flag
     worst = out["24h"]

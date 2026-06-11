@@ -967,3 +967,84 @@ class TestBlindspotLabelSelfHealAndCanary:
         assert "(homepage_aggregates->>'state_pct')::numeric >= 70" in src
         # Canary goes non-green when EITHER side is empty.
         assert "min(hp_blind_state, hp_blind_diaspora) < 1" in src
+
+
+class TestEmbeddingNullCanariesMirrorNlpGate:
+    """2026-06-11: the dashboard warned «266/610 (43.6%) NULL embedding — NLP
+    degraded» on a HEALTHY system. The H2 issue and /admin/embedding/health
+    counted every ingested article, but non-allowed content types (off_topic/
+    opinion/…) never reach the embedder — NULL by design (the same
+    design-orphan trap as breaking_news_unclustered). Both probes must mirror
+    the eligibility gate in nlp_pipeline.process_unprocessed_articles, like
+    the health-overview embedding_null_rate_24h canary already does."""
+
+    GATE = "content_filters -> 'allowed') @> to_jsonb(a.content_type)"
+
+    def _admin_src(self):
+        from pathlib import Path
+        return (Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py").read_text()
+
+    def test_dashboard_h2_counts_eligible_only(self):
+        src = self._admin_src()
+        i = src.find("# H2 — embedding null rate")
+        body = src[i:i + 1400]
+        assert i != -1
+        assert self.GATE in body
+        assert "a.content_type IS NOT NULL" in body
+        # Message says what it now measures.
+        assert "NLP-eligible articles" in body
+
+    def test_embedding_health_endpoint_counts_eligible_only(self):
+        src = self._admin_src()
+        i = src.find('@router.get("/embedding/health")')
+        body = src[i:i + 3600]
+        assert i != -1
+        assert self.GATE in body
+        # null_pct / zero_pct are rates over the ELIGIBLE denominator.
+        assert "max(1, eligible)" in body
+        # Design-skips and unclassified rows stay visible, separately.
+        assert "skipped_by_design" in body and "pending_classification" in body
+
+
+class TestMaintenanceLogsEndpointSurvivesEditorialRows:
+    """2026-06-11: POST /admin/weekly-digest stores raw Persian markdown in
+    maintenance_logs.results (status='weekly_digest'). GET /maintenance/logs
+    json.loads()'ed every row, so the day after an editorial post the whole
+    listing died with a misleading «create the maintenance_logs table» hint —
+    breaking verification step 3."""
+
+    def _admin_src(self):
+        from pathlib import Path
+        return (Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py").read_text()
+
+    def test_editorial_statuses_excluded_from_listing(self):
+        src = self._admin_src()
+        i = src.find('@router.get("/maintenance/logs")')
+        body = src[i:i + 2600]
+        assert i != -1
+        assert "status NOT IN ('weekly_digest', 'weekly_digest_ops')" in body
+
+    def test_per_row_parse_is_defensive(self):
+        src = self._admin_src()
+        i = src.find('@router.get("/maintenance/logs")')
+        body = src[i:i + 2600]
+        # One bad row must not take down the listing.
+        assert "_safe_json" in body and "_unparsed" in body
+
+
+class TestRssShortDeletionsPerSourceVisibility:
+    """2026-06-11 funnel review: the drop-short step deleted 316/319 RSS-stub
+    articles with no per-source visibility. An outlet whose full-text fetch
+    systematically fails (geo-block, URL change) publishes stub feeds → every
+    article deleted → the outlet silently vanishes from coverage. The step now
+    reports rss_short_by_source so one outlet dominating the list is visible
+    in the run stats."""
+
+    def test_breakdown_present_in_drop_short_step(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "auto_maintenance.py").read_text()
+        i = src.find("SHORT_THRESHOLD = 400")
+        body = src[i:i + 2200]
+        assert i != -1
+        assert "rss_short_by_source" in body
+        assert "JOIN sources s ON s.id = a.source_id" in body
