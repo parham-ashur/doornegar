@@ -312,6 +312,7 @@ INCIDENT_WORTHY_CANARIES = {
     "homepage_fresh_pool",
     "blindspot_fresh_pool",
     "oversized_active_stories",
+    "breaking_news_unclustered",
 }
 
 

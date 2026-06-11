@@ -855,6 +855,37 @@ class TestCanaryIncidentSync:
             "sync must be transition-only (check prev open state before logging)"
         assert 'detected_by="canary"' in body
 
+class TestBreakingNewsUnclusteredCanary:
+    """2026-06-11: the US–Iran war coverage (helicopter→US strikes→Iran
+    retaliation) arrived in the ingest but stayed story_id=NULL, so the
+    breaking story never reached the homepage and Parham caught the stale
+    hero by eye (detection-source ratio = 0.0). The breaking_news_unclustered
+    canary measures the fresh orphan BACKLOG so this class of miss is caught
+    by a signal next time ([[project_self_running_kpis]] Pillar 2)."""
+
+    def test_canary_registered(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py").read_text()
+        assert '"breaking_news_unclustered"' in src, "canary id missing from health_overview"
+        # Measures the orphan backlog past one cluster pass (6h–48h window),
+        # not the just-arrived cohort, so normal between-cron lag doesn't trip it.
+        assert "INTERVAL '48 hours'" in src and "INTERVAL '6 hours'" in src
+        assert "story_id IS NULL" in src
+
+    def test_canary_is_incident_worthy(self):
+        from app.services.incident_ledger import INCIDENT_WORTHY_CANARIES
+        assert "breaking_news_unclustered" in INCIDENT_WORTHY_CANARIES
+
+    def test_canary_has_rate_gate(self):
+        """WARN only when BOTH the count AND the rate are high — a bare count
+        would fire during quiet periods, a bare rate during tiny windows."""
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py").read_text()
+        i = src.find('"breaking_news_unclustered"')
+        body = src[i:i + 1200]
+        assert "fresh_orphan >= 25 and fresh_orphan_pct >= 30" in body
+
+
 class TestTrendingFreshnessMeasuresActivity:
     """2026-06-10: trending_freshness fired RED (9.5d) during the Iran-Israel
     war — a FALSE alarm. It measured story-START age (first_published_at), but

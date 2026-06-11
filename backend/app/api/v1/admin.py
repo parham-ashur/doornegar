@@ -4630,6 +4630,28 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
         "SELECT COUNT(*) FROM stories WHERE created_at >= NOW() - INTERVAL '24 hours'"
     ))).scalar() or 0)
 
+    # breaking_news_unclustered canary (Parham 2026-06-11): the 06-10/06-11
+    # US–Iran war coverage (helicopter→strikes→retaliation) arrived in the
+    # ingest but stayed story_id=NULL, so a major breaking story never reached
+    # the homepage and Parham caught it by eye. Measure the orphan BACKLOG:
+    # articles old enough to have already been through a cluster pass (ingested
+    # 6h–48h ago, so NOT the just-arrived cohort that legitimately hasn't been
+    # clustered yet) that are still unattached. A large fresh orphan cohort =
+    # clustering had its chance and left a breaking topic ungrouped. Window
+    # ends at 48h to stay inside the 7-day clusterable window (older orphans
+    # are aged out and can never cluster, so counting them would be noise).
+    _orphan_window = (await db.execute(_t("""
+        SELECT
+          COUNT(*) FILTER (WHERE story_id IS NULL) AS orphan,
+          COUNT(*) AS total
+        FROM articles
+        WHERE ingested_at >= NOW() - INTERVAL '48 hours'
+          AND ingested_at <= NOW() - INTERVAL '6 hours'
+    """))).mappings().first()
+    fresh_orphan = int((_orphan_window or {}).get("orphan") or 0)
+    fresh_total = int((_orphan_window or {}).get("total") or 0)
+    fresh_orphan_pct = round(100 * fresh_orphan / max(1, fresh_total), 1)
+
     no_title_fa = int((await db.execute(
         select(func.count(Article.id)).where(Article.title_fa.is_(None))
     )).scalar() or 0)
@@ -5219,6 +5241,24 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
             "error" if (articles_24h >= 50 and new_stories_24h == 0) else "ok",
             "If articles flow in but no stories are created, clustering broke. Common causes: "
             "zero embeddings (see canary above), threshold too high, all-matched-to-existing.",
+        ),
+        _canary(
+            "breaking_news_unclustered", "Fresh articles unclustered (breaking story not coalescing)",
+            f"{fresh_orphan} orphaned / {fresh_total} fresh ({fresh_orphan_pct}%)",
+            "< 25 orphaned or < 30%",
+            "warn" if (fresh_orphan >= 25 and fresh_orphan_pct >= 30) else "ok",
+            "Articles ingested 6h–48h ago (old enough to have already been through a cluster "
+            "pass — NOT the just-arrived cohort) that are still story_id=NULL. A large fresh "
+            "orphan cohort means clustering had its chance and left a breaking topic ungrouped, "
+            "so it never reaches the homepage — exactly the 2026-06-11 failure where the "
+            "US–Iran war coverage (helicopter→US strikes→Iran retaliation) sat unclustered and "
+            "Parham caught the stale hero by eye (detection-source ratio = 0.0). Distinct from "
+            "clustering_halt (which only fires when ZERO stories form): this catches the subtler "
+            "case where SOME stories form but a major fresh cohort scatters/orphans. WARN + a "
+            "rate gate (≥25 AND ≥30%) so normal between-cron lag and quiet periods don't trip "
+            "it. Fires → eyeball the newest articles; if a breaking story is buried, seed+pin it "
+            "(reference_manual_story_seed) and check why clustering didn't group the cohort. "
+            "Threshold is tunable — first weeks of a fast war may run hot until clustering catches up.",
         ),
         _canary(
             "stuck_lock", "Stuck maintenance lock",
