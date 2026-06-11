@@ -870,7 +870,21 @@ class TestBreakingNewsUnclusteredCanary:
         # Measures the orphan backlog past one cluster pass (6h–48h window),
         # not the just-arrived cohort, so normal between-cron lag doesn't trip it.
         assert "INTERVAL '48 hours'" in src and "INTERVAL '6 hours'" in src
-        assert "story_id IS NULL" in src
+        assert "a.story_id IS NULL" in src
+
+    def test_canary_mirrors_clustering_gate(self):
+        """Canary-name-is-a-contract (feedback_canary_design): the orphan count
+        MUST mirror the clustering candidate gate (clustering.py ~L2943) — only
+        content_type-set + allowed-list + cluster_attempts<3 articles 'should'
+        be in a story. The first version counted bare story_id IS NULL and
+        false-alarmed at 68% on design-orphans (opinion/off-topic/in-flight)."""
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py").read_text()
+        i = src.find('_orphan_window = ')
+        body = src[i:i + 900]
+        assert "a.content_type IS NOT NULL" in body
+        assert "content_filters -> 'allowed'" in body and "to_jsonb(a.content_type)" in body
+        assert "a.cluster_attempts < 3" in body
 
     def test_canary_is_incident_worthy(self):
         from app.services.incident_ledger import INCIDENT_WORTHY_CANARIES

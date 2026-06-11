@@ -4633,20 +4633,35 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
     # breaking_news_unclustered canary (Parham 2026-06-11): the 06-10/06-11
     # US–Iran war coverage (helicopter→strikes→retaliation) arrived in the
     # ingest but stayed story_id=NULL, so a major breaking story never reached
-    # the homepage and Parham caught it by eye. Measure the orphan BACKLOG:
+    # the homepage and Parham caught it by eye. Measure the orphan BACKLOG of
     # articles old enough to have already been through a cluster pass (ingested
-    # 6h–48h ago, so NOT the just-arrived cohort that legitimately hasn't been
-    # clustered yet) that are still unattached. A large fresh orphan cohort =
-    # clustering had its chance and left a breaking topic ungrouped. Window
-    # ends at 48h to stay inside the 7-day clusterable window (older orphans
-    # are aged out and can never cluster, so counting them would be noise).
+    # 6h–48h ago — NOT the just-arrived cohort that legitimately hasn't been
+    # clustered yet) that are still unattached. Window ends at 48h to stay
+    # inside the 7-day clusterable window (older orphans age out and can never
+    # cluster, so counting them would be noise).
+    #
+    # MUST mirror the EXACT clustering candidate gate (clustering.py
+    # cluster_articles ~L2943): an article only SHOULD be in a story if
+    # content_type is set AND in the source's allowed list AND cluster_attempts
+    # < 3. Counting bare `story_id IS NULL` over-counts massively — it lumps in
+    # opinion/off-topic (filtered, never cluster BY DESIGN), unclassified
+    # in-flight rows, and retired singletons. That trap shipped a 68% false
+    # alarm on 2026-06-11 (real clusterable backlog was far smaller); fixed to
+    # the gate per feedback_canary_design (name-is-a-contract). fresh_total =
+    # in-window articles that SHOULD land in a story; fresh_orphan = those still
+    # unattached with cluster attempts left.
     _orphan_window = (await db.execute(_t("""
         SELECT
-          COUNT(*) FILTER (WHERE story_id IS NULL) AS orphan,
+          COUNT(*) FILTER (
+            WHERE a.story_id IS NULL AND a.cluster_attempts < 3
+          ) AS orphan,
           COUNT(*) AS total
-        FROM articles
-        WHERE ingested_at >= NOW() - INTERVAL '48 hours'
-          AND ingested_at <= NOW() - INTERVAL '6 hours'
+        FROM articles a
+        JOIN sources s ON s.id = a.source_id
+        WHERE a.ingested_at >= NOW() - INTERVAL '48 hours'
+          AND a.ingested_at <= NOW() - INTERVAL '6 hours'
+          AND a.content_type IS NOT NULL
+          AND (s.content_filters -> 'allowed') @> to_jsonb(a.content_type)
     """))).mappings().first()
     fresh_orphan = int((_orphan_window or {}).get("orphan") or 0)
     fresh_total = int((_orphan_window or {}).get("total") or 0)
@@ -5247,18 +5262,20 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
             f"{fresh_orphan} orphaned / {fresh_total} fresh ({fresh_orphan_pct}%)",
             "< 25 orphaned or < 30%",
             "warn" if (fresh_orphan >= 25 and fresh_orphan_pct >= 30) else "ok",
-            "Articles ingested 6h–48h ago (old enough to have already been through a cluster "
-            "pass — NOT the just-arrived cohort) that are still story_id=NULL. A large fresh "
-            "orphan cohort means clustering had its chance and left a breaking topic ungrouped, "
-            "so it never reaches the homepage — exactly the 2026-06-11 failure where the "
-            "US–Iran war coverage (helicopter→US strikes→Iran retaliation) sat unclustered and "
-            "Parham caught the stale hero by eye (detection-source ratio = 0.0). Distinct from "
-            "clustering_halt (which only fires when ZERO stories form): this catches the subtler "
-            "case where SOME stories form but a major fresh cohort scatters/orphans. WARN + a "
-            "rate gate (≥25 AND ≥30%) so normal between-cron lag and quiet periods don't trip "
-            "it. Fires → eyeball the newest articles; if a breaking story is buried, seed+pin it "
-            "(reference_manual_story_seed) and check why clustering didn't group the cohort. "
-            "Threshold is tunable — first weeks of a fast war may run hot until clustering catches up.",
+            "CLUSTERABLE articles ingested 6h–48h ago (old enough to have already been through a "
+            "cluster pass — NOT the just-arrived cohort) that are still story_id=NULL with "
+            "cluster attempts left. Mirrors the clustering candidate gate EXACTLY (content_type "
+            "set AND in the source's allowed list AND cluster_attempts < 3) so it counts only "
+            "articles that SHOULD be in a story — not opinion/off-topic (filtered by design), "
+            "unclassified in-flight rows, or retired singletons. A large clusterable-orphan "
+            "cohort means clustering had its chance and left a breaking topic ungrouped, so it "
+            "never reaches the homepage — the 2026-06-11 failure (US–Iran war sat unclustered, "
+            "Parham caught the stale hero by eye, detection ratio 0.0). NOTE: the first version "
+            "counted bare story_id IS NULL and false-alarmed at 68% — the bulk was design-orphans, "
+            "not a real backlog. Distinct from clustering_halt (fires only at ZERO new stories): "
+            "this catches the subtler scatter/orphan case. WARN + rate gate (≥25 AND ≥30%) so "
+            "between-cron lag and quiet periods don't trip it. Fires → eyeball the newest "
+            "articles; if a breaking story is buried, seed+pin it (reference_manual_story_seed).",
         ),
         _canary(
             "stuck_lock", "Stuck maintenance lock",
