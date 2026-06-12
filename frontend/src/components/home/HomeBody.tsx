@@ -17,6 +17,18 @@ import {
   predictionText,
 } from "@/lib/telegram-text";
 import { normalizedSidePercentages, independentShare } from "@/lib/narrativeGroups";
+import {
+  buildBattleItems,
+  computeHomepagePicks,
+  coverageBadgeContradicts,
+  formatUpdateReason,
+  hasImage,
+  isUpdateBadgeFresh,
+  localizedStoryTitle,
+  showCoverageBadge,
+  type BattleItem,
+  type StoryAnalysisBrief,
+} from "@/lib/homepagePicks";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 // Server-side only — see app/api/v1/origin_auth.py for the contract.
@@ -66,7 +78,7 @@ async function fetchSummary(storyId: string): Promise<string | null> {
   }
 }
 
-async function fetchAnalysis(storyId: string): Promise<{ summary_fa?: string; briefing_fa?: string | null; bias_explanation_fa?: string; state_summary_fa?: string; diaspora_summary_fa?: string; dispute_score?: number; loaded_words?: { conservative: string[]; opposition: string[] } } | null> {
+async function fetchAnalysis(storyId: string): Promise<StoryAnalysisBrief | null> {
   try {
     const res = await fetch(`${API}/api/v1/stories/${storyId}/analysis`, { next: { revalidate: ANALYSIS_TTL }, headers: AUTH_HEADERS });
     if (!res.ok) return null;
@@ -76,7 +88,7 @@ async function fetchAnalysis(storyId: string): Promise<{ summary_fa?: string; br
   }
 }
 
-async function fetchAnalysesBatch(storyIds: string[]): Promise<Record<string, { summary_fa?: string; briefing_fa?: string | null; bias_explanation_fa?: string; state_summary_fa?: string; diaspora_summary_fa?: string; dispute_score?: number; loaded_words?: { conservative: string[]; opposition: string[] } } | null>> {
+async function fetchAnalysesBatch(storyIds: string[]): Promise<Record<string, StoryAnalysisBrief | null>> {
   if (storyIds.length === 0) return {};
   // Dedupe + stable-sort so identical sets share a cache key.
   const ids = Array.from(new Set(storyIds)).sort();
@@ -123,37 +135,9 @@ async function fetchTelegramAnalysesBatch(storyIds: string[]): Promise<Record<st
   }
 }
 
-/**
- * Pick the display title for a story based on the active locale.
- *
- * Cycle-4 (2026-05-08): pre-this-fix, HomeBody rendered `s.title_fa`
- * unconditionally — so /en showed Persian even though the API
- * populated `title_en` (gpt-4.1-nano article-level) and
- * `translations.{en,fr}.title` (gpt-5-mini story-level NYT/Le Monde
- * voice). Preference order:
- *   1. translations[locale].title — the higher-quality voice-tuned
- *      story-level translation when it exists.
- *   2. title_{en|fa} — flat per-language fields (article-level).
- *   3. The other locale as a last resort so the page never goes empty.
- *
- * The trending API now exposes `translations` on the brief (cycle-4
- * backend fix); pre-this-fix the blob was detail-only, so /fr rendered
- * the EN article-level translation as a fallback.
- */
-function localizedStoryTitle(
-  story: {
-    title_fa?: string | null;
-    title_en?: string | null;
-    translations?: Record<string, { title?: string | null } | null> | null;
-  },
-  locale: string,
-): string {
-  const tl = story.translations?.[locale]?.title;
-  if (tl) return tl;
-  if (locale === "fa") return story.title_fa || story.title_en || "";
-  // en, fr — prefer flat title_en (article-level), fall back to FA.
-  return story.title_en || story.title_fa || "";
-}
+// localizedStoryTitle, the update-badge helpers, and the picking logic
+// were extracted to @/lib/homepagePicks (2026-06-12) so the selection
+// policy is unit-testable. Render components stay here.
 
 function Meta({ story }: { story: StoryBrief }) {
   // Fall back through the date chain so a story always shows at least
@@ -255,24 +239,63 @@ function UpdateDeltaCallout({
   );
 }
 
-// Age-correct burst reason text. The backend writes "N مقاله جدید در
-// ساعت گذشته" at cron time, but we display the signal for up to 4h.
-// Stretch the window to match real time elapsed: articles arrived in
-// the [detected_at-1h, detected_at] slice, and we're rendering `age`
-// later, so they're actually "within the past ceil(age)+1 hours."
-function toFaDigits(n: number): string {
-  return String(n).replace(/\d/g, (d) => "۰۱۲۳۴۵۶۷۸۹"[Number(d)]);
+// Two-side narrative comparison (روایت درون‌مرزی / برون‌مرزی) — the
+// hero card and each «در روزهای گذشته» entry render the same grid;
+// `clampClass` is the only visual difference between the call sites.
+function NarrativeSides({
+  story,
+  stateSummary,
+  diasporaSummary,
+  clampClass,
+}: {
+  story: StoryBrief;
+  stateSummary?: string | null;
+  diasporaSummary?: string | null;
+  clampClass: "line-clamp-3" | "line-clamp-4";
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      {stateSummary && (
+        <div className="border-r-2 border-inside-border pr-3">
+          <p className="text-[15px] font-bold text-inside-border dark:text-inside-border-dark mb-1">روایت درون‌مرزی</p>
+          <UpdateDeltaCallout story={story} field="state" className="mb-1.5" />
+          <p className={`text-[15px] leading-6 text-slate-500 dark:text-slate-400 ${clampClass}`}>{stateSummary}</p>
+        </div>
+      )}
+      {diasporaSummary && (
+        <div className="border-r-2 border-outside-border pr-3">
+          <p className="text-[15px] font-bold text-outside-border dark:text-outside-border-dark mb-1">روایت برون‌مرزی</p>
+          <UpdateDeltaCallout story={story} field="diaspora" className="mb-1.5" />
+          <p className={`text-[15px] leading-6 text-slate-500 dark:text-slate-400 ${clampClass}`}>{diasporaSummary}</p>
+        </div>
+      )}
+    </div>
+  );
 }
-function formatUpdateReason(sig: NonNullable<StoryBrief["update_signal"]>): string | null {
-  if (sig.kind === "burst" && typeof sig.new_count === "number" && sig.detected_at) {
-    const ageMs = Date.now() - new Date(sig.detected_at).getTime();
-    const ageH = ageMs / 3600000;
-    if (ageH > 0.5) {
-      const windowH = Math.max(1, Math.ceil(ageH) + 1);
-      return `${toFaDigits(sig.new_count)} مقاله جدید در ${toFaDigits(windowH)} ساعت گذشته`;
-    }
-  }
-  return sig.reason_fa;
+
+// Telegram strip (discourse + first prediction + first claim) — the
+// hero card and the briefing entries render it identically. Renders
+// nothing when the story has no discourse summary.
+function TelegramStrip({ tg }: { tg: TelegramAnalysis | null | undefined }) {
+  if (!tg?.discourse_summary) return null;
+  return (
+    <div className="mt-3 px-1">
+      <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-2">
+        <span className="font-bold text-slate-600 dark:text-slate-300">تحلیل روایت‌های تلگرام.</span>
+        {" "}{tg.discourse_summary}
+      </p>
+      {tg.predictions && tg.predictions.length > 0 && (
+        <p className="text-[15px] leading-6 text-slate-400 dark:text-slate-500 mt-1 line-clamp-1">
+          <span className="font-bold text-blue-500">پیش‌بینی:</span> {predictionText(tg.predictions[0])}
+        </p>
+      )}
+      {tg.key_claims && tg.key_claims.length > 0 && (
+        <p className="text-[15px] leading-6 text-slate-400 dark:text-slate-500 mt-1 line-clamp-1">
+          <span className="font-bold text-amber-500">ادعا:</span> {claimText(tg.key_claims[0])}
+        </p>
+      )}
+    </div>
+  );
 }
 
 // Compact update pill for homepage story cards. Two variants:
@@ -282,43 +305,8 @@ function formatUpdateReason(sig: NonNullable<StoryBrief["update_signal"]>): stri
 //     into the story within the last 2 hours but no trigger was
 //     significant enough to flag orange. Tells the user the story just
 //     got fresh coverage without claiming something major happened.
-// If neither condition holds, renders nothing.
-// F5 — orange "بروزرسانی" badge auto-expires after 24 hours.
-// Without this, a story flagged at 09:00 Monday still wears the orange
-// pill on Friday, which is misleading. The trigger doesn't get
-// re-evaluated until the next maintenance tick, so we TTL the
-// rendered badge on the read side based on `detected_at`.
-const UPDATE_BADGE_TTL_MS = 24 * 3600 * 1000;
-function isUpdateBadgeFresh(sig: NonNullable<StoryBrief["update_signal"]> | null | undefined): boolean {
-  if (!sig?.has_update) return false;
-  if (!sig.detected_at) return true; // legacy rows without detected_at — render once, falls off naturally on next refresh
-  const t = Date.parse(sig.detected_at);
-  if (!Number.isFinite(t)) return true;
-  return Date.now() - t < UPDATE_BADGE_TTL_MS;
-}
-
-// Defense-in-depth (Parham 2026-06-03): a stale coverage-shift signal can
-// outlive the articles that triggered it — e.g. «پوشش درون‌مرزی آغاز شد» on a
-// story that's now 0% inside (538d848c, after QC dropped its only inside
-// article). A badge that contradicts the current split is worse than no badge,
-// so suppress a «… آغاز/تقویت شد» reason when the side it names has ~no current
-// coverage. (The backend recompute-after-postprocess fixes the source; this
-// guards any signal that's stale at read time.)
-function coverageBadgeContradicts(story: StoryBrief): boolean {
-  const sig = story.update_signal;
-  if (!sig?.has_update || sig.kind !== "coverage_shift") return false;
-  const r = sig.reason_fa || "";
-  if (!r.includes("شد") || r.includes("کمرنگ")) return false; // only "began/strengthened"
-  const inside = story.inside_border_pct ?? story.state_pct ?? 0;
-  const outside = story.outside_border_pct ?? story.diaspora_pct ?? 0;
-  if (r.includes("درون‌مرزی") && inside <= 2) return true;
-  if (r.includes("برون‌مرزی") && outside <= 2) return true;
-  return false;
-}
-function showCoverageBadge(story: StoryBrief): boolean {
-  return isUpdateBadgeFresh(story.update_signal) && !coverageBadgeContradicts(story);
-}
-
+// If neither condition holds, renders nothing. Freshness/TTL +
+// contradiction gating lives in @/lib/homepagePicks.
 function UpdateBadge({ story, className = "mt-1.5" }: { story: StoryBrief; className?: string }) {
   // «بروزرسانی» must mean NEW REPORTING arrived. A closed/frozen story
   // (no new article in >7d) can still carry a fresh update_signal from a
@@ -448,10 +436,8 @@ export default async function HomeBody({
   // on the homepage — it looks broken and dilutes the editorial feed.
   // Those stories are still accessible via direct link and are queued for
   // HITL image assignment at /admin/hitl/stories-without-image.
-  // `has_real_image` is undefined on older cached responses; treat
-  // undefined as "assume true" so a rollout of the backend flag doesn't
-  // blank the homepage on stale caches.
-  const hasImage = (s: StoryBrief) => s.has_real_image !== false;
+  // (`hasImage` treats undefined as "assume true" so a rollout of the
+  // backend flag doesn't blank the homepage on stale caches.)
   let stories = (_stories || []).filter(hasImage);
   let blindspots = _blindspots.filter(hasImage);
 
@@ -479,138 +465,6 @@ export default async function HomeBody({
     );
   }
 
-  // ── Freshness filter + significant-update rule ──────────────────────
-  // Parham's rule: a story can stay in the hero or blindspot slot across
-  // days ONLY if its narrative has shifted meaningfully since yesterday
-  // — "gained new articles" is not enough. The server-side
-  // `update_signal.has_update` boolean captures this (dispute_score move
-  // ≥ 0.2, or subgroup pct move ≥ 15pp, or ≥3 new articles + rewritten
-  // bias comparison). When `has_update` is true, the story is both
-  // eligible to repeat AND shown with an orange "بروزرسانی" badge +
-  // the delta reason.
-  //
-  // Combined with the 24h freshness signal (`last_updated_at`), we get
-  // three states:
-  //   - Fresh + has_update  → prime candidate. Show badge.
-  //   - Fresh, no update    → new story in the cluster. Normal hero.
-  //   - Stale (>24h)        → not eligible; slot rotates.
-  // F1 — tiered freshness windows. The site's editorial intent is
-  // "anything older than ~7 days is dated; ~30 days is dead." Each
-  // homepage section gets its own cutoff so older content silently
-  // falls off the prime slots even when picks would otherwise be
-  // empty. Anything beyond MAX_AGE is dropped from every pick.
-  const HERO_MAX_AGE_MS = 72 * 3600 * 1000;        // 3d — hero must be hot
-  const HERO_DROUGHT_AGE_MS = 26 * 86400 * 1000;   // 26d — last-resort hero only when nothing fresher exists
-  const BLINDSPOT_MAX_AGE_MS = 7 * 86400 * 1000;   // 7d — F7 mirror
-  const DISPUTE_MAX_AGE_MS = 14 * 86400 * 1000;    // 14d — disputed slot
-  const BRIEFING_MAX_AGE_MS = 14 * 86400 * 1000;   // 14d — weekly briefing
-  const POPULAR_MAX_AGE_MS = 14 * 86400 * 1000;    // 14d — pop-score
-  // HARD_MAX_AGE_MS removed 2026-05-03: was the silent filter that
-  // dropped frozen homepage stories. Per-slot windows below are the
-  // editorial intent; backend archived_at is the death.
-  const FRESH_WINDOW_MS = 24 * 60 * 60 * 1000;     // legacy "fresh" signal kept for has_update gating
-  const nowMs = Date.now();
-  const ageMs = (s: StoryBrief): number => {
-    const src = s.last_updated_at || s.first_published_at;
-    if (!src) return Number.POSITIVE_INFINITY;
-    const t = Date.parse(src);
-    return Number.isFinite(t) ? nowMs - t : Number.POSITIVE_INFINITY;
-  };
-  const isFresh = (s: StoryBrief): boolean => ageMs(s) < FRESH_WINDOW_MS;
-  const withinAge = (limit: number) => (s: StoryBrief): boolean => ageMs(s) < limit;
-  const hasUpdate = (s: StoryBrief): boolean => !!s.update_signal?.has_update;
-
-  // Frontend age policy (Parham 2026-05-03): the prior unconditional
-  // HARD_MAX_AGE_MS=30d filter silently dropped frozen stories that
-  // the backend now intentionally serves on the homepage (frozen-stays-
-  // visible rule). Trust the backend ordering — archived_at and the
-  // demote-on-freeze sort already keep stale content from dominating.
-  // Hero/blindspot/disputed/popular/briefing slots STILL apply their
-  // tighter per-slot windows below; this just removes the global gate
-  // that was hiding the rotation tail.
-
-  // Blind spots: prefer fresh + has_update (badge explains why it still
-  // deserves the slot), then fresh without update (new blindspot), then
-  // fall back to the most recent stale one rather than leave the slot
-  // empty — a one-sided story from yesterday is still informative.
-  // Formal blindspots (state_only / diaspora_only) come from the backend's
-  // classifier. On most news days one side's blindspot bucket is empty —
-  // today e.g. 10 state_only, 0 diaspora_only — which would leave the
-  // opposite column empty on the homepage. Fall back to the most heavily
-  // one-sided story on that axis so both نگاه یک‌جانبه slots always show
-  // something, even if the backend hasn't formally flagged it as a
-  // blindspot. 80/20 is the threshold for "one-sided enough to be
-  // worth calling out as a نگاه یک‌جانبه" — anything balanced beyond
-  // that erodes the meaning of the slot. The label below switches to
-  // «بیشتر» when the minority side has any coverage and «فقط» only
-  // when the minority side is at exactly 0%.
-  const ONE_SIDED_MAJOR = 80;  // % covered by the dominant side (heuristic mint)
-  const ONE_SIDED_MINOR = 20;  // % covered by the minority side (heuristic mint)
-  // Backend-flagged blindspots get a looser live re-validation: the
-  // backend already classified them as one-sided, we just confirm the
-  // split hasn't flipped. Without this, formal blindspots whose minority
-  // climbed from 0% → 25% (still one-sided) would fail the 80/20 gate
-  // and leave a slot empty when the backend already named a candidate.
-  const ONE_SIDED_MAJOR_LOOSE = 70;
-  const ONE_SIDED_MINOR_LOOSE = 30;
-  const stateHeavy = (s: StoryBrief) =>
-    (s.state_pct || 0) >= ONE_SIDED_MAJOR && (s.diaspora_pct || 0) <= ONE_SIDED_MINOR;
-  const diasporaHeavy = (s: StoryBrief) =>
-    (s.diaspora_pct || 0) >= ONE_SIDED_MAJOR && (s.state_pct || 0) <= ONE_SIDED_MINOR;
-  const stateHeavyLoose = (s: StoryBrief) =>
-    (s.state_pct || 0) >= ONE_SIDED_MAJOR_LOOSE && (s.diaspora_pct || 0) <= ONE_SIDED_MINOR_LOOSE;
-  const diasporaHeavyLoose = (s: StoryBrief) =>
-    (s.diaspora_pct || 0) >= ONE_SIDED_MAJOR_LOOSE && (s.state_pct || 0) <= ONE_SIDED_MINOR_LOOSE;
-
-  // F1 — blindspots restricted to BLINDSPOT_MAX_AGE_MS (7d). The
-  // feature loses meaning if it shows month-old gaps. Fall through
-  // to the formal blindspot list before the heuristic state/diaspora
-  // heavy fallback, but never beyond 7d. Earlier code's "any state_only
-  // ever" fallback removed — those slots simply stay empty when
-  // there's nothing fresh, which is honest signal.
-  //
-  // Re-validate one-sidedness against current state_pct/diaspora_pct.
-  // Backend's is_blindspot is computed from per-article side counts at
-  // recount time, while the homepage displays distinct-source pcts —
-  // when new articles tip a previously one-sided story toward balance
-  // the flag can lag the visible split. Gate the formal pick by the
-  // same 60/40 source threshold the heuristic uses so we never show a
-  // «نگاه یک‌جانبه» card whose own percentages contradict the label.
-  const blindFresh = withinAge(BLINDSPOT_MAX_AGE_MS);
-  // Prefer a real-image candidate (`blindspots` is image-filtered), but fall
-  // back to a PHOTO-LESS one-sided blindspot from the unfiltered `_blindspots`
-  // before leaving the slot empty. Diaspora outlets reaching us only via t.me
-  // mirrors usually have no OG image, so _pick_image returns their source LOGO
-  // with has_real_image=false — which the `hasImage` filter strips, silently
-  // emptying the برون‌مرزی column even when a perfect 100%-diaspora blindspot
-  // exists (Parham, 2026-06-02: «نگاه یک‌جانبه has only one story»). The card
-  // renders the newspaper placeholder for these via the has_real_image gate.
-  const conservativeBlind =
-    blindspots.find(s => s.blindspot_type === "state_only" && blindFresh(s) && hasUpdate(s) && stateHeavyLoose(s)) ||
-    blindspots.find(s => s.blindspot_type === "state_only" && blindFresh(s) && stateHeavyLoose(s)) ||
-    _blindspots.find(s => s.blindspot_type === "state_only" && blindFresh(s) && stateHeavyLoose(s)) ||
-    [...stories].filter(stateHeavy).filter(blindFresh).sort((a, b) =>
-      (b.state_pct - b.diaspora_pct) - (a.state_pct - a.diaspora_pct)
-    )[0] ||
-    undefined;
-  const oppositionBlind =
-    blindspots.find(s => s.blindspot_type === "diaspora_only" && blindFresh(s) && hasUpdate(s) && diasporaHeavyLoose(s)) ||
-    blindspots.find(s => s.blindspot_type === "diaspora_only" && blindFresh(s) && diasporaHeavyLoose(s)) ||
-    _blindspots.find(s => s.blindspot_type === "diaspora_only" && blindFresh(s) && diasporaHeavyLoose(s)) ||
-    [...stories].filter(diasporaHeavy).filter(blindFresh).sort((a, b) =>
-      (b.diaspora_pct - b.state_pct) - (a.diaspora_pct - a.state_pct)
-    )[0] ||
-    undefined;
-
-  // ── Deduplication: track which stories are placed ──
-  const usedIds = new Set<string>();
-
-  // Blind spots first (already picked above)
-  if (conservativeBlind) usedIds.add(conservativeBlind.id);
-  if (oppositionBlind) usedIds.add(oppositionBlind.id);
-
-  const sorted = [...stories];
-
   // ── Stage 2 (collapsed): one round trip for ALL analyses + top-15
   //    telegram strips, fired in parallel. Previously this was split
   //    across two awaits — a 15-id "prefetch" to gate the hero picker,
@@ -618,232 +472,35 @@ export default async function HomeBody({
   //    Merging into a single Promise.all saves ~300-600ms on every ISR
   //    regen on Railway. Hero/leftText/mostViewed strips are looked up
   //    from the top-15 telegram map further down (no separate fetches).
+  const sorted = [...stories];
   const sortedIds = sorted.map(s => s.id);
   const telegramAnalysisIds = sorted.slice(0, 15).map(s => s.id);
   const [allAnalyses, telegramByStoryId] = await Promise.all([
     fetchAnalysesBatch(sortedIds),
     fetchTelegramAnalysesBatch(telegramAnalysisIds),
   ]);
-  const hasBiasNarrative = (s: StoryBrief): boolean => {
-    const a = allAnalyses[s.id];
-    return !!(a && (a.state_summary_fa || a.diaspora_summary_fa) && a.bias_explanation_fa);
-  };
 
-  // Hero picker fallback chain — most specific first so we surface the
-  // richest story that qualifies. The bias-narrative gate sits at the
-  // top because the hero card is useless without it; once the gate is
-  // exhausted we fall through to the older signals so the slot never
-  // goes empty on a thin news day.
-  // F1 — hero must be hot (≤72h). Fall through to the regular
-  // 24h-fresh window only if no 72h-eligible story has the right
-  // narrative shape. Anything older than 14d is excluded entirely
-  // (no `sorted[0]` fallback), so on a thin news day the hero may
-  // be missing — better than promoting a 3-week-old story.
-  const heroFresh = withinAge(HERO_MAX_AGE_MS);
-  const heroSafe = withinAge(BRIEFING_MAX_AGE_MS);
-  // Manual-pin override (Parham 2026-05-04): a story with priority > 0
-  // is the operator's explicit declaration that this IS the hero,
-  // regardless of whether step_detect_hourly_updates flagged it as
-  // having an update_signal. Without this clause the regular
-  // hasUpdate-gated find skipped a freshly-pinned story whose update
-  // signal hadn't yet been recomputed. Still requires bias narrative
-  // + 72h freshness so the card isn't visually broken.
-  const isPinned = (s: StoryBrief): boolean => (s.priority ?? 0) > 0;
-  const hero =
-    sorted.find(s => isPinned(s) && hasBiasNarrative(s) && heroFresh(s)) ||
-    sorted.find(s => hasBiasNarrative(s) && heroFresh(s) && hasUpdate(s) && s.state_pct >= 5 && s.diaspora_pct >= 5) ||
-    sorted.find(s => hasBiasNarrative(s) && heroFresh(s) && s.state_pct >= 5 && s.diaspora_pct >= 5) ||
-    sorted.find(s => hasBiasNarrative(s) && heroFresh(s)) ||
-    sorted.find(s => hasBiasNarrative(s) && heroSafe(s)) ||
-    sorted.find(s => heroFresh(s) && hasUpdate(s) && s.state_pct >= 5 && s.diaspora_pct >= 5) ||
-    sorted.find(s => heroFresh(s) && s.state_pct >= 5 && s.diaspora_pct >= 5) ||
-    sorted.find(s => heroSafe(s) && s.state_pct >= 5 && s.diaspora_pct >= 5) ||
-    sorted.find(heroFresh) ||
-    sorted.find(heroSafe) ||
-    // Drought fallback (2026-05-31): the 14d cap above leaves the marquee
-    // EMPTY when every trending story is older — which is exactly what
-    // happened after the May cron lockdown left the freshest stories at
-    // 16-25d AND the two genuinely-fresh ones were archived (a grab-bag +
-    // a false geo-merge). An empty hero reads as broken, so fall back to
-    // the best older story: prefer a two-sided bias narrative, else the
-    // freshest available within the wider window. Auto-tightens back to
-    // 14d the moment the now-live cron brings fresh news.
-    sorted.find(s => withinAge(HERO_DROUGHT_AGE_MS)(s) && hasBiasNarrative(s) && s.state_pct >= 5 && s.diaspora_pct >= 5) ||
-    sorted.find(s => withinAge(HERO_DROUGHT_AGE_MS)(s) && hasBiasNarrative(s)) ||
-    sorted.find(withinAge(HERO_DROUGHT_AGE_MS));
-  if (hero) usedIds.add(hero.id);
-
-  // Weekly briefing: left-text "در روزهای گذشته" block. 3 hero-style
-  // cards — two-side narratives + telegram strip, no image. F1: drop
-  // anything older than 14d so this section reflects the past week,
-  // not the past month.
-  // ── تقابل روایت‌ها reservation (Parham 2026-06-03) ──────────────
-  // The «clash of narratives» box needs two genuinely-opposed sides. On a
-  // war-news day EVERY story is two-sided, and the most-viewed / left-text
-  // strips below were consuming the fresh disputed stories before this box
-  // was computed — so تقابل rendered just 1 card despite plenty of qualifying
-  // stories. Reserve its picks HERE, before those strips, so it gets the
-  // strongest disputed stories; the strips then fill from the remainder.
-  // (The old separate «بیشترین اختلاف» box was merged into this one — its
-  // mostDisputed/secondDisputed/thirdDisputed vars are no longer rendered.)
-  const META_PATTERNS = [
-    /^پوشش\s+(برون‌مرزی|درون‌مرزی)/,
-    /روایت[^.]{0,40}(متمایز|شکل\s+نگرفت|غایب)/,
-    /هیچ\s+رسانه/,
-    /در\s+این\s+(خبر|مجموعه)[^.]{0,20}حضور\s+ندارن/,
-    /رسانه[^.]{0,50}حضور\s+ندار/,
-    // 2026-06-04: «این زیرگروه در مجموعهٔ مقالات حاضر حضوری ندارد» / «…
-    // پوششی درباره این رویداد ندارد» — the summary IS the absence statement,
-    // not a narrative. The earlier patterns required «در این مجموعه» or a
-    // «رسانه» subject and missed «این زیرگروه … حضوری ندارد» (د8489917 leaked
-    // into تقابل with a contradictory state side).
-    /حضور[ی]?\s+ندار/,
-    /پوششی[^.]{0,30}ندار/,
-    /زیرگروه[^.]{0,40}(ندار|نیست|غایب)/,
-  ];
-  const hasTwoRealNarratives = (
-    a: { state_summary_fa?: string | null; diaspora_summary_fa?: string | null } | null | undefined,
-  ): boolean => {
-    if (!a) return false;
-    const ss = (a.state_summary_fa || "").trim();
-    const ds = (a.diaspora_summary_fa || "").trim();
-    if (ss.length < 60 || ds.length < 60) return false;
-    for (const re of META_PATTERNS) {
-      if (re.test(ss) || re.test(ds)) return false;
-    }
-    return true;
-  };
-  const _battleGate = (s: StoryBrief, maxAgeMs: number): boolean => {
-    if (!(s.state_pct > 0 && s.diaspora_pct > 0) || s.is_blindspot) return false;
-    if (usedIds.has(s.id)) return false;
-    if (ageMs(s) >= maxAgeMs) return false;
-    const a = allAnalyses[s.id];
-    if (!hasTwoRealNarratives(a)) return false;
-    const lw = a?.loaded_words;
-    if (lw?.conservative?.length && lw?.opposition?.length) return true;
-    // Bias-text quote fallback (matches the battle loop below).
-    const quotes = a?.bias_explanation_fa?.match(/«[^»]+»/g);
-    return !!(quotes && quotes.length >= 2);
-  };
-  const _battleSpread = (a: StoryBrief, b: StoryBrief) =>
-    Math.abs(b.state_pct - b.diaspora_pct) - Math.abs(a.state_pct - a.diaspora_pct);
-  let battleReserved = [...sorted].filter(s => _battleGate(s, DISPUTE_MAX_AGE_MS)).sort(_battleSpread);
-  if (battleReserved.length < 3) {
-    // Drought widen — same recovery logic as the other boxes.
-    battleReserved = [...sorted].filter(s => _battleGate(s, 26 * 86400 * 1000)).sort(_battleSpread);
-  }
-  battleReserved = battleReserved.slice(0, 4);
-  battleReserved.forEach(s => usedIds.add(s.id));
-
-  const briefingFresh = withinAge(BRIEFING_MAX_AGE_MS);
-  let leftTextStories = sorted.filter(s => !usedIds.has(s.id) && briefingFresh(s)).slice(0, 3);
-  if (leftTextStories.length < 3) {
-    // Drought fallback (2026-05-31): after a content gap (e.g. the May
-    // cron lockdown left most stories 16-25d old) the 14d cap leaves
-    // this block empty once hero + disputed consume the few fresh ones.
-    // Widen to 26d so «در روزهای گذشته» isn't bare — same recovery logic
-    // as the disputed box; auto-tightens once fresh content returns.
-    const briefingDrought = withinAge(26 * 86400 * 1000);
-    leftTextStories = sorted.filter(s => !usedIds.has(s.id) && briefingDrought(s)).slice(0, 3);
-  }
-  leftTextStories.forEach(s => usedIds.add(s.id));
-
-  // Most viewed: top 3. Narrower half-column now (grid-cols-2 cell in
-  // row 2), so fewer cards at richer density reads better. F1: cap at
-  // 14d so a 3-week-old viral story doesn't dominate the section
-  // forever after its real moment passed.
-  const popularFresh = withinAge(POPULAR_MAX_AGE_MS);
-  const now = Date.now();
-  let popularPool = [...sorted].filter(s => !usedIds.has(s.id) && popularFresh(s));
-  if (popularPool.length < 3) {
-    // Drought fallback (2026-05-31): when the 14d window can't fill the 3
-    // «پرمخاطب‌ترین» slots (post-lockdown content gap), widen to 26d so the
-    // section isn't blank. Auto-tightens once fresh news returns.
-    popularPool = [...sorted].filter(s => !usedIds.has(s.id) && withinAge(26 * 86400 * 1000)(s));
-  }
-  if (popularPool.length < 3) {
-    // Second tier (Parham 2026-06-04): «پرمخاطب‌ترین» is about POPULARITY,
-    // which accumulates over weeks — the genuinely most-viewed stories are
-    // often the 27-30d war umbrellas, and on a thin war-homepage the fresh
-    // pool is also claimed by the hero + تقابل + recent-days strips. Since
-    // popularity isn't freshness-sensitive, widen to any homepage-eligible
-    // story (retention already caps the DB at 30d) so this box never blanks.
-    popularPool = [...sorted].filter(s => !usedIds.has(s.id));
-  }
-  const mostViewed = popularPool
-    .map(s => {
-      const views = s.view_count || 0;
-      const recencyHours = s.updated_at ? (now - new Date(s.updated_at).getTime()) / 3600000 : 100;
-      const recencyBonus = Math.max(0, 1 - recencyHours / 72); // decays over 3 days
-      const score = views * 2 + s.trending_score + recencyBonus * 10 + s.article_count * 0.5;
-      return { ...s, _popScore: score };
-    })
-    .sort((a, b) => b._popScore - a._popScore)
-    .slice(0, 3);
-  mostViewed.forEach(s => usedIds.add(s.id));
-
-  // Most disputed: F1: 14d cap. A 3-week-old disputed story isn't
-  // disputed news anymore, it's history.
-  //
-  // Adaptive window (2026-05-31): the strict 14d cap goes bare during a
-  // content drought (e.g. after the May cron lockdown most two-sided war
-  // stories were 17-25d old). So we try 14d first; only if that yields
-  // fewer than 3 disputed slots do we widen to DISPUTE_DROUGHT_AGE_MS so
-  // the section fills from slightly-older two-sided stories. As soon as
-  // the now-live cron brings ≥3 fresh disputed stories this auto-tightens
-  // back to 14d — no permanent weakening of the freshness rule.
-  const DISPUTE_DROUGHT_AGE_MS = 26 * 86400 * 1000; // recovery fallback only
-  const disputeTwoSided = (s: StoryBrief, maxAgeMs: number) =>
-    s.state_pct > 0 && s.diaspora_pct > 0 && !s.is_blindspot && !usedIds.has(s.id) && withinAge(maxAgeMs)(s);
-  const byDisputeSpread = (a: StoryBrief, b: StoryBrief) =>
-    Math.abs(b.state_pct - b.diaspora_pct) - Math.abs(a.state_pct - a.diaspora_pct);
-  const freshDisputed = [...stories]
-    .filter(s => disputeTwoSided(s, DISPUTE_MAX_AGE_MS))
-    .sort(byDisputeSpread);
-  const disputedCandidates = freshDisputed.length >= 3
-    ? freshDisputed
-    : [...stories].filter(s => disputeTwoSided(s, DISPUTE_DROUGHT_AGE_MS)).sort(byDisputeSpread);
-  let mostDisputed = disputedCandidates[0] || null;
-  let secondDisputed = disputedCandidates[1] || null;
-  let thirdDisputed = disputedCandidates[2] || null;
-  if (mostDisputed) usedIds.add(mostDisputed.id);
-  if (secondDisputed) usedIds.add(secondDisputed.id);
-  if (thirdDisputed) usedIds.add(thirdDisputed.id);
-
-  // Common ground: not already used
-  const commonGround = [...stories]
-    .filter(s => s.state_pct > 10 && s.diaspora_pct > 10 && !s.is_blindspot && !usedIds.has(s.id))
-    .sort((a, b) => Math.abs(a.state_pct - a.diaspora_pct) - Math.abs(b.state_pct - b.diaspora_pct))
-    .slice(0, 2);
-  commonGround.forEach(s => usedIds.add(s.id));
-  // Overflow: everything not yet used
-  const overflow = sorted.filter(s => !usedIds.has(s.id));
-
-  // ── Overflow: build sections sequentially, each consuming what it needs ──
-  // Section types cycle: text(3) → images(4) → feature(2) → text(3) → images(4) → feature(2)...
-  // Odd cycles: mirror the feature rows
-  type Section = { type: "text"; stories: StoryBrief[] }
-    | { type: "images"; stories: StoryBrief[] }
-    | { type: "hero-thumb"; stories: StoryBrief[] }
-    | { type: "hero-repeat"; stories: StoryBrief[] };
-
-  const sections: Section[] = [];
-  // Pattern: hero-thumb(2) → hero-repeat(4) → text(3)
-  const pattern = [
-    { type: "hero-thumb" as const, size: 2 },
-    { type: "hero-repeat" as const, size: 4 },
-    { type: "text" as const, size: 3 },
-  ];
-  let cursor = 0;
-
-  // Only one cycle, then stop
-  for (const step of pattern) {
-    if (cursor >= overflow.length) break;
-    const chunk = overflow.slice(cursor, cursor + step.size);
-    if (chunk.length === 0) break;
-    sections.push({ type: step.type, stories: chunk } as Section);
-    cursor += chunk.length;
-  }
+  // ── Slot selection ──────────────────────────────────────────────
+  // All age windows, one-sidedness thresholds, the hero fallback
+  // chain, and the no-story-twice reservation order live in
+  // @/lib/homepagePicks (unit-tested). Gating runs on the FA
+  // narrative text — the EN/FR translation hoist below happens after,
+  // and only the battle-card TEXT re-reads the hoisted values (via
+  // buildBattleItems further down; keep that call order).
+  const {
+    conservativeBlind,
+    oppositionBlind,
+    hero,
+    battleReserved,
+    leftTextStories,
+    mostViewed,
+  } = computeHomepagePicks({
+    stories,
+    blindspots,
+    blindspotsAll: _blindspots,
+    analyses: allAnalyses,
+    nowMs: Date.now(),
+  });
 
   // ── Telegram lookup maps ──
   // Top-15 telegram strips were fetched up top alongside analyses, in a
@@ -899,134 +556,12 @@ export default async function HomeBody({
     allSummaries[id] = tl || allAnalyses[id]?.summary_fa || null;
   }
 
-  // Pick disputed stories by the real dispute_score (state-vs-diaspora
-  // framing divergence, backfilled deterministically — the LLM had clustered
-  // every story on ~0.5, so this box used to just show the top-trending
-  // two-sided stories rather than the genuinely-contested ones). Sort by
-  // dispute desc (tiebreak: coverage-% gap), then PREFER the genuinely-
-  // disputed subset (>= floor); fall back to the full sorted list if too few
-  // qualify so the box isn't empty on calm news days.
-  const DISPUTE_FLOOR = 0.45;
-  const byDispute = [...disputedCandidates].sort((a, b) =>
-    ((allAnalyses[b.id]?.dispute_score ?? 0) - (allAnalyses[a.id]?.dispute_score ?? 0))
-    || (Math.abs(b.state_pct - b.diaspora_pct) - Math.abs(a.state_pct - a.diaspora_pct)),
-  );
-  const genuinelyDisputed = byDispute.filter(
-    s => (allAnalyses[s.id]?.dispute_score ?? 0) >= DISPUTE_FLOOR,
-  );
-  const disputedResorted = genuinelyDisputed.length >= 2 ? genuinelyDisputed : byDispute;
-  mostDisputed = disputedResorted[0] || null;
-  secondDisputed = disputedResorted[1] || null;
-  thirdDisputed = disputedResorted[2] || null;
 
-  // Pre-compute تقابل روایت‌ها battle items here so we can exclude those
-  // story IDs from بیشترین اختلاف نگاه below. Without this, both boxes
-  // on the right column pulled from the same top-2 disputed stories,
-  // producing duplicate cards. Each story should appear in at most one
-  // of the two boxes (the third — "most visited" — is allowed to repeat).
-  type BattleItem = {
-    storyId: string;
-    title: string;
-    // Lists of distinct loaded words, sorted shortest-first. RotatingWord
-    // cycles through them with a fade animation; if a story only yielded
-    // one word the component renders it static (no flicker).
-    conservativeWords: string[];
-    oppositionWords: string[];
-    stateSummary: string;
-    diasporaSummary: string;
-  };
-  const battleItems: BattleItem[] = [];
-  const buildWordList = (ws: string[]): string[] => {
-    // Strip «», dedupe, drop too-short, sort shortest-first so the first
-    // paint shows the most compact word; cap at 6 so the rotation cycle
-    // doesn't stretch into minutes on noisy stories.
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const raw of ws) {
-      const w = raw.replace(/[«»]/g, "").trim();
-      if (w.length < 3) continue;
-      if (seen.has(w)) continue;
-      seen.add(w);
-      out.push(w);
-    }
-    out.sort((a, b) => a.length - b.length);
-    return out.slice(0, 6);
-  };
-  // Cross-card variety (2026-05-31): the diaspora framing vocabulary
-  // genuinely converges — «سرکوب» / «حقوق بشر» recur across most
-  // government stories, and buildWordList's shortest-first sort surfaces
-  // the short stock word («سرکوب») first, so every card showed the same
-  // outside-border word. preferUnused reorders each story's list to lead
-  // with a word no prior card has shown yet, falling back to the
-  // shortest-first order only when every word is already taken. Keeps
-  // the rotation list intact (RotatingWord still cycles all of them) —
-  // only the FIRST, most-visible word is diversified across cards.
-  const _usedOppWords = new Set<string>();
-  const _usedConsWords = new Set<string>();
-  const preferUnused = (ws: string[], used: Set<string>): string[] => {
-    const fresh = ws.filter(w => !used.has(w));
-    const stale = ws.filter(w => used.has(w));
-    const ordered = fresh.length ? [...fresh, ...stale] : ws;
-    if (ordered[0]) used.add(ordered[0]);
-    return ordered;
-  };
-  // Scan the top 12 disputed candidates so we can reliably fill the
-  // 4-story تقابل روایت‌ها box — previously 2 slots here + 2 in the
-  // separate بیشترین اختلاف نگاه box. The two boxes shared ~80% of
-  // selection logic and only differed in visuals (word pair vs
-  // percentage); merging into one 4-story box reduces duplication
-  // and keeps the stronger word-pair affordance. On quiet news days
-  // the box may render 2-3 items instead of 4 — acceptable.
-  // battleReserved was gated + sorted + reserved up top (before the
-  // most-viewed/left-text strips could eat these stories).
-  for (const story of battleReserved) {
-    if (battleItems.length >= 4) break;
-    const analysis = allAnalyses[story.id];
-    if (!analysis) continue;
-    if (!hasTwoRealNarratives(analysis)) continue;
-    const words = analysis.loaded_words;
-    const stateSummary = analysis.state_summary_fa || "";
-    const diasporaSummary = analysis.diaspora_summary_fa || "";
-    const biasText = analysis.bias_explanation_fa;
-    if (words?.conservative?.length && words?.opposition?.length) {
-      const cw = buildWordList(words.conservative);
-      const ow = buildWordList(words.opposition);
-      if (cw.length && ow.length) {
-        battleItems.push({
-          storyId: story.id,
-          title: localizedStoryTitle(story, locale) || "",
-          conservativeWords: preferUnused(cw, _usedConsWords),
-          oppositionWords: preferUnused(ow, _usedOppWords),
-          stateSummary,
-          diasporaSummary,
-        });
-        continue;
-      }
-    }
-    if (biasText) {
-      const quotes = biasText.match(/«[^»]+»/g);
-      if (quotes && quotes.length >= 2) {
-        // Bias-text fallback: split the matched quotes into halves so each
-        // side still gets a list to rotate through (instead of a single
-        // word). Shortest-first ordering happens inside buildWordList.
-        const half = Math.floor(quotes.length / 2);
-        const cw = buildWordList(quotes.slice(0, Math.max(half, 1)));
-        const ow = buildWordList(quotes.slice(Math.max(half, 1)));
-        if (cw.length && ow.length) {
-          battleItems.push({
-            storyId: story.id,
-            title: localizedStoryTitle(story, locale) || "",
-            conservativeWords: preferUnused(cw, _usedConsWords),
-            oppositionWords: preferUnused(ow, _usedOppWords),
-            stateSummary,
-            diasporaSummary,
-          });
-          continue;
-        }
-      }
-    }
-  }
-  const battleIds = new Set(battleItems.map(b => b.storyId));
+  // تقابل روایت‌ها cards — built AFTER the translation hoist above so
+  // the card text (and its narrative re-check) reflects the locale,
+  // while the slot RESERVATION in computeHomepagePicks gated on FA.
+  const battleItems: BattleItem[] = buildBattleItems(battleReserved, allAnalyses, locale);
+
 
   const prefetchedTelegram: { storyId: string; analysis: TelegramAnalysis }[] = [];
   for (const id of telegramAnalysisIds) {
@@ -1176,44 +711,12 @@ export default async function HomeBody({
                       ))}
                     </div>
                   )}
-                  <div className="grid grid-cols-2 gap-3">
-                    {stateSummary && (
-                      <div className="border-r-2 border-inside-border pr-3">
-                        <p className="text-[15px] font-bold text-inside-border dark:text-inside-border-dark mb-1">روایت درون‌مرزی</p>
-                        <UpdateDeltaCallout story={hero} field="state" className="mb-1.5" />
-                        <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-3">{stateSummary}</p>
-                      </div>
-                    )}
-                    {diasporaSummary && (
-                      <div className="border-r-2 border-outside-border pr-3">
-                        <p className="text-[15px] font-bold text-outside-border dark:text-outside-border-dark mb-1">روایت برون‌مرزی</p>
-                        <UpdateDeltaCallout story={hero} field="diaspora" className="mb-1.5" />
-                        <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-3">{diasporaSummary}</p>
-                      </div>
-                    )}
-                  </div>
+                  <NarrativeSides story={hero} stateSummary={stateSummary} diasporaSummary={diasporaSummary} clampClass="line-clamp-3" />
                 </div>
               );
             })()}
             {/* Telegram discourse summary */}
-            {heroTelegram?.discourse_summary && (
-              <div className="mt-3 px-1">
-                <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-2">
-                  <span className="font-bold text-slate-600 dark:text-slate-300">تحلیل روایت‌های تلگرام.</span>
-                  {" "}{heroTelegram.discourse_summary}
-                </p>
-                {heroTelegram.predictions && heroTelegram.predictions.length > 0 && (
-                  <p className="text-[15px] leading-6 text-slate-400 dark:text-slate-500 mt-1 line-clamp-1">
-                    <span className="font-bold text-blue-500">پیش‌بینی:</span> {predictionText(heroTelegram.predictions[0])}
-                  </p>
-                )}
-                {heroTelegram.key_claims && heroTelegram.key_claims.length > 0 && (
-                  <p className="text-[15px] leading-6 text-slate-400 dark:text-slate-500 mt-1 line-clamp-1">
-                    <span className="font-bold text-amber-500">ادعا:</span> {claimText(heroTelegram.key_claims[0])}
-                  </p>
-                )}
-              </div>
-            )}
+            <TelegramStrip tg={heroTelegram} />
           </div>
         )}
 
@@ -1303,22 +806,7 @@ export default async function HomeBody({
                     {stateSummary || diasporaSummary ? (
                       <div className="mt-3">
                         <UpdateDeltaCallout story={s} field="bias" />
-                        <div className="grid grid-cols-2 gap-3">
-                          {stateSummary && (
-                            <div className="border-r-2 border-inside-border pr-3">
-                              <p className="text-[15px] font-bold text-inside-border dark:text-inside-border-dark mb-1">روایت درون‌مرزی</p>
-                              <UpdateDeltaCallout story={s} field="state" className="mb-1.5" />
-                              <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-4">{stateSummary}</p>
-                            </div>
-                          )}
-                          {diasporaSummary && (
-                            <div className="border-r-2 border-outside-border pr-3">
-                              <p className="text-[15px] font-bold text-outside-border dark:text-outside-border-dark mb-1">روایت برون‌مرزی</p>
-                              <UpdateDeltaCallout story={s} field="diaspora" className="mb-1.5" />
-                              <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-4">{diasporaSummary}</p>
-                            </div>
-                          )}
-                        </div>
+                        <NarrativeSides story={s} stateSummary={stateSummary} diasporaSummary={diasporaSummary} clampClass="line-clamp-4" />
                       </div>
                     ) : (() => {
                       const bias = analysis?.bias_explanation_fa;
@@ -1328,24 +816,7 @@ export default async function HomeBody({
                       return <p className="mt-1.5 text-[15px] leading-6 text-slate-400 dark:text-slate-500 line-clamp-1">• {firstPoint}</p>;
                     })()}
                     {/* Telegram strip — discourse + first prediction + first claim */}
-                    {tg?.discourse_summary && (
-                      <div className="mt-3 px-1">
-                        <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-2">
-                          <span className="font-bold text-slate-600 dark:text-slate-300">تحلیل روایت‌های تلگرام.</span>
-                          {" "}{tg.discourse_summary}
-                        </p>
-                        {tg.predictions && tg.predictions.length > 0 && (
-                          <p className="text-[15px] leading-6 text-slate-400 dark:text-slate-500 mt-1 line-clamp-1">
-                            <span className="font-bold text-blue-500">پیش‌بینی:</span> {predictionText(tg.predictions[0])}
-                          </p>
-                        )}
-                        {tg.key_claims && tg.key_claims.length > 0 && (
-                          <p className="text-[15px] leading-6 text-slate-400 dark:text-slate-500 mt-1 line-clamp-1">
-                            <span className="font-bold text-amber-500">ادعا:</span> {claimText(tg.key_claims[0])}
-                          </p>
-                        )}
-                      </div>
-                    )}
+                    <TelegramStrip tg={tg} />
                   </div>
                 );
               })}
