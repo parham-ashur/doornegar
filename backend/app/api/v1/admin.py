@@ -156,8 +156,9 @@ _DASHBOARD_CACHE_TTL = 300
 async def get_dashboard(db: AsyncSession = Depends(get_db)):
     """Comprehensive dashboard data: counts, maintenance status, costs, issues.
 
-    Cached for 60 seconds to reduce Neon network transfer. The dashboard
-    frontend polls every 30s, so most requests hit the cache.
+    Cached for _DASHBOARD_CACHE_TTL (300s) to reduce Neon network
+    transfer. The dashboard frontend polls every 30s; most requests
+    hit the cache.
     """
     import time as _time
     if _dashboard_cache["data"] and _time.time() < _dashboard_cache["expires"]:
@@ -560,7 +561,8 @@ async def get_dashboard(db: AsyncSession = Depends(get_db)):
         "freshness_hours": freshness_hours,
     }
 
-    # Cache for 60s to reduce Neon transfer on repeated dashboard polls
+    # Cache for _DASHBOARD_CACHE_TTL (300s) to reduce Neon transfer on
+    # repeated dashboard polls
     _dashboard_cache["data"] = response
     _dashboard_cache["expires"] = _time.time() + _DASHBOARD_CACHE_TTL
     return response
@@ -4013,7 +4015,7 @@ async def feedback_impact_source_trust(db: AsyncSession = Depends(get_db)):
 
 # ─────────────────────────────────────────────────────────────────────
 # /admin/health/overview — single-fetch health snapshot for /dashboard/health
-# Caches 60s (matches the page's auto-refresh cadence).
+# Caches _HEALTH_CACHE_TTL (300s).
 # ─────────────────────────────────────────────────────────────────────
 
 _health_cache: dict = {"data": None, "expires": 0.0}

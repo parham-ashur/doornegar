@@ -1048,3 +1048,23 @@ class TestRssShortDeletionsPerSourceVisibility:
         assert i != -1
         assert "rss_short_by_source" in body
         assert "JOIN sources s ON s.id = a.source_id" in body
+
+
+class TestPerStepCpuInstrumentation:
+    """2026-06-12: Railway compute audit showed maintenance-cron burning
+    ~as much vCPU as the 24/7 API despite ~100 min/day of runtime — the
+    same optimizing-blind problem the Phase F.1 egress meter solved.
+    The run loop now records RUSAGE_SELF deltas per step (`_cpu` next to
+    `_egress`) so the CPU-reduction work targets measured hot spots, not
+    guesses."""
+
+    def test_cpu_meter_wired_into_step_loop(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "auto_maintenance.py").read_text()
+        assert "RUSAGE_SELF" in src
+        i = src.find('result["_cpu"]')
+        assert i != -1, "_cpu stats missing from step result"
+        body = src[i:i + 300]
+        assert "user_s" in body and "sys_s" in body
+        # Snapshot must happen BEFORE the step runs (next to tup_before).
+        assert src.find("_cpu_before = _resource.getrusage") < src.find("step_t0 = time.time()")

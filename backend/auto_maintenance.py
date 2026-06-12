@@ -8817,6 +8817,15 @@ async def run_maintenance(mode: str = "full"):
                     tup_before = int(_eg_row.tup_returned or 0) if _eg_row else 0
             except Exception:
                 tup_before = 0  # tolerate stat read failure; just no instrumentation
+            # Per-step CPU instrumentation (2026-06-12): Railway bills
+            # usage-based vCPU, and the cron's compute ≈ the 24/7 API's
+            # despite ~100 min/day of runtime — same optimizing-blind
+            # problem Phase F.1 solved for egress. Steps run sequentially
+            # in this one process, so RUSAGE_SELF deltas attribute
+            # user+sys CPU seconds to each step. Read-only counters; the
+            # numbers land next to _egress in maintenance_logs.
+            import resource as _resource
+            _cpu_before = _resource.getrusage(_resource.RUSAGE_SELF)
             step_t0 = time.time()
             try:
                 result = await asyncio.wait_for(func(), timeout=timeout)
@@ -8843,6 +8852,11 @@ async def run_maintenance(mode: str = "full"):
                         tup_delta * 4096 / 1024 / 1024, 2
                     )
                     result["_egress"]["elapsed_s"] = step_elapsed
+                    _cpu_after = _resource.getrusage(_resource.RUSAGE_SELF)
+                    result["_cpu"] = {
+                        "user_s": round(_cpu_after.ru_utime - _cpu_before.ru_utime, 2),
+                        "sys_s": round(_cpu_after.ru_stime - _cpu_before.ru_stime, 2),
+                    }
                 results[key] = result
                 await maintenance_state.end_step(display, "ok", result)
             except asyncio.TimeoutError:

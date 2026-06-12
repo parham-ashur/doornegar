@@ -194,7 +194,7 @@ Per the 2026-05-12 policy: only stories that earned homepage time are kept (up t
 
 ### Monitoring
 
-- `/admin/health/overview` — single-stop "is anything broken?" with 20+ canaries. Cached 60s.
+- `/admin/health/overview` — single-stop "is anything broken?" with 20+ canaries. Cached 300s (bumped from 60s in the 2026-05-12 audit, like the dashboard cache).
 - 3 cloud routines on claude.ai/code/routines auto-recover ghost locks + report regressions + send morning briefing.
 - `force-release-lock` endpoint clears both `maintenance_lock` AND `maintenance_run_status` so the dashboard reflects reality.
 
