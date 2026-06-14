@@ -1114,3 +1114,27 @@ class TestBellwetherLogsEvidence:
         # evidence must be captured before the LLM verdict so it persists
         # even when the comparator returns None / errors.
         assert src.find('result["outlet_leads"]') < src.find("verdict = await _llm_compare")
+
+
+class TestManualImageNotGatedOnIsEdited:
+    """2026-06-14: a manually-pinned cover image (`manual_image_url` in the
+    summary_en blob, written by update_image) stopped being served whenever
+    a story got a title/summary edit. Cause: the editorial system migrated
+    from freeze-forever (is_edited=True) to the refreshable summary_anchor
+    model, which deliberately sets is_edited=False — but the read-time image
+    override still gated on is_edited=True, so the edit silently dropped the
+    operator's chosen image and fell through to the auto-picked aggregate.
+    The override must honor manual_image_url whenever present + valid,
+    independent of is_edited (which is exactly what _pick_image defers to)."""
+
+    def test_manual_image_override_independent_of_is_edited(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "app" / "api" / "v1" / "stories.py").read_text()
+        i = src.find('candidate = _blob.get("manual_image_url")')
+        assert i != -1, "manual_image_url override missing"
+        # the guard immediately preceding the override must NOT gate on is_edited
+        guard = src[max(0, i - 260):i]
+        assert "is_edited" not in guard, (
+            "manual_image override re-gated on is_edited — a title/summary edit "
+            "will silently drop the operator's pinned cover image again"
+        )

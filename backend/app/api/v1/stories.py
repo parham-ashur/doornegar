@@ -1231,11 +1231,22 @@ def _story_brief_with_extras(
 
     # Manual override: Story ORM has no image_url column, so the curator's
     # override is stored inside the summary_en JSON blob as
-    # "manual_image_url" (written by journalist_audit.apply_fix and by the
-    # dashboard editor). When the story is is_edited and the blob has a
-    # manual_image_url, trust it and skip the title-overlap scorer.
+    # "manual_image_url" (written by update_image + journalist_audit.apply_fix
+    # and by the dashboard editor). Honor it whenever it is present and valid
+    # — the pinned URL IS the deliberate human signal, and this read-time
+    # override is exactly what homepage_aggregates._pick_image defers to (its
+    # docstring: "minus the manual_image_url override, read live from
+    # story.summary_en at request time and overrides the blob").
+    #
+    # Previously gated on is_edited=True. That broke after the editorial
+    # system migrated from freeze-forever (is_edited=True) to the refreshable
+    # summary_anchor model, which deliberately keeps is_edited=False (see
+    # admin.edit_story). The result: any title/summary edit flipped is_edited
+    # off and silently dropped the operator's chosen cover image, falling
+    # through to the auto-picked aggregate. (Parham 2026-06-14: "why did the
+    # image I picked change again?")
     manual_image = None
-    if getattr(story, "is_edited", False) and story.summary_en:
+    if story.summary_en:
         try:
             _blob = _json.loads(story.summary_en)
             candidate = _blob.get("manual_image_url")
