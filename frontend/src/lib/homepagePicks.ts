@@ -441,11 +441,36 @@ export function computeHomepagePicks({
   // Weekly briefing: left-text "در روزهای گذشته" block. 3 hero-style
   // cards — two-side narratives + telegram strip, no image. ≤14d so
   // this section reflects the past week, not the past month.
+  //
+  // Selection nudge (Parham 2026-06-14): each entry renders a bias
+  // comparison + telegram strip, so a story with no narratives/summary
+  // becomes a title-only stub that reads as "empty." Among the eligible
+  // pool — already in priority/trending order — surface content-rich
+  // stories first. A NUDGE, not a hard filter: it's a stable sort by a
+  // richness tier (full two-side comparison > any summary/bias > none),
+  // preserving the existing freshness/priority order WITHIN each tier
+  // (the `idx` tiebreak), and thin stories still backfill when fewer
+  // than 3 rich ones exist. The render side also has a fallback chain
+  // (summary_fa → coverage line) so a thin pick is never literally
+  // blank — this just leads with the most informative stories.
+  const briefingRichness = (s: StoryBrief): number => {
+    const a = analyses[s.id];
+    if (!a) return 0;
+    if (a.state_summary_fa && a.diaspora_summary_fa) return 2; // full درون‌مرزی/برون‌مرزی comparison
+    if (a.bias_explanation_fa || (a.summary_fa && a.summary_fa.length > 40)) return 1;
+    return 0;
+  };
+  const pickBriefing = (pool: StoryBrief[]): StoryBrief[] =>
+    pool
+      .map((s, idx) => ({ s, idx, r: briefingRichness(s) }))
+      .sort((a, b) => b.r - a.r || a.idx - b.idx)
+      .map(x => x.s)
+      .slice(0, 3);
   const briefingFresh = withinAge(P.BRIEFING_MAX_AGE_MS);
-  let leftTextStories = sorted.filter(s => !usedIds.has(s.id) && briefingFresh(s)).slice(0, 3);
+  let leftTextStories = pickBriefing(sorted.filter(s => !usedIds.has(s.id) && briefingFresh(s)));
   if (leftTextStories.length < 3) {
     const briefingDrought = withinAge(P.DROUGHT_AGE_MS);
-    leftTextStories = sorted.filter(s => !usedIds.has(s.id) && briefingDrought(s)).slice(0, 3);
+    leftTextStories = pickBriefing(sorted.filter(s => !usedIds.has(s.id) && briefingDrought(s)));
   }
   leftTextStories.forEach(s => usedIds.add(s.id));
 

@@ -253,8 +253,13 @@ function NarrativeSides({
   diasporaSummary?: string | null;
   clampClass: "line-clamp-3" | "line-clamp-4";
 }) {
+  // When only ONE side has a summary (blindspots, or stories scored on a
+  // single narrative), a 2-column grid leaves a glaring empty half. Render
+  // the present side full-width instead so the block reads as intentional,
+  // not broken. (Parham 2026-06-14: "empty space … doesn't look empty".)
+  const bothSides = !!stateSummary && !!diasporaSummary;
   return (
-    <div className="grid grid-cols-2 gap-3">
+    <div className={`grid ${bothSides ? "grid-cols-2" : "grid-cols-1"} gap-3`}>
       {stateSummary && (
         <div className="border-r-2 border-inside-border pr-3">
           <p className="text-[15px] font-bold text-inside-border dark:text-inside-border-dark mb-1">روایت درون‌مرزی</p>
@@ -809,9 +814,19 @@ export default async function HomeBody({
                         <NarrativeSides story={s} stateSummary={stateSummary} diasporaSummary={diasporaSummary} clampClass="line-clamp-4" />
                       </div>
                     ) : (() => {
+                      // Body fallback chain so an entry without a two-side
+                      // comparison is never a bare title (Parham 2026-06-14).
+                      // Meta above already carries the coverage stats, so the
+                      // missing piece is BODY text: prefer the story's neutral
+                      // summary (2 lines, present on ~93% of homepage stories),
+                      // then a single bias bullet. If neither exists, Meta still
+                      // gives the entry substance, so render nothing extra.
+                      const summary = allSummaries[s.id];
+                      if (summary && summary.trim().length > 30) {
+                        return <p className="mt-2 text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-2">{summary}</p>;
+                      }
                       const bias = analysis?.bias_explanation_fa;
-                      if (!bias) return null;
-                      const firstPoint = splitBiasPoints(bias)[0];
+                      const firstPoint = bias ? splitBiasPoints(bias)[0] : null;
                       if (!firstPoint) return null;
                       return <p className="mt-1.5 text-[15px] leading-6 text-slate-400 dark:text-slate-500 line-clamp-1">• {firstPoint}</p>;
                     })()}
@@ -1376,6 +1391,10 @@ function MobileHome({
           <h2 className="text-[20px] font-black text-slate-900 dark:text-white mb-3">در روزهای گذشته ...</h2>
           <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
             {briefingStories.map((s) => {
+              // Same body fallback as the desktop briefing: neutral summary
+              // (2 lines) preferred over a lone bias bullet so the entry isn't
+              // a title-only stub (Parham 2026-06-14).
+              const summary = summaries[s.id];
               const bias = allAnalyses[s.id]?.bias_explanation_fa;
               const firstPoint = splitBiasPoints(bias)[0];
               return wrapStory(
@@ -1391,9 +1410,11 @@ function MobileHome({
                       {s.state_pct > 0 && <span className="text-inside-border dark:text-inside-border-dark"> · درون‌مرزی {tabularNum(s.state_pct)}٪</span>}
                       {s.diaspora_pct > 0 && <span className="text-outside-border dark:text-outside-border-dark"> · برون‌مرزی {tabularNum(s.diaspora_pct)}٪</span>}
                     </p>
-                    {firstPoint && (
+                    {summary && summary.trim().length > 30 ? (
+                      <p className="mt-1.5 text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-2">{summary}</p>
+                    ) : firstPoint ? (
                       <p className="mt-1.5 text-[15px] leading-6 text-slate-400 dark:text-slate-500 line-clamp-1">• {firstPoint}</p>
-                    )}
+                    ) : null}
                   </Link>
                 ),
                 s.id,

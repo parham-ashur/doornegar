@@ -314,6 +314,59 @@ describe("computeHomepagePicks — پرمخاطب‌ترین", () => {
   });
 });
 
+describe("computeHomepagePicks — briefing content-richness nudge", () => {
+  // Parham 2026-06-14: a briefing entry with no bias comparison / summary
+  // renders as a title-only stub that reads "empty". The briefing now
+  // surfaces content-rich stories first (stable sort by richness tier),
+  // while thin stories still backfill when fewer than 3 rich exist.
+  function briefingScenario() {
+    // hero eats hero-slot; the heuristic state_only blindspot eats the
+    // first 100/0 story (blind-eater); the briefing then picks from the
+    // four remaining 100/0 stories. Default order = insertion order.
+    const stories = [
+      makeStory({ id: "hero-slot" }),
+      makeStory({ id: "blind-eater", state_pct: 100, diaspora_pct: 0 }),
+      makeStory({ id: "thin-a", state_pct: 100, diaspora_pct: 0 }),
+      makeStory({ id: "thin-b", state_pct: 100, diaspora_pct: 0 }),
+      makeStory({ id: "rich-c", state_pct: 100, diaspora_pct: 0 }),
+      makeStory({ id: "rich-d", state_pct: 100, diaspora_pct: 0 }),
+    ];
+    return stories;
+  }
+
+  it("surfaces summary-bearing stories ahead of higher-priority thin ones, thin still backfills", () => {
+    const stories = briefingScenario();
+    const analyses: AnalysesById = {
+      "hero-slot": makeAnalysis(),
+      "blind-eater": makeAnalysis(),
+      // thin = no summary, no sides (tier 0); rich = summary only (tier 1).
+      // None have a two-side narrative, so the battle box stays empty and
+      // the four feed the briefing.
+      "thin-a": {},
+      "thin-b": {},
+      "rich-c": { summary_fa: LONG_STATE },
+      "rich-d": { summary_fa: LONG_DIASPORA },
+    };
+    const { leftTextStories } = pick(stories, { analyses });
+    // rich-c, rich-d lead (insertion-stable within tier), thin-a backfills.
+    expect(leftTextStories.map(s => s.id)).toEqual(["rich-c", "rich-d", "thin-a"]);
+  });
+
+  it("is a nudge, not a filter: all-thin pool keeps original order", () => {
+    const stories = briefingScenario();
+    const analyses: AnalysesById = {
+      "hero-slot": makeAnalysis(),
+      "blind-eater": makeAnalysis(),
+      "thin-a": {},
+      "thin-b": {},
+      "rich-c": {},
+      "rich-d": {},
+    };
+    const { leftTextStories } = pick(stories, { analyses });
+    expect(leftTextStories.map(s => s.id)).toEqual(["thin-a", "thin-b", "rich-c"]);
+  });
+});
+
 describe("buildBattleItems", () => {
   it("builds cards with word lists from loaded_words", () => {
     const stories = [makeStory({ id: "x" })];
