@@ -205,6 +205,19 @@ async def run_bellwether_check(db: AsyncSession) -> dict[str, Any]:
             for k, hs in reachable.items()
         )
         ours_block = "\n".join(f"- {t}" for t in ours) or "(none)"
+        # Evidence for the verdict. Without it a `missing=true conf 0.9`
+        # flag is un-actionable: nobody can tell whether it's a real gap or
+        # the comparator failing to credit an umbrella story for a sub-angle
+        # (observed 2026-06-14: outlets led with the hardliner backlash to
+        # the Geneva deal, which we covered as one umbrella hero — the LLM
+        # read the backlash as a "missing" lead). Persisting the lead
+        # headlines it saw + the titles it compared against makes every
+        # flag judgeable at a glance from the logged event. Capped to keep
+        # the signals blob small.
+        result["outlet_leads"] = {
+            k: hs[:6] for k, hs in reachable.items()
+        }
+        result["compared_titles"] = ours[:15]
         verdict = await _llm_compare(outlets_block, ours_block)
         if verdict is None:
             result["status"] = "unable"  # no key / LLM failed

@@ -617,7 +617,10 @@ async def step_prune_noise():
         SHORT_THRESHOLD = 400
         rss_short_rows = (await db.execute(
             _text("""
-                SELECT a.id, s.slug AS source_slug
+                SELECT a.id, s.slug AS source_slug, a.content_type,
+                       (a.content_type IS NOT NULL
+                        AND (s.content_filters -> 'allowed') @> to_jsonb(a.content_type)
+                       ) AS was_eligible
                 FROM articles a
                 JOIN sources s ON s.id = a.source_id
                 WHERE a.story_id IS NULL
@@ -634,13 +637,34 @@ async def step_prune_noise():
             stats["rss_short_skipped_fk"] = len(ids) - deleted_n
             if fk_breakdown:
                 stats["rss_short_skipped_fk_breakdown"] = fk_breakdown
-            # Per-source counts: a single outlet dominating this list means
-            # its full-text fetch is systematically failing (geo-block, URL
-            # change) and we're silently deleting that outlet's coverage —
-            # not just pruning feed stubs. Top 10 keeps the stats blob small.
+            # SIGNAL vs NOISE split. The vast majority of short orphans are
+            # non-news (off_topic / opinion / discussion / other) that the
+            # NLP gate deliberately never fetched full text for — deleting
+            # them is correct and expected. A raw "141 deleted" therefore
+            # reads as a catastrophe when ~92% of it is healthy pruning
+            # (same false-alarm class as the NULL-embedding / design-orphan
+            # canaries: counting design-skipped rows as damage). The only
+            # row that actually matters is an NLP-ELIGIBLE article (its
+            # content_type IS in the source's allowed filters) that still
+            # landed here — meaning its full-text fetch genuinely failed and
+            # we lost real coverage. Report that number on its own, and make
+            # the per-source breakdown ELIGIBLE-ONLY so a dominating outlet
+            # actually signals a broken fetch instead of lighting up every
+            # outlet with expected off_topic noise.
+            stats["rss_short_news_deleted"] = sum(
+                1 for r in rss_short_rows if r.was_eligible
+            )
+            by_type: dict[str, int] = {}
+            for row in rss_short_rows:
+                ct = row.content_type or "(unclassified)"
+                by_type[ct] = by_type.get(ct, 0) + 1
+            stats["rss_short_by_type"] = dict(
+                sorted(by_type.items(), key=lambda kv: -kv[1])
+            )
             by_source: dict[str, int] = {}
             for row in rss_short_rows:
-                by_source[row.source_slug] = by_source.get(row.source_slug, 0) + 1
+                if row.was_eligible:
+                    by_source[row.source_slug] = by_source.get(row.source_slug, 0) + 1
             stats["rss_short_by_source"] = dict(
                 sorted(by_source.items(), key=lambda kv: -kv[1])[:10]
             )
@@ -650,7 +674,8 @@ async def step_prune_noise():
     logger.info(
         f"Prune noise: tg {stats['tg_deleted']}/{stats['tg_checked']}, "
         f"tg-articles {stats['articles_deleted']}/{stats['articles_checked']}, "
-        f"rss-short {stats.get('rss_short_deleted', 0)}/{stats.get('rss_short_checked', 0)}"
+        f"rss-short {stats.get('rss_short_deleted', 0)}/{stats.get('rss_short_checked', 0)} "
+        f"(news-lost {stats.get('rss_short_news_deleted', 0)})"
     )
     return stats
 

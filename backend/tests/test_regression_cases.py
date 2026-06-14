@@ -1044,7 +1044,7 @@ class TestRssShortDeletionsPerSourceVisibility:
         from pathlib import Path
         src = (Path(__file__).parent.parent / "auto_maintenance.py").read_text()
         i = src.find("SHORT_THRESHOLD = 400")
-        body = src[i:i + 2200]
+        body = src[i:i + 3200]
         assert i != -1
         assert "rss_short_by_source" in body
         assert "JOIN sources s ON s.id = a.source_id" in body
@@ -1068,3 +1068,49 @@ class TestPerStepCpuInstrumentation:
         assert "user_s" in body and "sys_s" in body
         # Snapshot must happen BEFORE the step runs (next to tup_before).
         assert src.find("_cpu_before = _resource.getrusage") < src.find("step_t0 = time.time()")
+
+
+class TestRssShortSignalVsNoiseSplit:
+    """2026-06-14 deep-dive: the drop-short step reported a raw
+    `rss_short_deleted` (141/142 on a healthy run) that read as a
+    catastrophe but was ~92% expected off_topic/opinion pruning — the NLP
+    gate never fetches full text for non-news, so those orphans are SUPPOSED
+    to be deleted. The honest signal is only NLP-eligible (news) articles
+    that got here, meaning their full-text fetch genuinely failed. The step
+    now splits the number: `rss_short_news_deleted` (the real loss),
+    `rss_short_by_type` (full transparency), and an ELIGIBLE-ONLY
+    `rss_short_by_source` so a dominating outlet signals a broken fetch
+    instead of lighting up on expected noise. Same false-alarm class as the
+    NULL-embedding / design-orphan canaries."""
+
+    def test_news_vs_noise_split_present(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "auto_maintenance.py").read_text()
+        i = src.find("SHORT_THRESHOLD = 400")
+        body = src[i:i + 3200]
+        assert i != -1
+        # the eligibility predicate must mirror the NLP gate exactly
+        assert "(s.content_filters -> 'allowed') @> to_jsonb(a.content_type)" in body
+        assert "was_eligible" in body
+        assert "rss_short_news_deleted" in body
+        assert "rss_short_by_type" in body
+        # per-source breakdown is now eligible-only
+        assert "if row.was_eligible:" in body
+
+
+class TestBellwetherLogsEvidence:
+    """2026-06-14: the bellwether canary logged only its verdict
+    (missing/missed_story/confidence), so a `missing=true conf 0.9` flag was
+    un-actionable — nobody could tell a real coverage gap from the comparator
+    failing to credit an umbrella story for a sub-angle. The check now
+    persists the lead headlines it saw (`outlet_leads`) and the titles it
+    compared against (`compared_titles`) into the logged event signals."""
+
+    def test_evidence_fields_persisted(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "app" / "services" / "bellwether.py").read_text()
+        assert 'result["outlet_leads"]' in src
+        assert 'result["compared_titles"]' in src
+        # evidence must be captured before the LLM verdict so it persists
+        # even when the comparator returns None / errors.
+        assert src.find('result["outlet_leads"]') < src.find("verdict = await _llm_compare")
