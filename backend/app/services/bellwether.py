@@ -49,15 +49,39 @@ _WS_RE = re.compile(r"\s+")
 
 EVENT_TYPE = "bellwether_check"
 
+# Sports / entertainment noise. The comparator prompt already says "ignore
+# sports", but a homepage's <h2>/<h3> often LEAD with football during a
+# tournament (observed 2026-06-14: Iran International's top headlines were all
+# World Cup — کوراسائو، فیفا، ورزشگاه — which pushed the real Iran-US lead out
+# of the top-10 slice we feed the LLM and produced a false "missing" flag).
+# Drop these at extraction so the real political/conflict leads survive.
+_NOISE_RE = re.compile(
+    r"جام جهانی|فوتبال|فیفا|ورزشگاه|والیبال|بسکتبال|المپیک|لیگ برتر"
+    r"|دروازه‌?بان|هافبک|گلزنی|باشگاه|سرمربی|قلعه‌نویی|تیم ملی فوتبال"
+    r"|جشنواره فیلم|باکس آفیس|اسکار|کنسرت"
+)
+# Site chrome / section labels that aren't stories (nav, masthead, "live").
+_NAV_RE = re.compile(
+    r"^(?:صفحه اصلی|صفحه اول|خبرهای? کوتاه|مهم?ترین خبرها?|آخرین اخبار"
+    r"|تازه‌ترین|BBC News|ایران اینترنشنال|پربیننده‌ترین)\b"
+    r"|^BBC News|اینترنشنال$"
+)
+
+
+def _is_noise_headline(txt: str) -> bool:
+    return bool(_NOISE_RE.search(txt) or _NAV_RE.search(txt))
+
 
 def _extract_headlines(html: str, limit: int = 15) -> list[str]:
     """Pull <title>/<h1>/<h2>/<h3> text from a homepage — that's where lead
-    headlines live — without an LLM call. Cheap, robust to layout changes."""
+    headlines live — without an LLM call. Cheap, robust to layout changes.
+    Sports/entertainment + site-chrome lines are dropped so a tournament
+    week's football headlines don't crowd out the real political lead."""
     out: list[str] = []
     seen: set[str] = set()
     for m in _HEADLINE_RE.finditer(html):
         txt = _WS_RE.sub(" ", _TAG_RE.sub("", m.group(1))).strip()
-        if 12 <= len(txt) <= 160 and txt not in seen:
+        if 12 <= len(txt) <= 160 and txt not in seen and not _is_noise_headline(txt):
             seen.add(txt)
             out.append(txt)
         if len(out) >= limit:
@@ -130,7 +154,21 @@ but is MISSING from the aggregator's top stories. Ignore sports, weather,
 entertainment, and minor/local items. A story counts as covered if the
 aggregator has anything on the same event, even if worded differently.
 
-Return ONLY JSON: {{"missing": <bool>, "missed_story": "<short FA description or empty>", "confidence": <0-1>}}
+DECISION PROCEDURE — follow exactly, it prevents false alarms:
+1. Pick the single most prominent MAJOR Iran story across the OUTLET headlines.
+2. Scan the AGGREGATOR TOP STORIES and name the ONE title closest to it
+   (`closest_existing`). Same event counts even if the wording, angle, or
+   sub-detail differs (e.g. an outlet leads on "protests against the deal" and
+   the aggregator has "the deal" — that is COVERED; a deal and its fallout are
+   the SAME event).
+3. Only set missing=true if NO aggregator title plausibly covers that event.
+   When the closest title is on the same broad event, set missing=FALSE.
+   Bias toward missing=false on doubt — a false alarm is worse than a miss.
+
+Return ONLY JSON:
+{{"missing": <bool>, "missed_story": "<short FA description or empty>",
+  "closest_existing": "<the nearest aggregator title you found, or empty>",
+  "confidence": <0-1>}}
 
 === OUTLET FRONT-PAGE HEADLINES ===
 {outlets}
@@ -192,6 +230,7 @@ async def run_bellwether_check(db: AsyncSession) -> dict[str, Any]:
         "outlets_failed": failed,
         "missing": False,
         "missed_story": "",
+        "closest_existing": "",
         "confidence": 0.0,
         "status": "ok",
     }
@@ -224,6 +263,10 @@ async def run_bellwether_check(db: AsyncSession) -> dict[str, Any]:
         else:
             result["missing"] = bool(verdict.get("missing"))
             result["missed_story"] = str(verdict.get("missed_story") or "")[:300]
+            # The title the LLM judged closest — its own justification for the
+            # verdict. On a missing=true flag this shows whether it genuinely
+            # found no match or just under-credited an existing umbrella story.
+            result["closest_existing"] = str(verdict.get("closest_existing") or "")[:300]
             try:
                 result["confidence"] = max(0.0, min(1.0, float(verdict.get("confidence", 0))))
             except (TypeError, ValueError):

@@ -1116,6 +1116,54 @@ class TestBellwetherLogsEvidence:
         assert src.find('result["outlet_leads"]') < src.find("verdict = await _llm_compare")
 
 
+class TestBellwetherFiltersSportsNoise:
+    """2026-06-14: the bellwether false-positived (missing=true conf 0.9) on a
+    story we clearly covered. Logged evidence showed why: Iran International's
+    homepage <h2>/<h3> led with World Cup headlines (جام جهانی، فیفا، ورزشگاه)
+    during a tournament, crowding the real Iran-US lead out of the top-10 slice
+    fed to the LLM. _extract_headlines now drops sports/entertainment + site
+    chrome so the political/conflict leads survive."""
+
+    def test_sports_and_nav_dropped_real_news_kept(self):
+        from app.services.bellwether import _extract_headlines
+        html = (
+            "<title>صفحه اصلی | ایران اینترنشنال</title>"
+            "<h2>جام جهانی ۲۰۲۶؛ کوراسائو در آستانه یک رکورد تاریخی</h2>"
+            "<h2>مهدی تاج: آمریکا به پروتکل‌های فیفا پایبند نبوده است</h2>"
+            "<h3>خبرهای کوتاه</h3>"
+            "<h2>توافق احتمالی ایران و آمریکا در ژنو؛ تجمعات مخالفان در تهران</h2>"
+            "<h3>حملات اسرائیل به ضاحیه بیروت؛ سه کشته بر جای گذاشت</h3>"
+        )
+        heads = _extract_headlines(html)
+        joined = " || ".join(heads)
+        assert "جام جهانی" not in joined and "فیفا" not in joined
+        assert "صفحه اصلی" not in joined and "خبرهای کوتاه" not in joined
+        assert any("توافق احتمالی ایران و آمریکا" in h for h in heads)
+        assert any("حملات اسرائیل به ضاحیه" in h for h in heads)
+
+
+class TestBellwetherPromptRequiresClosestExisting:
+    """2026-06-14 follow-up: tighten the comparator so it must name the closest
+    existing aggregator title before declaring a story missing, and bias toward
+    missing=false on doubt — the un-credited-umbrella false-alarm class. The
+    closest_existing field is persisted as the LLM's own justification."""
+
+    def test_prompt_and_field_present(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "app" / "services" / "bellwether.py").read_text()
+        assert "closest_existing" in src
+        # the verdict must persist the justification field
+        assert 'result["closest_existing"]' in src
+        # prompt must instruct naming the closest title + the doubt→false bias
+        assert "closest" in _COMPARE_PROMPT_TEXT(src).lower()
+        assert "missing=false" in _COMPARE_PROMPT_TEXT(src).lower() or "missing=FALSE" in _COMPARE_PROMPT_TEXT(src)
+
+
+def _COMPARE_PROMPT_TEXT(src: str) -> str:
+    i = src.find("_COMPARE_PROMPT = ")
+    return src[i:i + 1600] if i != -1 else ""
+
+
 class TestManualImageNotGatedOnIsEdited:
     """2026-06-14: a manually-pinned cover image (`manual_image_url` in the
     summary_en blob, written by update_image) stopped being served whenever
