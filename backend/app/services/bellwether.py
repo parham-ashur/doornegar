@@ -72,6 +72,42 @@ def _is_noise_headline(txt: str) -> bool:
     return bool(_NOISE_RE.search(txt) or _NAV_RE.search(txt))
 
 
+_PUNCT_RE = re.compile(r"[؛،:.!؟…\-«»\"'‌]")
+
+
+def _norm_title(s: str) -> str:
+    """Normalize a title for matching: unify Arabic/Persian glyph variants,
+    drop punctuation + zero-width joiners, collapse whitespace."""
+    s = (s or "").replace("ي", "ی").replace("ك", "ک")
+    s = _PUNCT_RE.sub(" ", s)
+    return _WS_RE.sub(" ", s).strip()
+
+
+def _closest_matches_ours(closest: str, ours: list[str]) -> bool:
+    """True when the LLM's `closest_existing` is really one of OUR titles.
+
+    The comparator (gpt-4.1-nano) is told to name the nearest same-event
+    aggregator title before deciding `missing`, then only flag missing when NO
+    title covers the event. Observed 2026-06-15: it named an EXACT match
+    («…۱۱ موشک به سمت تل‌آویو…», #13 in our own list) yet still returned
+    missing=true — a self-contradiction the nano model won't reliably avoid.
+    So we don't trust its boolean over its own evidence: if `closest_existing`
+    strongly overlaps a compared title, the event IS covered. Strong = ≥4
+    shared tokens AND ≥60% overlap in either direction (the echoed title may be
+    lightly reworded or truncated)."""
+    c = set(_norm_title(closest).split())
+    if len(c) < 3:
+        return False
+    for t in ours:
+        o = set(_norm_title(t).split())
+        if not o:
+            continue
+        inter = len(c & o)
+        if inter >= 4 and (inter / len(c) >= 0.6 or inter / len(o) >= 0.6):
+            return True
+    return False
+
+
 def _extract_headlines(html: str, limit: int = 15) -> list[str]:
     """Pull <title>/<h1>/<h2>/<h3> text from a homepage — that's where lead
     headlines live — without an LLM call. Cheap, robust to layout changes.
@@ -271,6 +307,16 @@ async def run_bellwether_check(db: AsyncSession) -> dict[str, Any]:
                 result["confidence"] = max(0.0, min(1.0, float(verdict.get("confidence", 0))))
             except (TypeError, ValueError):
                 result["confidence"] = 0.0
+            # Deterministic guardrail against the nano model's self-
+            # contradiction (named an exact match, still said missing=true).
+            # If its own closest_existing really is one of our titles, the
+            # event is covered — suppress the flag and record why.
+            if result["missing"] and _closest_matches_ours(result["closest_existing"], ours):
+                result["missing"] = False
+                result["missing_override"] = (
+                    "closest_existing matched a compared title — "
+                    "LLM self-contradiction suppressed"
+                )
 
     try:
         from app.services.events import log_event

@@ -1164,6 +1164,41 @@ def _COMPARE_PROMPT_TEXT(src: str) -> str:
     return src[i:i + 1600] if i != -1 else ""
 
 
+class TestBellwetherClosestExistingGuardrail:
+    """2026-06-15: even with the tightened prompt, gpt-4.1-nano named an EXACT
+    match in our titles («…۱۱ موشک به سمت تل‌آویو…», #13 in compared_titles)
+    yet still returned missing=true. The deterministic guardrail suppresses the
+    flag when the LLM's own closest_existing strongly overlaps one of our
+    titles — we don't trust its boolean over its own evidence. Must NOT suppress
+    a genuinely different (low-overlap) closest title."""
+
+    def test_exact_match_suppresses_false_positive(self):
+        from app.services.bellwether import _closest_matches_ours
+        ours = [
+            "توافق احتمالی ایران و آمریکا در ژنو",
+            "حملات اسرائیل به جنوب لبنان؛ کشته شدن یک مقام محلی",
+            "حملات موشکی ایران به اسرائیل؛ ۱۱ موشک به سمت تل‌آویو شلیک شد",
+        ]
+        # the exact self-contradiction case from the 2026-06-15 run
+        assert _closest_matches_ours(
+            "حملات موشکی ایران به اسرائیل؛ ۱۱ موشک به سمت تل‌آویو شلیک شد", ours
+        )
+        # lightly reworded / glyph-variant echo still matches
+        assert _closest_matches_ours(
+            "حملات موشكي ايران به اسراييل: ۱۱ موشك به سمت تل آويو", ours
+        )
+
+    def test_different_event_not_suppressed(self):
+        from app.services.bellwether import _closest_matches_ours
+        ours = [
+            "توافق احتمالی ایران و آمریکا در ژنو",
+            "حملات موشکی ایران به اسرائیل؛ ۱۱ موشک به سمت تل‌آویو شلیک شد",
+        ]
+        # a real gap the LLM couldn't match to anything close
+        assert not _closest_matches_ours("اعتصاب سراسری معلمان در ۳۰ شهر ایران", ours)
+        assert not _closest_matches_ours("", ours)
+
+
 class TestManualImageNotGatedOnIsEdited:
     """2026-06-14: a manually-pinned cover image (`manual_image_url` in the
     summary_en blob, written by update_image) stopped being served whenever
