@@ -4853,6 +4853,11 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
             WHERE article_count >= :max_size
               AND frozen_at IS NULL
               AND archived_at IS NULL
+              -- Pinned heroes (priority >= pin floor 40) are exempt: the
+              -- matcher now intentionally lets the operator's canonical
+              -- story grow past max_cluster_size (Parham 2026-06-15), so a
+              -- large pinned hero is by-design, not clustering-past-the-cap.
+              AND COALESCE(priority, 0) < 40
           ) AS oversized_active,
           COUNT(*) FILTER (WHERE first_published_at IS NULL) AS null_first_pub,
           COUNT(*) FILTER (WHERE centroid_embedding IS NULL AND article_count >= 2) AS null_centroid

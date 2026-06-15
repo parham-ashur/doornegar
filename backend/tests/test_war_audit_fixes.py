@@ -4387,3 +4387,75 @@ class TestIngestEgressFix:
             "ingest_all_channels no longer passes the shared map into ingest_channel — "
             "the per-channel rebuild (44× multiplier) is back"
         )
+
+
+class TestPinnedHeroFeedExemption:
+    """Parham 2026-06-15: a fast-breaking story fragments when its pinned
+    hero froze / exceeded the caps, so fresh coverage spawns parallel
+    clusters (the Iran-US deal split into 6). Fix: the match-existing query
+    lets a manually-pinned story (priority >= pin floor) keep absorbing
+    fresh (<=7d) articles past the max_cluster_size and umbrella first-pub
+    caps. The runaway-umbrella protection stays in force for everything the
+    operator has NOT pinned, and the <=7-day ARTICLE window is untouched.
+
+    These are source-level tripwires (same style as TestSevenDayDataWindow):
+    they pin the SHAPE of the exemption so a future cycle can't silently
+    drop it or, worse, extend it to the article-age window.
+    """
+
+    def _match_body(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "app" / "services" / "clustering.py").read_text()
+        idx = src.find("async def _match_to_existing_stories")
+        assert idx >= 0, "_match_to_existing_stories must exist"
+        nxt = src.find("\nasync def ", idx + 1)
+        return src[idx: nxt if nxt > 0 else len(src)]
+
+    def test_pins_exempt_from_size_cap(self):
+        import re
+        body = self._match_body()
+        # An or_( ... ) containing BOTH the pin floor and the size cap.
+        m = re.search(r"or_\((?:[^)]|\([^)]*\))*?_MERGE_PIN_PRIORITY_FLOOR"
+                      r"(?:[^)]|\([^)]*\))*?max_cluster_size", body, re.S)
+        assert m is not None, (
+            "match-existing must exempt pinned stories from the "
+            "max_cluster_size cap via or_(priority>=PIN_FLOOR, ...)"
+        )
+
+    def test_pins_exempt_from_umbrella_first_pub_cap(self):
+        import re
+        body = self._match_body()
+        m = re.search(r"or_\((?:[^)]|\([^)]*\))*?_MERGE_PIN_PRIORITY_FLOOR"
+                      r"(?:[^)]|\([^)]*\))*?umbrella_cutoff", body, re.S)
+        assert m is not None, (
+            "match-existing must exempt pinned stories from the umbrella "
+            "first-pub cap via or_(priority>=PIN_FLOOR, ...)"
+        )
+
+    def test_article_age_window_is_NOT_pin_exempt(self):
+        """The <=7d ARTICLE window must stay a hard AND for every story,
+        pinned or not — only stale STORIES are widened, never stale
+        articles. The last_updated_at/time_cutoff gate must remain a bare
+        condition, not wrapped in an or_ with the pin floor."""
+        body = self._match_body()
+        assert "Story.last_updated_at >= time_cutoff," in body, (
+            "the freshness gate must remain a top-level AND condition"
+        )
+        # AGE_CAP_DAYS stays <= 7 (belt-and-suspenders with TestSevenDayDataWindow)
+        import re
+        m = re.search(r"AGE_CAP_DAYS = (\d+)", body)
+        assert m and int(m.group(1)) <= 7
+
+    def test_oversized_canary_exempts_pins(self):
+        """A deliberately-large pinned hero must NOT trip the
+        oversized_active_stories canary (else it's a guaranteed false
+        positive the moment the matcher feeds a pin past the cap)."""
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py").read_text()
+        idx = src.find("AS oversized_active")
+        assert idx >= 0
+        window = src[max(0, idx - 400): idx]
+        assert "COALESCE(priority, 0) < 40" in window, (
+            "oversized_active canary must exclude pinned (priority>=40) "
+            "stories now that the matcher grows pins past max_cluster_size"
+        )

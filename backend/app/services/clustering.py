@@ -17,7 +17,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from openai import OpenAI
-from sqlalchemy import func, select, text, update
+from sqlalchemy import func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -931,7 +931,20 @@ async def _match_to_existing_stories(
             # small-story anchor floor (jaccard >= 0.15, line ~1280) and the
             # 7-day umbrella/last_updated caps below.
             Story.article_count >= 3,
-            Story.article_count < settings.max_cluster_size,
+            # Pinned-hero feed exemption (Parham 2026-06-15): a story at/above
+            # the pin floor is the operator's explicit "this is THE canonical
+            # story." Let fresh (≤7d) articles keep joining it past the
+            # max_cluster_size + umbrella first-pub caps instead of fragmenting
+            # one fast event into parallel clusters (the Iran–US deal split into
+            # 6). Non-pinned stories still chapter at 7d / max_cluster_size, so
+            # the runaway-umbrella protection is untouched for anything the
+            # operator hasn't curated. The ≤7-day ARTICLE window (time_cutoff /
+            # AGE_CAP_DAYS) is UNCHANGED — stale articles still never cluster;
+            # this only widens which EXISTING stories are eligible match targets.
+            or_(
+                Story.priority >= _MERGE_PIN_PRIORITY_FLOOR,
+                Story.article_count < settings.max_cluster_size,
+            ),
             Story.last_updated_at >= time_cutoff,
             Story.frozen_at.is_(None),
             # F3 — archived stories are never resurrected.
@@ -948,9 +961,10 @@ async def _match_to_existing_stories(
             # `step_archive_stale` already backfills first_published_at
             # from MIN(article.published_at), so legitimate new stories
             # always have a real value before this gate fires.
-            (
+            or_(
+                Story.priority >= _MERGE_PIN_PRIORITY_FLOOR,
                 func.coalesce(Story.first_published_at, Story.created_at)
-                >= umbrella_cutoff
+                >= umbrella_cutoff,
             ),
         )
         .order_by(Story.last_updated_at.desc().nullslast())
