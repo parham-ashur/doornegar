@@ -4735,6 +4735,120 @@ async def step_demote_umbrella_stories():
     return stats
 
 
+async def step_dedupe_homepage_events():
+    """Collapse same-event homepage stories to ONE card (Parham 2026-06-16).
+
+    A fast-breaking story (the Iran-US deal) fragments into several homepage
+    cards because the clustering engine is built for tight, short-lived
+    clusters: every cron, fresh coverage forms a new tight cluster instead of
+    joining the big diffuse pinned hero (whose centroid no longer
+    cosine-matches any single fresh article), and the coherence audit then
+    freezes the hero for that breadth. Forcing one mega-hero fights the
+    architecture; rather than hand-merge every cron, we de-dup at the
+    PRESENTATION layer: detect stories that are clearly the SAME event and
+    keep only the representative (pinned, else freshest) on the homepage,
+    archiving the rest.
+
+    Same-event test (calibrated 2026-06-16, see homepage_dedup.py): centroid
+    cosine >= 0.64 AND title-token Jaccard >= 0.12 AND >= 2 shared content
+    tokens. Biased to precision — a missed dup is a repeated card; a false
+    merge hides a genuinely distinct story. NEVER hides a pinned story.
+
+    Runs AFTER recalc_trending (needs fresh trending_score to pick the
+    representative) and BEFORE homepage_aggregates (so the denormalized blob
+    is built on the de-duped set).
+    """
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    from sqlalchemy import select, update
+    from app.database import async_session
+    from app.models.story import Story
+    from app.services.events import log_event as _log_event
+    from app.services.homepage_dedup import DedupRow, plan_dedup
+
+    stats = {"candidates": 0, "groups": 0, "hidden": 0, "details": []}
+    recent_cutoff = _dt.now(_tz.utc) - _td(days=14)
+    now = _dt.now(_tz.utc)
+
+    async with async_session() as db:
+        rows = (await db.execute(
+            select(
+                Story.id, Story.title_fa, Story.centroid_embedding,
+                Story.priority, Story.trending_score, Story.last_updated_at,
+                Story.article_count,
+            ).where(
+                Story.archived_at.is_(None),
+                Story.article_count >= 5,
+                Story.centroid_embedding.isnot(None),
+                Story.last_updated_at >= recent_cutoff,
+            )
+        )).all()
+        candidates = [
+            DedupRow(
+                id=r.id, title_fa=r.title_fa, centroid=r.centroid_embedding,
+                priority=int(r.priority or 0),
+                trending_score=float(r.trending_score or 0.0),
+                last_updated_at=r.last_updated_at,
+                article_count=int(r.article_count or 0),
+            )
+            for r in rows
+        ]
+        stats["candidates"] = len(candidates)
+
+        plans = plan_dedup(candidates)
+        stats["groups"] = len(plans)
+
+        # Defense-in-depth: same-event fragmentation is usually 2-6 cards. If
+        # the plan would archive more than this in one run, treat it as a
+        # threshold/centroid-drift anomaly and SKIP applying — surface it
+        # instead of mass-archiving. (The 2026-06-16 transitive prototype
+        # tried to hide 36 stories; this cap is the backstop against any
+        # future recurrence.)
+        SAFETY_CAP = 12
+        total_hides = sum(len(hide) for _, hide in plans)
+        if total_hides > SAFETY_CAP:
+            stats["skipped_safety"] = total_hides
+            logger.error(
+                f"Homepage event de-dup ABORTED: plan would hide {total_hides} "
+                f"stories (cap {SAFETY_CAP}) — likely threshold drift. Not applied. "
+                f"Plans: {[{'kept': (r.title_fa or '')[:50], 'n_hide': len(h)} for r, h in plans]}"
+            )
+            return stats
+
+        for rep, hide in plans:
+            if not hide:
+                continue
+            hide_ids = [h.id for h in hide]
+            await db.execute(
+                update(Story).where(Story.id.in_(hide_ids))
+                .values(archived_at=now, priority=-100)
+                .execution_options(synchronize_session=False)
+            )
+            for h in hide:
+                await _log_event(
+                    db,
+                    event_type="story_deduped",
+                    actor="maintenance",
+                    story_id=h.id,
+                    signals={
+                        "representative_id": str(rep.id),
+                        "representative_title": (rep.title_fa or "")[:120],
+                        "hidden_title": (h.title_fa or "")[:120],
+                    },
+                )
+            stats["hidden"] += len(hide)
+            stats["details"].append({
+                "kept": (rep.title_fa or "")[:80],
+                "kept_id": str(rep.id),
+                "hid": [(h.title_fa or "")[:80] for h in hide],
+            })
+        await db.commit()
+
+    if stats["hidden"]:
+        logger.info(f"Homepage event de-dup: {stats['hidden']} hidden across "
+                    f"{stats['groups']} group(s): {stats['details']}")
+    return stats
+
+
 async def step_archive_stale():
     """Three-tier story aging.
 
@@ -8563,6 +8677,15 @@ FULL_PIPELINE = [
     # the 6h until next cron. Demote sets priority via formula
     # independent of trending_score, so swapping order is safe.
     ("recalc_trending", "Recalculate trending", "step_recalculate_trending"),
+    # Self-running same-event de-dup (Parham 2026-06-16). A fast-breaking
+    # story (the Iran-US deal) fragments into multiple homepage cards because
+    # clustering wants tight, short-lived clusters; rather than hand-merge
+    # every cron, collapse stories that are clearly the SAME event (centroid
+    # cosine + title overlap, see homepage_dedup.py) to ONE card — keep the
+    # pinned/freshest, archive the rest. Runs AFTER recalc_trending (needs
+    # fresh trending_score to pick the representative) and BEFORE
+    # homepage_aggregates so the denormalized blob reflects the de-duped set.
+    ("dedup_homepage_events", "De-duplicate same-event homepage stories", "step_dedupe_homepage_events"),
     # Phase G.3.2 (Parham 2026-05-10): denormalize per-story image +
     # coverage percentages + narrative-group blob into
     # Story.homepage_aggregates. Runs AFTER recalc_trending so the

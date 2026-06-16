@@ -219,6 +219,21 @@ class TestPipelineOrdering:
             "trending_score reflects newly-archived state."
         )
 
+    def test_dedup_homepage_events_between_recalc_and_aggregates(self):
+        """Same-event de-dup (2026-06-16) must run AFTER the late
+        recalc_trending (needs fresh trending_score to pick the
+        representative) and BEFORE homepage_aggregates (so the
+        denormalized homepage blob is built on the de-duped set)."""
+        m = _import_pipelines()
+        keys = _pipeline_keys(m.FULL_PIPELINE)
+        assert "dedup_homepage_events" in keys
+        assert keys.index("recalc_trending") < keys.index("dedup_homepage_events"), (
+            "dedup must run after the late recalc_trending"
+        )
+        assert keys.index("dedup_homepage_events") < keys.index("homepage_aggregates"), (
+            "dedup must run before homepage_aggregates so the blob is de-duped"
+        )
+
 
 # ═════════════════════════════════════════════════════════════════════
 # 3. Removed steps stay removed
@@ -267,10 +282,16 @@ class TestIngestOnlyPipelineShape:
     dashboard's progress bar shows wrong percentages but the run still
     completes — silent UI bug."""
 
-    def test_full_pipeline_total_steps_is_62(self):
+    def test_full_pipeline_total_steps_is_63(self):
         """The 6h-cron progress bar pins to this count. Same drift
         risk as INGEST_ONLY — keep both this number and the parent
-        `CLAUDE.md` (`full=62`) in lockstep with the actual list.
+        `CLAUDE.md` (`full=63`) in lockstep with the actual list.
+
+        Bumped 62 → 63 on 2026-06-16: added `dedup_homepage_events`
+        after `recalc_trending` (before `homepage_aggregates`). Self-
+        running same-event de-dup — collapses fragmented same-event
+        stories (e.g. the Iran-US deal) to ONE homepage card, keeping
+        the pinned/freshest and archiving the rest. See homepage_dedup.py.
 
         Bumped 61 → 62 on 2026-06-10: added `canary_incident_sync` at
         the END — auto-logs detected_by='canary' incidents on canary
@@ -298,11 +319,11 @@ class TestIngestOnlyPipelineShape:
         Neon storage + egress lean.
         """
         m = _import_pipelines()
-        assert len(m.FULL_PIPELINE) == 62, (
+        assert len(m.FULL_PIPELINE) == 63, (
             f"FULL_PIPELINE step count drifted: found "
             f"{len(m.FULL_PIPELINE)} steps. If this is intentional, "
             f"update both this test AND the parent CLAUDE.md verification "
-            f"step #4 (`full=62`)."
+            f"step #4 (`full=63`)."
         )
 
     def test_total_steps_is_13(self):
