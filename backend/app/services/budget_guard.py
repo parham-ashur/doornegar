@@ -50,6 +50,21 @@ HALT_FRACTION_LLM = 0.80
 # Neon data transfer alone, projecting to $77/mo).
 HALT_HARD_USD = MONTHLY_BUDGET_USD * 0.85  # $25.50
 
+# Parham 2026-06-18 (EXPLICIT owner decision): stop counting Neon egress in
+# the budget kill-switch and stop halting crons on egress. "remove concerns
+# and limits for Neon, let it run and don't count it." Rationale: the egress
+# halts were skipping crons mid-month (06-17 15:00 was skipped) and staling
+# the homepage during the Iran-US deal — Parham accepts the Neon cost so the
+# site stays fresh. When False:
+#   • combined_mtd = LLM cost only (egress excluded from the hard/80% caps)
+#   • the daily egress cap halt is skipped
+# The LLM kill-switch (HALT_FRACTION_LLM on llm_mtd) is UNCHANGED and still
+# protects against runaway LLM spend. Egress is still ESTIMATED + reported in
+# signals (for visibility) — just never halts. Flip back to True to restore
+# the egress floor. See feedback_budget_kill_switch.md + the
+# 2gb-daily-egress-cap strict rule (now relaxed for Neon by owner decision).
+COUNT_NEON_EGRESS_IN_BUDGET = False
+
 # Parham 2026-05-09: Neon free tier allows 100 GB/month outbound
 # data transfer. 100 / 30 = ~3.33 GB/day. We cap at 3.0 GB/day to
 # leave 10% headroom for unexpected spikes. When today's egress
@@ -344,12 +359,15 @@ async def should_halt_for_budget(
     egress_gb, egress_cost = await get_neon_egress_estimate_mtd(db)
     daily_egress_gb, _current_tup = await get_daily_egress_estimate(db)
     override = await get_manual_override(db)
-    combined_mtd = llm_mtd + egress_cost
+    # Parham 2026-06-18: Neon egress no longer counts toward the budget.
+    # combined_mtd reflects only what we still gate on (LLM spend).
+    combined_mtd = llm_mtd + (egress_cost if COUNT_NEON_EGRESS_IN_BUDGET else 0.0)
 
     signals = {
         "llm_cost_mtd_usd": round(llm_mtd, 4),
         "neon_egress_estimate_gb_mtd": round(egress_gb, 2),
         "neon_cost_estimate_usd_mtd": round(egress_cost, 4),
+        "neon_counted_in_budget": COUNT_NEON_EGRESS_IN_BUDGET,
         "combined_cost_estimate_usd_mtd": round(combined_mtd, 4),
         "neon_egress_estimate_gb_today": round(daily_egress_gb, 3),
         "daily_egress_cap_gb": DAILY_EGRESS_CAP_GB,
@@ -372,7 +390,7 @@ async def should_halt_for_budget(
     # so a one-shot clear cannot bypass the daily cap (the cap is
     # the survival floor; clear is for unblocking specific runs
     # within budget).
-    if daily_egress_gb >= DAILY_EGRESS_CAP_GB:
+    if COUNT_NEON_EGRESS_IN_BUDGET and daily_egress_gb >= DAILY_EGRESS_CAP_GB:
         return (
             True,
             f"daily_egress_cap_{daily_egress_gb:.2f}gb_over_{DAILY_EGRESS_CAP_GB}gb",

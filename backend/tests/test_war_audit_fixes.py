@@ -3156,6 +3156,29 @@ class TestDailyEgressCap3GB:
             "on a fresh DB without manual migration."
         )
 
+    def test_neon_egress_not_counted_when_disabled(self):
+        """Parham 2026-06-18 (EXPLICIT owner decision): Neon egress no longer
+        counts toward the budget kill-switch and no longer halts crons. The
+        egress halts had started skipping mid-month crons (06-17 15:00) and
+        staling the homepage during the Iran-US deal; Parham accepts the Neon
+        cost to keep the site fresh. The LLM kill-switch is UNCHANGED. Flip
+        COUNT_NEON_EGRESS_IN_BUDGET back to True to restore the egress floor.
+        This overrides the egress-cap intent of this class by owner decision."""
+        from pathlib import Path
+        src = (
+            Path(__file__).parent.parent / "app" / "services" / "budget_guard.py"
+        ).read_text()
+        assert "COUNT_NEON_EGRESS_IN_BUDGET = False" in src, (
+            "Neon egress counting is disabled by owner decision 2026-06-18"
+        )
+        assert "egress_cost if COUNT_NEON_EGRESS_IN_BUDGET else 0.0" in src, (
+            "combined_mtd must drop egress_cost when COUNT_NEON_EGRESS_IN_BUDGET is False"
+        )
+        assert (
+            "if COUNT_NEON_EGRESS_IN_BUDGET and daily_egress_gb >= DAILY_EGRESS_CAP_GB"
+            in src
+        ), "the daily egress cap halt must be gated by COUNT_NEON_EGRESS_IN_BUDGET"
+
 
 class TestManualLockHaltsEntirePipeline:
     """Cycle-5 Phase E.2 (CRITICAL 2026-05-09): the budget kill-switch
