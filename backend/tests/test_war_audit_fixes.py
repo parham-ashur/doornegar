@@ -4482,3 +4482,34 @@ class TestPinnedHeroFeedExemption:
             "oversized_active canary must exclude pinned (priority>=40) "
             "stories now that the matcher grows pins past max_cluster_size"
         )
+
+
+class TestMergeReassignsAnalystTakes:
+    """2026-06-19: the cluster step failed with a ForeignKeyViolationError —
+    _merge_hidden_stories (and the sibling _merge_tiny_by_cosine) deleted a
+    merged-away victim story that still had analyst_takes rows. analyst_takes.
+    story_id is a RESTRICT FK, so the DELETE violated it. Both merge paths must
+    reassign analyst_takes to the keeper BEFORE deleting the victim, exactly
+    like articles / telegram_posts / rater_feedback already do."""
+
+    def _fn_body(self, name):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "app" / "services" / "clustering.py").read_text()
+        idx = src.find(f"async def {name}")
+        assert idx >= 0, f"{name} must exist"
+        nxt = src.find("\nasync def ", idx + 1)
+        return src[idx: nxt if nxt > 0 else len(src)]
+
+    def test_merge_hidden_reassigns_analyst_takes_before_delete(self):
+        body = self._fn_body("_merge_hidden_stories")
+        assert "AnalystTake" in body, "merge_hidden must touch analyst_takes"
+        assert "db.delete(victim)" in body
+        assert body.index("AnalystTake") < body.index("db.delete(victim)"), (
+            "analyst_takes must be reassigned BEFORE the victim is deleted"
+        )
+
+    def test_merge_tiny_reassigns_analyst_takes_before_delete(self):
+        body = self._fn_body("_merge_tiny_by_cosine")
+        assert "AnalystTake" in body, "merge_tiny must touch analyst_takes"
+        assert "db.delete(victim)" in body
+        assert body.index("AnalystTake") < body.index("db.delete(victim)")

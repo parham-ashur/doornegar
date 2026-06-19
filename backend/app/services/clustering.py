@@ -2304,6 +2304,10 @@ async def _merge_tiny_by_cosine(db: AsyncSession, threshold: float = 0.60) -> in
             await db.execute(update(Article).where(Article.story_id == victim.id).values(story_id=keeper.id))
             await db.execute(update(TelegramPost).where(TelegramPost.story_id == victim.id).values(story_id=keeper.id))
             await db.execute(update(RaterFeedback).where(RaterFeedback.story_id == victim.id).values(story_id=keeper.id))
+            # analyst_takes.story_id is a RESTRICT FK — reassign to keeper before
+            # deleting the victim, else ForeignKeyViolationError. (2026-06-19 fix.)
+            from app.models.analyst_take import AnalystTake as _AnalystTake
+            await db.execute(update(_AnalystTake).where(_AnalystTake.story_id == victim.id).values(story_id=keeper.id))
             from sqlalchemy import delete as _del
             await db.execute(_del(SocialSentimentSnapshot).where(SocialSentimentSnapshot.story_id == victim.id))
             await _log_event_tiny(
@@ -2415,6 +2419,15 @@ async def _merge_hidden_stories(db: AsyncSession) -> int:
             await db.execute(
                 update(RaterFeedback)
                 .where(RaterFeedback.story_id == victim.id)
+                .values(story_id=keeper.id)
+            )
+            # analyst_takes.story_id is a RESTRICT FK — reassign to keeper before
+            # deleting the victim, else ForeignKeyViolationError (the exact
+            # 2026-06-19 production merge_hidden failure this fixes).
+            from app.models.analyst_take import AnalystTake
+            await db.execute(
+                update(AnalystTake)
+                .where(AnalystTake.story_id == victim.id)
                 .values(story_id=keeper.id)
             )
             from sqlalchemy import delete
