@@ -4520,3 +4520,139 @@ class TestMergeReassignsAnalystTakes:
         assert "AnalystTake" in body, "merge_tiny must touch analyst_takes"
         assert "db.delete(victim)" in body
         assert body.index("AnalystTake") < body.index("db.delete(victim)")
+
+
+# ═════════════════════════════════════════════════════════════════════
+# Homepage coherence gate (2026-06-20)
+# ═════════════════════════════════════════════════════════════════════
+
+class TestCoherenceGate:
+    """Step coherence_gate archives small grab-bag clusters before LLM spend.
+
+    Grab-bags: 5-25 article stories where most articles are off-topic.
+    Detection: mean cosine similarity of article embeddings to story centroid.
+    Exempt: pinned stories (priority >= 1), frozen, large (>25 articles).
+    """
+
+    def _make_story(self, story_id="s1", priority=0, article_count=9,
+                    centroid=None, article_embeddings=None):
+        from app.services.coherence_gate import CandidateStory
+        return CandidateStory(
+            story_id=story_id,
+            priority=priority,
+            article_count=article_count,
+            centroid_embedding=centroid or [1.0, 0.0, 0.0],
+            article_embeddings=article_embeddings or [],
+        )
+
+    def _unit_vec(self, angle_deg):
+        import math
+        r = math.radians(angle_deg)
+        return [math.cos(r), math.sin(r), 0.0]
+
+    def test_coherent_cluster_not_archived(self):
+        """A cluster where all articles are tightly clustered around the
+        centroid (high mean sim) must NOT be archived."""
+        from app.services.coherence_gate import plan_coherence_archive
+        centroid = [1.0, 0.0, 0.0]
+        # All articles very similar to centroid
+        article_embeddings = [self._unit_vec(a) for a in [5, -5, 10, -10, 8, -8, 3, -3, 6]]
+        story = self._make_story(
+            article_count=9, centroid=centroid, article_embeddings=article_embeddings
+        )
+        result = plan_coherence_archive([story])
+        assert result == [], "coherent cluster must not be archived"
+
+    def test_grab_bag_archived(self):
+        """A cluster where most articles are off-topic (low mean sim to
+        centroid) must be returned for archival."""
+        from app.services.coherence_gate import plan_coherence_archive
+        centroid = [1.0, 0.0, 0.0]
+        # 1 on-topic, 8 pointing in random orthogonal directions
+        on_topic = self._unit_vec(5)
+        off_topic = [self._unit_vec(a) for a in [90, 95, 100, 105, 110, 85, 92, 97]]
+        article_embeddings = [on_topic] + off_topic
+        story = self._make_story(
+            story_id="grab-bag-1", article_count=9,
+            centroid=centroid, article_embeddings=article_embeddings
+        )
+        result = plan_coherence_archive([story])
+        ids = [sid for sid, _ in result]
+        assert "grab-bag-1" in ids, "grab-bag with 1/9 on-topic must be archived"
+
+    def test_pinned_story_exempt(self):
+        """Pinned stories (priority >= 1) must never be archived."""
+        from app.services.coherence_gate import plan_coherence_archive, PIN_FLOOR
+        centroid = [1.0, 0.0, 0.0]
+        off_topic = [self._unit_vec(a) for a in range(90, 180, 10)]
+        story = self._make_story(
+            story_id="pinned", priority=PIN_FLOOR,
+            article_count=9, centroid=centroid, article_embeddings=off_topic
+        )
+        result = plan_coherence_archive([story])
+        assert result == [], "pinned story must be exempt from coherence gate"
+
+    def test_large_story_exempt(self):
+        """Stories with article_count > MAX_ARTICLE_COUNT are exempt."""
+        from app.services.coherence_gate import plan_coherence_archive, MAX_ARTICLE_COUNT
+        centroid = [1.0, 0.0, 0.0]
+        off_topic = [self._unit_vec(a) for a in range(90, 90 + MAX_ARTICLE_COUNT + 2)]
+        story = self._make_story(
+            story_id="large", priority=0,
+            article_count=MAX_ARTICLE_COUNT + 1,
+            centroid=centroid, article_embeddings=off_topic
+        )
+        result = plan_coherence_archive([story])
+        assert result == [], "large story must be exempt from coherence gate"
+
+    def test_safety_cap_respected(self):
+        """Never archive more than SAFETY_CAP stories per run."""
+        from app.services.coherence_gate import plan_coherence_archive, SAFETY_CAP
+        centroid = [1.0, 0.0, 0.0]
+        off_topic = [self._unit_vec(a) for a in range(90, 90 + 9)]
+        stories = [
+            self._make_story(
+                story_id=f"grab-{i}", priority=0, article_count=9,
+                centroid=centroid, article_embeddings=off_topic
+            )
+            for i in range(SAFETY_CAP + 3)
+        ]
+        result = plan_coherence_archive(stories)
+        assert len(result) <= SAFETY_CAP, (
+            f"safety cap must be respected: got {len(result)} > {SAFETY_CAP}"
+        )
+
+    def test_low_embedding_coverage_skipped(self):
+        """If fewer than MIN_COVERAGE fraction of articles have embeddings,
+        the story is skipped (we can't judge coherence)."""
+        from app.services.coherence_gate import plan_coherence_archive, MIN_COVERAGE
+        centroid = [1.0, 0.0, 0.0]
+        # Only 1/9 articles have an embedding (< MIN_COVERAGE)
+        embeddings = [self._unit_vec(90)] + [None] * 8
+        story = self._make_story(
+            story_id="low-coverage", priority=0, article_count=9,
+            centroid=centroid, article_embeddings=embeddings
+        )
+        result = plan_coherence_archive([story])
+        assert result == [], "story with low embedding coverage must be skipped"
+
+    def test_no_centroid_skipped(self):
+        """Stories without a centroid embedding cannot be scored."""
+        from app.services.coherence_gate import CandidateStory, plan_coherence_archive
+        embeddings = [[0.0, 1.0, 0.0]] * 9
+        story = CandidateStory(
+            story_id="no-centroid", priority=0, article_count=9,
+            centroid_embedding=None, article_embeddings=embeddings
+        )
+        result = plan_coherence_archive([story])
+        assert result == [], "story without centroid must be skipped"
+
+    def test_coherence_gate_in_full_pipeline_not_ingest_only(self):
+        """coherence_gate belongs in FULL_PIPELINE only — not INGEST_ONLY."""
+        import importlib, sys
+        sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent.parent))
+        m = importlib.import_module("auto_maintenance")
+        full_keys = [k for k, _, _ in m.FULL_PIPELINE]
+        ingest_keys = [k for k, _, _ in m.INGEST_ONLY_PIPELINE]
+        assert "coherence_gate" in full_keys, "coherence_gate must be in FULL_PIPELINE"
+        assert "coherence_gate" not in ingest_keys, "coherence_gate must NOT be in INGEST_ONLY_PIPELINE"

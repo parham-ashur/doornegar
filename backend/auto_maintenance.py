@@ -1414,6 +1414,115 @@ async def step_merge_similar():
     return {"merged": merged}
 
 
+async def step_coherence_gate():
+    """Archive small incoherent clusters (grab-bags) before LLM spend.
+
+    Grab-bags form when the cluster + recluster_orphans steps lump articles
+    from different domestic-news topics under one title because they share
+    generic Iranian-news embedding proximity. This step runs AFTER centroids
+    are recomputed (step_recompute_centroids) so each story has a centroid
+    embedding, and BEFORE step_summarize_newly_visible / step_summarize so
+    we never burn LLM budget on grab-bags.
+
+    Scoring: mean cosine(article_embedding, story_centroid). Coherent
+    clusters score ≥ 0.45; grab-bags (most articles off-topic) score 0.25-0.40.
+
+    Exempt: pinned (priority ≥ 1), frozen (frozen-stays-on-homepage rule),
+    large stories (article_count > 25), stories created > 48h ago (stable by then).
+    SAFETY_CAP = 5 per run.
+    """
+    from datetime import datetime, timezone, timedelta
+    from uuid import UUID
+
+    from sqlalchemy import select, update
+
+    from app.database import async_session
+    from app.models.article import Article
+    from app.models.story import Story
+    from app.services.coherence_gate import (
+        MAX_ARTICLE_COUNT,
+        MAX_AGE_HOURS,
+        MIN_ARTICLE_COUNT,
+        CandidateStory,
+        plan_coherence_archive,
+    )
+    from app.services.events import log_event
+
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(hours=MAX_AGE_HOURS)
+
+    # Short read session — load candidate stories
+    async with async_session() as db:
+        rows = (await db.execute(
+            select(Story.id, Story.priority, Story.article_count, Story.centroid_embedding)
+            .where(
+                Story.archived_at.is_(None),
+                Story.frozen_at.is_(None),   # frozen stays on homepage by design
+                Story.article_count >= MIN_ARTICLE_COUNT,
+                Story.article_count <= MAX_ARTICLE_COUNT,
+                Story.created_at >= cutoff,
+            )
+        )).all()
+
+    if not rows:
+        return {"checked": 0, "archived": 0}
+
+    # Load article embeddings per story (short sessions, one per story)
+    candidates: list[CandidateStory] = []
+    for sid, priority, article_count, centroid in rows:
+        async with async_session() as db:
+            emb_rows = (await db.execute(
+                select(Article.embedding).where(Article.story_id == sid)
+            )).scalars().all()
+        candidates.append(CandidateStory(
+            story_id=str(sid),
+            priority=priority,
+            article_count=article_count,
+            centroid_embedding=centroid,
+            article_embeddings=list(emb_rows),
+        ))
+
+    to_archive = plan_coherence_archive(candidates)
+
+    if not to_archive:
+        logger.info(f"coherence_gate: checked {len(candidates)} stories, none are grab-bags")
+        return {"checked": len(candidates), "archived": 0}
+
+    # Archive each identified grab-bag (short write sessions)
+    archived = 0
+    for sid_str, score in to_archive:
+        sid = UUID(sid_str)
+        async with async_session() as db:
+            await db.execute(
+                update(Story)
+                .where(Story.id == sid)
+                .values(archived_at=now, priority=-100)
+            )
+            await db.commit()
+        async with async_session() as db:
+            await log_event(
+                db,
+                event_type="coherence_gate_archive",
+                actor="maintenance",
+                story_id=sid,
+                signals={"coherence_score": score, "article_count": int(
+                    next(c.article_count for c in candidates if c.story_id == sid_str)
+                )},
+            )
+        logger.warning(
+            f"coherence_gate: archived grab-bag {sid_str[:8]} "
+            f"(coherence={score}, article_count="
+            f"{next(c.article_count for c in candidates if c.story_id == sid_str)})"
+        )
+        archived += 1
+
+    return {
+        "checked": len(candidates),
+        "archived": archived,
+        "archived_ids": [sid for sid, _ in to_archive],
+    }
+
+
 async def step_summarize_newly_visible():
     """Generate summaries for any homepage-eligible story currently lacking one.
 
@@ -8603,6 +8712,15 @@ FULL_PIPELINE = [
     ("cluster", "Cluster articles into stories", "step_cluster"),
     ("centroids", "Recompute story centroid embeddings", "step_recompute_centroids"),
     ("recluster_orphans", "Second-chance clustering for 6h+ orphans (looser cosine)", "step_recluster_orphans"),
+    # Self-running homepage coherence gate (Parham 2026-06-20). After all
+    # clustering (including second-chance orphan re-attach), before any LLM
+    # spend. Scores each small active story (5-25 articles, created <48h ago)
+    # by mean cosine similarity of article embeddings to story centroid; if
+    # < 0.45 (a grab-bag where most articles are off-topic) the story is
+    # archived so summarize_newly_visible and summarize don't burn LLM budget
+    # on it. SAFETY_CAP=5. Exempt: pinned, frozen, large stories.
+    # Bumped full pipeline 63 → 64.
+    ("coherence_gate", "Archive incoherent grab-bag clusters before LLM spend", "step_coherence_gate"),
     # Cycle-3 Phase B fix (2026-05-08): recalc_trending must run BEFORE
     # summarize_newly_visible. Pre-this-fix, the gate
     # `homepage_story_ids` filter `trending_score > 0.5` saw the PRIOR
