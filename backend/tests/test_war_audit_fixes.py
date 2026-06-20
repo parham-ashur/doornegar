@@ -2309,18 +2309,25 @@ class TestStepSummarizeNoCentroidDefer:
             Path(__file__).parent.parent / "auto_maintenance.py"
         ).read_text()
         # Locate the step_summarize main candidate select.
-        idx = src.find("step_summarize uses content_text + title +")
+        idx = src.find("Cycle-2 audit (2026-05-07): the cycle-1 attempt to also defer")
         assert idx >= 0, (
-            "step_summarize comment block must remain to anchor this test"
+            "step_summarize cycle-2 audit comment must remain to anchor this test"
         )
-        # Look at the next ~600 chars (the select + options block).
-        block = src[idx:idx + 1500]
-        # The article-level defers are required; the Story-level defer
-        # of centroid_embedding is the trap.
+        # Look at the preceding ~800 chars (covers the selectinload options block).
+        block = src[max(0, idx - 800):idx + 600]
+        # Story.centroid_embedding must NOT be deferred — it's read at 8 sites
+        # in step_summarize; async lazy-load of a deferred attribute raises MissingGreenlet.
         assert "_defer_summ(Story.centroid_embedding)" not in block, (
             "step_summarize must NOT defer Story.centroid_embedding — "
             "the function reads it at 8 later sites and async lazy-load "
             "raises MissingGreenlet. See cycle-2 audit."
+        )
+        # Article.embedding must also NOT be deferred — the drift check at the
+        # candidate-scan loop accesses a.embedding; deferring it causes the same
+        # MissingGreenlet crash (confirmed 2026-06-20).
+        assert "_defer_summ(Article.embedding)" not in block, (
+            "step_summarize must NOT defer Article.embedding — the drift check "
+            "accesses a.embedding inside async SQLAlchemy. See 2026-06-20 fix."
         )
 
 

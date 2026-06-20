@@ -1737,9 +1737,13 @@ async def step_summarize():
         # the active priority=0 stories at the top of the page stay blank
         # (Parham 2026-05-03: top story 42 articles, NO summary; budget
         # burned on 2461-article umbrella sunk to slot 8).
-        # Egress fix (Parham 2026-05-07): defer embedding, keywords,
-        # named_entities. step_summarize uses content_text + title +
-        # source on each article, but never the embedding fields.
+        # Egress fix (Parham 2026-05-07): defer keywords and named_entities
+        # (not accessed here). Article.embedding is NOT deferred — the
+        # drift check at the candidate-scan loop accesses a.embedding to
+        # compute cosine similarity; deferring it causes a lazy-load of a
+        # deferred attribute inside async SQLAlchemy → greenlet_spawn crash
+        # (confirmed 2026-06-20). With Neon egress no longer counted in
+        # the budget guard, the ~3 KB × article-count egress is acceptable.
         #
         # Cycle-2 audit (2026-05-07): the cycle-1 attempt to also defer
         # Story.centroid_embedding (commit 12076f9) was a defer-then-
@@ -1754,7 +1758,6 @@ async def step_summarize():
             select(Story)
             .options(
                 selectinload(Story.articles).options(
-                    _defer_summ(Article.embedding),
                     _defer_summ(Article.keywords),
                     _defer_summ(Article.named_entities),
                 ),
