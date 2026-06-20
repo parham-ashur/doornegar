@@ -1414,6 +1414,124 @@ async def step_merge_similar():
     return {"merged": merged}
 
 
+async def step_coherence_gate():
+    """Archive incoherent grab-bag clusters before LLM spend (title-judge).
+
+    A grab-bag is a cluster whose title names one topic but whose articles
+    are about several different events that merely share embedding proximity.
+    Embedding geometry can't detect this (validated 2026-06-20: grab-bags
+    score HIGHER than coherent stories on centroid cosine — see
+    coherence_judge.py docstring + memory project_grabbag_detection.md).
+
+    The reliable signal is reading the titles, like a Niloofar audit. For each
+    small fresh active story (5-25 articles, created <48h, not pinned, not
+    frozen) we ask gpt-4.1-nano: "what single event do the most headlines
+    share, and how many share it?" If the largest shared-event group is under
+    45% of the articles, the story is a grab-bag and gets archived.
+
+    Runs AFTER recluster_orphans (final clusters) and BEFORE the summarize
+    steps, so it SAVES net LLM by killing grab-bags before they're summarized.
+    Titles only — no embeddings, no bodies. ~5-8 nano calls/cron. SAFETY_CAP=5.
+    """
+    from datetime import datetime, timezone, timedelta
+
+    from sqlalchemy import select, update
+
+    from app.database import async_session
+    from app.models.article import Article
+    from app.models.story import Story
+    from app.services.coherence_judge import (
+        MAX_AGE_HOURS,
+        MAX_ARTICLE_COUNT,
+        MIN_ARTICLE_COUNT,
+        PIN_FLOOR,
+        SAFETY_CAP,
+        is_grab_bag,
+        judge_story,
+    )
+    from app.services.events import log_event
+
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(hours=MAX_AGE_HOURS)
+
+    # Short read session — candidate stories (title only; embeddings not needed)
+    async with async_session() as db:
+        rows = (await db.execute(
+            select(Story.id, Story.title_fa, Story.article_count)
+            .where(
+                Story.archived_at.is_(None),
+                Story.frozen_at.is_(None),          # frozen stays on homepage
+                Story.priority < PIN_FLOOR,         # never touch pinned stories
+                Story.article_count >= MIN_ARTICLE_COUNT,
+                Story.article_count <= MAX_ARTICLE_COUNT,
+                Story.created_at >= cutoff,
+            )
+            .order_by(Story.created_at.desc())
+        )).all()
+
+    if not rows:
+        return {"checked": 0, "archived": 0}
+
+    archived = 0
+    checked = 0
+    archived_info = []
+    for sid, title_fa, article_count in rows:
+        if archived >= SAFETY_CAP:
+            logger.warning(
+                "coherence_gate: hit SAFETY_CAP=%d — stopping (drift backstop)", SAFETY_CAP
+            )
+            break
+        # Load article titles for this story (short session)
+        async with async_session() as db:
+            titles = list((await db.execute(
+                select(Article.title_fa).where(Article.story_id == sid)
+                .order_by(Article.published_at.desc().nullslast())
+            )).scalars().all())
+
+        parsed = await judge_story(title_fa, titles)
+        if parsed is None:
+            continue  # judge failed/unparseable → never archive on uncertainty
+        checked += 1
+        if not is_grab_bag(parsed):
+            continue
+
+        frac = parsed["on_topic_count"] / parsed["total"]
+        # Archive the grab-bag (short write session) + advisory event log
+        async with async_session() as db:
+            await db.execute(
+                update(Story).where(Story.id == sid)
+                .values(archived_at=now, priority=-100)
+            )
+            await log_event(
+                db,
+                event_type="coherence_gate_archive",
+                actor="maintenance",
+                story_id=sid,
+                signals={
+                    "on_topic_count": parsed["on_topic_count"],
+                    "total": parsed["total"],
+                    "fraction": round(frac, 3),
+                    "dominant_event": parsed["dominant_event"],
+                },
+                commit=True,
+            )
+        logger.warning(
+            "coherence_gate: archived grab-bag %s (%d/%d on-topic, event=%r): %s",
+            str(sid)[:8], parsed["on_topic_count"], parsed["total"],
+            parsed["dominant_event"], (title_fa or "")[:50],
+        )
+        archived_info.append({
+            "id": str(sid),
+            "fraction": round(frac, 3),
+            "event": parsed["dominant_event"],
+        })
+        archived += 1
+
+    if archived:
+        logger.info("coherence_gate: archived %d grab-bag(s) of %d checked", archived, checked)
+    return {"checked": checked, "archived": archived, "archived_info": archived_info}
+
+
 async def step_summarize_newly_visible():
     """Generate summaries for any homepage-eligible story currently lacking one.
 
@@ -8603,6 +8721,14 @@ FULL_PIPELINE = [
     ("cluster", "Cluster articles into stories", "step_cluster"),
     ("centroids", "Recompute story centroid embeddings", "step_recompute_centroids"),
     ("recluster_orphans", "Second-chance clustering for 6h+ orphans (looser cosine)", "step_recluster_orphans"),
+    # Self-running grab-bag gate (Parham 2026-06-20). After all clustering,
+    # before any LLM spend. For each small fresh active story (5-25 art, <48h,
+    # not pinned/frozen) a gpt-4.1-nano title-judge decides if it's one event
+    # or a grab-bag of unrelated events; grab-bags (<45% on a shared event)
+    # are archived. Title-only, ~5-8 nano calls/cron, SAFETY_CAP=5. Embedding
+    # geometry was tried first and FAILED (grab-bags scored higher than
+    # coherent stories) — see coherence_judge.py. Bumped full pipeline 63→64.
+    ("coherence_gate", "Archive grab-bag clusters before LLM spend (title-judge)", "step_coherence_gate"),
     # Cycle-3 Phase B fix (2026-05-08): recalc_trending must run BEFORE
     # summarize_newly_visible. Pre-this-fix, the gate
     # `homepage_story_ids` filter `trending_score > 0.5` saw the PRIOR
