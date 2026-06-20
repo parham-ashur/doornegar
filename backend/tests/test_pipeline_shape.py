@@ -234,24 +234,6 @@ class TestPipelineOrdering:
             "dedup must run before homepage_aggregates so the blob is de-duped"
         )
 
-    def test_coherence_gate_after_recluster_before_summarize(self):
-        """Coherence gate (2026-06-20) must run AFTER recluster_orphans
-        (final clusters) and BEFORE the summarize steps + the pre-summarize
-        recalc (so grab-bags are archived before any LLM spend and aren't
-        counted in trending)."""
-        m = _import_pipelines()
-        keys = _pipeline_keys(m.FULL_PIPELINE)
-        assert "coherence_gate" in keys, "coherence_gate missing from FULL_PIPELINE"
-        assert keys.index("recluster_orphans") < keys.index("coherence_gate"), (
-            "coherence_gate must run after recluster_orphans (needs final clusters)"
-        )
-        assert keys.index("coherence_gate") < keys.index("summarize_newly_visible"), (
-            "coherence_gate must run before summarize_newly_visible (no LLM spend on grab-bags)"
-        )
-        assert keys.index("coherence_gate") < keys.index("summarize"), (
-            "coherence_gate must run before summarize"
-        )
-
 
 # ═════════════════════════════════════════════════════════════════════
 # 3. Removed steps stay removed
@@ -300,19 +282,10 @@ class TestIngestOnlyPipelineShape:
     dashboard's progress bar shows wrong percentages but the run still
     completes — silent UI bug."""
 
-    def test_full_pipeline_total_steps_is_64(self):
+    def test_full_pipeline_total_steps_is_63(self):
         """The 6h-cron progress bar pins to this count. Same drift
         risk as INGEST_ONLY — keep both this number and the parent
-        `CLAUDE.md` (`full=64`) in lockstep with the actual list.
-
-        Bumped 63 → 64 on 2026-06-20: added `coherence_gate` after
-        `recluster_orphans` (before `recalc_trending_pre_summarize`).
-        Self-running grab-bag detector — a gpt-4.1-nano title-judge
-        archives small fresh clusters whose articles span unrelated
-        events (<45% on a shared event). Embedding geometry was tried
-        first and FAILED (grab-bags scored higher than coherent
-        stories). Title-only, ~5-8 nano calls/cron, SAFETY_CAP=5.
-        See coherence_judge.py + memory project_grabbag_detection.md.
+        `CLAUDE.md` (`full=63`) in lockstep with the actual list.
 
         Bumped 62 → 63 on 2026-06-16: added `dedup_homepage_events`
         after `recalc_trending` (before `homepage_aggregates`). Self-
@@ -346,11 +319,11 @@ class TestIngestOnlyPipelineShape:
         Neon storage + egress lean.
         """
         m = _import_pipelines()
-        assert len(m.FULL_PIPELINE) == 64, (
+        assert len(m.FULL_PIPELINE) == 63, (
             f"FULL_PIPELINE step count drifted: found "
             f"{len(m.FULL_PIPELINE)} steps. If this is intentional, "
             f"update both this test AND the parent CLAUDE.md verification "
-            f"step #4 (`full=64`)."
+            f"step #4 (`full=63`)."
         )
 
     def test_total_steps_is_13(self):
