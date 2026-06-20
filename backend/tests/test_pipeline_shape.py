@@ -234,26 +234,6 @@ class TestPipelineOrdering:
             "dedup must run before homepage_aggregates so the blob is de-duped"
         )
 
-    def test_coherence_gate_after_recluster_before_summarize(self):
-        """Coherence gate (2026-06-20) must run AFTER recluster_orphans
-        (all clustering done, centroids fresh) and BEFORE
-        recalc_trending_pre_summarize + summarize_newly_visible (so
-        grab-bags are archived before any LLM spend)."""
-        m = _import_pipelines()
-        keys = _pipeline_keys(m.FULL_PIPELINE)
-        assert "coherence_gate" in keys, "coherence_gate missing from FULL_PIPELINE"
-        assert keys.index("recluster_orphans") < keys.index("coherence_gate"), (
-            "coherence_gate must run after recluster_orphans (needs final clusters + centroids)"
-        )
-        assert keys.index("coherence_gate") < keys.index("recalc_trending_pre_summarize"), (
-            "coherence_gate must run before recalc_trending_pre_summarize "
-            "(archived grab-bags should not be counted in trending)"
-        )
-        assert keys.index("coherence_gate") < keys.index("summarize_newly_visible"), (
-            "coherence_gate must run before summarize_newly_visible "
-            "(don't spend LLM budget on grab-bags)"
-        )
-
 
 # ═════════════════════════════════════════════════════════════════════
 # 3. Removed steps stay removed
@@ -302,17 +282,10 @@ class TestIngestOnlyPipelineShape:
     dashboard's progress bar shows wrong percentages but the run still
     completes — silent UI bug."""
 
-    def test_full_pipeline_total_steps_is_64(self):
+    def test_full_pipeline_total_steps_is_63(self):
         """The 6h-cron progress bar pins to this count. Same drift
         risk as INGEST_ONLY — keep both this number and the parent
-        `CLAUDE.md` (`full=64`) in lockstep with the actual list.
-
-        Bumped 63 → 64 on 2026-06-20: added `coherence_gate` after
-        `recluster_orphans` (before `recalc_trending_pre_summarize`).
-        Self-running grab-bag detector — archives small incoherent
-        clusters (mean article-to-centroid cosine < 0.45) before any
-        LLM spend. Exempt: pinned, frozen, large (>25 articles).
-        SAFETY_CAP=5. See coherence_gate.py.
+        `CLAUDE.md` (`full=63`) in lockstep with the actual list.
 
         Bumped 62 → 63 on 2026-06-16: added `dedup_homepage_events`
         after `recalc_trending` (before `homepage_aggregates`). Self-
@@ -346,11 +319,11 @@ class TestIngestOnlyPipelineShape:
         Neon storage + egress lean.
         """
         m = _import_pipelines()
-        assert len(m.FULL_PIPELINE) == 64, (
+        assert len(m.FULL_PIPELINE) == 63, (
             f"FULL_PIPELINE step count drifted: found "
             f"{len(m.FULL_PIPELINE)} steps. If this is intentional, "
             f"update both this test AND the parent CLAUDE.md verification "
-            f"step #4 (`full=64`)."
+            f"step #4 (`full=63`)."
         )
 
     def test_total_steps_is_13(self):
