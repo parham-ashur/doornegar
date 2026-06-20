@@ -158,13 +158,25 @@ _OFF_DOMAIN_CONTENT = (
     "نقل و انتقالات", "وزنه‌برداری", "وزنه برداری", "گل‌زنی", "هتریک",
     "تیم ملی فوتبال", "تیم ملی والیبال", "تیم ملی کشتی", "قهرمان جهان شد",
     "قهرمانی جوانان وزنه", "مسابقات وزنه‌برداری", "مدال طلا گرفت", "صعود به لیگ برتر",
+    # Sports — goal-scoring lines in match reports. The ORDINAL "گل اول/دوم/…"
+    # appears only in football match writeups; high precision. Added 2026-06-20
+    # after a Niloofar audit found tasnim match reports («گل دوم آرژانتین به
+    # الجزایر توسط مسی در دقیقه ۶۰», «گل سوم نروژ به عراق») mislabeled news@1.0
+    # by the nano stage and clustering into war grab-bags. Firing here (step 0,
+    # before the news-verb heuristic) keeps them off the nano path entirely.
+    "گل اول", "گل دوم", "گل سوم", "گل چهارم", "گل پنجم", "گل ششم",
+    "خلاصه بازی", "خلاصه نیمه",
     # Clubs / athletes (almost always sports in an Iran-news feed)
     "رئال مادرید", "بارسلونا", "منچسترسیتی", "منچستر یونایتد", "گواردیولا",
     "آرتتا", "لیونل مسی", "کریستیانو رونالدو", "رافائل نادال", "کاسمیرو",
-    "اینفانتینو", "قلعه‌نویی", "لامین یامال", "کی‌روش",
+    "اینفانتینو", "قلعه‌نویی", "لامین یامال", "کی‌روش", "رونالدینیو",
     # Entertainment / film / lifestyle fluff
     "جشنواره فیلم", "باکس آفیس", "اکران کمدی", "آلبوم موسیقی", "مولتی ویتامین",
     "طالع بینی", "فال روز",
+    # Book-publisher promo spam. The shargh feed floods dozens of identical
+    # «انتشارات کتاب شرق منتشر کرد» book-release ads, mislabeled news and
+    # polluting clusters (2026-06-20). Promotional/cultural, not political news.
+    "انتشارات کتاب شرق",
 )
 
 # Political/diplomatic override (Parham 2026-06-06): if any of these appear, the
@@ -294,8 +306,23 @@ def heuristic_classify(article: Article) -> _Verdict | None:
     # 3. Title prefixes — Iranian outlets routinely tag the section in
     #    the headline. Match either as a prefix or with a slash/colon
     #    separator inside the first 30 chars.
+    #
+    # MoU guard (2026-06-20): «یادداشت تفاهم» / «تفاهم‌نامه» = Memorandum of
+    # Understanding (the Iran-US deal — the top story), NOT an op-ed «یادداشت».
+    # Without this, headlines like «مسعود پزشکیان یادداشت تفاهم را امضا کرد»
+    # matched the «یادداشت» op-ed prefix and were dropped as opinion at ingest,
+    # starving deal coverage. The adjacent «یادداشت تفاهم» check is precise: it
+    # spares MoU-content news but still flags «یادداشت العربیه …» (a real note/
+    # op-ed) as opinion. Found via the content_type validation dry-run.
+    _is_mou = (
+        "یادداشت تفاهم" in title
+        or "تفاهم‌نامه" in title
+        or "تفاهم نامه" in title
+    )
     title_head = title[:60]
     for kw in _OPINION_TITLE_PREFIXES:
+        if kw == "یادداشت" and _is_mou:
+            continue
         if _title_label_match(title_head, kw):
             return _Verdict("opinion", 0.9)
     for kw in _DISCUSSION_TITLE_PREFIXES:
@@ -360,7 +387,12 @@ For each numbered article, label it with ONE of:
 - off_topic: outside the aggregator's scope — sports, weather forecasts,
   entertainment/celebrity, arts/culture features, horoscopes, routine consumer
   prices, lifestyle/health tips, local accidents/fires with no political angle,
-  unrelated foreign news. Use this even when the piece is original reporting.
+  unrelated foreign news, book/product release promos. Use this even when the
+  piece is original reporting. CRITICAL: a sports match report is ALWAYS
+  off_topic — e.g. «گل دوم آرژانتین به الجزایر توسط مسی در دقیقه ۶۰», «خلاصه
+  بازی», a World-Cup score line, or any goal/match/score writeup — even when it
+  mentions Iran's national team. (A sports story is only in-scope when its
+  substance is diplomatic/political, e.g. visa or sanctions affecting a team.)
 
 Return a JSON array. One object per article, in the same order:
   {{"id": <int>, "label": "<one of the six>", "confidence": <float 0-1>}}

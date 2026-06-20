@@ -150,6 +150,81 @@ class TestHeuristicDrop:
         assert v is not None and v.label == "opinion"
 
 
+class TestOffDomainContent2026_06_20:
+    """Junk that leaked into news clusters as content_type='news' and formed
+    grab-bags (Niloofar audit 2026-06-20). The heuristic must now drop these
+    at step 0 (off_topic, conf 0.9) before the news-verb rule / nano stage."""
+
+    def test_football_goal_report_dropped(self):
+        # tasnim match report previously labeled news@1.0 by the nano stage
+        art = _stub(
+            title="گل دوم آرژانتین به الجزایر توسط مسی در دقیقه ۶۰",
+            body="در دقیقه ۶۰ بازی، لیونل مسی دروازه الجزایر را باز کرد.",
+            url="https://www.tasnimnews.com/fa/news/2046999/sport",
+        )
+        v = ct.heuristic_classify(art)
+        assert v is not None and v.label == "off_topic"
+        assert v.confidence >= 0.9
+
+    def test_football_goal_ordinals(self):
+        for title in (
+            "گل سوم نروژ به عراق توسط اوستیگارد در دقیقه ۷۶",
+            "گل دوم نیوزیلند به ایران توسط جاست در دقیقه ۵۴",
+            "خلاصه بازی فرانسه و سنگال",
+        ):
+            art = _stub(title=title, body="گزارش بازی فوتبال.")
+            v = ct.heuristic_classify(art)
+            assert v is not None and v.label == "off_topic", title
+
+    def test_book_publisher_promo_dropped(self):
+        # shargh feed floods dozens of these as news; promotional, not news
+        art = _stub(
+            title="انتشارات کتاب شرق منتشر کرد؛ کتاب تازه‌ای روانه بازار شد",
+            body="انتشارات کتاب شرق اعلام کرد کتاب جدیدی منتشر کرده است.",
+        )
+        v = ct.heuristic_classify(art)
+        assert v is not None and v.label == "off_topic"
+
+    def test_real_football_diplomacy_still_kept(self):
+        # The political-override must still protect the in-scope visa/sanctions
+        # story even though it mentions the national team and the World Cup.
+        art = _stub(
+            title="آمریکا با صدور ویزای تیم ملی فوتبال ایران برای جام جهانی مخالفت کرد",
+            body="وزارت خارجه آمریکا اعلام کرد که با صدور ویزا برای اعضای تیم ملی مخالفت می‌کند.",
+            url="https://www.tasnimnews.com/fa/news/2047000",
+        )
+        v = ct.heuristic_classify(art)
+        # Must NOT be off_topic — the override keeps it on the news path.
+        assert v is None or v.label != "off_topic"
+
+
+class TestMoUNotOpinion2026_06_20:
+    """«یادداشت تفاهم» (Memorandum of Understanding — the Iran-US deal) was
+    matching the «یادداشت» op-ed prefix and being dropped as opinion, starving
+    the top story. The MoU guard must keep these off the opinion path while
+    still flagging genuine «یادداشت» op-eds."""
+
+    def test_mou_signing_not_opinion(self):
+        for title in (
+            "مسعود پزشکیان یادداشت تفاهم اسلام‌آباد را امضا کرد",
+            "کاخ سفید متن یادداشت تفاهم ایران و آمریکا را منتشر کرد",
+            "۱۴ بند یادداشت تفاهم ایران و آمریکا به روایت العربیه",
+            "تفاهم‌نامه ایران و آمریکا امضا شد",
+        ):
+            art = _stub(title=title, body="وزارت خارجه اعلام کرد متن سند منتشر شد.")
+            v = ct.heuristic_classify(art)
+            assert v is None or v.label != "opinion", title
+
+    def test_genuine_yaddasht_opinion_still_dropped(self):
+        # A real op-ed «یادداشت/ …» (no «تفاهم») must still be opinion.
+        art = _stub(
+            title="یادداشت/ چرا اقتصاد ایران به اصلاح ساختاری نیاز دارد",
+            body="در سال‌های اخیر بسیاری از اقتصاددانان معتقدند ساختار اقتصاد باید اصلاح شود.",
+        )
+        v = ct.heuristic_classify(art)
+        assert v is not None and v.label == "opinion"
+
+
 class TestHeuristicAmbiguous:
     """Cases the heuristic can't resolve — they should fall through to LLM."""
 
