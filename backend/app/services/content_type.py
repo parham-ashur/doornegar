@@ -166,6 +166,14 @@ _OFF_DOMAIN_CONTENT = (
     # before the news-verb heuristic) keeps them off the nano path entirely.
     "گل اول", "گل دوم", "گل سوم", "گل چهارم", "گل پنجم", "گل ششم",
     "خلاصه بازی", "خلاصه نیمه",
+    # Sports — match previews / team news / player items that carry NO goal or
+    # «جام جهانی» keyword and so slipped into deal/war grab-bags as news
+    # (Niloofar audit 2026-06-21: a 71-article grab-bag was titled «تیم ملی
+    # فوتبال ایران به مصاف بلژیک»). High-precision phrasings + World-Cup-group
+    # opponents + named players that only occur in football coverage.
+    "دیدار تیم ملی", "بازی تیم ملی", "بازی ایران و بلژیک", "به مصاف بلژیک",
+    "مقابل کیپ‌ورد", "کیپ‌ورد", "دوکو", "رافینیا", "امباپه", "هالند",
+    "football match",
     # Clubs / athletes (almost always sports in an Iran-news feed)
     "رئال مادرید", "بارسلونا", "منچسترسیتی", "منچستر یونایتد", "گواردیولا",
     "آرتتا", "لیونل مسی", "کریستیانو رونالدو", "رافائل نادال", "کاسمیرو",
@@ -221,6 +229,20 @@ _ROUNDUP_TITLE_PATTERNS = (
 # Persian quote chars («...») that aggregators string together.
 _PERSIAN_QUOTE_RE = re.compile(r"«[^»]+»")
 
+# Football match-score line: a Persian word, a SINGLE-digit score, a dash, a
+# single-digit score, a Persian word — «مکزیک ۱-۰ کره‌جنوبی», «کانادا ۶ - ۰
+# قطر», «ایران ۲-۲ نیوزیلند». Single digit each side (football scores are
+# single-digit) + letters on BOTH sides so it won't fire on «ماده ۱۴-۱», dates,
+# or page ranges. A clause-word guard (_SCORE_FALSE_FRIENDS) is also checked.
+# Added 2026-06-21 (Niloofar audit) — score lines carry no «گل»/«جام جهانی»
+# keyword and were slipping into clusters as news.
+_SPORT_SCORE_RE = re.compile(
+    r"[؀-ۿ]\s*[۰-۹0-9]\s*[-–—]\s*[۰-۹0-9]\s*[؀-ۿ]"
+)
+# If any of these legal/structural words appear, a «۵-۳»-style token is a
+# clause/section reference, not a match score — don't treat it as sports.
+_SCORE_FALSE_FRIENDS = ("ماده", "بند", "تبصره", "اصل ", "قطعنامه", "صفحه")
+
 
 # ─── Heuristic stage ──────────────────────────────────────────────────
 @dataclass(frozen=True)
@@ -274,6 +296,13 @@ def heuristic_classify(article: Article) -> _Verdict | None:
         for kw in _OFF_DOMAIN_CONTENT:
             if kw in title:
                 return _Verdict("off_topic", 0.9)
+        # d) football match-score line («مکزیک ۱-۰ کره‌جنوبی»). Letter-bounded
+        #    + single-digit + clause-word guard so it won't fire on
+        #    article/clause numbers or dates.
+        if _SPORT_SCORE_RE.search(title) and not any(
+            w in title for w in _SCORE_FALSE_FRIENDS
+        ):
+            return _Verdict("off_topic", 0.9)
 
     # 0b. Multi-topic roundup headlines → aggregation (drop). Cluster-pollution
     #     guard: these bundle unrelated items and attach to any nearby cluster.
@@ -388,10 +417,13 @@ For each numbered article, label it with ONE of:
   entertainment/celebrity, arts/culture features, horoscopes, routine consumer
   prices, lifestyle/health tips, local accidents/fires with no political angle,
   unrelated foreign news, book/product release promos. Use this even when the
-  piece is original reporting. CRITICAL: a sports match report is ALWAYS
-  off_topic — e.g. «گل دوم آرژانتین به الجزایر توسط مسی در دقیقه ۶۰», «خلاصه
-  بازی», a World-Cup score line, or any goal/match/score writeup — even when it
-  mentions Iran's national team. (A sports story is only in-scope when its
+  piece is original reporting. CRITICAL: sports coverage of ANY kind is ALWAYS
+  off_topic — not only match reports/score lines («گل دوم آرژانتین…», «کانادا
+  ۶-۰ قطر», «خلاصه بازی») but also match PREVIEWS, team news, squad/line-up
+  items, player injuries or transfers, coach press-conference remarks, and fan
+  reactions — e.g. «توپ پر قلعه‌نویی پیش از بازی با بلژیک», «غیبت دوکو در دیدار
+  بلژیک مقابل ایران», «تساوی ایران و نیوزیلند» — even when it mentions Iran's
+  national team or the World Cup. (A sports story is only in-scope when its
   substance is diplomatic/political, e.g. visa or sanctions affecting a team.)
 
 Return a JSON array. One object per article, in the same order:

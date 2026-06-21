@@ -185,6 +185,42 @@ class TestOffDomainContent2026_06_20:
         v = ct.heuristic_classify(art)
         assert v is not None and v.label == "off_topic"
 
+    def test_football_previews_and_team_news_dropped_2026_06_21(self):
+        # Previews / team-news / player items that carry NO goal or «جام جهانی»
+        # keyword — these slipped into a 71-article grab-bag titled «… به مصاف
+        # بلژیک» (Niloofar audit 2026-06-21).
+        for title in (
+            "توپ پر امیر قلعه‌نویی پیش از بازی با بلژیک: مشکلات ما دو برابر شد",
+            "جنجال درباره غیبت دوکو در دیدار بلژیک مقابل ایران",
+            "براین رودریگز: امیدواریم مقابل کیپ‌ورد سورپرایز نشویم",
+            "وضعیت مصدومیت رافینیا برای همراهی برزیل مشخص شد",
+            "دوباره جام‌جهانی، دوباره امباپه",
+        ):
+            art = _stub(title=title, body="گزارش فوتبالی.")
+            v = ct.heuristic_classify(art)
+            assert v is not None and v.label == "off_topic", title
+
+    def test_football_score_line_dropped_2026_06_21(self):
+        for title in (
+            "مکزیک ۱-۰ کره‌جنوبی؛ اشتباه دروازه‌بان کره",
+            "کانادا ۶ - ۰ قطر؛ آتش‌بازی کانادا در ونکوور",
+            "جام جهانی ۲۰۲۶؛ نیمه دوم: ایران ۲-۲ نیوزیلند",
+        ):
+            art = _stub(title=title, body="گزارش بازی.")
+            v = ct.heuristic_classify(art)
+            assert v is not None and v.label == "off_topic", title
+
+    def test_score_regex_does_not_fire_on_clause_numbers(self):
+        # «ماده ۱۴-۱» / «بند ۵-۳» / دی‌ماه dates must NOT be mistaken for scores.
+        # (These should fall through to the news-verb/LLM path, not off_topic.)
+        for title in (
+            "بررسی ماده ۱۴-۱ قانون مجازات اسلامی در کمیسیون قضایی",
+            "متن کامل تفاهم‌نامه ۱۴ بندی ایران و آمریکا منتشر شد",
+        ):
+            art = _stub(title=title, body="مقام رسمی اعلام کرد جزئیات سند منتشر شده است.")
+            v = ct.heuristic_classify(art)
+            assert v is None or v.label != "off_topic", title
+
     def test_real_football_diplomacy_still_kept(self):
         # The political-override must still protect the in-scope visa/sanctions
         # story even though it mentions the national team and the World Cup.
