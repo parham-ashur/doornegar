@@ -110,6 +110,27 @@ def pick_clean_title(
     return None
 
 
+def locked_title(story) -> str | None:
+    """Editorially-locked title_fa for a story, if one exists.
+
+    When an admin corrects a headline via PATCH /admin/stories/{id} (or
+    seeds a story), the corrected title is written to
+    `summary_anchor['title_fa']`. That title is canonical and MUST survive
+    LLM re-summarization. Without this lock the summarize / quality steps
+    regenerate the title every cron and, on state-media-heavy clusters,
+    drift it straight back to the propaganda framing the admin removed
+    (e.g. «پیروزی ایران» asserted as fact). The body fields still refresh —
+    only the title is pinned. Returns the locked title, or None when the
+    story has no editorial title anchor (normal LLM retitling applies).
+    """
+    anchor = getattr(story, "summary_anchor", None)
+    if isinstance(anchor, dict):
+        t = (anchor.get("title_fa") or "").strip()
+        if t:
+            return t
+    return None
+
+
 def compute_dispute_score(scores: dict | None) -> float | None:
     """Deterministic dispute score (0-1) from per-side framing words.
 

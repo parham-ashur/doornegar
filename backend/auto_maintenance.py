@@ -1554,17 +1554,28 @@ async def step_summarize_newly_visible():
                     continue
 
                 story.summary_fa = analysis.get("summary_fa")
-                from app.services.story_analysis import pick_clean_title as _pick_title
-                _fallbacks = [(_a.title_original or _a.title_fa or "") for _a in top_articles]
-                _clean_t = _pick_title(analysis.get("title_fa"), story.title_fa, _fallbacks)
-                if _clean_t:
-                    if analysis.get("title_fa") and _clean_t != (analysis["title_fa"] or "").strip():
-                        logger.warning(
-                            f"  rejected meta-title for {story.id}: {analysis.get('title_fa')!r}"
-                        )
-                    story.title_fa = _clean_t
-                if analysis.get("title_en") and analysis["title_en"].strip():
-                    story.title_en = analysis["title_en"].strip()
+                from app.services.story_analysis import (
+                    pick_clean_title as _pick_title,
+                    locked_title as _locked_title,
+                )
+                _lock = _locked_title(story)
+                if _lock:
+                    # Editorial title lock (summary_anchor['title_fa']): an
+                    # admin corrected this headline — keep it verbatim and
+                    # don't let the LLM retitle (or drift it back to the
+                    # propaganda framing). title_en is preserved too.
+                    story.title_fa = _lock
+                else:
+                    _fallbacks = [(_a.title_original or _a.title_fa or "") for _a in top_articles]
+                    _clean_t = _pick_title(analysis.get("title_fa"), story.title_fa, _fallbacks)
+                    if _clean_t:
+                        if analysis.get("title_fa") and _clean_t != (analysis["title_fa"] or "").strip():
+                            logger.warning(
+                                f"  rejected meta-title for {story.id}: {analysis.get('title_fa')!r}"
+                            )
+                        story.title_fa = _clean_t
+                    if analysis.get("title_en") and analysis["title_en"].strip():
+                        story.title_en = analysis["title_en"].strip()
 
                 extras = {
                     "state_summary_fa": analysis.get("state_summary_fa"),
@@ -2114,7 +2125,14 @@ async def step_summarize():
                 # bias_explanation_fa, etc.) — only the title is gated.
                 proposed_title_fa = (analysis.get("title_fa") or "").strip()
                 proposed_title_en = (analysis.get("title_en") or "").strip()
-                if proposed_title_fa or proposed_title_en:
+                from app.services.story_analysis import locked_title as _locked_title2
+                _lock2 = _locked_title2(story)
+                if _lock2:
+                    # Editorial title lock — admin-corrected headline in
+                    # summary_anchor['title_fa'] is canonical. Summary/bias
+                    # fields still refresh below; only the title is pinned.
+                    story.title_fa = _lock2
+                elif proposed_title_fa or proposed_title_en:
                     title_cohesion_ok = True
                     if story.centroid_embedding and proposed_title_fa:
                         try:
@@ -6000,8 +6018,15 @@ async def step_quality_postprocess():
 
                 title_suggestion = review.get("title_suggestion")
                 if title_suggestion and isinstance(title_suggestion, str) and title_suggestion.strip():
-                    from app.services.story_analysis import is_meta_title as _is_meta
-                    if _is_meta(title_suggestion):
+                    from app.services.story_analysis import (
+                        is_meta_title as _is_meta,
+                        locked_title as _locked_title3,
+                    )
+                    if _locked_title3(story):
+                        # Editorial title lock — QC may still drop irrelevant
+                        # articles above, but must not retitle a pinned headline.
+                        pass
+                    elif _is_meta(title_suggestion):
                         logger.warning(
                             f"  QC rejected meta-title for {story.id}: {title_suggestion!r}"
                         )
