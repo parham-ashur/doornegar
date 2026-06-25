@@ -4447,6 +4447,31 @@ async def self_review_endpoint(db: AsyncSession = Depends(get_db)):
     return await self_review_packet(db)
 
 
+# ── Stale-frozen-homepage detector (Option A, 2026-06-25 freeze-cliff) ──
+# The 7-day first-published freeze (load-bearing anti-umbrella guard) is
+# working as designed, but applied to a CONTINUOUS story (the war/deal) it
+# freezes every cluster within a week, so fresh daily coverage orphans
+# instead of forming a live card and the homepage stalls on frozen
+# umbrellas. This is the signal to maintain a rolling pinned hero — NOT to
+# weaken the freeze. Pure threshold logic, extracted for unit testing.
+STALE_HP_FROZEN_SHARE = 0.80      # homepage ≥80% frozen
+STALE_HP_MIN_FRESH_ORPHAN = 15    # AND fresh clusterable coverage is orphaning
+
+
+def _stale_homepage_status(frozen_share: float, fresh_orphan: int, live_hero: int) -> str:
+    """warn when the homepage is frozen-dominated AND fresh coverage is
+    un-surfaced AND no live pinned hero exists; ok otherwise. A live pinned
+    hero (priority>=40, not frozen, fresh) clears the condition — which is
+    exactly what seeding/pinning one does."""
+    if (
+        frozen_share >= STALE_HP_FROZEN_SHARE
+        and fresh_orphan >= STALE_HP_MIN_FRESH_ORPHAN
+        and live_hero == 0
+    ):
+        return "warn"
+    return "ok"
+
+
 @router.get("/health/overview")
 async def health_overview(db: AsyncSession = Depends(get_db)):
     """Comprehensive health snapshot for the /dashboard/health page.
@@ -5135,6 +5160,36 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
           AND NOT ((s.content_filters -> 'allowed') @> to_jsonb(a.content_type))
     """))).scalar() or 0)
 
+    # Stale-frozen-homepage (Option A): share of the visible homepage that is
+    # frozen, and whether a LIVE pinned hero exists. Combined with fresh_orphan
+    # (above) this flags the freeze-cliff condition where an ongoing story has
+    # frozen and fresh coverage is orphaning. Mirrors the homepage scope
+    # (article_count>=5, archived_at IS NULL, 14d window). live_hero = a pinned
+    # (priority>=_MERGE_PIN_PRIORITY_FLOOR), non-frozen, fresh, >=5 story.
+    _stale = (await db.execute(_t("""
+        SELECT
+          COUNT(*) FILTER (
+            WHERE article_count >= 5 AND archived_at IS NULL
+              AND last_updated_at >= NOW() - INTERVAL '14 days'
+          ) AS hp_total,
+          COUNT(*) FILTER (
+            WHERE article_count >= 5 AND archived_at IS NULL
+              AND last_updated_at >= NOW() - INTERVAL '14 days'
+              AND frozen_at IS NOT NULL
+          ) AS hp_frozen,
+          COUNT(*) FILTER (
+            WHERE article_count >= 5 AND archived_at IS NULL
+              AND frozen_at IS NULL AND priority >= 40
+              AND last_updated_at >= NOW() - INTERVAL '2 days'
+          ) AS live_hero
+        FROM stories
+    """))).mappings().one()
+    hp_total = int(_stale["hp_total"] or 0)
+    hp_frozen_visible = int(_stale["hp_frozen"] or 0)
+    live_hero = int(_stale["live_hero"] or 0)
+    frozen_share = (hp_frozen_visible / hp_total) if hp_total else 0.0
+    stale_hp_status = _stale_homepage_status(frozen_share, fresh_orphan, live_hero)
+
     # Bellwether / missing-main-story (Step B): read the latest verdict logged
     # by step_bellwether_check (a per-cron outlet-fetch + nano compare). Cheap
     # here — just reads the most recent story_events row.
@@ -5230,6 +5285,22 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
             "تقابل sections draw from. Below 8 means content drought: the homepage falls back to "
             "stale 26-day-window content and sections look thin/empty. Signals an ingest or "
             "clustering stall, or a genuinely quiet news period — either way, worth a look.",
+        ),
+        _canary(
+            "stale_frozen_homepage", "Frozen homepage, fresh coverage un-surfaced",
+            f"{round(frozen_share * 100)}% frozen ({hp_frozen_visible}/{hp_total}); "
+            f"{fresh_orphan} fresh orphans; live_hero={live_hero}",
+            f"<{round(STALE_HP_FROZEN_SHARE * 100)}% frozen OR a live pinned hero exists",
+            stale_hp_status,
+            f"Fires when the visible homepage is ≥{round(STALE_HP_FROZEN_SHARE * 100)}% frozen AND "
+            f"≥{STALE_HP_MIN_FRESH_ORPHAN} fresh clusterable articles are orphaning AND no live "
+            "pinned hero exists — the 2026-06-25 freeze-cliff condition. The 7-day first-published "
+            "freeze (load-bearing anti-umbrella guard) is working as designed, but for a CONTINUOUS "
+            "story (war/deal) it freezes every cluster within a week, so fresh daily coverage "
+            "orphans instead of forming a live card. Action: seed+pin a fresh hero from the orphan "
+            "pool (reference_manual_story_seed) — pinning one clears this canary. This is the signal "
+            "to maintain a rolling hero, NOT to weaken the freeze. Option B would automate the "
+            "re-seed; until then it stays a manual flag.",
         ),
         _canary(
             "blindspot_fresh_pool", "Fresh blindspot pool per side (نگاه یک‌جانبه)",
