@@ -492,6 +492,7 @@ async def apply_fix(finding: dict) -> str:
     from app.models.story import Story
     from app.models.article import Article
     from sqlalchemy import select, func, update
+    from sqlalchemy.orm.attributes import flag_modified
 
     fix_type = finding.get("fix_type", "")
     fix_data = finding.get("fix_data", {})
@@ -737,6 +738,12 @@ async def apply_fix(finding: dict) -> str:
                         claims[idx] = new_text
                     tg["key_claims"] = claims
                     story.telegram_analysis = tg
+                    # telegram_analysis is a plain JSONB column (not
+                    # MutableDict-wrapped), so mutating the same dict
+                    # reference in place doesn't register as a change —
+                    # SQLAlchemy silently drops the column from the UPDATE.
+                    # flag_modified forces it to be written.
+                    flag_modified(story, "telegram_analysis")
                     await db.commit()
                     return f"✓ ادعا {idx} به‌روز شد"
                 return f"✗ شماره ادعا نامعتبر: {idx}"
