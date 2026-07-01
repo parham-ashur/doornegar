@@ -582,6 +582,33 @@ def _jaccard(a: set, b: set) -> float:
     return len(a & b) / len(a | b)
 
 
+# Story-level document-frequency threshold above which a title token is
+# considered too generic to serve as a shared-anchor match signal (see
+# `_compute_generic_tokens` and the 2026-07-01 audit note at its call site
+# in `_match_to_existing_stories`).
+GENERIC_TOKEN_STORY_DF = 0.15
+
+
+def _compute_generic_tokens(
+    story_token_sets: list[set[str]], threshold: float = GENERIC_TOKEN_STORY_DF
+) -> set[str]:
+    """Return tokens that appear in >= `threshold` fraction of the given
+    per-story token sets — i.e. words too common in the CURRENT batch of
+    active stories to discriminate between them (e.g. "ایران"/"آمریکا"
+    during a months-long Iran-US war arc, when nearly every story mentions
+    them). Self-adjusting: no hardcoded word list, just recomputed each
+    clustering run from whatever stories are actually active.
+    """
+    if not story_token_sets:
+        return set()
+    counts: dict[str, int] = {}
+    for tokens in story_token_sets:
+        for tok in tokens:
+            counts[tok] = counts.get(tok, 0) + 1
+    n = len(story_token_sets)
+    return {tok for tok, cnt in counts.items() if cnt / n >= threshold}
+
+
 # ── Layer 1: geographic-theater gate (2026-05-31) ──────────────────────
 # The embedding matcher is blind to geography: "US strikes a boat, N
 # killed" reads the same whether it's the Iran/Persian-Gulf theater or
@@ -1129,6 +1156,25 @@ async def _match_to_existing_stories(
             "article_count": row[3],
         }
 
+    # Corpus-frequency-aware anchor exclusion (2026-07-01, Niloofar audit
+    # follow-up). The single-shared-token anchor check below assumes a
+    # shared title token is rare and therefore meaningful. That assumption
+    # breaks down during a single dominant story arc (e.g. a months-long
+    # Iran-US war): tokens like "ایران"/"آمریکا"/"جنگ" show up in the
+    # signature of most active stories, so "shares one token" stops
+    # discriminating and any article mentioning the dominant topic can
+    # anchor onto ANY story about it. Audit evidence: three stories found
+    # 2026-07-01 (c8933c34, 5a10417d, 8f004864) were 90%+ off-topic
+    # articles glued on by exactly this path once they crossed the
+    # small-story protection's 10-article threshold. Fix: compute how
+    # many of THIS run's candidate stories contain each token and refuse
+    # to let an over-represented token serve as the sole anchor — this is
+    # self-adjusting (no hardcoded word list) and only excludes words that
+    # are currently saturating the news cycle, not any word in general.
+    generic_tokens: set[str] = _compute_generic_tokens(
+        [sig["tokens"] for sig in story_sig.values()]
+    )
+
     # Reserve coherent sub-clusters of this run's own unmatched articles
     # BEFORE running the matcher. Protects emergent third stories from
     # being absorbed one-by-one into adjacent attractor clusters. See
@@ -1316,8 +1362,13 @@ async def _match_to_existing_stories(
                         or shared_quote or shared_number
                     )
                 else:
+                    # Exclude tokens that are over-represented across this
+                    # run's active stories (see generic_tokens above) — a
+                    # shared "ایران"/"آمریکا" during a war-saturated news
+                    # cycle is not evidence of a match.
+                    distinctive_shared = (a_tokens & s_tokens) - generic_tokens
                     has_anchor = (
-                        len(a_tokens & s_tokens) >= 1
+                        len(distinctive_shared) >= 1
                         or shared_quote or shared_number
                     )
                 if not has_anchor:

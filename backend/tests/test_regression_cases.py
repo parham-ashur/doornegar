@@ -186,10 +186,16 @@ class TestClusteringQuality:
         a = _title_tokens("هما میرافشار، ملکه ترانه‌سرایی ایران، در ۸۹ سالگی درگذشت")
         b = _title_tokens("صدمین سالگرد تولد مرلین مونرو؛ راز مرگ او")
         assert len(a & b) == 0, "obituary titles must share no content token (anchor)"
-        # and the gate must be wired for non-small stories, not just small ones
+        # and the gate must be wired for non-small stories, not just small ones.
+        # 2026-07-01: the raw intersection check was made frequency-aware
+        # (distinctive_shared = intersection minus over-represented tokens)
+        # to stop a saturated word like "ایران" from counting as an anchor
+        # during a single dominant story arc — the gate itself must still
+        # be present and still require ≥1 shared token for non-small stories.
         from pathlib import Path
         src = (Path(__file__).parent.parent / "app" / "services" / "clustering.py").read_text()
-        assert "has_anchor" in src and "len(a_tokens & s_tokens) >= 1" in src
+        assert "has_anchor" in src and "generic_tokens" in src
+        assert "len(distinctive_shared) >= 1" in src
 
     def test_auto_reject_cosine_raised_to_063(self):
         """#3: the permissive 0.60-0.85 band was shrunk to 0.63-0.85."""
@@ -254,6 +260,62 @@ class TestClusteringQuality:
         # wired into the coherence step
         am = (Path(__file__).parent.parent / "auto_maintenance.py").read_text()
         assert "freeze_oversized_active_stories" in am
+
+    def test_generic_token_exclusion_2026_07_01(self):
+        """SYMPTOM (2026-07-01 Niloofar audit): c8933c34, 5a10417d, 8f004864
+        each ended up 90%+ off-topic articles because, once a story crossed
+        the small-story protection's 10-article threshold, ANY article
+        sharing just "ایران"/"آمریکا"/"ترامپ" with the story's corpus passed
+        the shared-anchor gate — those tokens appear in nearly every active
+        story during a war-saturated news cycle, so they stopped being
+        distinctive. FIX: `_compute_generic_tokens` excludes tokens that
+        appear in >= GENERIC_TOKEN_STORY_DF (0.15) fraction of this run's
+        story signatures from counting as anchors, while leaving genuinely
+        rare/distinctive tokens (a name, a specific place) untouched."""
+        from app.services.clustering import _compute_generic_tokens, _title_tokens, GENERIC_TOKEN_STORY_DF
+
+        story_titles = [
+            "توافق ۱۴ بندی ایران و آمریکا؛ آتش‌بس دو هفته‌ای برقرار شد",
+            "ترامپ: آمریکا به سرنگونی بالگرد در تنگه هرمز پاسخ می‌دهد",
+            "حملات موشکی ایران به اسرائیل؛ فشار ترامپ بر نتانیاهو",
+            "دستور بازداشت افراد مرتبط با پروژه داماد ترامپ در آلبانی",
+            "مذاکرات ایران و آمریکا در دوحه؛ بیانیه مجلس خبرگان",
+            "ایران هفت موشک به سمت کویت و بحرین شلیک کرد",
+            "توافق صلح ایران و آمریکا؛ امضای تفاهم‌نامه در سوئیس",
+        ]
+        token_sets = [_title_tokens(t) for t in story_titles]
+        generic = _compute_generic_tokens(token_sets, GENERIC_TOKEN_STORY_DF)
+
+        # Saturated across most stories in this batch — must be excluded.
+        assert "ایران" in generic
+        assert "آمریکا" in generic
+        assert "ترامپ" in generic
+        # Distinctive to a single story — must NOT be excluded, it's a
+        # genuine anchor (this is exactly the Kushner/Albania story that
+        # otherwise absorbed 27 unrelated articles on generic anchors alone).
+        assert "آلبانی" not in generic
+        assert "داماد" not in generic
+
+        # An incoming Yemen-missile article shares nothing but "ایران" with
+        # the Albania story — with generic tokens excluded, that's no
+        # longer a valid anchor.
+        incoming = _title_tokens(
+            "موشک بالستیک پرتاب‌شده از یمن در نزدیکی مرز با عربستان سعودی سقوط کرد"
+        )
+        albania_tokens = _title_tokens(
+            "دستور بازداشت افراد مرتبط با پروژه داماد ترامپ در آلبانی"
+        )
+        raw_shared = incoming & albania_tokens
+        distinctive_shared = raw_shared - generic
+        assert len(distinctive_shared) == 0, (
+            "unrelated Yemen article must not anchor onto the Albania story "
+            f"once generic tokens are excluded (raw shared: {raw_shared})"
+        )
+
+    def test_generic_token_exclusion_empty_input(self):
+        """Degenerate input (no stories yet) must not raise or divide by zero."""
+        from app.services.clustering import _compute_generic_tokens
+        assert _compute_generic_tokens([]) == set()
 
 
 class TestC3LearningLoop:
