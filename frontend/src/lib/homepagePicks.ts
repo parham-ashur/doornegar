@@ -488,6 +488,26 @@ export function computeHomepagePicks({
   if (popularPool.length < 3) {
     popularPool = [...sorted].filter(s => !usedIds.has(s.id));
   }
+  // Widen to the blindspot pool (2026-07-02): `sorted` is built only from
+  // `stories` (the regular trending feed), which excludes anything
+  // is_blindspot. During a heavily one-sided news cycle almost every
+  // active story can end up classified as a blindspot (seen live
+  // 2026-07-02: 90 blindspot vs. only 6 regular-trending stories
+  // site-wide) — `sorted` shrinks to a handful that hero/تقابل/briefing
+  // already claim before this section's turn, and «پرمخاطب‌ترین» rendered
+  // its header with zero cards under it. A one-sided story is still a
+  // legitimate "most viewed" pick, so pull unclaimed blindspot stories in
+  // as real content instead of leaving the section empty.
+  if (popularPool.length < 3) {
+    const usedHere = new Set(popularPool.map(s => s.id));
+    const blindPool = [...blindspotsAll].filter(s => !usedIds.has(s.id) && !usedHere.has(s.id));
+    popularPool = [...popularPool, ...blindPool];
+  }
+  // Last resort: reuse a story already claimed by an earlier section
+  // rather than render the box empty — a repeated card beats a dead one.
+  if (popularPool.length === 0) {
+    popularPool = [...sorted, ...blindspotsAll];
+  }
   const mostViewed = popularPool
     .map(s => {
       const views = s.view_count || 0;

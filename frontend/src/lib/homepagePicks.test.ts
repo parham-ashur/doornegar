@@ -312,6 +312,32 @@ describe("computeHomepagePicks — پرمخاطب‌ترین", () => {
     expect(mostViewed.map(s => s.id)).toEqual(["viral", "mid", "quiet"]);
     expect(mostViewed[0]._popScore).toBeGreaterThan(mostViewed[2]._popScore);
   });
+
+  it("2026-07-02: falls back to the blindspot pool instead of rendering empty when `stories` is too thin", () => {
+    // Live incident: a heavily one-sided news cycle left only 6 stories
+    // in the regular trending feed site-wide (90 were classified
+    // is_blindspot and excluded from `stories` entirely) — hero + تقابل
+    // + briefing claimed all 6 before «پرمخاطب‌ترین» got its turn, so it
+    // rendered a header with zero cards beneath it.
+    const stories = [
+      makeStory({ id: "hero-slot" }),
+      makeStory({ id: "brief1" }),
+      makeStory({ id: "brief2" }),
+    ];
+    const blindspotsAll = [
+      makeStory({ id: "blind-a", is_blindspot: true, state_pct: 90, diaspora_pct: 5, view_count: 50 }),
+      makeStory({ id: "blind-b", is_blindspot: true, diaspora_pct: 90, state_pct: 5, view_count: 20 }),
+    ];
+    const { mostViewed } = pick(stories, { blindspotsAll });
+    expect(mostViewed.length).toBeGreaterThan(0);
+    expect(mostViewed.map(s => s.id)).toContain("blind-a");
+  });
+
+  it("2026-07-02: reuses an already-claimed story rather than rendering empty when even the blindspot pool is exhausted", () => {
+    const stories = [makeStory({ id: "only-story" })];
+    const { mostViewed } = pick(stories, { blindspotsAll: [] });
+    expect(mostViewed.length).toBeGreaterThan(0);
+  });
 });
 
 describe("computeHomepagePicks — briefing content-richness nudge", () => {
