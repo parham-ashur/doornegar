@@ -305,7 +305,7 @@ async def fetch_stories():
         result = await db.execute(
             select(Story)
             .options(selectinload(Story.articles).selectinload(Article.source))
-            .where(Story.article_count >= 2)
+            .where(Story.article_count >= 2, Story.archived_at.is_(None))
             .order_by(Story.trending_score.desc())
             .limit(25)
         )
@@ -922,10 +922,18 @@ async def gather_stories_json(limit: int = 25) -> dict:
 
     async with async_session() as db:
         # Top trending pool.
+        # archived_at IS NULL (2026-07-02): trending_score is never reset
+        # on archive, so a month-old archived story with a huge historical
+        # score (e.g. a 2000+ article umbrella) kept outranking everything
+        # actually live and got audited/edited for three sessions straight
+        # even though it was invisible on the real homepage. This mirrors
+        # the archived_at exclusion in api/v1/stories.py's trending query
+        # and app/services/homepage_scope.py's homepage_story_ids() — see
+        # the homepage-scope-sot rule in CLAUDE.md.
         result = await db.execute(
             select(Story)
             .options(selectinload(Story.articles).selectinload(Article.source))
-            .where(Story.article_count >= 2)
+            .where(Story.article_count >= 2, Story.archived_at.is_(None))
             .order_by(Story.trending_score.desc())
             .limit(limit)
         )
@@ -937,7 +945,11 @@ async def gather_stories_json(limit: int = 25) -> dict:
         bs_result = await db.execute(
             select(Story)
             .options(selectinload(Story.articles).selectinload(Article.source))
-            .where(Story.is_blindspot.is_(True), Story.article_count >= 2)
+            .where(
+                Story.is_blindspot.is_(True),
+                Story.article_count >= 2,
+                Story.archived_at.is_(None),
+            )
             .order_by(Story.trending_score.desc())
             .limit(15)
         )
