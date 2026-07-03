@@ -1819,6 +1819,19 @@ async def step_summarize():
         #     (small drips of relevant articles are fine to integrate)
         # Maturity lock stays as the cost-saving safety net for now.
         VOLUME_TRIGGER = 5
+        # Shrink trigger (Parham 2026-07-03): article REMOVAL (Niloofar's
+        # remove_article, or an admin detach) is always a deliberate,
+        # meaningful edit — unlike small additions, which can be noise
+        # drips. Before this fix, volume_trigger only looked at growth
+        # (new_articles >= VOLUME_TRIGGER), so a story pruned from 28
+        # articles down to 3 kept its stale 28-article narrative forever:
+        # hash_changed was True but volume_trigger was always False for a
+        # negative new_articles, so needs_rerun never fired. Two stories
+        # found stuck this way in the 2026-07-03 Niloofar audit (rent-law
+        # story 9e204cf8 frozen at a 28-article hash while sitting at 3
+        # articles; lawyer-sentencing story aa6bac86 frozen at 9 while
+        # sitting at 2) — see project_session_summary_2026-07-03.md.
+        SHRINK_TRIGGER = 3
         DRIFT_THRESHOLD = 0.75
 
         from app.nlp.embeddings import cosine_similarity as _cs_eval
@@ -1935,9 +1948,15 @@ async def step_summarize():
                             # Don't refresh — the cluster might be wrong.
                             continue
 
-            # Volume gate — refresh on EITHER large new-article batch OR
-            # hash change. Small drips don't trigger refresh by themselves.
-            volume_trigger = (new_articles is not None and new_articles >= VOLUME_TRIGGER)
+            # Volume gate — refresh on a large new-article batch, a
+            # meaningful shrink, or hash change on a story that's never
+            # been hashed before. Small drips (growth under VOLUME_TRIGGER,
+            # shrink under SHRINK_TRIGGER) don't trigger refresh by
+            # themselves.
+            volume_trigger = (
+                new_articles is not None
+                and (new_articles >= VOLUME_TRIGGER or new_articles <= -SHRINK_TRIGGER)
+            )
             needs_rerun = hash_changed and (volume_trigger or count_at_last is None)
 
             # Maturity check — if story is older than the lock window AND

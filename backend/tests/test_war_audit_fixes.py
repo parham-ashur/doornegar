@@ -2331,6 +2331,49 @@ class TestStepSummarizeNoCentroidDefer:
         )
 
 
+class TestSummarizeRefreshesOnArticleShrink:
+    """2026-07-03 Niloofar audit found two stories whose narrative text
+    described a completely different article set than the one currently
+    in the cluster — traced to step_summarize's volume_trigger only
+    firing on GROWTH (new_articles >= VOLUME_TRIGGER). A story pruned
+    from 28 articles down to 3 (remove_article, or an admin detach) kept
+    its stale 28-article narrative forever: hash_changed was True but
+    volume_trigger was always False for a negative new_articles, so
+    needs_rerun never fired. Fix adds a symmetric SHRINK_TRIGGER so
+    meaningful removals also re-trigger analysis.
+    """
+
+    def test_shrink_trigger_constant_defined(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent / "auto_maintenance.py"
+        ).read_text()
+        assert "SHRINK_TRIGGER = 3" in src, (
+            "step_summarize must define SHRINK_TRIGGER — a meaningful "
+            "article-count shrink must also trigger re-analysis, not "
+            "just growth. See 2026-07-03 audit."
+        )
+
+    def test_volume_trigger_fires_on_shrink_not_just_growth(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent / "auto_maintenance.py"
+        ).read_text()
+        idx = src.find("# Volume gate — refresh on a large new-article batch")
+        assert idx >= 0, (
+            "step_summarize's volume-gate comment block must remain to anchor this test"
+        )
+        block = src[idx:idx + 500]
+        assert "new_articles >= VOLUME_TRIGGER" in block
+        assert "new_articles <= -SHRINK_TRIGGER" in block, (
+            "volume_trigger must also fire when new_articles is a large "
+            "negative number (articles removed from the cluster) — "
+            "growth-only was the 2026-07-03 bug."
+        )
+
+
 class TestDedupPoolOrderedByRecency:
     """Cycle-2 audit: cycle-1 dropped pool 500→100 (commit a540c7a)
     but the query has no ORDER BY. Postgres returns arbitrary heap-
