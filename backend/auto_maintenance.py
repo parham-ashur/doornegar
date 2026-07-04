@@ -7353,32 +7353,24 @@ async def step_audit_cluster_coherence():
     stories.audit_notes.cluster_drift with evidence. Niloofar surfaces
     the flagged ones in the next audit.
 
-    Phase 2 (2026-06-01): after the flag-only drift pass, run the
-    homepage coherence audit that ACTS — it audits the homepage-VISIBLE
-    set (incl. frozen, which the drift pass skips) and ARCHIVES confirmed
-    grab-bags (deterministic low-cohesion gate + cheap LLM confirm,
-    double-gated, reversible). This is the automated version of the
-    manual Niloofar title audit that caught 745b6edd / f06af369 /
-    91476a59. The LLM half is skipped when the budget guard trips (no
-    key / soft-halt) — it fails safe: no LLM confirm → no archive.
+    RETIRED 2026-07-04: the Phase-2 "coherence audit that ACTS"
+    (audit_homepage_coherence — low-cohesion pre-filter + nano confirm +
+    auto-archive) was removed. The v1 postmortem measured that grab-bags
+    HUG their centroid while rich real stories scatter, so its pre-filter
+    inspected exactly the wrong stories: real grab-bags never reached the
+    LLM, and the only archivable candidates were sprawling REAL stories
+    (the nano-undercount failure that got coherence_gate v2 reverted).
+    Detection now belongs to the read-only canaries + human review.
     """
     from app.database import async_session
     from app.services.clustering import (
         audit_cluster_coherence,
-        audit_homepage_coherence,
         detach_offtopic_from_visible_stories,
         freeze_oversized_active_stories,
     )
 
     async with async_session() as db:
         stats = await audit_cluster_coherence(db)
-    async with async_session() as db:
-        try:
-            act_stats = await audit_homepage_coherence(db)
-            stats["homepage_act"] = act_stats
-        except Exception as e:
-            logger.exception("Homepage coherence act failed (non-fatal): %s", e)
-            stats["homepage_act"] = {"error": str(e)[:200]}
     # Cluster hygiene (2026-06-02): drain off-topic articles already clustered
     # into visible stories — the content_type cluster gate stops new junk but
     # can't retro-remove it, so this self-heals the homepage_offtopic_leak

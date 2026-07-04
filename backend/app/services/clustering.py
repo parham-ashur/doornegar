@@ -2290,20 +2290,50 @@ async def _cluster_new_articles(
 async def _merge_tiny_by_cosine(db: AsyncSession, threshold: float = 0.60) -> int:
     """Deterministic pre-merge for near-duplicate tiny stories.
 
-    Finds pairs of stories with article_count ≤ 4 whose centroid
-    embeddings have cosine similarity ≥ threshold (default 0.60) and
-    merges them. Pure math, zero LLM cost — pairs the LLM would
-    obviously merge get handled here first, shrinking the candidate
-    pool for the subsequent LLM merge pass.
+    Finds pairs of stories with article_count ≤ 4 that pass the
+    calibrated SAME-EVENT test and merges them. Pure math, zero LLM
+    cost — pairs the LLM would obviously merge get handled here first,
+    shrinking the candidate pool for the subsequent LLM merge pass.
 
     A 2-article + 3-article merge often crosses the article_count ≥ 5
     visibility floor, so this directly surfaces stories that were
-    stuck in the hidden pool. Conservative on threshold so we don't
-    bad-merge different events that happen to share vocabulary.
+    stuck in the hidden pool.
+
+    SAME-EVENT TEST SWAP (Parham 2026-07-04). The original rule was raw
+    centroid cosine >= 0.60 (the `threshold` param — kept for signature
+    compat, no longer the deciding test). The v1 grab-bag postmortem
+    measured that unrelated Persian domestic news scores 0.53-0.73 on
+    centroid cosine, so 0.60 sat inside the confusion zone — and a
+    14-day replay of this step's ACTUAL merges found 248 of 278 (89%)
+    fail a title-token same-event check: a "US helicopter search" story
+    absorbed teachers' unions, a Kurdish protester's sentence, and
+    football; the Doha-talks story absorbed funeral fragments +
+    executions + poppy cultivation (caught live 2026-07-04 15:12).
+    Each pair must now pass homepage_dedup._same_event — the
+    2026-06-16-calibrated test already guarding
+    step_dedupe_homepage_events: centroid cosine >= 0.64 AND title-token
+    jaccard >= 0.12 AND >= 2 shared tokens AND >= 1 shared token OUTSIDE
+    the generic actor/place list. Union-find stays, but transitive
+    chains now require every LINK to share event-specific vocabulary,
+    which kills the funeral→prisoners→poppy chains.
 
     Returns number of stories absorbed.
     """
-    from app.nlp.embeddings import cosine_similarity as _cs
+    from app.services.homepage_dedup import (
+        DedupRow as _DR,
+        _same_event as _same_event_raw,
+        DEDUP_COSINE_MIN as _COS_MIN,
+        DEDUP_JACCARD_MIN as _JAC_MIN,
+        DEDUP_MIN_SHARED_TOKENS as _MIN_SHARED,
+    )
+
+    def _same_event_test(ra: _DR, rb: _DR) -> bool:
+        # Same thresholds as step_dedupe_homepage_events — one calibration,
+        # two consumers. If those constants move, both paths move together.
+        return _same_event_raw(
+            ra, rb,
+            cos_min=_COS_MIN, jac_min=_JAC_MIN, min_shared=_MIN_SHARED,
+        )
     from app.models.social import TelegramPost, SocialSentimentSnapshot
     from app.models.feedback import RaterFeedback
 
@@ -2349,17 +2379,29 @@ async def _merge_tiny_by_cosine(db: AsyncSession, threshold: float = 0.60) -> in
         if ra != rb:
             parent[ra] = rb
 
-    # O(n²) cosine; with ≤ few thousand tiny stories that's fine for a
-    # nightly pass. If it ever gets slow, bucket by leading embedding
-    # dim.
-    for i in range(len(stories)):
-        for j in range(i + 1, len(stories)):
+    # O(n²) same-event test; with ≤ few thousand tiny stories that's
+    # fine for a nightly pass. If it ever gets slow, bucket by leading
+    # embedding dim. DedupRows built once so titles are tokenized once
+    # per story, not once per pair.
+    drows = [
+        _DR(
+            id=str(s.id),
+            title_fa=s.title_fa,
+            centroid=s.centroid_embedding,
+            priority=s.priority or 0,
+            trending_score=s.trending_score or 0.0,
+            last_updated_at=s.last_updated_at,
+            article_count=s.article_count or 0,
+        )
+        for s in stories
+    ]
+    for i in range(len(drows)):
+        for j in range(i + 1, len(drows)):
             try:
-                sim = _cs(stories[i].centroid_embedding, stories[j].centroid_embedding)
+                if _same_event_test(drows[i], drows[j]):
+                    union(drows[i].id, drows[j].id)
             except Exception:
                 continue
-            if sim >= threshold:
-                union(str(stories[i].id), str(stories[j].id))
 
     # Group by root
     groups: dict[str, list[Story]] = {}
@@ -3531,71 +3573,6 @@ async def _nullctx():
     yield
 
 
-# ── Niloofar coherence audit that ACTS (2026-06-01) ────────────────────
-# The flag-only audit above skips frozen stories — but a frozen grab-bag
-# still shows on the homepage during a content drought (frozen-stays-
-# visible). So this pass audits the HOMEPAGE-VISIBLE set (incl. frozen),
-# and for a story that's both (a) deterministically incoherent (articles
-# scatter away from the centroid) AND (b) confirmed a grab-bag by a cheap
-# LLM, it ARCHIVES it. Double-gated so a legitimately big coherent story
-# (e.g. the 161-article Hormuz cluster, whose articles hug its centroid)
-# is never touched. Archive is reversible (PATCH archived=false).
-COHERENCE_ACT_PROMPT = """\
-You are a meticulous Persian news editor checking whether a story cluster is \
-ABOUT ONE STORY or is a grab-bag of unrelated events mislabeled with one title.
-
-Cluster title:
-{title}
-
-Sample of article headlines in the cluster:
-{headlines_block}
-
-A coherent cluster: the headlines are all about the SAME specific event/topic the \
-title names. A grab-bag: the headlines span several unrelated events (different \
-places, different topics) and the title only matches a minority.
-
-Return ONLY valid JSON:
-{{"grab_bag": true_or_false, "off_topic_ratio": 0.0_to_1.0, "dominant_topic": "...", "reason": "short Persian"}}
-
-- off_topic_ratio = fraction of headlines NOT about the title's specific event.
-- grab_bag = true only when the cluster clearly mixes several unrelated events.
-"""
-
-
-async def _call_openai_coherence(prompt: str) -> dict | None:
-    """Cheap-tier (gpt-4.1-nano) JSON call for the coherence-act audit.
-    Returns parsed dict, or None on ANY failure — no silent fallback:
-    the caller NEVER archives on a None (no LLM confirm = no action)."""
-    if not settings.openai_api_key:
-        return None
-    from app.services.llm_helper import build_openai_params
-    from app.services.llm_usage import log_llm_usage
-
-    def _sync_call():
-        client = OpenAI(api_key=settings.openai_api_key)
-        try:
-            params = build_openai_params(
-                model=settings.content_type_model,
-                prompt=prompt,
-                max_tokens=300,
-                temperature=0,
-            )
-            response = client.chat.completions.create(**params)
-            return _parse_llm_response(response.choices[0].message.content), response.usage
-        except Exception as e:
-            logger.error(f"Coherence-audit LLM error: {e}")
-            return None, None
-
-    parsed, usage = await asyncio.get_event_loop().run_in_executor(None, _sync_call)
-    if usage is not None:
-        await log_llm_usage(
-            model=settings.content_type_model,
-            purpose="clustering.coherence_audit",
-            usage=usage,
-        )
-    return parsed or None
-
-
 async def detach_offtopic_from_visible_stories(
     db: AsyncSession, *, limit: int = 500
 ) -> dict:
@@ -3704,104 +3681,18 @@ async def freeze_oversized_active_stories(db) -> dict:
     return {"frozen": len(ids)}
 
 
-async def audit_homepage_coherence(
-    db: AsyncSession,
-    *,
-    min_articles: int = 15,
-    sample_size: int = 8,
-    centroid_cohesion_floor: float = 0.55,
-    off_topic_archive_ratio: float = 0.5,
-) -> dict:
-    """Audit homepage-visible stories and ARCHIVE confirmed grab-bags.
-
-    Per story (homepage scope, article_count >= min_articles):
-    1. Deterministic pre-filter — mean cosine of sampled articles to the
-       story centroid. Coherent clusters hug the centroid (>floor); only
-       LOW-cohesion stories advance, so cost + risk stay on the suspects.
-    2. LLM confirm (cheap) — title vs sampled headlines → grab_bag verdict.
-       No LLM key / LLM error → None → NEVER archive (fail-safe).
-    3. Archive (+priority=-100) when both gates agree, logging the
-       evidence to story_events (coherence_archive). Reversible.
-    """
-    from app.nlp.embeddings import cosine_similarity as _cos
-    from app.services.homepage_scope import homepage_story_ids
-    from app.services.events import log_event as _log_event
-
-    stats = {"checked": 0, "low_cohesion": 0, "llm_confirmed": 0,
-             "archived": 0, "archived_titles": []}
-
-    hp_ids = await homepage_story_ids(db, trending_top_n=25, blindspot_top_n=20)
-    if not hp_ids:
-        return stats
-
-    rows = (await db.execute(
-        select(Story.id, Story.title_fa, Story.article_count, Story.centroid_embedding)
-        .where(
-            Story.id.in_(hp_ids),
-            Story.article_count >= min_articles,
-            Story.archived_at.is_(None),
-            Story.priority <= 0,  # respect manual pins
-        )
-    )).all()
-
-    for sid, title_fa, ac, centroid in rows:
-        if not centroid:
-            continue
-        stats["checked"] += 1
-        art_q = await db.execute(
-            select(Article.embedding, Article.title_fa, Article.title_original)
-            .where(Article.story_id == sid, Article.embedding.isnot(None))
-            .order_by(Article.published_at.desc().nullslast())
-            .limit(sample_size)
-        )
-        sample = [r for r in art_q.all() if r[0]]
-        if len(sample) < 5:
-            continue
-        cohesion = sum(_cos(r[0], centroid) for r in sample) / len(sample)
-        if cohesion >= centroid_cohesion_floor:
-            continue  # hugs the centroid → coherent → skip (no LLM)
-        stats["low_cohesion"] += 1
-
-        headlines = [(r[1] or r[2] or "").strip() for r in sample]
-        headlines = [h for h in headlines if h]
-        block = "\n".join(f"- {h}" for h in headlines)
-        verdict = await _call_openai_coherence(
-            COHERENCE_ACT_PROMPT.format(title=title_fa or "", headlines_block=block)
-        )
-        if not verdict:
-            continue  # fail-safe: no LLM confirm → no archive
-        if not (verdict.get("grab_bag") is True
-                and float(verdict.get("off_topic_ratio") or 0) >= off_topic_archive_ratio):
-            continue
-        stats["llm_confirmed"] += 1
-
-        from datetime import datetime as _dt_c, timezone as _tz_c
-        await db.execute(
-            update(Story).where(Story.id == sid).values(
-                archived_at=_dt_c.now(_tz_c.utc), priority=-100,
-            )
-        )
-        await _log_event(
-            db, event_type="coherence_archive", actor="maintenance",
-            story_id=sid,
-            signals={
-                "article_count": int(ac or 0),
-                "centroid_cohesion": round(cohesion, 3),
-                "off_topic_ratio": float(verdict.get("off_topic_ratio") or 0),
-                "reason": str(verdict.get("reason") or "")[:200],
-                "title_fa": (title_fa or "")[:120],
-            },
-        )
-        stats["archived"] += 1
-        stats["archived_titles"].append((title_fa or "")[:60])
-        logger.info(
-            "Coherence-archive: %s (ac=%s, cohesion=%.2f, off_topic=%.2f) — %s",
-            (title_fa or "")[:50], ac, cohesion,
-            float(verdict.get("off_topic_ratio") or 0), verdict.get("reason", ""),
-        )
-    await db.commit()
-    logger.info(f"Homepage coherence act: {stats}")
-    return stats
+# ── RETIRED: audit_homepage_coherence + COHERENCE_ACT_PROMPT (2026-07-04) ──
+# The "coherence audit that ACTS" (2026-06-01) archived homepage grab-bags
+# behind a low-cohesion pre-filter — but the 2026-06-20 v1 postmortem
+# MEASURED that grab-bags HUG their centroid (0.53-0.73) while rich real
+# stories scatter, so the pre-filter selected exactly the wrong stories:
+# real grab-bags skipped the LLM entirely ("hugs centroid → coherent"),
+# and the only stories that could reach the archive path were sprawling
+# REAL stories — the same nano-undercount failure mode that got the v2
+# coherence_gate reverted. Retired rather than inverted: detection now
+# belongs to the read-only canaries (sibling_cluster_fragmentation,
+# midsize_grabbag_risk, homepage_grabbag) + human-reviewed detachment.
+# Tripwire: tests/test_war_audit_fixes.py::TestCoherenceActRetired.
 
 
 # ---------------------------------------------------------------------------

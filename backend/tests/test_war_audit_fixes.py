@@ -4323,45 +4323,40 @@ class TestHeadlineGrounding:
 # Niloofar coherence audit that ACTS (2026-06-01, Phase 2)
 # ═════════════════════════════════════════════════════════════════════
 
-class TestCoherenceAuditActs:
-    """audit_homepage_coherence archives confirmed grab-bags from the
-    homepage-visible set (incl. frozen, which the flag-only drift pass
-    skips), double-gated: low centroid cohesion AND an LLM grab_bag
-    verdict. No LLM confirm (None) => never archives (fail-safe)."""
+class TestCoherenceActRetired:
+    """2026-07-04: audit_homepage_coherence (the Phase-2 auto-archiving
+    coherence check) was RETIRED. Its low-cohesion pre-filter was backwards
+    per the v1 postmortem's own measurements — grab-bags HUG their centroid
+    (0.53-0.73) while rich real stories scatter — so real grab-bags never
+    reached the LLM, and the only archivable candidates were sprawling REAL
+    stories (the nano-undercount failure that got coherence_gate v2
+    reverted). This tripwire blocks silent revival: grab-bag detection is
+    read-only canaries + human-reviewed detachment, never auto-archive."""
 
-    def test_function_and_prompt_exist(self):
+    def test_function_and_prompt_removed(self):
         from app.services import clustering
-        assert hasattr(clustering, "audit_homepage_coherence")
-        assert "grab_bag" in clustering.COHERENCE_ACT_PROMPT
+        assert not hasattr(clustering, "audit_homepage_coherence"), (
+            "audit_homepage_coherence was retired 2026-07-04 — do not revive "
+            "an auto-archiving coherence gate without Parham's explicit OK"
+        )
+        assert not hasattr(clustering, "COHERENCE_ACT_PROMPT")
 
-    def test_wired_into_pipeline_step(self):
+    def test_not_called_from_pipeline_step(self):
         from pathlib import Path
         src = (Path(__file__).parent.parent / "auto_maintenance.py").read_text()
         i = src.find("async def step_audit_cluster_coherence")
-        body = src[i:i+2000]
-        assert "audit_homepage_coherence" in body, (
-            "coherence-act audit no longer called from step_audit_cluster_coherence"
+        body = src[i:i + 3000]
+        assert "act_stats = await audit_homepage_coherence" not in body, (
+            "retired coherence-act audit must not be re-wired into the step"
         )
 
-    def test_no_archive_without_llm_confirm(self):
-        # Source-level guarantee: the archive path requires a non-None
-        # verdict AND grab_bag is True. A None verdict must `continue`.
-        from pathlib import Path
-        src = (Path(__file__).parent.parent / "app" / "services" / "clustering.py").read_text()
-        i = src.find("async def audit_homepage_coherence")
-        body = src[i:i+3000]
-        assert "if not verdict:" in body and "no archive" in body.lower(), (
-            "fail-safe (no LLM confirm => no archive) was removed"
-        )
-        assert 'grab_bag") is True' in body, "archive no longer requires grab_bag=True"
-
-    def test_respects_manual_pins_and_skips_small(self):
-        from pathlib import Path
-        src = (Path(__file__).parent.parent / "app" / "services" / "clustering.py").read_text()
-        i = src.find("async def audit_homepage_coherence")
-        body = src[i:i+3000]
-        assert "Story.priority <= 0" in body, "coherence-act must respect manual pins (priority>0)"
-        assert "min_articles: int = 15" in body, "coherence-act should skip small stories"
+    def test_flag_only_audit_survives(self):
+        """The read-only drift audit (audit_cluster_coherence) and the two
+        hygiene passes must remain — only the ARCHIVING half retired."""
+        from app.services import clustering
+        assert hasattr(clustering, "audit_cluster_coherence")
+        assert hasattr(clustering, "detach_offtopic_from_visible_stories")
+        assert hasattr(clustering, "freeze_oversized_active_stories")
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -4701,3 +4696,62 @@ class TestClusteringPromptsCarryPublishDates:
         assert "DATES:" in CLUSTERING_PROMPT, "clustering prompt must carry the date rule"
         assert "publish date" in MATCHING_PROMPT
         assert "publish date" in CLUSTERING_PROMPT
+
+
+class TestMergeTinyUsesCalibratedSameEventTest:
+    """2026-07-04: _merge_tiny_by_cosine's raw cosine>=0.60 rule was a
+    grab-bag factory — a 14-day replay of its ACTUAL merges found 248/278
+    (89%) fail a title-token same-event check (the Doha-talks story absorbed
+    funeral fragments + executions + poppy cultivation in one live pass).
+    The v1 postmortem measured unrelated Persian domestic news at 0.53-0.73
+    centroid cosine, so 0.60 sat inside the confusion zone. Each pair must
+    now pass homepage_dedup._same_event (cosine >= 0.64 AND title jaccard
+    >= 0.12 AND a shared event-specific token) — the same calibration that
+    guards step_dedupe_homepage_events."""
+
+    def _body(self):
+        import inspect
+        from app.services.clustering import _merge_tiny_by_cosine
+        return inspect.getsource(_merge_tiny_by_cosine)
+
+    def test_uses_same_event_not_raw_cosine(self):
+        body = self._body()
+        assert "_same_event" in body, (
+            "merge_tiny must use homepage_dedup._same_event, not raw cosine"
+        )
+        assert "sim >= threshold" not in body, (
+            "raw-cosine union (sim >= threshold) must not decide merges — "
+            "that rule merged funeral+prisoners+poppy into the Doha story"
+        )
+
+    def test_thresholds_come_from_homepage_dedup_constants(self):
+        """One calibration, two consumers: the thresholds must be the
+        DEDUP_* constants, not re-hardcoded numbers that can drift."""
+        body = self._body()
+        assert "DEDUP_COSINE_MIN" in body
+        assert "DEDUP_JACCARD_MIN" in body
+        assert "DEDUP_MIN_SHARED_TOKENS" in body
+
+    def test_blocks_generic_token_only_pairs(self):
+        """End-to-end sanity on the imported test itself: two titles sharing
+        only generic war-vocab (ایران/آمریکا) must NOT merge even at high
+        cosine; two titles about the same specific event must merge."""
+        from app.services.homepage_dedup import (
+            DedupRow, _same_event,
+            DEDUP_COSINE_MIN, DEDUP_JACCARD_MIN, DEDUP_MIN_SHARED_TOKENS,
+        )
+
+        def row(id_, title, vec):
+            return DedupRow(id=id_, title_fa=title, centroid=vec, priority=0,
+                            trending_score=0.0, last_updated_at=None, article_count=3)
+
+        kw = dict(cos_min=DEDUP_COSINE_MIN, jac_min=DEDUP_JACCARD_MIN,
+                  min_shared=DEDUP_MIN_SHARED_TOKENS)
+        # Same specific event (funeral discounts) — near-identical vectors
+        a = row("a", "تخفیف ۵۰ درصدی هتل‌ها برای زائران مراسم تشییع", [1, 0, 0, 0])
+        b = row("b", "تسهیلات و تخفیف هتل‌ها برای زائران تشییع رهبر", [0.95, 0.312, 0, 0])
+        assert _same_event(a, b, **kw) is True
+        # Only generic overlap (ایران/آمریکا) — high cosine must still block
+        c = row("c", "مذاکرات ایران و آمریکا در دوحه از سر گرفته شد", [1, 0, 0, 0])
+        d = row("d", "هشدار ایران به آمریکا درباره تنگه هرمز", [0.95, 0.312, 0, 0])
+        assert _same_event(c, d, **kw) is False

@@ -5288,9 +5288,11 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
             "≥ 120. oversized_active MISSES these because it filters frozen_at IS NULL, yet "
             "the frozen mega-umbrellas (82c03e04 at 161 art) are the worst grab-bags. A single "
             "coherent story rarely exceeds 120; > 0 = eyeball it (could be a legit large arc "
-            "like a merged negotiation cluster, or a grab-bag the coherence audit should archive). "
-            "Warn, not error — size is a proxy; the Phase-2 coherence audit does the real "
-            "cohesion check and archives true grab-bags (event_type=coherence_archive).",
+            "like a merged negotiation cluster, or a grab-bag needing manual review). "
+            "Warn, not error — size is a proxy. NOTE: the Phase-2 auto-archiving coherence "
+            "audit was RETIRED 2026-07-04 (its low-cohesion pre-filter was backwards — "
+            "grab-bags hug their centroid); review flagged stories by hand or via the "
+            "strong-model coherence judge.",
         ),
         _canary(
             "midsize_grabbag_risk", "Mid-size grab-bag risk (auto-titled «؛» story, 12-119 art)",
