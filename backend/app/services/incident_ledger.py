@@ -304,6 +304,7 @@ async def seed_incidents(db: AsyncSession, *, commit: bool = True) -> int:
 INCIDENT_WORTHY_CANARIES = {
     "midsize_grabbag_risk",
     "homepage_grabbag",
+    "sibling_cluster_fragmentation",
     "homepage_offtopic_leak",
     "bellwether_missing_story",
     "narrative_coverage_contradiction",

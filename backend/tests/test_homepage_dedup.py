@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 from app.services.homepage_dedup import (
     normalize_title_tokens, centroid_cosine, token_jaccard,
-    plan_dedup, DedupRow, DEDUP_COSINE_MIN,
+    plan_dedup, find_fragment_pairs, DedupRow, DEDUP_COSINE_MIN,
 )
 
 
@@ -121,3 +121,39 @@ def test_generic_token_overlap_alone_not_hidden():
     frag = _row("frag", "توافق ایران آمریکا در سوئیس؛ جزئیات بندها", [0.95, 0.31, 0, 0], prio=0)
     plans = plan_dedup([hero, frag])
     assert len(plans) == 1 and [h.id for h in plans[0][1]] == ["frag"]
+
+
+# ---- find_fragment_pairs (2026-07-04: sibling_cluster_fragmentation canary) ----
+# Unlike plan_dedup, this needs NO pin — it's the detection-only counterpart
+# used to catch un-pinned fragmentation (the 2026-07-03 Khamenei funeral case,
+# which plan_dedup structurally cannot see since nothing was pinned).
+
+def test_find_fragment_pairs_needs_no_pin():
+    """The exact scenario plan_dedup refuses (test_no_pin_means_no_dedup) —
+    three mutually-similar, all-unpinned deal-like stories — IS surfaced here,
+    because detection (list candidates) is safe without a canonical anchor;
+    only auto-hiding requires one."""
+    a = _row("a", "توافق ایران آمریکا پایان جنگ سوئیس امضا", [1, 0, 0, 0], prio=0)
+    b = _row("b", "توافق ایران آمریکا سوئیس جزئیات بندها", [0.9, 0.4359, 0, 0], prio=0)
+    c = _row("c", "توافق ایران آمریکا بندها واکنش استقبال", [0.85, 0.527, 0, 0], prio=0)
+    pairs = find_fragment_pairs([a, b, c])
+    found = {frozenset((x.id, y.id)) for x, y in pairs}
+    assert frozenset(("a", "b")) in found
+    assert frozenset(("a", "c")) in found
+
+def test_find_fragment_pairs_still_excludes_distinct_and_generic_overlap():
+    """Same guards as plan_dedup: cosine gate excludes the related-but-distinct
+    US-strikes story, and the shared-token guard excludes the cosine anomaly."""
+    hero, d1, d2, us, leb = _deal_set()
+    pairs = find_fragment_pairs([hero, d1, d2, us, leb])
+    found = {frozenset((x.id, y.id)) for x, y in pairs}
+    assert frozenset(("hero", "d1")) in found
+    assert frozenset(("hero", "d2")) in found
+    assert not any("us" in p for p in found)
+    assert not any("leb" in p for p in found)
+
+def test_find_fragment_pairs_empty_on_distinct_stories():
+    hero = _row("hero", "توافق ایران آمریکا پایان جنگ سوئیس امضا", [1, 0, 0, 0], prio=0)
+    leb = _row("leb", "حملات اسرائیل به جنوب لبنان؛ ۸ کشته", [0, 1, 0, 0], prio=0)
+    strike = _row("strike", "حملات موشکی ایران به ۱۸ هدف نظامی آمریکا", [0.55, 0, 0.83, 0], prio=0)
+    assert find_fragment_pairs([hero, leb, strike]) == []

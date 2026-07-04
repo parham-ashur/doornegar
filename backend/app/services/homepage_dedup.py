@@ -160,6 +160,43 @@ def _same_event(a: DedupRow, b: DedupRow,
     return True
 
 
+def find_fragment_pairs(
+    rows: list[DedupRow],
+    *,
+    cos_min: float = DEDUP_COSINE_MIN,
+    jac_min: float = DEDUP_JACCARD_MIN,
+    min_shared: int = DEDUP_MIN_SHARED_TOKENS,
+) -> list[tuple[DedupRow, DedupRow]]:
+    """Read-only, pairwise same-event scan across ALL rows — no pin required.
+
+    `plan_dedup` only collapses fragments of an explicitly-pinned story,
+    because it HIDES stories (an irreversible homepage action) and a 2026-06-16
+    dry-run showed transitive same-event grouping catastrophically over-merges
+    the dense war/deal topic space. That pin-anchoring means a fast-breaking
+    event that fragments WITHOUT anyone pinning a canonical story is invisible
+    to it — exactly what happened 2026-07-03, when the Khamenei funeral split
+    across 4 un-pinned story IDs and only a manual Niloofar audit caught it.
+
+    This function takes no action and stores nothing; it just lists candidate
+    pairs for a human/Niloofar merge_stories pass (see the
+    sibling_cluster_fragmentation canary in admin.py). Because nothing is
+    auto-hidden or auto-grouped, it doesn't inherit the transitive-closure
+    over-merge risk — a false-positive pair here just means someone glances at
+    two titles and decides they're not actually the same event, same as any
+    other WARN canary (homepage_grabbag, midsize_grabbag_risk). Reuses the
+    identical calibrated `_same_event` test so it inherits the same precision
+    bias (cosine >= 0.64 AND title-jaccard >= 0.12 AND a shared event-specific
+    token, not just generic actor/place words).
+    """
+    pairs: list[tuple[DedupRow, DedupRow]] = []
+    for i in range(len(rows)):
+        for j in range(i + 1, len(rows)):
+            a, b = rows[i], rows[j]
+            if _same_event(a, b, cos_min=cos_min, jac_min=jac_min, min_shared=min_shared):
+                pairs.append((a, b))
+    return pairs
+
+
 def plan_dedup(
     rows: list[DedupRow],
     *,

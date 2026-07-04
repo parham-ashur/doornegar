@@ -5225,6 +5225,44 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
             "threshold": threshold, "status": status, "why": why,
         }
 
+    # Sibling-cluster fragmentation (Parham 2026-07-04). Closes a gap in
+    # step_dedupe_homepage_events: that step is PIN-ANCHORED, so it only
+    # collapses fragments of an explicitly-pinned story. The 2026-07-03
+    # Niloofar audit found the Khamenei funeral fragmented across 4 UN-pinned
+    # story IDs — invisible to the pin-anchored dedup, caught only by a
+    # manual sibling-cluster merge sweep. Reuses the identical calibrated
+    # same-event test (cosine>=0.64 AND title-jaccard>=0.12 AND a shared
+    # event-specific token) pairwise across the whole fresh-visible pool
+    # instead of pin-vs-non-pin. Read-only: lists candidate pairs, never
+    # merges — so it doesn't inherit the transitive-grouping over-merge risk
+    # that made plan_dedup pin-anchored in the first place.
+    from app.services.homepage_dedup import DedupRow, find_fragment_pairs
+    _frag_rows_result = await db.execute(
+        select(
+            Story.id, Story.title_fa, Story.centroid_embedding,
+            Story.priority, Story.trending_score, Story.last_updated_at,
+            Story.article_count,
+        ).where(
+            Story.article_count >= 4,
+            Story.archived_at.is_(None),
+            Story.last_updated_at >= datetime.now(timezone.utc) - timedelta(days=7),
+        )
+    )
+    _frag_rows = [
+        DedupRow(
+            id=r.id, title_fa=r.title_fa, centroid=r.centroid_embedding,
+            priority=r.priority or 0, trending_score=r.trending_score or 0.0,
+            last_updated_at=r.last_updated_at, article_count=r.article_count,
+        )
+        for r in _frag_rows_result.all()
+    ]
+    frag_pairs = find_fragment_pairs(_frag_rows)
+    frag_count = len(frag_pairs)
+    frag_sample = (
+        f"{(frag_pairs[0][0].title_fa or '')[:50]} ≈≈ {(frag_pairs[0][1].title_fa or '')[:50]}"
+        if frag_pairs else "none"
+    )
+
     oversized_total = int(story_states["oversized_total"] or 0)
     oversized_active = int(story_states["oversized_active"] or 0)
     null_first_pub = int(story_states["null_first_pub"] or 0)
@@ -5266,6 +5304,19 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
             "«؛» is a proxy: eyeball it, split if it's two events, ignore if it's one event with "
             "a sub-clause. Pairs with the merge-protection cure (42a7844) that stops pinned "
             "stories being absorbed in the first place.",
+        ),
+        _canary(
+            "sibling_cluster_fragmentation", "Sibling-cluster fragmentation (same event, different story IDs)",
+            frag_count, "= 0 (eyeball if > 0)",
+            "warn" if frag_count > 0 else "ok",
+            f"Sample: {frag_sample}. Reuses step_dedupe_homepage_events' calibrated "
+            "same-event test (centroid cosine >= 0.64 AND title-token jaccard >= 0.12 "
+            "AND a shared event-specific token, not just generic actor/place words) but "
+            "scans ALL fresh-visible pairs instead of only pin-vs-non-pin — closes the "
+            "gap that let the 2026-07-03 Khamenei funeral fragment across 4 un-pinned "
+            "story IDs reach Niloofar's manual merge sweep instead of a signal. "
+            "Read-only: never auto-merges, just flags candidate pairs for a "
+            "merge_stories pass.",
         ),
         _canary(
             "homepage_offtopic_leak", "Off-topic articles inside visible stories",
