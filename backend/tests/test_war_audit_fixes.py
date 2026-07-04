@@ -4597,3 +4597,107 @@ class TestMergeReassignsAnalystTakes:
         assert "AnalystTake" in body, "merge_tiny must touch analyst_takes"
         assert "db.delete(victim)" in body
         assert body.index("AnalystTake") < body.index("db.delete(victim)")
+
+
+class TestStalePublishedArticlesNeverCluster:
+    """2026-07-04 audit: the 7-day clustering window filtered on ingested_at
+    only, so feeds serving weeks-old items (37 stale articles in one week,
+    all 37 reaching a story) put a May-10 oil article inside the July-4
+    Khamenei-funeral story. Both clustering pools must gate on published_at
+    too (NULL allowed — the ingested_at gate still holds)."""
+
+    def test_cluster_pool_gates_on_published_at(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "app" / "services" / "clustering.py").read_text()
+        idx = src.find("# ── Step 1: Get unclustered articles from the last 7 days ──")
+        assert idx >= 0, "cluster pool anchor comment must exist"
+        block = src[idx: idx + 2600]
+        assert "Article.ingested_at >= cutoff" in block
+        assert "Article.published_at >= cutoff" in block, (
+            "cluster pool must also require published_at within the window "
+            "(stale-published gate, 2026-07-04)"
+        )
+        assert "Article.published_at.is_(None)" in block, (
+            "NULL published_at must remain allowed (some feeds omit dates)"
+        )
+
+    def test_orphan_recluster_pool_gates_on_published_at(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "auto_maintenance.py").read_text()
+        idx = src.find("async def step_recluster_orphans")
+        assert idx >= 0
+        block = src[idx: idx + 4200]
+        assert "Article.published_at >= aged_out_cutoff" in block, (
+            "orphan pool must mirror the cluster-pool stale-published gate"
+        )
+        assert "Article.published_at.is_(None)" in block
+
+
+class TestBirthGraceBeforeAgeFreeze:
+    """2026-07-04 audit: first_published_at = MIN(article.published_at), so a
+    single stale-dated interloper aged a 16-MINUTE-old story past the age_7d
+    freeze cutoff (30 stories frozen within 1h of birth in one week). Each
+    birth-frozen story rejects the next wave of coverage, spawning the sibling
+    fragments the sibling_cluster_fragmentation canary keeps catching. The
+    age-based freeze must require the story row itself to be >= 24h old; the
+    size-based freeze keeps NO grace."""
+
+    def test_birth_grace_constant_and_wiring(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "auto_maintenance.py").read_text()
+        assert "BIRTH_GRACE_HOURS = 24" in src, "birth-grace constant must exist"
+        idx = src.find("# Birth grace (Parham 2026-07-04)")
+        assert idx >= 0, "birth-grace rationale comment must anchor the freeze query"
+        block = src[idx: idx + 1400]
+        assert "Story.created_at < birth_grace_cutoff" in block
+        assert "Story.first_published_at < freeze_cutoff" in block
+
+    def test_size_freeze_keeps_no_grace(self):
+        """The 100+-article umbrella freeze must stay OUTSIDE the grace
+        conjunction — an umbrella needs freezing regardless of story age."""
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "auto_maintenance.py").read_text()
+        idx = src.find("# Birth grace (Parham 2026-07-04)")
+        block = src[idx: idx + 1600]
+        grace_idx = block.find("Story.created_at < birth_grace_cutoff")
+        size_idx = block.find("Story.article_count > UMBRELLA_ARTICLE_COUNT_FREEZE")
+        assert grace_idx >= 0 and size_idx >= 0
+        # The size condition appears after the grace-wrapped age block,
+        # as a sibling arm of the outer or_ — not inside the grace &.
+        closing = block[grace_idx:size_idx]
+        assert closing.count("or_(") >= 1, (
+            "age conditions must sit in a nested or_ under the grace guard, "
+            "with the size freeze as a separate outer arm"
+        )
+
+
+class TestClusteringPromptsCarryPublishDates:
+    """2026-07-04 audit: the grouping/matching LLM decided \"same event?\"
+    BLIND to dates. A live strong-model judge run proved publish dates are the
+    single most decisive interloper-rejection signal (May-10 article vs July-4
+    event = certain rejection). The article block, the story block, and both
+    prompt rule lists must carry dates."""
+
+    def test_articles_block_includes_publish_date(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "app" / "services" / "clustering.py").read_text()
+        idx = src.find("def _build_articles_block")
+        assert idx >= 0
+        block = src[idx: idx + 2600]
+        assert 'pub.date().isoformat()' in block, (
+            "article lines must carry the publish date"
+        )
+
+    def test_story_lines_include_coverage_start(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "app" / "services" / "clustering.py").read_text()
+        assert "coverage since" in src, (
+            "matching story lines must show when coverage began"
+        )
+
+    def test_prompts_state_the_date_rule(self):
+        from app.services.clustering import MATCHING_PROMPT, CLUSTERING_PROMPT
+        assert "DATES:" in MATCHING_PROMPT, "matching prompt must carry the date rule"
+        assert "DATES:" in CLUSTERING_PROMPT, "clustering prompt must carry the date rule"
+        assert "publish date" in MATCHING_PROMPT
+        assert "publish date" in CLUSTERING_PROMPT

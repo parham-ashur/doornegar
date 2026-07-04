@@ -176,7 +176,13 @@ STRICT RULES (follow all):
    - Same exact attack on the same target → match
 5. Every article MUST get an entry in matches (either with a story_idx or with null).
 6. If unsure, OUTPUT NULL. There is no penalty for nulls — there is a big penalty for wrong matches.
-7. Return ONLY the JSON object, no commentary.
+7. DATES: each article shows its publish date in parentheses, and each story shows \
+when its coverage began. An article published well BEFORE the story's coverage began \
+(more than a few days earlier) is reporting an OLDER, different development — reject it \
+(story_idx: null), no matter how similar the wording. A publish-date gap of more than \
+7 days between the article and the story's coverage window is near-certain evidence of \
+a different event.
+8. Return ONLY the JSON object, no commentary.
 """
 
 CLUSTERING_PROMPT = """\
@@ -210,6 +216,10 @@ Rules:
   - Articles sharing only a broad category (aviation, families, weather, sports) but about different specific events are SEPARATE
   - Multiple articles about the SAME attack on the SAME target = one group
 - Be very precise: only group articles describing the exact same incident/event/announcement
+- DATES: each article shows its publish date in parentheses. Articles published more than \
+a few days apart are almost never the same specific event — do NOT group them, even when \
+they share names, places, or vocabulary. A weeks-old article does not belong in a group \
+about this week's event.
 - Titles must be specific and descriptive of the single event, NOT vague summaries
 - Titles should be informative statements, NOT questions
 - title_fa must be in Farsi, title_en must be in English
@@ -371,13 +381,21 @@ def _build_articles_block(articles: list, source_names: dict[str, str] | None = 
             sname = source_names.get(str(_g(article, "id")), "Unknown")
         else:
             sname = "Unknown"
+        # Publish date (Parham 2026-07-04): the grouping/matching LLM was
+        # deciding "same event?" BLIND to dates — a May-10 article joined a
+        # July-4 funeral story because nothing in the prompt revealed the
+        # 55-day gap. A live strong-model judge run on that story showed
+        # dates were the single most decisive rejection signal. ~6 tokens
+        # per article; both prompts carry a date rule referencing this.
+        pub = _g(article, "published_at")
+        date_tag = f"({pub.date().isoformat()}) " if pub else ""
         body = (_g(article, "content_text") or _g(article, "summary") or "").strip()
         # Collapse whitespace so token usage is predictable
         body = " ".join(body.split())[:150]
         if body:
-            lines.append(f"{i}. [{sname}] {title}\n    {body}")
+            lines.append(f"{i}. [{sname}] {date_tag}{title}\n    {body}")
         else:
-            lines.append(f"{i}. [{sname}] {title}")
+            lines.append(f"{i}. [{sname}] {date_tag}{title}")
     return "\n".join(lines)
 
 
@@ -945,6 +963,10 @@ async def _match_to_existing_stories(
         select(
             Story.id, Story.title_fa, Story.title_en, Story.article_count,
             Story.centroid_embedding, Story.last_updated_at, Story.summary_fa,
+            # first_published_at feeds the story-line date tag in the
+            # matching prompt (2026-07-04) — appended LAST so existing
+            # positional row[i] consumers stay valid.
+            Story.first_published_at,
         )
         .where(
             # Catch-22 break (Parham 2026-06-05): the floor used to be >= 5, but
@@ -996,7 +1018,7 @@ async def _match_to_existing_stories(
         )
         .order_by(Story.last_updated_at.desc().nullslast())
     )
-    existing_stories = result.all()  # (id, title_fa, title_en, article_count, centroid, last_updated_at, summary_fa)
+    existing_stories = result.all()  # (id, title_fa, title_en, article_count, centroid, last_updated_at, summary_fa, first_published_at)
     logger.info(
         f"Matching against {len(existing_stories)} open stories "
         f"(article_count 5 .. {settings.max_cluster_size - 1}, "
@@ -1536,8 +1558,13 @@ async def _match_to_existing_stories(
         for i, row in enumerate(story_batch, 1):
             sid, title_fa, title_en = row[0], row[1], row[2]
             summary_fa = row[6]
+            first_pub = row[7] if len(row) > 7 else None
             display = title_fa or title_en or "(no title)"
-            line = f"S{i}. {display}"
+            # Story-side date tag (2026-07-04): pairs with the article-side
+            # date in _build_articles_block so the LLM can reject matches
+            # with an implausible publish-date gap.
+            date_tag = f" (coverage since {first_pub.date().isoformat()})" if first_pub else ""
+            line = f"S{i}. {display}{date_tag}"
             recent = story_recent_titles.get(sid) or []
             # Drop the original title from the recent list if duplicated
             recent_unique = [t for t in recent if t and t != title_fa][:2]
@@ -3024,6 +3051,18 @@ async def cluster_articles(db: AsyncSession, *, deadline_ts: float | None = None
         .where(
             Article.story_id.is_(None),
             Article.ingested_at >= cutoff,
+            # Stale-published gate (Parham 2026-07-04). The window above
+            # filters on INGEST time only, but some feeds serve weeks-old
+            # items (2026-07-04 audit: 37 articles published >7d ago were
+            # ingested within the window in one week — ALL 37 reached a
+            # story). A May-10-published oil article clustered into the
+            # July-4 Khamenei-funeral story, dragged first_published_at
+            # back 55 days, and got the newborn story frozen as "age_7d"
+            # 16 minutes after birth — which then bounced the next wave
+            # of funeral coverage into a sibling fragment. Articles must
+            # be fresh by BOTH clocks. NULL published_at is allowed
+            # (some feeds omit dates; the ingested_at gate still holds).
+            or_(Article.published_at.is_(None), Article.published_at >= cutoff),
             Article.cluster_attempts < MAX_CLUSTER_ATTEMPTS,
             Article.content_type.isnot(None),
             text("(sources.content_filters -> 'allowed') @> to_jsonb(articles.content_type)"),

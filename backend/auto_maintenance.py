@@ -1147,6 +1147,13 @@ async def step_recluster_orphans():
                 Article.embedding.isnot(None),
                 Article.ingested_at < cutoff,
                 Article.ingested_at >= aged_out_cutoff,  # ← 7-day floor
+                # Stale-published gate (Parham 2026-07-04): mirror the
+                # cluster_articles pool fix — an article published >7d
+                # ago must not be re-homed into a fresh story, or it
+                # drags first_published_at backwards and triggers the
+                # age_7d freeze on a newborn story. NULL allowed.
+                (Article.published_at.is_(None))
+                | (Article.published_at >= aged_out_cutoff),
             ).limit(MAX_PER_RUN)
         )).all()
 
@@ -4951,6 +4958,10 @@ async def step_archive_stale():
     stats = {"auto_frozen": 0, "soft_archived": 0, "hard_deleted": 0, "recounted": 0}
     now = datetime.now(timezone.utc)
     freeze_cutoff = now - timedelta(days=7)
+    # BIRTH_GRACE_HOURS: minimum story age before the age_7d freeze may
+    # fire (see the freeze query below for the full 2026-07-04 rationale).
+    BIRTH_GRACE_HOURS = 24
+    birth_grace_cutoff = now - timedelta(hours=BIRTH_GRACE_HOURS)
     soft_cutoff = now - timedelta(days=30)
     hard_cutoff = now - timedelta(days=60)
 
@@ -5010,9 +5021,25 @@ async def step_archive_stale():
                 # overnight when the auto-freeze fired on its 25-day age).
                 Story.priority <= 0,
                 or_(
-                    Story.first_published_at < freeze_cutoff,
-                    (Story.first_published_at.is_(None))
-                        & (Story.created_at < freeze_cutoff),
+                    # Birth grace (Parham 2026-07-04): age-based freeze
+                    # requires the STORY itself to be at least 24h old.
+                    # first_published_at is MIN(article.published_at), so
+                    # one stale-dated interloper ages a newborn story past
+                    # the 7d cutoff instantly — 2026-07-04 audit: funeral
+                    # story 75cebaa8 was frozen 16 MINUTES after creation
+                    # ("age_7d" via a May-10 oil article), and 30 stories
+                    # in one week were frozen within 1h of birth. Each
+                    # birth-frozen story rejects the next wave of coverage,
+                    # spawning the sibling fragments the
+                    # sibling_cluster_fragmentation canary keeps catching.
+                    # The size-based freeze below keeps NO grace — a
+                    # 100+-article umbrella needs freezing regardless of age.
+                    (Story.created_at < birth_grace_cutoff)
+                    & or_(
+                        Story.first_published_at < freeze_cutoff,
+                        (Story.first_published_at.is_(None))
+                            & (Story.created_at < freeze_cutoff),
+                    ),
                     Story.article_count > UMBRELLA_ARTICLE_COUNT_FREEZE,
                 ),
             )
