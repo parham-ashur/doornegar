@@ -2374,6 +2374,40 @@ class TestSummarizeRefreshesOnArticleShrink:
         )
 
 
+class TestSummarizeShrinkBreaksMaturityLock:
+    """2026-07-04 follow-up: the 2026-07-03 SHRINK_TRIGGER fix only helps a
+    story BEFORE it's locked — the `analysis_locked_at` check runs first and
+    exits unconditionally, so the shrink-trigger code is unreachable for any
+    story that was already mature-locked (48h+ stable) before it got pruned.
+    Confirmed live: story c0f9adf7 was locked at 03:15 UTC on 2026-07-04 —
+    HOURS after the shrink-trigger fix deployed — while already 9 articles
+    stale. Fix lets a meaningful shrink (>= SHRINK_TRIGGER since the count
+    recorded at lock time) pop analysis_locked_at and requeue the story.
+    """
+
+    def test_locked_story_can_be_unlocked_by_shrink(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent / "auto_maintenance.py"
+        ).read_text()
+        idx = src.find("# Already locked → never re-analyze, UNLESS the article set has")
+        assert idx >= 0, (
+            "step_summarize's lock-check comment must remain to anchor this test"
+        )
+        block = src[idx:idx + 1400]
+        assert 'b.get("analysis_locked_at")' in block
+        assert "articles_count_at_hash" in block
+        assert "count_at_lock - cur_count) >= SHRINK_TRIGGER" in block, (
+            "a locked story must be unlockable when its article count has "
+            "shrunk by >= SHRINK_TRIGGER since the count recorded at lock "
+            "time — otherwise pruning that happens after the 48h maturity "
+            "lock (the common case for Niloofar cleanup) can never "
+            "re-trigger analysis, even with the growth/shrink volume gate."
+        )
+        assert 'b.pop("analysis_locked_at", None)' in block
+
+
 class TestDedupPoolOrderedByRecency:
     """Cycle-2 audit: cycle-1 dropped pool 500→100 (commit a540c7a)
     but the query has no ORDER BY. Postgres returns arbitrary heap-

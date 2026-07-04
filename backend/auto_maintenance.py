@@ -1893,8 +1893,30 @@ async def step_summarize():
                     f"Skipping re-analysis to preserve whatever editorial state remains."
                 )
                 continue
-            # Already locked → never re-analyze.
+            # Already locked → never re-analyze, UNLESS the article set has
+            # shrunk meaningfully since the lock's hash was taken (Parham
+            # 2026-07-04). The 2026-07-03 SHRINK_TRIGGER fix only helps a
+            # story BEFORE it's locked — this check runs first and exits
+            # unconditionally, so a story that gets pruned (Niloofar
+            # remove_article, admin detach) well after its 48h maturity
+            # lock stays frozen forever regardless of that fix. Confirmed
+            # live 2026-07-04: story c0f9adf7 was locked at 03:15 UTC that
+            # morning — HOURS after the shrink-trigger fix deployed — while
+            # already 9 articles stale, proving the lock path is a separate
+            # gap. Same threshold, same rationale: removal is a deliberate
+            # editorial action, not noise.
             if isinstance(b, dict) and b.get("analysis_locked_at"):
+                count_at_lock = b.get("articles_count_at_hash")
+                cur_count = s.article_count or 0
+                if count_at_lock is not None and (count_at_lock - cur_count) >= SHRINK_TRIGGER:
+                    b.pop("analysis_locked_at", None)
+                    s.summary_en = _json.dumps(b, ensure_ascii=False)
+                    all_candidates.append(s)
+                    logger.info(
+                        f"  unlocking mature story for shrink (was {count_at_lock} "
+                        f"articles, now {cur_count}): {(s.title_fa or '')[:40]}"
+                    )
+                    continue
                 continue
             last_hash = b.get("articles_hash") if isinstance(b, dict) else None
             cur_hash = _articles_hash(s)
