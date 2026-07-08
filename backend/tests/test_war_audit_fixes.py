@@ -245,26 +245,46 @@ class TestHomepageScope:
     """
 
     def test_module_constants_match_trending_api(self):
-        """The min_articles + min_score constants must equal the API defaults."""
+        """The min_articles + min_score constants must equal the API defaults.
+
+        2026-07-08: api/v1/stories.py now imports TRENDING_MIN_ARTICLES /
+        BLINDSPOT_MIN_ARTICLES directly as its Query() defaults instead of
+        hardcoding its own copy, so drift between the two is no longer
+        possible by construction — this test now just pins the intentional
+        value. Lowered 4 -> 3 the same day (Parham's call): the 182e12c
+        merge_tiny fix correctly stopped bad merges but left most stories
+        stuck at 2-3 articles with nothing inflating them past 4 anymore
+        (0 stories in the 4-9 bucket, homepage down to 4 trending + 1
+        blindspot story). 3 restores real content without dropping all
+        the way to 2, which would let very thin single-narrative stories
+        onto a site built around multi-source comparison.
+        """
         from app.services.homepage_scope import (
             TRENDING_MIN_ARTICLES,
             TRENDING_MIN_SCORE,
             BLINDSPOT_MIN_ARTICLES,
         )
+        from app.api.v1.stories import trending_stories, blindspot_stories
+        import inspect
 
-        # These values are mirrored from api/v1/stories.py — if either
-        # side changes, both sides change. This test is a tripwire.
-        assert TRENDING_MIN_ARTICLES == 4, (
-            "TRENDING_MIN_ARTICLES drifted from the API default (4). "
-            "Update both api/v1/stories.py:trending_stories AND "
-            "app/services/homepage_scope.py together."
+        assert TRENDING_MIN_ARTICLES == 3, (
+            "TRENDING_MIN_ARTICLES changed — confirm this was an intentional "
+            "homepage-content decision, not an accidental edit."
         )
         assert TRENDING_MIN_SCORE == 0.5, (
             "TRENDING_MIN_SCORE drifted from the API default (0.5)."
         )
-        assert BLINDSPOT_MIN_ARTICLES == 4, (
-            "BLINDSPOT_MIN_ARTICLES drifted from the API default."
+        assert BLINDSPOT_MIN_ARTICLES == 3, (
+            "BLINDSPOT_MIN_ARTICLES changed — confirm this was an intentional "
+            "homepage-content decision, not an accidental edit."
         )
+
+        # Structural guarantee: the API's Query() default must literally be
+        # the same object/value as the constant, not a second hardcoded copy.
+        trending_default = inspect.signature(trending_stories).parameters["min_articles"].default.default
+        blindspot_default = inspect.signature(blindspot_stories).parameters["min_articles"].default.default
+        assert trending_default == TRENDING_MIN_ARTICLES
+        assert blindspot_default == BLINDSPOT_MIN_ARTICLES
 
     def test_homepage_eligible_filters_excludes_archived_and_hidden(self):
         """The looser SQL-side predicate must still exclude archived

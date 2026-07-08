@@ -25,11 +25,28 @@ from app.models.story import Story
 
 
 # Mirrors api/v1/stories.py:trending_stories — keep in lockstep.
-TRENDING_MIN_ARTICLES = 4
+# api/v1/stories.py now imports these directly as its Query() defaults
+# instead of hardcoding its own copy, so this module is the only place
+# to change the floor (2026-07-08: this docstring's own warning about
+# drift had gone stale — the two literal 4s were never actually the
+# same knob, just two numbers kept in sync by comment discipline).
+#
+# 4 -> 3 (2026-07-08): the 2026-07-04 merge_tiny fix (182e12c) replaced
+# a loose cosine merge rule with a strict same-event test, correctly
+# stopping bad merges (89% of the old rule's merges failed a same-event
+# check) but — as flagged at the time ("expect more small hidden
+# stories instead") — leaving most stories stuck at 2-3 articles with
+# nothing inflating them past 4 anymore. Production check: 0 stories in
+# the 4-9 bucket, 52 stuck at 2-3, 40 of those with a healthy trending
+# score — the homepage was showing only 4 trending + 1 blindspot story.
+# Lowering to 3 (Parham's call) restores that content without going all
+# the way to 2, which would let very thin single-narrative stories onto
+# a site whose whole premise is multi-source comparison.
+TRENDING_MIN_ARTICLES = 3
 TRENDING_MIN_SCORE = 0.5
 
 # Mirrors api/v1/stories.py:blindspot_stories.
-BLINDSPOT_MIN_ARTICLES = 4
+BLINDSPOT_MIN_ARTICLES = 3
 BLINDSPOT_LAST_UPDATED_DAYS = 14  # soft window; covers strict 7d too
 
 

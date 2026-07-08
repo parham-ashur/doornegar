@@ -27,6 +27,7 @@ from app.schemas.story import (
     StoryListResponse,
 )
 from app.services.story_analysis import generate_story_analysis
+from app.services.homepage_scope import TRENDING_MIN_ARTICLES, BLINDSPOT_MIN_ARTICLES
 from app.rate_limit import limiter as _limiter
 
 logger = logging.getLogger(__name__)
@@ -210,7 +211,7 @@ async def trending_stories(
     # ~40% per /trending call across the board. The frontend
     # explicitly requests limit=30 (cycle-5 phase F.3).
     limit: int = Query(10, ge=1, le=30),
-    min_articles: int = Query(4, ge=1),
+    min_articles: int = Query(TRENDING_MIN_ARTICLES, ge=1),
     db: AsyncSession = Depends(get_db),
 ):
     # Phase F.3 (Parham 2026-05-09): Cloudflare CDN cache. Without
@@ -319,7 +320,7 @@ async def trending_stories(
 async def blindspot_stories(
     request: Request,
     limit: int = Query(20, ge=1, le=50),
-    min_articles: int = Query(4, ge=1),
+    min_articles: int = Query(BLINDSPOT_MIN_ARTICLES, ge=1),
     db: AsyncSession = Depends(get_db),
 ):
     # F7 — a blindspot from >7d ago isn't a blindspot anymore, it's just
