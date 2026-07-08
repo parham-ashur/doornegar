@@ -161,6 +161,7 @@ async def get_dashboard(db: AsyncSession = Depends(get_db)):
     hit the cache.
     """
     import time as _time
+    from sqlalchemy import or_
     if _dashboard_cache["data"] and _time.time() < _dashboard_cache["expires"]:
         return _dashboard_cache["data"]
 
@@ -175,7 +176,27 @@ async def get_dashboard(db: AsyncSession = Depends(get_db)):
     with_fa_title = (await db.execute(
         select(func.count(Article.id)).where(Article.title_fa.isnot(None))
     )).scalar() or 0
-    without_fa_title = total_articles - with_fa_title
+    # Only count articles that could ever be displayed (2026-07-08): off_topic /
+    # opinion / discussion / aggregation / other articles never reach
+    # process_unprocessed_articles (it gates on the same source
+    # content_filters['allowed'] whitelist), so their title_fa stays NULL
+    # forever by design — counting them here made this warning fire on a
+    # permanent, harmless backlog instead of the real stuck-news backlog.
+    # Same predicate as nlp_pipeline.py / auto_maintenance.py's backfill step.
+    without_fa_title = (await db.execute(
+        select(func.count(Article.id))
+        .select_from(Article)
+        .join(Source, Source.id == Article.source_id)
+        .where(
+            Article.title_fa.is_(None),
+            or_(
+                Article.content_type.is_(None),
+                _sa_text(
+                    "(sources.content_filters -> 'allowed') @> to_jsonb(articles.content_type)"
+                ),
+            ),
+        )
+    )).scalar() or 0
 
     total_stories = (await db.execute(select(func.count(Story.id)))).scalar() or 0
     # archived_at filter (Parham 2026-05-07 audit Island 11): public
@@ -1049,6 +1070,19 @@ async def diagnostics(db: AsyncSession = Depends(get_db)):
             and_(Article.title_fa.is_(None), Article.title_original.isnot(None))
         )
     )).scalar() or 0
+    # Breakdown by content_type (2026-07-08): off_topic/opinion/discussion/
+    # aggregation/other articles never reach process_unprocessed_articles
+    # (same whitelist gate as nlp_pipeline.py) so their title_fa is NULL by
+    # design, not by backlog — this separates "will never be shown, ignore
+    # it" from "real stuck news" without needing a one-off script each time.
+    no_title_fa_by_content_type = {
+        str(row[0]): row[1]
+        for row in (await db.execute(
+            select(Article.content_type, func.count(Article.id))
+            .where(Article.title_fa.is_(None), Article.title_original.isnot(None))
+            .group_by(Article.content_type)
+        )).all()
+    }
     unprocessed = (await db.execute(
         select(func.count(Article.id)).where(Article.processed_at.is_(None))
     )).scalar() or 0
@@ -1080,6 +1114,7 @@ async def diagnostics(db: AsyncSession = Depends(get_db)):
             "no_title_fa": no_title_fa,
             "no_title_original": no_title_original,
             "translatable_now": no_title_fa_but_has_original,
+            "translatable_now_by_content_type": no_title_fa_by_content_type,
             "unprocessed": unprocessed,
             "clustered_into_story": clustered,
             "has_content_or_summary": has_content,
@@ -1098,6 +1133,7 @@ async def diagnostics(db: AsyncSession = Depends(get_db)):
         "notes": [
             "translatable_now = articles the backfill step can actually translate (have title_original but no title_fa)",
             "if translatable_now is small, the remaining no_title_fa articles have broken ingestion (no title_original either)",
+            "translatable_now_by_content_type: off_topic/opinion/discussion/aggregation/other rows are excluded from backfill's target (2026-07-08) and never get a title_fa by design — only content_type=news (or NULL, not yet classified) is the real backlog to watch",
             "bias scoring requires: clustered into story AND has content/summary AND LLM key set",
         ],
     }

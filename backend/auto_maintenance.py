@@ -830,11 +830,31 @@ async def step_backfill_farsi_titles():
     process_unprocessed_articles only touches articles with processed_at IS NULL,
     so articles where translation failed the first time get stuck. This step
     targets them directly.
+
+    Content-type gate (2026-07-08): process_unprocessed_articles only ever
+    processes articles whose content_type is in the source's
+    content_filters['allowed'] whitelist (see nlp_pipeline.py) — off_topic /
+    opinion / discussion / aggregation / other articles never reach it and
+    their title_fa stays NULL forever. This step used to have no such
+    filter, so its 300-per-run cap was spent on whichever 300 NULL-title
+    rows the DB returned first, regardless of type — burning translation
+    calls on articles that will never be shown while real unprocessed news
+    articles (which DO need a title_fa to display) waited behind them.
+    Root-caused via a Niloofar-adjacent maintenance audit after the
+    dashboard's "without Farsi title" count crossed the warning threshold
+    (26 → 177 in 24h): 87/177 were off_topic (cosmetically irrelevant, never
+    shown), but 51 of the remaining 84 "news" articles were also still
+    unclustered and up to 5 days old — heading for silent deletion under
+    the 7-day retention rule without a reader ever seeing them.
+    Same whitelist predicate as nlp_pipeline.py/clustering.py so the three
+    stay in lockstep; oldest-first so the longest-stuck real articles clear
+    first instead of being starved by a fresh batch of off-topic noise.
     """
     from app.config import settings
     from app.database import async_session
-    from app.models import Article
-    from sqlalchemy import and_, select
+    from app.models import Article, Source
+    from sqlalchemy import and_, or_, select
+    from sqlalchemy import text as _sa_text_bf
 
     if not settings.openai_api_key:
         logger.warning("OPENAI_API_KEY not set — skipping title backfill")
@@ -847,6 +867,7 @@ async def step_backfill_farsi_titles():
         from sqlalchemy.orm import defer as _defer_bf
         result = await db.execute(
             select(Article)
+            .join(Source, Source.id == Article.source_id)
             .options(
                 _defer_bf(Article.embedding),
                 _defer_bf(Article.content_text),
@@ -857,8 +878,17 @@ async def step_backfill_farsi_titles():
                 and_(
                     Article.title_fa.is_(None),
                     Article.title_original.isnot(None),
+                    or_(
+                        # Not yet classified — keep eligible, it may
+                        # turn out to be displayable news.
+                        Article.content_type.is_(None),
+                        _sa_text_bf(
+                            "(sources.content_filters -> 'allowed') @> to_jsonb(articles.content_type)"
+                        ),
+                    ),
                 )
             )
+            .order_by(Article.ingested_at.asc())
             .limit(300)  # cap per maintenance run
         )
         articles = list(result.scalars().all())
