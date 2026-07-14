@@ -451,6 +451,56 @@ class TestMetaTitleGuardrail:
         assert "is_meta_title" in src, "QC path not gated against meta-titles"
 
 
+class TestTitleNumericFigureGuidance:
+    """2026-07-14 Niloofar audit: two of the war's most-visible homepage
+    stories carried titles with a STALE casualty count (the first-seen low
+    number from early articles) even though later articles in the same
+    cluster reported the Health Ministry's higher running total; a third
+    story stated a single-outlet, unconfirmed superlative ("43 million
+    funeral attendees", Fars-only) as settled fact. ROOT CAUSE: the title
+    prompt told the model to include a number if one existed, but never said
+    which number to pick when articles disagree or when only one outlet
+    makes an extraordinary claim. Manually patched via journalist_audit.py
+    that day; this locks the same guidance into the automated prompt so the
+    pattern doesn't require a Niloofar catch every time it recurs."""
+
+    def test_prompt_instructs_latest_official_figure_on_conflict(self):
+        from app.services.story_analysis import STORY_ANALYSIS_PROMPT
+        assert "جدیدترین" in STORY_ANALYSIS_PROMPT
+        assert "وزارت بهداشت" in STORY_ANALYSIS_PROMPT
+
+    def test_prompt_instructs_attributing_unconfirmed_single_source_figures(self):
+        from app.services.story_analysis import STORY_ANALYSIS_PROMPT
+        assert "فقط از یک منبع گزارش شده" in STORY_ANALYSIS_PROMPT
+        assert "فارس: حضور" in STORY_ANALYSIS_PROMPT
+
+
+class TestNarrativeOutletNameConcreteExamples:
+    """2026-07-14 Niloofar audit: an outlet name (New York Times) leaked into
+    a state/diaspora narrative field despite the general 'no outlet names in
+    these fields' rule stated earlier in the prompt. ROOT CAUSE: the rule
+    lived only in prose far from the actual output slot, unlike title_fa
+    (which restates its banned-words rule WITH a مثال غلط/مثال درست pair
+    right in the schema hint — see TestMetaTitleGuardrail). This gives
+    state_summary_fa/diaspora_summary_fa the same concrete-example
+    reinforcement at the point of generation. A single occurrence isn't
+    strong enough evidence for a deterministic strip/reject gate (unlike
+    meta-titles, which recurred 3x) — see [[project_grabbag_detection]] on
+    why over-eager auto-gates in this codebase have twice been reverted."""
+
+    def test_state_summary_field_has_concrete_wrong_right_example(self):
+        from app.services.story_analysis import STORY_ANALYSIS_PROMPT
+        i = STORY_ANALYSIS_PROMPT.find('"state_summary_fa"')
+        field = STORY_ANALYSIS_PROMPT[i:i + 700]
+        assert "مثال غلط" in field and "مثال درست" in field
+
+    def test_diaspora_summary_field_has_concrete_wrong_right_example(self):
+        from app.services.story_analysis import STORY_ANALYSIS_PROMPT
+        i = STORY_ANALYSIS_PROMPT.find('"diaspora_summary_fa"')
+        field = STORY_ANALYSIS_PROMPT[i:i + 500]
+        assert "مثال غلط" in field and "مثال درست" in field
+
+
 class TestNarrativeSampleStratification:
     """2026-06-03: story d8489917 had inside-border articles (and Telegram) yet
     the narrative said «این زیرگروه در مجموعهٔ مقالات حاضر حضوری ندارد». ROOT
