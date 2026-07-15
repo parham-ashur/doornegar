@@ -501,6 +501,38 @@ class TestNarrativeOutletNameConcreteExamples:
         assert "مثال غلط" in field and "مثال درست" in field
 
 
+class TestBiasExplanationGroundingRule:
+    """2026-07-14 Niloofar audit: story aa6bac86 (Javad Alikordi, sentenced to
+    18 years) had a bias_explanation_fa that included Sharif University
+    student-expulsion content — a real event, but from a DIFFERENT story, not
+    mentioned in either of this story's 2 actual articles. ROOT CAUSE: the
+    'ground every claim in the present articles' rule (قاعدهٔ دوم) explicitly
+    listed state_summary_fa/diaspora_summary_fa/independent_summary_fa/the
+    subgroup bullets, but never named bias_explanation_fa — the exact field
+    where the fabrication landed. This is the 'fabricated relationship trap'
+    ([[feedback_niloofar_exhaustive]]) recurring on the generation side, not
+    just an audit-catch pattern. Locks bias_explanation_fa into the same
+    grounding rule + a same-topic-different-story concrete example."""
+
+    def test_grounding_rule_names_bias_explanation_fa(self):
+        from app.services.story_analysis import STORY_ANALYSIS_PROMPT
+        i = STORY_ANALYSIS_PROMPT.find("قاعدهٔ دوم")
+        rule = STORY_ANALYSIS_PROMPT[i:i + 900]
+        assert "bias_explanation_fa" in rule
+
+    def test_grounding_rule_forbids_similar_but_different_story_content(self):
+        from app.services.story_analysis import STORY_ANALYSIS_PROMPT
+        i = STORY_ANALYSIS_PROMPT.find("قاعدهٔ دوم")
+        rule = STORY_ANALYSIS_PROMPT[i:i + 900]
+        assert "شبیه" in rule  # explicit "even if topically similar" guard
+
+    def test_bias_explanation_field_hint_repeats_the_guard(self):
+        from app.services.story_analysis import STORY_ANALYSIS_PROMPT
+        i = STORY_ANALYSIS_PROMPT.find('"bias_explanation_fa"')
+        field = STORY_ANALYSIS_PROMPT[i:i + 500]
+        assert "خبر دیگر" in field
+
+
 class TestNarrativeSampleStratification:
     """2026-06-03: story d8489917 had inside-border articles (and Telegram) yet
     the narrative said «این زیرگروه در مجموعهٔ مقالات حاضر حضوری ندارد». ROOT
