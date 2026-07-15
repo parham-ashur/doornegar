@@ -487,6 +487,35 @@ def _enforce_side_presence(blob: dict, inside: int, outside: int, independent: i
     return cleared
 
 
+def _write_summary_anchor(story, **fields) -> None:
+    """2026-07-15: apply_fix() set is_edited=True on every fix and NEVER
+    wrote summary_anchor, unlike admin.py's PATCH /admin/stories/{id} (see
+    its '#6' fix comment) which deliberately moved away from that exact
+    freeze-forever pattern. Effect: every story a Niloofar audit ever
+    touched via --apply-from was silently excluded FOREVER from the
+    automated summarize passes (their eligibility gate is
+    `is_edited=False OR summary_anchor IS NOT NULL`), so its title/bias
+    analysis could only ever go stale again through another manual audit —
+    the opposite of what [[feedback_iterative_prompt_improvement]] wants
+    ('Niloofar role should become less needed'). This mirrors admin.py's
+    anchor_writers dict so the SAME story stays cron-eligible afterward:
+    the nightly pass treats the anchor as a tone/vocabulary reference to
+    preserve while incorporating new articles, rather than skipping the
+    story outright. Deliberately does NOT touch is_edited — leaving it
+    True preserves the OTHER protections that key off it (oversized-active
+    freeze exemption for growing pinned war heroes, auto-merge protection);
+    the OR in the eligibility gate means writing the anchor alone is
+    sufficient to unlock refresh eligibility.
+    """
+    from datetime import datetime, timezone
+    anchor = dict(story.summary_anchor or {})
+    for key, value in fields.items():
+        if value is not None:
+            anchor[key] = value
+    anchor["anchored_at"] = datetime.now(timezone.utc).isoformat() + "Z"
+    story.summary_anchor = anchor
+
+
 async def apply_fix(finding: dict) -> str:
     """Apply a single fix to the database. Returns status message."""
     from app.database import async_session
@@ -515,6 +544,7 @@ async def apply_fix(finding: dict) -> str:
                     story.title_en = fix_data["new_title_en"]
                 if hasattr(story, "is_edited"):
                     story.is_edited = True
+                _write_summary_anchor(story, title_fa=fix_data["new_title_fa"])
                 await db.commit()
                 return f"✓ عنوان تغییر کرد: {old[:40]} → {story.title_fa[:40]}"
             return "✗ موضوع یافت نشد"
@@ -525,6 +555,7 @@ async def apply_fix(finding: dict) -> str:
                 story.summary_fa = fix_data["new_summary_fa"]
                 if hasattr(story, "is_edited"):
                     story.is_edited = True
+                _write_summary_anchor(story, summary_fa=fix_data["new_summary_fa"])
                 await db.commit()
                 return f"✓ خلاصه به‌روز شد"
             return "✗ موضوع یافت نشد"
@@ -609,6 +640,12 @@ async def apply_fix(finding: dict) -> str:
             story.summary_en = _json.dumps(blob, ensure_ascii=False)
             if hasattr(story, "is_edited"):
                 story.is_edited = True
+            _write_summary_anchor(
+                story,
+                bias_explanation_fa=new_bias,
+                state_summary_fa=blob.get("state_summary_fa") if (new_state or has_subgroup) else None,
+                diaspora_summary_fa=blob.get("diaspora_summary_fa") if (new_diaspora or has_subgroup) else None,
+            )
             await db.commit()
             return f"✓ بازنویسی شد: {'، '.join(changed)}"
 
@@ -812,6 +849,15 @@ async def apply_fix(finding: dict) -> str:
             blob["summary_source"] = "niloofar_preliminary"
             blob["niloofar_written_at"] = datetime.now(timezone.utc).isoformat()
             story.summary_en = _json.dumps(blob, ensure_ascii=False)
+            _write_summary_anchor(
+                story,
+                title_fa=story.title_fa,
+                summary_fa=story.summary_fa,
+                state_summary_fa=blob.get("state_summary_fa"),
+                diaspora_summary_fa=blob.get("diaspora_summary_fa"),
+                independent_summary_fa=blob.get("independent_summary_fa"),
+                bias_explanation_fa=blob.get("bias_explanation_fa"),
+            )
             await db.commit()
 
             filled = sum(1 for k in ("state_summary_fa", "diaspora_summary_fa", "bias_explanation_fa") if blob.get(k))

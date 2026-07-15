@@ -533,6 +533,75 @@ class TestBiasExplanationGroundingRule:
         assert "خبر دیگر" in field
 
 
+class TestNiloofarFixesStaySummarizeEligible:
+    """2026-07-15: apply_fix() (the entire journalist_audit.py --apply-from
+    workflow Niloofar audits use) set is_edited=True on every content fix and
+    NEVER wrote summary_anchor. admin.py's PATCH /admin/stories/{id} was
+    already fixed (its '#6' comment) to move away from that exact
+    freeze-forever pattern -- it writes summary_anchor and leaves
+    is_edited=False specifically so `(is_edited=False) | (summary_anchor IS
+    NOT NULL)`, the eligibility gate both step_summarize and
+    step_summarize_newly_visible use, keeps picking the story up. Because
+    journalist_audit.py never wrote the anchor, EVERY story a Niloofar audit
+    ever touched was silently excluded from automated re-analysis forever --
+    its title/bias narrative could only ever go stale again through another
+    manual audit. That's the opposite of
+    [[feedback_iterative_prompt_improvement]]'s stated goal ('Niloofar role
+    should become less needed'): every touch increased future dependency on
+    Niloofar instead of decreasing it. CURE: _write_summary_anchor() mirrors
+    admin.py's anchor_writers dict. Deliberately does NOT flip is_edited to
+    False (unlike admin.py) -- the OR in the gate means writing the anchor
+    alone is enough, and leaving is_edited=True preserves the OTHER
+    protections that key off it (oversized-active freeze exemption for
+    growing pinned war heroes, auto-merge protection) which a growing,
+    actively-edited war story still needs."""
+
+    def _apply_fix_source(self) -> str:
+        from pathlib import Path
+        return (Path(__file__).parent.parent / "scripts" / "journalist_audit.py").read_text()
+
+    def test_anchor_helper_exists_and_sets_anchored_at(self):
+        src = self._apply_fix_source()
+        assert "def _write_summary_anchor(" in src
+        assert 'anchor["anchored_at"]' in src
+
+    def test_content_fix_types_write_the_anchor(self):
+        src = self._apply_fix_source()
+        body_start = src.find("async def apply_fix(")
+        assert body_start != -1
+        body = src[body_start:]
+        for marker in (
+            'fix_type == "rename_story"',
+            'fix_type == "update_summary"',
+            'fix_type == "update_narratives"',
+            'fix_type == "write_preliminary_summary"',
+        ):
+            i = body.find(marker)
+            assert i != -1, f"branch not found: {marker}"
+            branch = body[i:i + 6000]
+            next_branch = branch.find("\n        elif fix_type ==", 1)
+            if next_branch != -1:
+                branch = branch[:next_branch]
+            assert "_write_summary_anchor(" in branch, f"{marker} never writes the anchor -- silently freezes forever"
+
+    def test_update_image_does_not_write_the_anchor(self):
+        """manual_image_url isn't part of the anchor's continuity domain and
+        a past bug (feedback_manual_image_vs_is_edited) already showed
+        is_edited resets can drop a pinned cover image -- update_image must
+        stay untouched by this fix."""
+        src = self._apply_fix_source()
+        body_start = src.find("async def apply_fix(")
+        assert body_start != -1
+        body = src[body_start:]
+        i = body.find('fix_type == "update_image"')
+        assert i != -1
+        branch = body[i:i + 800]
+        next_branch = branch.find("\n        elif fix_type ==", 1)
+        if next_branch != -1:
+            branch = branch[:next_branch]
+        assert "_write_summary_anchor(" not in branch
+
+
 class TestRenameStoryCanTranslateToo:
     """2026-07-15: the Niloofar persona doc (item 13, translation parity) has
     told the audit to 'include a new_title_en field in a rename_story payload'
