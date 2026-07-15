@@ -602,6 +602,43 @@ class TestNiloofarFixesStaySummarizeEligible:
         assert "_write_summary_anchor(" not in branch
 
 
+class TestHitlNarrativeEndpointStaysSummarizeEligible:
+    """2026-07-15: same bug as TestNiloofarFixesStaySummarizeEligible, found
+    independently in a THIRD manual-edit code path -- PATCH
+    /hitl/stories/{story_id}/narrative (app/api/v1/hitl.py) also set
+    is_edited=True with no summary_anchor, permanently excluding any story
+    edited through the HITL dashboard's narrative editor from automated
+    re-analysis. admin.py's PATCH /admin/stories/{id} (already fixed, its
+    own '#6' comment) and admin.py's /admin/stories/seed (already fixed,
+    2026-06-03, its own comment references story f5088d84 losing its
+    doornama briefing over this exact gap) both already had the correct
+    pattern -- it just never propagated to this endpoint. Now shares
+    app/services/summary_anchor.apply_editorial_anchor(), created so a
+    fourth occurrence requires actively skipping the shared helper rather
+    than reinventing (and forgetting) the anchor write."""
+
+    def test_narrative_endpoint_writes_anchor_and_clears_is_edited(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "app" / "api" / "v1" / "hitl.py").read_text()
+        i = src.find("async def update_story_narrative(")
+        assert i != -1
+        body = src[i:i + 2500]
+        assert "apply_editorial_anchor(" in body
+        assert "story.is_edited = False" in body
+
+    def test_shared_anchor_helper_does_not_touch_is_edited(self):
+        """The helper must stay call-site-agnostic on is_edited -- the right
+        value differs (admin.py/hitl.py want False, journalist_audit.py
+        deliberately keeps True for the oversized-freeze exemption)."""
+        from app.services.summary_anchor import apply_editorial_anchor
+        from types import SimpleNamespace
+        story = SimpleNamespace(summary_anchor=None, is_edited=True)
+        apply_editorial_anchor(story, title_fa="x")
+        assert story.is_edited is True
+        assert story.summary_anchor["title_fa"] == "x"
+        assert "anchored_at" in story.summary_anchor
+
+
 class TestRenameStoryCanTranslateToo:
     """2026-07-15: the Niloofar persona doc (item 13, translation parity) has
     told the audit to 'include a new_title_en field in a rename_story payload'

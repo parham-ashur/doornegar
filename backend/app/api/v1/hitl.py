@@ -461,8 +461,21 @@ async def update_story_narrative(
         blob["diaspora_summary_fa"] = "؛ ".join(outside_bullets)
 
     story.summary_en = _json.dumps(blob, ensure_ascii=False)
-    if hasattr(story, "is_edited"):
-        story.is_edited = True
+    # 2026-07-15: this used to set is_edited=True with no summary_anchor,
+    # permanently excluding the story from automated re-analysis (the
+    # step_summarize eligibility gate is `is_edited=False OR summary_anchor
+    # IS NOT NULL`) -- see app/services/summary_anchor.py. Matches
+    # admin.py's PATCH /admin/stories/{id} pattern: write the anchor and
+    # leave is_edited=False so nightly maintenance keeps refreshing the
+    # story, treating this edit as a tone/vocabulary reference.
+    from app.services.summary_anchor import apply_editorial_anchor
+    apply_editorial_anchor(
+        story,
+        bias_explanation_fa=blob.get("bias_explanation_fa"),
+        state_summary_fa=blob.get("state_summary_fa"),
+        diaspora_summary_fa=blob.get("diaspora_summary_fa"),
+    )
+    story.is_edited = False
     await db.commit()
     return {"status": "ok"}
 
