@@ -533,6 +533,28 @@ class TestBiasExplanationGroundingRule:
         assert "خبر دیگر" in field
 
 
+class TestRenameStoryCanTranslateToo:
+    """2026-07-15: the Niloofar persona doc (item 13, translation parity) has
+    told the audit to 'include a new_title_en field in a rename_story payload'
+    since it was written — but apply_fix()'s rename_story branch only ever
+    read new_title_fa. Any past attempt at that documented workaround was a
+    silent no-op: fix_data['new_title_en'] was accepted and ignored, title_en
+    stayed stale, and nothing errored. ROOT CAUSE: the only OTHER path that
+    can write title_en (write_preliminary_summary) forces a mandatory
+    new_summary_fa rewrite, so a plain 'fix the title in both languages'
+    edit had no working fix_type at all. CURE: rename_story now writes
+    title_en when new_title_en is present in fix_data (optional, backward
+    compatible)."""
+
+    def test_rename_story_branch_reads_new_title_en(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "scripts" / "journalist_audit.py").read_text()
+        i = src.find('fix_type == "rename_story"')
+        branch = src[i:i + 900]
+        assert "new_title_en" in branch, "rename_story still can't touch title_en"
+        assert "story.title_en" in branch, "rename_story reads new_title_en but never assigns it"
+
+
 class TestNarrativeSampleStratification:
     """2026-06-03: story d8489917 had inside-border articles (and Telegram) yet
     the narrative said «این زیرگروه در مجموعهٔ مقالات حاضر حضوری ندارد». ROOT
