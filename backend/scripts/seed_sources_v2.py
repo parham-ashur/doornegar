@@ -62,7 +62,10 @@ NEW_SOURCES = [
         "name_fa": "نورنیوز",
         "slug": "nour-news",
         "website_url": "https://www.nournews.ir",
-        "rss_urls": ["https://www.nournews.ir/fa/rss"],
+        # RSS unreachable from Railway: TLS cert hostname mismatch on
+        # nournews.ir's own server (verified 2026-07-16, not geo-block).
+        # Leave empty until they fix their cert.
+        "rss_urls": [],
         "state_alignment": "state",
         "irgc_affiliated": False,
         "production_location": "inside_iran",
@@ -91,7 +94,12 @@ NEW_SOURCES = [
         "name_fa": "خبرگزاری صدا و سیما",
         "slug": "irib-news",
         "website_url": "https://www.iribnews.ir",
-        "rss_urls": ["https://www.iribnews.ir/fa/rss"],
+        # RSS returns 403 from Railway on every path tried (/rss,
+        # /fa/rss, /fa/rss/allnews, /fa/rss/1) even with full browser
+        # headers -- verified 2026-07-16, looks like a WAF/bot block on
+        # this specific state broadcaster. Leave empty; revisit if a
+        # Telegram channel substitute is identified.
+        "rss_urls": [],
         "state_alignment": "state",
         "irgc_affiliated": False,
         "production_location": "inside_iran",
@@ -147,7 +155,9 @@ NEW_SOURCES = [
         "name_fa": "انتخاب",
         "slug": "entekhab",
         "website_url": "https://www.entekhab.ir",
-        "rss_urls": ["https://www.entekhab.ir/fa/rss"],
+        # /fa/rss (no path) 404s; verified 2026-07-16 the real feed is
+        # /fa/rss/allnews (200, 100 entries).
+        "rss_urls": ["https://www.entekhab.ir/fa/rss/allnews"],
         "state_alignment": "semi_state",
         "irgc_affiliated": False,
         "production_location": "inside_iran",
@@ -424,8 +434,23 @@ async def seed_new_sources(db: AsyncSession) -> dict:
             added += 1
             logger.info(f"  + Added source: {source_data['slug']}")
         else:
-            skipped += 1
-            logger.info(f"  ~ Skipped source (exists): {source_data['slug']}")
+            # Fill-gaps-only sync (2026-07-16): this branch used to be a
+            # pure no-op ("exists, skip"), which silently discarded
+            # NEW_SOURCES' rss_urls whenever a row already existed --
+            # mashregh-news, entekhab, irib-news, nour-news all sat with
+            # rss_urls=[] and zero articles ever for this exact reason,
+            # undetected until a health audit cross-checked this file
+            # against production. Only fills a currently-empty
+            # rss_urls; never overwrites a value someone (a prior seed
+            # run, a dashboard edit, or a deliberate "geo-blocked, use
+            # Telegram instead" decision) already set.
+            if not existing.rss_urls and source_data.get("rss_urls"):
+                existing.rss_urls = source_data["rss_urls"]
+                updated += 1
+                logger.info(f"  ~ Filled missing rss_urls for existing source: {source_data['slug']}")
+            else:
+                skipped += 1
+                logger.info(f"  ~ Skipped source (exists): {source_data['slug']}")
 
     # Apply updates to existing sources
     for slug, updates in SOURCE_UPDATES.items():

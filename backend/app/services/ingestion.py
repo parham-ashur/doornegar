@@ -122,8 +122,20 @@ def _normalize_url(url: str) -> str:
         return url
 
 
-async def fetch_feed(feed_url: str) -> feedparser.FeedParserDict | None:
-    """Fetch and parse an RSS feed."""
+async def fetch_feed(feed_url: str) -> tuple[feedparser.FeedParserDict | None, str | None]:
+    """Fetch and parse an RSS feed.
+
+    Returns (feed, error_detail). error_detail is None on a clean fetch
+    with entries. On failure it distinguishes HTTP status / timeout /
+    other exception from "fetched fine but feedparser found 0 entries" —
+    these used to collapse into one generic IngestionLog.error_message
+    ("No entries found or feed unavailable"), which made chronic
+    source_health failures undiagnosable without a live repro (2026-07-16
+    audit: VOA's 3 feeds showed this exact message for days but a fresh
+    isolated fetch worked immediately — the generic message couldn't
+    say whether that run's failure was a timeout, a block, or a
+    genuinely empty feed).
+    """
     try:
         async with httpx.AsyncClient(
             timeout=settings.ingestion_timeout_seconds,
@@ -132,15 +144,25 @@ async def fetch_feed(feed_url: str) -> feedparser.FeedParserDict | None:
         ) as client:
             response = await client.get(feed_url)
             response.raise_for_status()
-            return feedparser.parse(response.text)
+            feed = feedparser.parse(response.text)
+            if not feed.entries:
+                detail = f"HTTP {response.status_code}, 0 entries parsed, bozo={feed.bozo}"
+                bozo_exc = feed.get("bozo_exception")
+                if bozo_exc:
+                    detail += f", parse_error={bozo_exc}"
+                return feed, detail
+            return feed, None
+    except httpx.TimeoutException as e:
+        logger.error(f"Failed to fetch feed {feed_url}: timeout: {e}")
+        return None, f"timeout after {settings.ingestion_timeout_seconds}s"
     except httpx.HTTPStatusError as e:
         # Cycle-1 audit Island 1: log status code so geo-block (403)
         # is distinguishable from outage (500/503) in maintenance logs.
         logger.error(f"Failed to fetch feed {feed_url}: HTTP {e.response.status_code} {e}")
-        return None
+        return None, f"HTTP {e.response.status_code}"
     except Exception as e:
         logger.error(f"Failed to fetch feed {feed_url}: {type(e).__name__}: {e}")
-        return None
+        return None, f"{type(e).__name__}: {e}"
 
 
 async def extract_article_content(url: str) -> str | None:
@@ -239,10 +261,10 @@ async def ingest_source(source: Source, db: AsyncSession) -> dict:
         )
 
         try:
-            feed = await fetch_feed(feed_url)
+            feed, error_detail = await fetch_feed(feed_url)
             if not feed or not feed.entries:
                 log.status = "error"
-                log.error_message = "No entries found or feed unavailable"
+                log.error_message = error_detail or "No entries found or feed unavailable"
                 # Set completed_at on the error path too (cycle-1 audit
                 # Island 1) — without it, `completed_at IS NULL` queries
                 # treat failed feeds as still-running.

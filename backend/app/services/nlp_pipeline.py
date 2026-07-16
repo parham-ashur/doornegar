@@ -57,10 +57,36 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
     embedding IS NULL AND ingested_at >= NOW() - 14d` so they get
     re-embedded on subsequent maintenance runs. The 14d cap prevents
     digging into ancient data on first deploy.
+
+    Backlog starvation fix (2026-07-16): the selection query used to
+    `ORDER BY ingested_at DESC` with a flat 200-per-run cap (MAX_ITERS
+    in step_process). Whenever a single run ingests more than 200
+    newly-eligible articles — routine during high-volume news days —
+    the oldest stragglers get bumped to the back on every subsequent
+    run too, because DESC always hands the next run's fresh batch
+    priority over last run's leftovers. Nothing ever promotes them
+    back to the front, so they can silently age past the 7-day
+    strict-retention cutoff (`step_delete_aged`) and get deleted
+    having never been embedded or clustered — a real article quietly
+    dropped from the pipeline, not just delayed. Fix: articles waiting
+    more than 24h are selected first (oldest-first within that tier),
+    then the remaining budget goes to fresh arrivals newest-first as
+    before. 24h leaves 6 full days of margin before the retention
+    cliff.
     """
     from datetime import timedelta as _td
-    from sqlalchemy import or_ as _or
+    from sqlalchemy import or_ as _or, case as _case, func as _func
     retry_cutoff = datetime.now(timezone.utc) - _td(days=14)
+    starvation_cutoff = datetime.now(timezone.utc) - _td(hours=24)
+    # Single ORDER BY that sorts the >24h tier oldest-first (true FIFO —
+    # relieves the most at-risk articles first) and the <24h tier
+    # newest-first (freshness). Negating epoch within the fresh tier
+    # lets one `.asc()` express both directions at once.
+    _epoch = _func.extract("epoch", Article.ingested_at)
+    _within_tier_order = _case(
+        (Article.ingested_at < starvation_cutoff, _epoch),
+        else_=-_epoch,
+    )
 
     # Cycle-2 audit (2026-05-07): reset normalize-path counter at the
     # START as well as the END. The module-global counter accumulates
@@ -106,7 +132,10 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
             Article.content_type.isnot(None),
             sa_text("(sources.content_filters -> 'allowed') @> to_jsonb(articles.content_type)"),
         )
-        .order_by(Article.ingested_at.desc())
+        .order_by(
+            _case((Article.ingested_at < starvation_cutoff, 0), else_=1).asc(),
+            _within_tier_order.asc(),
+        )
         .limit(batch_size)
     )
     articles = list(result.scalars().all())
