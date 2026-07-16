@@ -1539,3 +1539,36 @@ class TestContentExtractionTitleOverlapGuard:
             "content-extraction loop no longer calls the title-overlap guard "
             "before storing extracted content"
         )
+
+
+class TestEmbeddingJsonbNoneAsNull:
+    """2026-07-16: Article.embedding is a nullable JSONB column. Without
+    none_as_null=True, SQLAlchemy serializes `article.embedding = None`
+    as the JSONB *value* `null`, not SQL NULL -- `embedding IS NULL`
+    (used by the sentinel-column retry gate and the dedup pool query in
+    process_unprocessed_articles) silently fails to match those rows.
+    A row "cleared" this way passed `embedding.isnot(None)` in the dedup
+    pool query, then crashed cosine_similarity with a Python None instead
+    of a vector, taking down the whole step_process batch."""
+
+    def test_embedding_column_uses_none_as_null(self):
+        from app.models.article import Article
+        from sqlalchemy.dialects.postgresql import JSONB
+        col_type = Article.__table__.c.embedding.type
+        assert isinstance(col_type, JSONB)
+        assert col_type.none_as_null is True, (
+            "Article.embedding lost none_as_null=True -- `.embedding = None` "
+            "will silently store a JSONB null value instead of SQL NULL again"
+        )
+
+    def test_dedup_loop_skips_non_list_embeddings(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "app" / "services" / "nlp_pipeline.py").read_text()
+        i = src.find("for recent_id, recent_emb in recent_pool:")
+        assert i != -1
+        window = src[i:i + 900]
+        assert "isinstance(recent_emb, list)" in window, (
+            "dedup loop no longer guards against malformed (non-list) "
+            "embeddings before calling cosine_similarity -- one bad row "
+            "can crash the entire step_process batch"
+        )

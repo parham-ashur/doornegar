@@ -498,6 +498,17 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
             for recent_id, recent_emb in recent_pool:
                 if recent_id == article.id:
                     continue
+                # Defense in depth against any malformed/non-list embedding
+                # slipping through the `embedding.isnot(None)` filter above
+                # (2026-07-16: a JSONB `null` *value* is not SQL NULL, so a
+                # bad row can pass that filter and still not be a real
+                # vector) -- one bad row shouldn't crash the whole batch.
+                if not isinstance(recent_emb, list):
+                    logger.warning(
+                        f"Skipping malformed embedding in dedup pool for "
+                        f"article {recent_id} (type={type(recent_emb).__name__})"
+                    )
+                    continue
                 sim = cosine_similarity(article.embedding, recent_emb)
                 if sim > settings.nlp_dedup_cosine_threshold:
                     # Near-duplicate — don't cluster this one
