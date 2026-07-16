@@ -1493,3 +1493,49 @@ class TestManualImageNotGatedOnIsEdited:
             "manual_image override re-gated on is_edited — a title/summary edit "
             "will silently drop the operator's pinned cover image again"
         )
+
+
+class TestContentExtractionTitleOverlapGuard:
+    """2026-07-16: trafilatura extracted the identical unrelated
+    boilerplate text ("Dey-month prisoners" widget) from two different
+    iranintl.com article URLs with different titles and different page
+    sizes — a wrong-page-extraction bug, not a fetch failure (both
+    fetches returned HTTP 200 with distinct content). 6 articles were
+    silently contaminated in production before this was caught. Fixed
+    by rejecting extracted content that shares zero distinctive terms
+    with the article's own title, falling back to the RSS summary
+    instead of storing cross-contaminated text."""
+
+    def test_rejects_content_with_no_title_overlap(self):
+        from app.services.nlp_pipeline import _extraction_matches_title
+        title = "ترامپ: آمریکا نگهبان تنگه هرمز خواهد بود؛ قرارگاه خاتم‌الانبیا: اجازه نمی‌دهیم"
+        wrong_content = (
+            "شاهدان عینی گفتند زندانیان به آب گرم، جای خواب کافی و دارو "
+            "دسترسی ندارند و در معرض انواع بیماری‌ها قرار گرفته‌اند."
+        )
+        assert _extraction_matches_title(wrong_content, title) is False
+
+    def test_accepts_content_with_title_overlap(self):
+        from app.services.nlp_pipeline import _extraction_matches_title
+        title = "حملات تازه آمریکا به بندر لنگه یک کشته و دو زخمی به جا گذاشت"
+        matching_content = (
+            "حملات تازه آمریکا به بندر لنگه یک کشته و دو زخمی به جا گذاشت "
+            "در حملات تازه آمریکا به مناطقی در جنوب ایران یک نفر کشته شد."
+        )
+        assert _extraction_matches_title(matching_content, title) is True
+
+    def test_empty_title_does_not_block(self):
+        from app.services.nlp_pipeline import _extraction_matches_title
+        assert _extraction_matches_title("some content", None) is True
+        assert _extraction_matches_title("some content", "") is True
+
+    def test_guard_wired_into_extraction_loop(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "app" / "services" / "nlp_pipeline.py").read_text()
+        i = src.find("if not article.content_text and article.url:")
+        assert i != -1
+        window = src[i:i + 700]
+        assert "_extraction_matches_title" in window, (
+            "content-extraction loop no longer calls the title-overlap guard "
+            "before storing extracted content"
+        )

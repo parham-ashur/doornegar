@@ -12,6 +12,7 @@ This runs as a batch job on articles that haven't been processed yet.
 """
 
 import logging
+import re
 from datetime import datetime, timezone
 
 import httpx
@@ -29,6 +30,45 @@ from app.nlp.persian import extract_keywords, extract_text_for_embedding, normal
 from app.services.translation import translate_batch_fa_to_en, translate_en_to_fa
 
 logger = logging.getLogger(__name__)
+
+# Persian function words excluded from the title/content overlap check
+# below — common enough to appear in almost any sentence, so counting
+# them as a "match" would defeat the check's purpose.
+_OVERLAP_STOPWORDS = {
+    "است", "بود", "شد", "شده", "کرد", "کردند", "دارد", "دارند", "خواهد",
+    "خواهند", "این", "آن", "که", "برای", "تا", "یا", "اما", "نیز",
+    "همچنین", "را", "به", "از", "در", "با", "هم", "اند", "بودند", "کند",
+    "کنند", "شود", "شوند", "هستند", "باید", "پس", "اگر", "چون", "وی",
+    "او", "ما", "شما", "آنها", "یک", "دو", "سه", "نه", "بلکه",
+}
+_OVERLAP_TOKEN_RE = re.compile(r"[\s،؛:«»\"'.,!?()\[\]/\\-]+")
+
+
+def _extraction_matches_title(content: str, title: str | None) -> bool:
+    """Reject a full-page extraction that shares no distinctive term
+    with the article's own title.
+
+    Confirmed 2026-07-16: trafilatura sometimes extracts an unrelated
+    boilerplate/widget block instead of the real article body on
+    iranintl.com's SPA-rendered pages — two DIFFERENT article URLs
+    (different titles, different content lengths server-side) both
+    yielded the identical wrong "Dey-month prisoners" text. The
+    fetch/HTTP layer succeeded (200, distinct page sizes); the failure
+    was purely in what trafilatura picked as "the article". A title
+    with zero content-word overlap with the extracted text is the
+    signature of this failure — reject and fall back to the RSS
+    summary rather than silently store cross-contaminated content.
+    """
+    def _tokens(s: str) -> set[str]:
+        return {
+            t for t in _OVERLAP_TOKEN_RE.split(s or "")
+            if len(t) >= 3 and t not in _OVERLAP_STOPWORDS
+        }
+
+    title_tokens = _tokens(title or "")
+    if not title_tokens:
+        return True  # nothing distinctive to check against — don't block
+    return bool(title_tokens & _tokens((content or "")[:1000]))
 
 
 async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -> dict:
@@ -155,7 +195,15 @@ async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -
             try:
                 content = await _fetch_and_extract(article.url)
                 if content:
-                    article.content_text = content
+                    title_for_check = article.title_original or article.title_fa
+                    if _extraction_matches_title(content, title_for_check):
+                        article.content_text = content
+                    else:
+                        logger.warning(
+                            f"Rejected extracted content for {article.url}: "
+                            f"no term overlap with title — likely wrong-page "
+                            f"extraction, falling back to RSS summary"
+                        )
             except Exception as e:
                 logger.warning(f"Content extraction failed for {article.url}: {e}")
         if (i + 1) % 10 == 0:
