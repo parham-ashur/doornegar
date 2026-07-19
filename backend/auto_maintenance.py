@@ -607,13 +607,25 @@ async def step_prune_noise():
         # Second pass — RSS-origin orphans with content_text < 400 chars.
         # These are usually feed stubs (nav fragments, "click to read",
         # empty bodies) OR teaser-only items the source publishes
-        # without filling out the body. Running after NLP has had a
-        # chance (ingested >1h ago) so we don't prune articles still
-        # mid-extraction. Restrict to story_id IS NULL so we never
-        # touch something that made it into a cluster — there's a
-        # reason it landed there. Threshold raised 200→400 per Parham
+        # without filling out the body. Restrict to story_id IS NULL so
+        # we never touch something that made it into a cluster — there's
+        # a reason it landed there. Threshold raised 200→400 per Parham
         # 2026-05-01 (evening, $30/mo budget): most sub-400-char
         # articles are weak stubs that shouldn't have reached NLP.
+        #
+        # Bug found + fixed 2026-07-19: this used to run on ANY orphan
+        # >1h old regardless of content_type, so an article still
+        # sitting in the classify_content_type or step_process queue
+        # (content_type IS NULL — never even looked at yet) got treated
+        # identically to a confirmed stub. Maintenance logs showed
+        # single-run spikes of 148-271 deletions where ~95% were
+        # content_type IS NULL (never classified), not confirmed noise.
+        # Now requires content_type IS NOT NULL (classify_content_type
+        # actually reached it — that step drains up to 1200/run, so
+        # this is a fast, reliable signal) AND bumps the age floor
+        # 1h→6h to match MIN_ORPHAN_AGE_HOURS in step_recluster_orphans,
+        # giving step_process's smaller 50/run extraction batch more
+        # room to catch up before this step judges the content "short."
         SHORT_THRESHOLD = 400
         rss_short_rows = (await db.execute(
             _text("""
@@ -625,7 +637,8 @@ async def step_prune_noise():
                 JOIN sources s ON s.id = a.source_id
                 WHERE a.story_id IS NULL
                   AND a.url NOT LIKE 'https://t.me/%'
-                  AND a.ingested_at < NOW() - INTERVAL '1 hour'
+                  AND a.content_type IS NOT NULL
+                  AND a.ingested_at < NOW() - INTERVAL '6 hours'
                   AND (a.content_text IS NULL OR LENGTH(a.content_text) < :th)
             """), {"th": SHORT_THRESHOLD}
         )).all()
@@ -8255,7 +8268,8 @@ async def step_delete_aged():
     2. Stories never on homepage that are >7 days old (= they didn't
        earn reader attention — the 7-day grace window expired).
     3. Articles whose story was just deleted (FK cleanup).
-    4. Orphan articles (story_id IS NULL OR points at a missing story).
+    4. Orphan articles (story_id IS NULL OR points at a missing story)
+       that are >7 days old (see grace_cutoff below — NOT unconditional).
     5. Telegram posts >7 days old (matches the 7-day data window rule).
     6. Bias scores, community_ratings, story_events, analyst_takes
        for deleted stories/articles (FK cleanup before the parent).
@@ -8263,6 +8277,23 @@ async def step_delete_aged():
     NEVER deletes a story currently on the homepage — those rotate
     off via step_archive_stale first (sets archived_at), then enter
     the 30-day archival window before this step picks them up.
+
+    Bug found + fixed 2026-07-19: orphan-article deletion (#4) had NO
+    age condition — it deleted EVERY story_id-IS-NULL article on EVERY
+    run, including ones ingested minutes earlier in this SAME run. That
+    silently defeated step_recluster_orphans's entire retry design
+    (MIN_ORPHAN_AGE_HOURS=6, retried up to 7 days — see that step's
+    docstring): an orphan could never survive long enough to reach the
+    6h eligibility window, because this step deleted it first, every
+    single cron fire. Confirmed via hra-news (خبرگزاری هرانا) — a real
+    human-rights source publishing several articles/day but averaging
+    only ~1 successfully-clustered article per WEEK; maintenance logs
+    showed prune_noise spike deletions of 148-271 articles/run, ~95%
+    with content_type still NULL (never even reached classification).
+    Now gated on the same grace_cutoff (7 days) used for story-level
+    retention and matching recluster_orphans's own 7-day retry ceiling
+    — an orphan gets its full multi-cycle second-chance window before
+    being retired.
     """
     from datetime import datetime as _dt, timedelta as _td, timezone as _tz
     from sqlalchemy import select as _select, text as _text
@@ -8337,10 +8368,20 @@ async def step_delete_aged():
         delete_story_list = list(delete_story_ids)
 
         # ── C. Articles to delete (story-FK + orphans) ───────────
+        # Orphans (story_id IS NULL) are gated on grace_cutoff (7d) so
+        # step_recluster_orphans's 6h-7d retry window (MIN_ORPHAN_AGE_HOURS
+        # to aged_out_cutoff in that step) has room to actually run before
+        # this step retires them. Without this gate, every orphan gets
+        # deleted at the end of the SAME cron run it was ingested in —
+        # before it can ever reach the 6h eligibility floor for a second
+        # clustering attempt. Found 2026-07-19 (see docstring above).
         article_ids_q = await db.execute(
             _select(Article.id).where(
                 (Article.story_id.in_(delete_story_list))
-                | (Article.story_id.is_(None))
+                | (
+                    Article.story_id.is_(None)
+                    & (Article.ingested_at < grace_cutoff)
+                )
             )
         )
         article_ids_to_delete = [row[0] for row in article_ids_q.all()]

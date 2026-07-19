@@ -1572,3 +1572,79 @@ class TestEmbeddingJsonbNoneAsNull:
             "embeddings before calling cosine_similarity -- one bad row "
             "can crash the entire step_process batch"
         )
+
+
+class TestOrphanArticleDeletionRespectsReclusterWindow:
+    """2026-07-19: step_delete_aged's orphan-article branch
+    (`Article.story_id.is_(None)`) had NO age condition -- it deleted
+    EVERY currently-unclustered article on EVERY cron run, including
+    ones ingested minutes earlier in that same run. This silently
+    defeated step_recluster_orphans's entire retry design
+    (MIN_ORPHAN_AGE_HOURS=6, retried up to a 7-day aged_out_cutoff):
+    an orphan could never survive long enough to reach the 6h
+    eligibility floor, because delete_aged (last step, same cron fire)
+    removed it first. Confirmed live via hra-news (a real human-rights
+    RSS source publishing several articles/day but averaging only ~1
+    successfully-clustered article per week) and maintenance-log spikes
+    of 148-271 single-run deletions. Fix: gate the orphan branch on the
+    same grace_cutoff (7 days) already used for story-level retention,
+    matching step_recluster_orphans's own retry ceiling."""
+
+    def test_orphan_branch_is_age_gated(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "auto_maintenance.py").read_text()
+        idx = src.find("async def step_delete_aged")
+        assert idx >= 0
+        next_def = src.find("\nasync def ", idx + 1)
+        block = src[idx:next_def if next_def > 0 else idx + 9000]
+        i = block.find("Article.story_id.in_(delete_story_list)")
+        assert i != -1, "step_delete_aged's article deletion query moved or was renamed"
+        window = block[i:i + 300]
+        assert "Article.story_id.is_(None)" in window
+        assert "grace_cutoff" in window, (
+            "step_delete_aged's orphan-article branch is missing an age "
+            "gate -- it will delete every unclustered article on every "
+            "run again, defeating step_recluster_orphans's 6h-7d retry "
+            "window before any orphan can reach it"
+        )
+
+    def test_recluster_orphans_min_age_unchanged(self):
+        # Sanity anchor: the fix assumes MIN_ORPHAN_AGE_HOURS=6 is the
+        # eligibility floor an orphan must survive to. If this constant
+        # changes, re-check that delete_aged's grace_cutoff still gives
+        # recluster_orphans room to run before deletion.
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "auto_maintenance.py").read_text()
+        assert "MIN_ORPHAN_AGE_HOURS = 6" in src
+
+
+class TestPruneNoiseRequiresClassificationBeforeDeletion:
+    """2026-07-19: step_prune_noise's second pass (RSS-origin orphans
+    with short/null content_text) fired on ANY orphan >1h old,
+    regardless of content_type -- so an article still sitting in the
+    classify_content_type or step_process queue (content_type IS NULL,
+    never even looked at yet) was treated identically to a confirmed
+    stub. Maintenance logs showed single-run spikes of 148-271
+    deletions where ~95% were content_type IS NULL. Fix: require
+    content_type IS NOT NULL (classify_content_type drains up to
+    1200/run, so this is a fast and reliable "was this actually looked
+    at" signal) and raise the age floor 1h->6h to match
+    MIN_ORPHAN_AGE_HOURS, giving step_process's smaller 50/run
+    extraction batch room to catch up first."""
+
+    def test_second_pass_requires_classification_and_six_hour_floor(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "auto_maintenance.py").read_text()
+        i = src.find("SHORT_THRESHOLD = 400")
+        assert i != -1
+        body = src[i:i + 1200]
+        assert "a.content_type IS NOT NULL" in body, (
+            "prune_noise's second pass no longer requires content_type "
+            "IS NOT NULL -- it will delete never-classified backlog "
+            "again instead of confirmed stubs"
+        )
+        assert "INTERVAL '6 hours'" in body, (
+            "prune_noise's second pass age floor regressed below the "
+            "6h MIN_ORPHAN_AGE_HOURS alignment"
+        )
+        assert "INTERVAL '1 hour'" not in body

@@ -4814,18 +4814,25 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
     """))).scalar() or 0)
     translation_phase_active = translation_active_7d > 0
 
-    # Budget guard signal — uses the same combined LLM + Neon estimate
-    # as the cron pre-flight check. As of 2026-05-07 the LLM-only
-    # signal undercounted by 5-10x: real Neon egress was ~$18 MTD
-    # while LLM was only ~$3.6.
+    # Budget guard signal. Neon egress is estimated + shown for visibility
+    # but, per Parham 2026-06-18 (COUNT_NEON_EGRESS_IN_BUDGET=False in
+    # budget_guard.py), no longer counts toward the halt decision — only
+    # LLM MTD does. This canary must mirror should_halt_for_budget()'s
+    # actual gating exactly (see feedback_canary_design.md: "canary SQL
+    # must mirror the real code path"), otherwise it cries wolf with a
+    # false `error` alert while the cron itself is nowhere near halting.
+    # Found 2026-07-19: this canary had drifted to always summing LLM +
+    # Neon (pre-2026-06-18 behavior), firing ARMED/error at Neon-driven
+    # MTD spikes that the actual cron pre-flight ignores.
     from app.services.budget_guard import (
+        COUNT_NEON_EGRESS_IN_BUDGET,
         get_llm_cost_mtd,
         get_neon_egress_estimate_mtd,
     )
     llm_mtd_cost = await get_llm_cost_mtd(db)
     _neon_gb_mtd, neon_cost_mtd = await get_neon_egress_estimate_mtd(db)
-    combined_mtd = llm_mtd_cost + neon_cost_mtd
-    budget_guard_armed = combined_mtd >= 30.0 * 0.80
+    guard_mtd = llm_mtd_cost + (neon_cost_mtd if COUNT_NEON_EGRESS_IN_BUDGET else 0.0)
+    budget_guard_armed = guard_mtd >= 30.0 * 0.80
 
     translation_cost_24h = float((await db.execute(_t(f"""
         SELECT COALESCE(SUM(total_cost), 0)
@@ -5530,23 +5537,26 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
             "must all filter frozen_at + archived_at + article_count >= 5.",
         ),
         _canary(
-            "budget_guard", "Budget guard halt state (LLM + Neon combined)",
+            "budget_guard", "Budget guard halt state (LLM-gated; Neon shown, not counted)",
             (
-                f"MTD ${combined_mtd:.2f} = LLM ${llm_mtd_cost:.2f} + Neon est. "
-                f"${neon_cost_mtd:.2f} ({_neon_gb_mtd:.0f} GB) — "
-                f"{'ARMED' if budget_guard_armed else 'ok'}"
+                f"MTD ${guard_mtd:.2f} (LLM ${llm_mtd_cost:.2f}"
+                + ("" if COUNT_NEON_EGRESS_IN_BUDGET else f", Neon est. ${neon_cost_mtd:.2f}/{_neon_gb_mtd:.0f}GB shown but not counted")
+                + f") — {'ARMED' if budget_guard_armed else 'ok'}"
             ),
-            "Combined MTD < $18 (60% of $30 cap = healthy buffer)",
+            "Gated MTD < $18 (60% of $30 cap = healthy buffer)",
             (
-                "error" if combined_mtd >= 30.0 * 0.85 else (  # halt-tripping
-                "error" if combined_mtd >= 30.0 * 0.80 else (  # cron auto-skips
-                "warn"  if combined_mtd >= 30.0 * 0.60 else "ok"  # early warning
+                "error" if guard_mtd >= 30.0 * 0.85 else (  # halt-tripping
+                "error" if guard_mtd >= 30.0 * 0.80 else (  # cron auto-skips
+                "warn"  if guard_mtd >= 30.0 * 0.60 else "ok"  # early warning
                 ))
             ),
-            "Strict-mode rule (Parham 2026-05-07): when combined LLM + estimated Neon egress "
-            "MTD reaches 80% of the $30/mo cap, the cron auto-skips LLM/egress-heavy steps "
-            "(summarize, bias, editorial, telegram analysis, translation, etc.). Website "
-            "goes stale rather than the project running out of budget mid-month. Override via "
+            "Strict-mode rule (Parham 2026-05-07): when gated MTD reaches 80% of the $30/mo "
+            "cap, the cron auto-skips LLM/egress-heavy steps (summarize, bias, editorial, "
+            "telegram analysis, translation, etc.). Website goes stale rather than the "
+            "project running out of budget mid-month. Per Parham 2026-06-18, Neon egress no "
+            "longer counts toward this gate (COUNT_NEON_EGRESS_IN_BUDGET=False in "
+            "budget_guard.py) — it's estimated and displayed here for visibility only, so "
+            "this canary must NOT arm on Neon alone. Override via "
             "POST /admin/budget/override?action=clear (one-shot pass) or "
             "?action=lock (force halt). Status: GET /admin/budget/status. "
             "Neon estimate uses pg_stat_database.tup_returned × ~4KB/row; calibrated against "

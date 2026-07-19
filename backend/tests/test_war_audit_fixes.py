@@ -3284,6 +3284,52 @@ class TestDailyEgressCap3GB:
         ), "the daily egress cap halt must be gated by COUNT_NEON_EGRESS_IN_BUDGET"
 
 
+class TestHealthOverviewBudgetCanaryMirrorsHaltLogic:
+    """2026-07-19: /admin/health/overview's `budget_guard` canary computed
+    `combined_mtd = llm_mtd_cost + neon_cost_mtd` unconditionally -- it
+    never picked up the 2026-06-18 COUNT_NEON_EGRESS_IN_BUDGET=False
+    change, so it kept firing a false `error` severity ("ARMED") purely
+    off Neon egress volume while the actual cron pre-flight
+    (should_halt_for_budget) was nowhere near halting (LLM-only gate).
+    Per feedback_canary_design.md, a canary that doesn't mirror the real
+    code path cries wolf. Fix: the canary now gates its ARMED/severity
+    decision on the same COUNT_NEON_EGRESS_IN_BUDGET flag, via a
+    `guard_mtd` that matches should_halt_for_budget's combined_mtd
+    exactly. Neon is still estimated and shown for visibility."""
+
+    def test_canary_severity_uses_gated_mtd_not_raw_combined(self):
+        from pathlib import Path
+        src = (
+            Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py"
+        ).read_text()
+        i = src.find('"budget_guard", "Budget guard halt state')
+        assert i != -1, "budget_guard canary block not found or renamed"
+        window = src[i - 400:i + 900]
+        assert "guard_mtd" in window, (
+            "budget_guard canary must use guard_mtd (gated by "
+            "COUNT_NEON_EGRESS_IN_BUDGET), not raw combined_mtd, or it "
+            "will arm on Neon egress alone again"
+        )
+        assert "combined_mtd" not in window, (
+            "budget_guard canary reverted to the ungated combined_mtd "
+            "for its severity/ARMED decision"
+        )
+
+    def test_guard_mtd_respects_count_neon_egress_flag(self):
+        from pathlib import Path
+        src = (
+            Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py"
+        ).read_text()
+        assert (
+            "guard_mtd = llm_mtd_cost + (neon_cost_mtd if COUNT_NEON_EGRESS_IN_BUDGET else 0.0)"
+            in src
+        ), "guard_mtd must drop neon_cost_mtd exactly like should_halt_for_budget's combined_mtd"
+        assert "from app.services.budget_guard import (\n        COUNT_NEON_EGRESS_IN_BUDGET," in src, (
+            "admin.py must import COUNT_NEON_EGRESS_IN_BUDGET from budget_guard, "
+            "not redefine it locally (would drift again)"
+        )
+
+
 class TestManualLockHaltsEntirePipeline:
     """Cycle-5 Phase E.2 (CRITICAL 2026-05-09): the budget kill-switch
     HALT_SKIP_STEPS list contains only ~17 LLM-heavy step names. The
