@@ -710,8 +710,19 @@ def _extract_title(cleaned_text: str, max_length: int = 100) -> str:
     """
     if not cleaned_text:
         return ""
-    # Try to grab the first line / sentence
-    first_line = cleaned_text.split("\n")[0].strip()
+    # Try to grab the first NON-BLANK line. Some channels (bbc-persian
+    # observed 2026-07-20) open posts with one or more lines containing
+    # only a zero-width non-joiner (U+200C) as a spacing artifact before
+    # the real headline — naive `split("\n")[0]` picked that up verbatim,
+    # producing an 8-article backlog of titles that were a single
+    # invisible character. Skip lines that are empty once ZWNJ + regular
+    # whitespace are stripped.
+    first_line = ""
+    for line in cleaned_text.split("\n"):
+        candidate = line.strip().strip("‌").strip()
+        if candidate:
+            first_line = line.strip()
+            break
     # If the first line is reasonably short, use it as-is
     if 0 < len(first_line) <= max_length:
         return first_line

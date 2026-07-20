@@ -1648,3 +1648,30 @@ class TestPruneNoiseRequiresClassificationBeforeDeletion:
             "6h MIN_ORPHAN_AGE_HOURS alignment"
         )
         assert "INTERVAL '1 hour'" not in body
+
+
+class TestTelegramTitleSkipsBlankLeadingLines:
+    """2026-07-20: bbc-persian's Telegram channel opens posts with one or
+    more lines containing only a zero-width non-joiner (U+200C) before
+    the real headline. `_extract_title`'s naive `split("\\n")[0]` picked
+    up that blank-looking-but-non-empty first line verbatim, producing
+    an 8-article backlog of titles that were a single invisible
+    character (found while investigating a sibling_cluster_fragmentation
+    canary hit whose pair included one such article). Fix: skip leading
+    lines that are empty once ZWNJ + whitespace are stripped."""
+
+    def test_skips_zwnj_only_leading_lines(self):
+        from app.services.telegram_service import _extract_title
+
+        real_headline = "بامداد دوشنبه در حالیکه فرماندهی مرکزی ارتش آمریکا خبر داد"
+        result = _extract_title(f"‌\n‌\n{real_headline}")
+        assert result == real_headline, (
+            f"expected the real headline, got {result!r} -- ZWNJ-only "
+            "leading lines are no longer being skipped"
+        )
+
+    def test_normal_first_line_unaffected(self):
+        from app.services.telegram_service import _extract_title
+
+        result = _extract_title("normal first line\nsecond line")
+        assert result == "normal first line"
