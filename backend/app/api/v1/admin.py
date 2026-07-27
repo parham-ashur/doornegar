@@ -4868,37 +4868,61 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
     # Stale = FA content has been updated since translation was written.
     # Pre-Phase-2 (no translations exist) this is always 0 because the
     # translations->'en'->>'translated_at' path is NULL.
-    translation_stale_count = int((await db.execute(_t("""
-        SELECT COUNT(*) FROM stories
-        WHERE archived_at IS NULL
-          AND article_count >= 5
-          AND (
-            (translations->'en'->>'translated_at' IS NOT NULL
-             AND COALESCE(updated_at, created_at)
-                 > (translations->'en'->>'translated_at')::timestamptz
-                   + INTERVAL '6 hours')
-            OR
-            (translations->'fr'->>'translated_at' IS NOT NULL
-             AND COALESCE(updated_at, created_at)
-                 > (translations->'fr'->>'translated_at')::timestamptz
-                   + INTERVAL '6 hours')
-          )
-    """))).scalar() or 0)
+    #
+    # Canary-design fix (2026-07-27): this used to filter with an inline
+    # `archived_at IS NULL AND article_count >= 5` predicate instead of
+    # the real production scope. step_translate_homepage_visible only
+    # ever translates `homepage_story_ids(db)` (~40 stories, priority-
+    # sorted, STORIES_PER_RUN=30/cron), so any story outside that set
+    # can never drain and sat "stale" forever — a permanent false
+    # `error` alarm (feedback_canary_design.md: canary SQL must mirror
+    # the real code path; this docstring already said "homepage-
+    # eligible stories", the SQL just never enforced it). Scoping to
+    # the same homepage_story_ids() call the step itself uses fixed a
+    # 78-vs-threshold-5 false alarm down to the true in-scope count.
+    from app.services.homepage_scope import homepage_story_ids as _translation_hp_ids
+    _translation_scope_ids = await _translation_hp_ids(db)
+
+    if _translation_scope_ids:
+        translation_stale_count = int((
+            await db.execute(
+                select(func.count(Story.id)).where(
+                    Story.id.in_(_translation_scope_ids),
+                    _sa_text(
+                        "((translations->'en'->>'translated_at' IS NOT NULL "
+                        " AND COALESCE(stories.updated_at, stories.created_at) "
+                        "     > (translations->'en'->>'translated_at')::timestamptz "
+                        "       + INTERVAL '6 hours') "
+                        " OR (translations->'fr'->>'translated_at' IS NOT NULL "
+                        " AND COALESCE(stories.updated_at, stories.created_at) "
+                        "     > (translations->'fr'->>'translated_at')::timestamptz "
+                        "       + INTERVAL '6 hours'))"
+                    ),
+                )
+            )
+        ).scalar() or 0)
+    else:
+        translation_stale_count = 0
 
     # Articles inside homepage-visible stories whose title_translations
     # haven't been populated. Pre-Phase-2 this matches every article in
-    # those stories — meaningful only once translation is active.
-    translation_orphan_count = int((await db.execute(_t("""
-        SELECT COUNT(*) FROM articles a
-        WHERE a.story_id IN (
-            SELECT id FROM stories
-            WHERE archived_at IS NULL AND article_count >= 5
-        )
-        AND (
-            a.title_translations IS NULL
-            OR a.title_translations->'en' IS NULL
-        )
-    """))).scalar() or 0) if translation_phase_active else 0
+    # those stories — meaningful only once translation is active. Same
+    # homepage-scope fix as translation_stale_count above.
+    translation_orphan_count = (
+        int((
+            await db.execute(
+                select(func.count(Article.id)).where(
+                    Article.story_id.in_(_translation_scope_ids),
+                    _sa_text(
+                        "(articles.title_translations IS NULL "
+                        " OR articles.title_translations->'en' IS NULL)"
+                    ),
+                )
+            )
+        ).scalar() or 0)
+        if translation_phase_active and _translation_scope_ids
+        else 0
+    )
 
     total_arts = int((await db.execute(select(func.count(Article.id)))).scalar() or 0)
     bias_eligible = int((await db.execute(_t("""
@@ -5081,11 +5105,22 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
         else:
             tg_session_status = "broken"
 
+    # Canary-design fix (2026-07-27): sources with rss_urls = [] are not
+    # "silent" — they were deliberately left blank after verified,
+    # documented RSS failures (geo-block / 403 WAF / TLS cert mismatch,
+    # see seed.py + scripts/seed_sources_v2.py comments for
+    # khabar-online, etemad-online, nour-news, irib-news, haalvsh).
+    # There is no URL to "fix" for these, so including them made this
+    # canary's own remediation text ("fix the URL or deactivate the
+    # source") permanently wrong for 5 of 7 entries and trained Parham
+    # to ignore the alert (feedback_canary_design.md). Only sources
+    # that actually have a feed configured can meaningfully go silent.
     silent_rows = (await db.execute(_t("""
         SELECT s.slug, s.name_fa, s.name_en, MAX(a.ingested_at) AS last_art
         FROM sources s
         LEFT JOIN articles a ON a.source_id = s.id
         WHERE s.is_active = TRUE
+          AND jsonb_array_length(COALESCE(s.rss_urls, '[]'::jsonb)) > 0
         GROUP BY s.id, s.slug, s.name_fa, s.name_en
         HAVING MAX(a.ingested_at) IS NULL
             OR MAX(a.ingested_at) < NOW() - INTERVAL '1 day'
