@@ -968,7 +968,7 @@ async def gather_stories_json(limit: int = 25) -> dict:
     import json as _json
     from datetime import datetime, timezone
 
-    from sqlalchemy import select
+    from sqlalchemy import func, select
     from sqlalchemy.orm import selectinload
 
     from app.database import async_session
@@ -985,10 +985,24 @@ async def gather_stories_json(limit: int = 25) -> dict:
         # the archived_at exclusion in api/v1/stories.py's trending query
         # and app/services/homepage_scope.py's homepage_story_ids() — see
         # the homepage-scope-sot rule in CLAUDE.md.
+        #
+        # priority >= 0 (2026-07-30): the hide mechanism (priority=-100,
+        # per project_niloofar_preliminary.md) was never excluded here.
+        # trending_score isn't reset on hide, so a story Niloofar
+        # deliberately hid in a PRIOR session (grab-bag, empty-narrative
+        # triage) kept ranking near the top of THIS gather and resurfaced
+        # for re-audit even though the real homepage's priority*1000 +
+        # trending_score ranking (api/v1/stories.py trending_stories)
+        # already sinks it to invisible. Confirmed 2026-07-30: two
+        # 07-27-hidden stories reappeared in the gather pool.
         result = await db.execute(
             select(Story)
             .options(selectinload(Story.articles).selectinload(Article.source))
-            .where(Story.article_count >= 2, Story.archived_at.is_(None))
+            .where(
+                Story.article_count >= 2,
+                Story.archived_at.is_(None),
+                func.coalesce(Story.priority, 0) >= 0,
+            )
             .order_by(Story.trending_score.desc())
             .limit(limit)
         )
@@ -1004,6 +1018,7 @@ async def gather_stories_json(limit: int = 25) -> dict:
                 Story.is_blindspot.is_(True),
                 Story.article_count >= 2,
                 Story.archived_at.is_(None),
+                func.coalesce(Story.priority, 0) >= 0,
             )
             .order_by(Story.trending_score.desc())
             .limit(15)
