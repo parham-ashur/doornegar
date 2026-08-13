@@ -275,18 +275,22 @@ async def get_dashboard(db: AsyncSession = Depends(get_db)):
     )).scalar()
     if latest_ingested:
         hours_ago = (now - latest_ingested).total_seconds() / 3600
-        if hours_ago > 24:
+        if hours_ago > 48:
             issues.append({
                 "severity": "error",
-                "message": f"Last ingestion: {hours_ago:.0f}h ago (>24h — stale data)",
+                "message": f"Last ingestion: {hours_ago:.0f}h ago (>48h — stale data)",
             })
             actions_needed.append("Run: python manage.py ingest (fetch new articles)")
-        elif hours_ago > 14:
-            # Threshold widened 6h -> 14h (2026-08-09): ingestion only
-            # happens during a maintenance-cron fire (03,15 UTC, 12h
-            # apart). A 6h cutoff false-"warning"s for roughly half of
-            # every cycle even when totally healthy. Same fix as the
-            # ingest_silence canary in /admin/health/overview.
+        elif hours_ago > 28:
+            # Threshold widened 14h -> 28h (2026-08-13): maintenance-cron
+            # moved from 2x/day (03,15 UTC, 12h apart) to 1x/day (03 UTC
+            # only) per Parham's cost-reduction call. Ingestion only
+            # happens during a cron fire, so a 14h cutoff (sized for the
+            # old 12h cadence) would false-"warning" for over half of
+            # every 24h cycle even when totally healthy. New thresholds:
+            # 28h = 24h cycle + 4h buffer (warn), 48h = missed a full
+            # cycle (error). Same fix as the ingest_silence canary in
+            # /admin/health/overview.
             issues.append({
                 "severity": "warning",
                 "message": f"Last ingestion: {hours_ago:.0f}h ago",
@@ -4888,15 +4892,14 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
     from app.services.homepage_scope import homepage_story_ids as _translation_hp_ids
     _translation_scope_ids = await _translation_hp_ids(db)
 
-    # Threshold widened 6h -> 14h (2026-08-09): step_translate_homepage_visible
-    # only runs inside FULL_PIPELINE, which fires at 03,15 UTC (12h apart).
-    # A story's FA content can legitimately update any time in that window
-    # and just wait for the next cron pass to translate it — a 6h cutoff
-    # flagged normal mid-cycle lag as "stale" for roughly the back half of
-    # every cycle. Verified 2026-08-09: all 11 stories then flagged were
-    # 6.3-9.5h past a 03:53 UTC translation, all due to drain at the next
-    # 15:00 UTC fire, none actually stuck. Same class as ingest_silence /
-    # telegram_session (feedback_canary_design.md).
+    # Threshold widened 14h -> 28h (2026-08-13): maintenance-cron moved from
+    # 2x/day (03,15 UTC) to 1x/day (03 UTC only) per Parham's cost-reduction
+    # call. step_translate_homepage_visible only runs inside FULL_PIPELINE,
+    # so a story's FA content can now legitimately wait up to ~24h for the
+    # next cron pass to translate it — the old 14h cutoff (sized for the
+    # 12h cadence) would flag normal mid-cycle lag as "stale" for over half
+    # of every cycle. 28h = 24h cycle + 4h buffer. Same class as
+    # ingest_silence / telegram_session (feedback_canary_design.md).
     if _translation_scope_ids:
         translation_stale_count = int((
             await db.execute(
@@ -4906,11 +4909,11 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
                         "((translations->'en'->>'translated_at' IS NOT NULL "
                         " AND COALESCE(stories.updated_at, stories.created_at) "
                         "     > (translations->'en'->>'translated_at')::timestamptz "
-                        "       + INTERVAL '14 hours') "
+                        "       + INTERVAL '28 hours') "
                         " OR (translations->'fr'->>'translated_at' IS NOT NULL "
                         " AND COALESCE(stories.updated_at, stories.created_at) "
                         "     > (translations->'fr'->>'translated_at')::timestamptz "
-                        "       + INTERVAL '14 hours'))"
+                        "       + INTERVAL '28 hours'))"
                     ),
                 )
             )
@@ -5113,14 +5116,12 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
     if tg_anchor:
         tg_minutes_ago = int((now - tg_anchor).total_seconds() / 60)
         # Telegram fetch only happens during a maintenance-cron fire
-        # (0 3,15 UTC, 12h apart — see ingest_silence). A 6h "ok" cutoff
-        # guarantees "stale" for the second half of every single cycle
-        # even with a perfectly healthy session, since these thresholds
-        # predate the 2026-05-12 3x->2x cron consolidation. Widened to
-        # match the real cadence (12h cycle + buffer), same as ingest_silence.
-        if tg_minutes_ago < 840:
+        # (0 3 UTC only, 1x/day since 2026-08-13 — see ingest_silence).
+        # Widened to match the real cadence (24h cycle + buffer), same
+        # as ingest_silence.
+        if tg_minutes_ago < 1680:
             tg_session_status = "ok"
-        elif tg_minutes_ago < 1440:
+        elif tg_minutes_ago < 2880:
             tg_session_status = "stale"
         else:
             tg_session_status = "broken"
@@ -5627,16 +5628,17 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
         _canary(
             "ingest_silence", "Last article ingested",
             f"{last_article_min_ago}m ago" if last_article_min_ago is not None else "never",
-            "< 14h (warn) / < 24h (error)",
+            "< 28h (warn) / < 48h (error)",
             (
-                "error" if (last_article_min_ago is not None and last_article_min_ago > 1440) else
-                "warn" if (last_article_min_ago is not None and last_article_min_ago > 840) else
+                "error" if (last_article_min_ago is not None and last_article_min_ago > 2880) else
+                "warn" if (last_article_min_ago is not None and last_article_min_ago > 1680) else
                 "ok"
             ),
-            "maintenance-cron runs at 03,15 UTC only (2x/day, 12h apart — reduced from 3x/day "
-            "in Phase G.3.5, 2026-05-12). Ingestion only happens during a cron fire, so gaps up "
-            "to ~12h between runs are normal, not silence. Warn at 14h (12h cycle + 2h buffer for "
-            "a slow/late run); >24h means a full cycle was missed = stuck pipeline.",
+            "maintenance-cron runs at 03 UTC only (1x/day since 2026-08-13, reduced from 2x/day "
+            "to cut LLM + Neon compute cost — Parham's call). Ingestion only happens during a "
+            "cron fire, so gaps up to ~24h between runs are normal, not silence. Warn at 28h "
+            "(24h cycle + 4h buffer for a slow/late run); >48h means a full cycle was missed = "
+            "stuck pipeline.",
         ),
         _canary(
             "telegram_session", "Telegram session status",
