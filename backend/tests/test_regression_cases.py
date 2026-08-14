@@ -1139,9 +1139,10 @@ class TestBreakingNewsUnclusteredCanary:
         from pathlib import Path
         src = (Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py").read_text()
         assert '"breaking_news_unclustered"' in src, "canary id missing from health_overview"
-        # Measures the orphan backlog past one cluster pass (6h–48h window),
+        # Measures the orphan backlog past 2 cluster passes (30h–96h window,
+        # widened 2026-08-14 for the 1x/day cron — see admin.py comment),
         # not the just-arrived cohort, so normal between-cron lag doesn't trip it.
-        assert "INTERVAL '48 hours'" in src and "INTERVAL '6 hours'" in src
+        assert "INTERVAL '96 hours'" in src and "INTERVAL '30 hours'" in src
         assert "a.story_id IS NULL" in src
 
     def test_canary_mirrors_clustering_gate(self):

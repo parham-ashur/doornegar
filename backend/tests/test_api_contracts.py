@@ -467,6 +467,34 @@ class TestAttachArticlesEndpoint:
             "so the per-story timeline shows the manual curation move."
         )
 
+    def test_endpoint_recounts_source_stories_too(self):
+        """2026-08-14 fix: this is the ONLY merge mechanism (no dedicated
+        /stories/merge) — moving all of story A's articles into story B
+        via this endpoint used to recount ONLY the target (B), leaving A
+        a zombie: article_count > 0 but zero actual rows. Direct DB check
+        after 4 Niloofar merges found exactly this (e.g. article_count=23
+        stored, 0 actual) on every source story, which fed stale counts
+        into sibling_cluster_fragmentation (showed already-merged pairs
+        again) and any other article_count-trusting query. Mirrors
+        /articles/detach's per-story recount loop.
+        """
+        src = (
+            Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py"
+        ).read_text()
+        idx = src.find("async def attach_articles_to_story(")
+        end = src.find("\n\n\n", idx)
+        body = src[idx : end if end > 0 else len(src)]
+        assert "prev_story.article_count = prev_live" in body, (
+            "/articles/attach must recount every SOURCE story articles "
+            "were moved away from, not just the target — otherwise "
+            "merges leave zombie stories with stale article_count."
+        )
+        assert '"source_story_recounts"' in body, (
+            "response must surface the source-story recounts so a caller "
+            "(chat-driven Niloofar curation) can verify the merge left no "
+            "zombie counts behind."
+        )
+
 
 class TestWeeklyDigestUpsertEndpoint:
     """`/admin/weekly-digest` lets Niloofar (Claude-driven) ship the

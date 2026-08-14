@@ -111,7 +111,10 @@ async def _get_maintenance_info(db: AsyncSession) -> dict:
         if latest_ingested:
             info["last_run"] = latest_ingested.isoformat()
             hours_ago = (datetime.now(timezone.utc) - latest_ingested).total_seconds() / 3600
-            info["last_result"] = "success" if hours_ago < 26 else "unknown"
+            # 24h cycle + 4h buffer, same convention as ingest_silence /
+            # dashboard "Last ingestion" (both recalibrated 2026-08-14 for
+            # the 1x/day cron). Was 26 (24h + 2h), too tight a buffer.
+            info["last_result"] = "success" if hours_ago < 28 else "unknown"
             info["next_run_approx"] = (latest_ingested + timedelta(hours=24)).isoformat()
             return info
     except Exception as e:
@@ -3289,7 +3292,8 @@ async def attach_articles_to_story(
         "attached": N,
         "not_found": ["uuid", ...],
         "moved_from": [{"old_story_id": "...", "count": M}],
-        "story_recount": {"story_id": "...", "old_count": M, "new_count": M+K}
+        "story_recount": {"story_id": "...", "old_count": M, "new_count": M+K},
+        "source_story_recounts": [{"story_id": "...", "old_count": M, "new_count": M-K}]
       }
     """
     import uuid as _uuid
@@ -3344,6 +3348,47 @@ async def attach_articles_to_story(
     )).scalar() or 0
     target_story.source_count = int(distinct_sources)
 
+    # Recount every SOURCE story articles moved away from (2026-08-14 fix).
+    # This mirrors /articles/detach's per-story recount loop, which attach
+    # never had — only the target got a fresh article_count/source_count.
+    # A merge (move all of story A's articles into story B via this
+    # endpoint, the only mechanism available — there's no dedicated
+    # /stories/merge) left story A as a zombie: 0 real articles but a
+    # stale article_count > 0. Direct DB check after 4 Niloofar merges
+    # this session confirmed it (e.g. article_count=23 stored, actual
+    # COUNT(*)=0). This has been silently true for every merge across
+    # every prior session using this endpoint — the zombie's stale count
+    # feeds any query filtering on article_count without joining the real
+    # rows (sibling_cluster_fragmentation showed already-merged pairs
+    # again; oversized/trending logic reads article_count directly too).
+    source_recounts: list = []
+    for prev_sid_str in moved_from_counter:
+        if prev_sid_str == "ORPHAN":
+            continue
+        try:
+            prev_sid = _uuid.UUID(prev_sid_str)
+        except (ValueError, TypeError):
+            continue
+        if prev_sid == target_story_uuid:
+            continue
+        prev_story = await db.get(Story, prev_sid)
+        if prev_story is None:
+            continue
+        prev_live = (await db.execute(
+            select(func.count(Article.id)).where(Article.story_id == prev_sid)
+        )).scalar() or 0
+        prev_old = int(prev_story.article_count or 0)
+        prev_story.article_count = prev_live
+        prev_distinct_sources = (await db.execute(
+            select(func.count(func.distinct(Article.source_id))).where(
+                Article.story_id == prev_sid
+            )
+        )).scalar() or 0
+        prev_story.source_count = int(prev_distinct_sources)
+        source_recounts.append({
+            "story_id": prev_sid_str, "old_count": prev_old, "new_count": prev_live,
+        })
+
     # Phase 2 auto-clear: attaching articles changes the target story's
     # narrative composition AND the source stories' (articles moved
     # away from them). Clear EN/FR translations on all affected stories.
@@ -3384,6 +3429,7 @@ async def attach_articles_to_story(
             "old_count": old_count,
             "new_count": live,
         },
+        "source_story_recounts": source_recounts,
     }
 
 
@@ -4754,11 +4800,25 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
     # US–Iran war coverage (helicopter→strikes→retaliation) arrived in the
     # ingest but stayed story_id=NULL, so a major breaking story never reached
     # the homepage and Parham caught it by eye. Measure the orphan BACKLOG of
-    # articles old enough to have already been through a cluster pass (ingested
-    # 6h–48h ago — NOT the just-arrived cohort that legitimately hasn't been
-    # clustered yet) that are still unattached. Window ends at 48h to stay
-    # inside the 7-day clusterable window (older orphans age out and can never
-    # cluster, so counting them would be noise).
+    # articles old enough to have already been through a cluster pass that are
+    # still unattached — NOT the just-arrived cohort that legitimately hasn't
+    # had its chance yet.
+    #
+    # Window widened 6h–48h -> 30h–96h (2026-08-14): maintenance-cron moved
+    # 2x/day -> 1x/day on 2026-08-13, so an article now gets its 2nd cluster
+    # pass ~24h after ingest instead of ~12h. Direct DB check the morning
+    # after the cadence cut: the freshest daily batch (1 pass, ~16.5h old)
+    # sat at 81% orphan; the SAME cohort one cycle later (2 passes, ~39.5h
+    # old) had dropped to 29% — almost exactly the old 30% threshold. So the
+    # old 6h lower bound was catching articles mid-maturation and would have
+    # false-alarmed on every run under the new cadence, same trap as the
+    # 2026-06-11 false-alarm this canary already learned from once. New lower
+    # bound (30h = 1 cycle + 6h buffer) only counts articles that have already
+    # had ≥2 passes; upper bound scaled the same 4x-cycle ratio as the old
+    # window (was 48h at a 12h cadence -> 96h at 24h) to stay clear of
+    # MAX_CLUSTER_ATTEMPTS=3 exhausting (~72h now) while still excluding
+    # ancient orphans that only add noise. Threshold percentage (30%) kept
+    # as-is — it's what the 2-pass cohort measured at directly.
     #
     # MUST mirror the EXACT clustering candidate gate (clustering.py
     # cluster_articles ~L2943): an article only SHOULD be in a story if
@@ -4778,8 +4838,8 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
           COUNT(*) AS total
         FROM articles a
         JOIN sources s ON s.id = a.source_id
-        WHERE a.ingested_at >= NOW() - INTERVAL '48 hours'
-          AND a.ingested_at <= NOW() - INTERVAL '6 hours'
+        WHERE a.ingested_at >= NOW() - INTERVAL '96 hours'
+          AND a.ingested_at <= NOW() - INTERVAL '30 hours'
           AND a.content_type IS NOT NULL
           AND (s.content_filters -> 'allowed') @> to_jsonb(a.content_type)
     """))).mappings().first()
@@ -4796,6 +4856,29 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
     translatable_now = int((await db.execute(_t("""
         SELECT COUNT(*) FROM articles
         WHERE title_fa IS NULL AND title_original IS NOT NULL
+    """))).scalar() or 0)
+    # Scoped variant for the translation_stuck canary (2026-08-14 fix):
+    # step_backfill_farsi_titles (auto_maintenance.py, 2026-07-08) only
+    # ever targets content_type NULL (not yet classified) or in the
+    # source's allowed list — off_topic/opinion/discussion/aggregation/
+    # other rows are excluded FROM THE STEP by design and will never get
+    # a title_fa no matter how many runs pass. The bare `translatable_now`
+    # above doesn't apply that filter, so the canary using it was counting
+    # permanently-excluded rows as if they were a live backlog. Direct
+    # check on 2026-08-14 (value=306, over the 200 threshold): ALL 306
+    # were excluded_by_type, ZERO were actually eligible-and-stuck — a
+    # pure false alarm, same class of bug as feedback_canary_design.md
+    # (canary SQL must mirror the real code path). translatable_now itself
+    # is left unscoped since pipeline.translation.stuck_unrecoverable below
+    # depends on its original bare semantics.
+    translatable_now_eligible = int((await db.execute(_t("""
+        SELECT COUNT(*) FROM articles a
+        JOIN sources s ON s.id = a.source_id
+        WHERE a.title_fa IS NULL AND a.title_original IS NOT NULL
+          AND (
+            a.content_type IS NULL
+            OR (s.content_filters -> 'allowed') @> to_jsonb(a.content_type)
+          )
     """))).scalar() or 0)
 
     # ── Multi-locale translation canaries (EN+FR rollout Phase 0h) ─────
@@ -4925,6 +5008,21 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
     # haven't been populated. Pre-Phase-2 this matches every article in
     # those stories — meaningful only once translation is active. Same
     # homepage-scope fix as translation_stale_count above.
+    #
+    # Fixed 2026-08-14: this used to gate on `translation_phase_active`,
+    # which is `purpose IN (translation_en, translation_fr, ...)` activity
+    # in llm_usage_logs — but that purpose tag is ALSO what the already-
+    # live STORY-level translator (translate_multilocale.py L233,
+    # step_translate_homepage_visible) writes. Article.title_translations
+    # is a completely different, never-built column (zero writers anywhere
+    # in the codebase per the 2026-08-12 audit) — the story translator
+    # going live months ago made this canary's gate permanently true for
+    # a feature that never shipped, so the count (481 -> 521 and climbing)
+    # has been silently growing into a permanent false alarm. Gate on the
+    # real code path instead: has title_translations EVER been written.
+    _title_translations_ever_used = bool((await db.execute(_t(
+        "SELECT 1 FROM articles WHERE title_translations IS NOT NULL LIMIT 1"
+    ))).scalar())
     translation_orphan_count = (
         int((
             await db.execute(
@@ -4937,7 +5035,7 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
                 )
             )
         ).scalar() or 0)
-        if translation_phase_active and _translation_scope_ids
+        if _title_translations_ever_used and _translation_scope_ids
         else 0
     )
 
@@ -5540,20 +5638,23 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
             f"{fresh_orphan} orphaned / {fresh_total} fresh ({fresh_orphan_pct}%)",
             "< 25 orphaned or < 30%",
             "warn" if (fresh_orphan >= 25 and fresh_orphan_pct >= 30) else "ok",
-            "CLUSTERABLE articles ingested 6h–48h ago (old enough to have already been through a "
-            "cluster pass — NOT the just-arrived cohort) that are still story_id=NULL with "
-            "cluster attempts left. Mirrors the clustering candidate gate EXACTLY (content_type "
-            "set AND in the source's allowed list AND cluster_attempts < 3) so it counts only "
-            "articles that SHOULD be in a story — not opinion/off-topic (filtered by design), "
-            "unclassified in-flight rows, or retired singletons. A large clusterable-orphan "
-            "cohort means clustering had its chance and left a breaking topic ungrouped, so it "
-            "never reaches the homepage — the 2026-06-11 failure (US–Iran war sat unclustered, "
+            "CLUSTERABLE articles ingested 30h–96h ago (old enough to have already had 2+ cluster "
+            "passes under the 1x/day cron — NOT the just-arrived cohort still on pass 1) that are "
+            "still story_id=NULL with cluster attempts left. Mirrors the clustering candidate gate "
+            "EXACTLY (content_type set AND in the source's allowed list AND cluster_attempts < 3) "
+            "so it counts only articles that SHOULD be in a story — not opinion/off-topic (filtered "
+            "by design), unclassified in-flight rows, or retired singletons. A large clusterable-"
+            "orphan cohort means clustering had its chances and left a breaking topic ungrouped, so "
+            "it never reaches the homepage — the 2026-06-11 failure (US–Iran war sat unclustered, "
             "Parham caught the stale hero by eye, detection ratio 0.0). NOTE: the first version "
             "counted bare story_id IS NULL and false-alarmed at 68% — the bulk was design-orphans, "
-            "not a real backlog. Distinct from clustering_halt (fires only at ZERO new stories): "
-            "this catches the subtler scatter/orphan case. WARN + rate gate (≥25 AND ≥30%) so "
-            "between-cron lag and quiet periods don't trip it. Fires → eyeball the newest "
-            "articles; if a breaking story is buried, seed+pin it (reference_manual_story_seed).",
+            "not a real backlog; window widened 6h-48h -> 30h-96h on 2026-08-14 for the same reason "
+            "(1x/day cron means 2 real passes now take ~30h, not ~6h — the old window was flagging "
+            "normal first-pass maturation lag on every run). Distinct from clustering_halt (fires "
+            "only at ZERO new stories): this catches the subtler scatter/orphan case. WARN + rate "
+            "gate (≥25 AND ≥30%) so between-cron lag and quiet periods don't trip it. Fires → "
+            "eyeball the newest articles; if a breaking story is buried, seed+pin it "
+            "(reference_manual_story_seed).",
         ),
         _canary(
             "stuck_lock", "Stuck maintenance lock",
@@ -5683,10 +5784,15 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
         ),
         _canary(
             "translation_stuck", "Articles translatable but un-translated",
-            translatable_now, "drains hourly",
-            "warn" if translatable_now > 200 else "ok",
-            "title_original is present but title_fa is NULL. step_translate should drain this. "
-            "Sustained high count = translation step throttled or LLM key missing.",
+            translatable_now_eligible, "drains within a cron cycle",
+            "warn" if translatable_now_eligible > 200 else "ok",
+            "title_original present but title_fa NULL, SCOPED to step_backfill_farsi_titles's own "
+            "eligibility gate (content_type NULL or in the source's allowed list) — off_topic/"
+            "opinion/discussion/aggregation/other rows are excluded from that step by design "
+            "(2026-07-08) and will never drain, so they must not count here either. Fixed "
+            "2026-08-14: the previous unscoped version read 306 (all of it excluded-by-type, "
+            "zero real backlog) — a false alarm, feedback_canary_design.md class of bug. Sustained "
+            "high count on THIS scoped number = translation step throttled or LLM key missing.",
         ),
         _canary(
             "trending_freshness", "Oldest trending story by last activity (days)",
@@ -5749,13 +5855,16 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
         _canary(
             "translation_orphan_articles", "Articles in homepage stories without EN translation",
             translation_orphan_count, "drains hourly once active",
-            "ok" if not translation_phase_active else (
+            "ok" if not _title_translations_ever_used else (
                 "warn" if translation_orphan_count > 200 else "ok"
             ),
             "articles.title_translations is NULL or missing the EN slot, in stories that meet "
             "homepage eligibility (article_count >= 5 AND archived_at IS NULL). The utility-tier "
             "batch translator (gpt-4.1-nano) drains this 200/cron. Sustained > 200 means the "
-            "title-translation step is throttled or skipping. Reports 0 before Phase 2 ships.",
+            "title-translation step is throttled or skipping. Reports 0 before Phase 2 ships. "
+            "Gated on whether title_translations has ever actually been written (2026-08-14 fix) "
+            "— NOT on translation_phase_active, which also covers the unrelated, already-live "
+            "story-level translator and was permanently misfiring this canary as a result.",
         ),
     ]
 
