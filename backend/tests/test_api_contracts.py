@@ -455,6 +455,31 @@ class TestAttachArticlesEndpoint:
             "stay accurate."
         )
 
+    def test_endpoint_bumps_target_last_updated_at(self):
+        """2026-08-15 fix: the automated matcher always sets
+        story.last_updated_at on attach (clustering.py ~L1786, ~L1925),
+        but this endpoint never did — a manually-curated hero kept
+        whatever last_updated_at it had from its original auto-cluster
+        creation no matter how much fresh real content got attached
+        later. Concretely: a hero built via this endpoint one day showed
+        stale_frozen_homepage's live_hero=0 the NEXT day even right after
+        re-enriching it back above the 5-article floor, because live_hero
+        also requires last_updated_at within 2 days and this endpoint had
+        never touched that column.
+        """
+        src = (
+            Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py"
+        ).read_text()
+        idx = src.find("async def attach_articles_to_story(")
+        end = src.find("\n\n\n", idx)
+        body = src[idx : end if end > 0 else len(src)]
+        assert "target_story.last_updated_at = datetime.now(timezone.utc)" in body, (
+            "/articles/attach must bump the target story's last_updated_at "
+            "— attaching real new articles is 'the story was updated' "
+            "exactly like an auto-cluster match, and freshness-gated logic "
+            "(live_hero, trending_freshness) depends on this column."
+        )
+
     def test_endpoint_logs_audit_event(self):
         src = (
             Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py"

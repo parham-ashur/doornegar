@@ -3348,6 +3348,22 @@ async def attach_articles_to_story(
     )).scalar() or 0
     target_story.source_count = int(distinct_sources)
 
+    # Bump last_updated_at on the target (2026-08-15 fix). The automated
+    # matcher always does this on attach (clustering.py L1786, L1925) but
+    # this endpoint never did — so a manually-curated/enriched story kept
+    # whatever last_updated_at it had from its original auto-cluster
+    # creation, no matter how much fresh real content got added later.
+    # Concretely: a pinned hero built here the day before showed up as
+    # `stale_frozen_homepage`'s live_hero=0 the NEXT day even immediately
+    # after re-enriching it back above the 5-article floor, because
+    # live_hero also requires `last_updated_at >= NOW() - 2 days` and this
+    # endpoint had never once touched that column. Semantically this
+    # SHOULD bump — attaching real new articles is "the story was updated"
+    # exactly like an auto-cluster match. detach is left alone: removing
+    # an off-topic article isn't "new coverage arrived".
+    if found_ids:
+        target_story.last_updated_at = datetime.now(timezone.utc)
+
     # Recount every SOURCE story articles moved away from (2026-08-14 fix).
     # This mirrors /articles/detach's per-story recount loop, which attach
     # never had — only the target got a fresh article_count/source_count.
