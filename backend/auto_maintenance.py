@@ -8855,8 +8855,22 @@ FULL_PIPELINE = [
     # read straight from this column — the actual egress cut.
     ("homepage_aggregates", "Recompute denormalized homepage aggregates", "step_recompute_homepage_aggregates"),
     ("image_relevance", "Image relevance check", "step_image_relevance"),
-    ("analyst_takes", "Extract analyst takes from Telegram", "step_extract_analyst_takes"),
-    ("verify_predictions", "Verify analyst predictions", "step_verify_predictions"),
+    # analyst_takes + verify_predictions REMOVED 2026-08-16 (Parham):
+    # both steps spend LLM calls (extraction: up to 200 posts/run;
+    # verification: up to 5/run) producing/verifying AnalystTake rows
+    # that feed ONLY `/api/v1/stories/{id}/analyst-takes` — an endpoint
+    # with zero frontend callers (confirmed via grep across
+    # frontend/src). Pure unnecessary spend until the reliability-
+    # scoring feature this was meant to support actually gets built —
+    # see project_telegram_prediction_reliability memory for the
+    # deferred design (Wilson-smoothed per-channel accuracy, falsifiability
+    # filter, explicit resolution criteria, chain-of-thought verifier —
+    # informed by Brier/Metaculus, Tetlock's hedged-prediction problem,
+    # and LLM-as-judge best practices). The functions still exist below
+    # (step_extract_analyst_takes, step_verify_predictions) for manual
+    # invocation; just not on any pipeline. Re-add both together when
+    # that feature is actually built, not before — verifying takes that
+    # nothing consumes is the exact waste being cut here.
     ("rater_feedback", "Apply rater feedback", "step_rater_feedback_apply"),
     ("summary_corrections", "Regenerate story summaries from rater corrections", "step_apply_summary_corrections"),
     ("niloofar_feedback_audit", "Niloofar audits open «نامرتبط» queue", "step_niloofar_feedback_audit"),

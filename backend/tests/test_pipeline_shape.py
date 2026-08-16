@@ -282,10 +282,22 @@ class TestIngestOnlyPipelineShape:
     dashboard's progress bar shows wrong percentages but the run still
     completes — silent UI bug."""
 
-    def test_full_pipeline_total_steps_is_63(self):
+    def test_full_pipeline_total_steps_is_61(self):
         """The 6h-cron progress bar pins to this count. Same drift
-        risk as INGEST_ONLY — keep both this number and the parent
-        `CLAUDE.md` (`full=63`) in lockstep with the actual list.
+        risk as INGEST_ONLY — keep this number in lockstep with the
+        actual list. (2026-08-16: CLAUDE.md's old step-count-history
+        verification section was condensed away at some point before
+        this session — this docstring's bump history is now the only
+        place that log lives; don't re-add a CLAUDE.md cross-reference
+        unless that section actually exists again.)
+
+        Bumped 63 → 61 on 2026-08-16 (Parham): REMOVED `analyst_takes` +
+        `verify_predictions`. Both spent LLM calls producing/verifying
+        AnalystTake rows that feed only a frontend-dead endpoint
+        (`/api/v1/stories/{id}/analyst-takes`, zero callers) — pure
+        unnecessary spend until the prediction-reliability-scoring
+        feature this was meant to support actually gets built. Functions
+        still exist for manual invocation; deferred, not deleted.
 
         Bumped 62 → 63 on 2026-06-16: added `dedup_homepage_events`
         after `recalc_trending` (before `homepage_aggregates`). Self-
@@ -319,11 +331,11 @@ class TestIngestOnlyPipelineShape:
         Neon storage + egress lean.
         """
         m = _import_pipelines()
-        assert len(m.FULL_PIPELINE) == 63, (
+        assert len(m.FULL_PIPELINE) == 61, (
             f"FULL_PIPELINE step count drifted: found "
             f"{len(m.FULL_PIPELINE)} steps. If this is intentional, "
-            f"update both this test AND the parent CLAUDE.md verification "
-            f"step #4 (`full=63`)."
+            f"update this test's docstring + assert (no separate CLAUDE.md "
+            f"section tracks this count as of 2026-08-16)."
         )
 
     def test_total_steps_is_13(self):
