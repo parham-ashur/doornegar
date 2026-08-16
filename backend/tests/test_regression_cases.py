@@ -1173,6 +1173,42 @@ class TestBreakingNewsUnclusteredCanary:
         assert "fresh_orphan >= 25 and fresh_orphan_pct >= 30" in body
 
 
+class TestFrozenRecentlyBumpedExcludesManualAttach:
+    """2026-08-16: /articles/attach started bumping last_updated_at on
+    2026-08-15 (feedback_admin_endpoint_parity fix) so manually-curated
+    stories pass the live_hero freshness check. That made a deliberate,
+    reviewed Niloofar merge into an already-frozen story (e.g. moving a
+    duplicate-event article into the canonical story) look identical to
+    the 2026-05-02 step_recluster_orphans regression this canary exists
+    to catch — frozen_recently_bumped flipped from 0 to a false-positive
+    'error' the same day the merge shipped. Fix: exclude stories with a
+    matching story_events row (event_type='articles_attached',
+    actor='admin') in the lookback window — step_recluster_orphans never
+    logs that event type, so the automated-bug signature is unaffected."""
+
+    def _admin_src(self):
+        from pathlib import Path
+        return (Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py").read_text()
+
+    def test_excludes_logged_admin_attach(self):
+        src = self._admin_src()
+        i = src.find("frozen_recently_bumped = int(")
+        block = src[i:i + 900]
+        assert "NOT EXISTS" in block
+        assert "event_type = 'articles_attached'" in block
+        assert "se.actor = 'admin'" in block
+
+    def test_still_catches_unattributed_bump(self):
+        # The exclusion is scoped to a specific event type/actor, not a
+        # blanket time-window skip — an automated bump with no matching
+        # admin event must still trip the canary.
+        src = self._admin_src()
+        i = src.find("frozen_recently_bumped = int(")
+        block = src[i:i + 900]
+        assert "s.last_updated_at > s.frozen_at + INTERVAL '5 minutes'" in block
+        assert "s.last_updated_at >= NOW() - INTERVAL '1 hour'" in block
+
+
 class TestTrendingFreshnessMeasuresActivity:
     """2026-06-10: trending_freshness fired RED (9.5d) during the Iran-Israel
     war — a FALSE alarm. It measured story-START age (first_published_at), but

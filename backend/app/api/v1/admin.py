@@ -5146,13 +5146,33 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
 
     # Catches the 2026-05-02 regression: step_recluster_orphans bumped
     # last_updated_at on frozen stories. With the fix in place, frozen
-    # stories should never have last_updated_at within the last hour.
+    # stories should never have last_updated_at within the last hour —
+    # UNLESS a human deliberately attached new articles via
+    # /articles/attach (2026-08-16 exclusion). That endpoint started
+    # bumping last_updated_at on 2026-08-15 (to fix live_hero staying 0
+    # after manual curation, see feedback_admin_endpoint_parity), which
+    # means a legitimate, reviewed Niloofar merge into an already-frozen
+    # story (e.g. moving a duplicate-event article into the canonical
+    # story) now looks identical to the automated-bug pattern this
+    # canary exists to catch. /articles/attach always logs a
+    # story_events row (event_type='articles_attached', actor='admin')
+    # in the same transaction as the bump, so exclude stories with a
+    # matching recent event — this still catches ANY bump with no
+    # corresponding admin event, which is exactly the automated-bug
+    # signature (step_recluster_orphans doesn't log this event type).
     frozen_recently_bumped = int((await db.execute(_t("""
-        SELECT COUNT(*) FROM stories
-        WHERE frozen_at IS NOT NULL
-          AND archived_at IS NULL
-          AND last_updated_at > frozen_at + INTERVAL '5 minutes'
-          AND last_updated_at >= NOW() - INTERVAL '1 hour'
+        SELECT COUNT(*) FROM stories s
+        WHERE s.frozen_at IS NOT NULL
+          AND s.archived_at IS NULL
+          AND s.last_updated_at > s.frozen_at + INTERVAL '5 minutes'
+          AND s.last_updated_at >= NOW() - INTERVAL '1 hour'
+          AND NOT EXISTS (
+              SELECT 1 FROM story_events se
+              WHERE se.story_id = s.id
+                AND se.event_type = 'articles_attached'
+                AND se.actor = 'admin'
+                AND se.created_at >= NOW() - INTERVAL '1 hour'
+          )
     """))).scalar() or 0)
 
     # article_count drift canary (Parham 2026-05-03 audit, item X):
@@ -5597,8 +5617,13 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
             frozen_recently_bumped, "= 0",
             "error" if frozen_recently_bumped > 0 else "ok",
             "Frozen stories whose last_updated_at advanced more than 5 minutes after frozen_at, "
-            "within the last hour. step_recluster_orphans must refuse frozen stories — if this "
-            "is > 0, the umbrella-accretion fix is broken (see 2026-05-02 incident).",
+            "within the last hour, WITH NO matching admin articles_attach event in that window. "
+            "step_recluster_orphans must refuse frozen stories — if this is > 0, the "
+            "umbrella-accretion fix is broken (see 2026-05-02 incident). A deliberate Niloofar "
+            "merge into an already-frozen story (e.g. moving a duplicate-event article into the "
+            "canonical story) also bumps last_updated_at since 2026-08-15 — excluded via the "
+            "story_events audit trail (event_type='articles_attached', actor='admin') so it "
+            "doesn't false-positive here (2026-08-16 fix).",
         ),
         _canary(
             "article_count_drift", "Stories with cached article_count != live count",

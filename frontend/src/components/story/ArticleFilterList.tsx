@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { Clock, Send } from "lucide-react";
-import ArticleRelevanceButton from "@/components/feedback/ArticleRelevanceButton";
 import type { StoryArticleWithBias } from "@/lib/types";
 
 // Telegram detection + de-deep-linking. Articles sourced from a
@@ -32,7 +31,6 @@ const TEHRAN_LABEL_FMT = new Intl.DateTimeFormat("fa-IR", {
 
 interface ArticleFilterListProps {
   articles: StoryArticleWithBias[];
-  storyId?: string;
   sidebarSync?: boolean;
 }
 
@@ -59,7 +57,7 @@ function getAlignmentBadge(alignment: string | null) {
   return map[alignment];
 }
 
-export default function ArticleFilterList({ articles, storyId, sidebarSync }: ArticleFilterListProps) {
+export default function ArticleFilterList({ articles, sidebarSync }: ArticleFilterListProps) {
   const [activeFilter, setActiveFilter] = useState<FilterKey>("all");
   const [sidebarHeight, setSidebarHeight] = useState<number | null>(null);
 
@@ -232,17 +230,9 @@ export default function ArticleFilterList({ articles, storyId, sidebarSync }: Ar
                     </h3>
                   </a>
 
-                  {storyId && (
-                    <div className="mt-1">
-                      <ArticleRelevanceButton storyId={storyId} articleId={head.id} />
-                    </div>
-                  )}
-
                   {/* Additional same-day titles from this source, stacked
                       compact so they read as a cluster rather than their
-                      own cards. Each is its own link with its own
-                      «نامرتبط» button so feedback maps to the article
-                      the reader actually clicked, not the head. */}
+                      own cards. */}
                   {g.items.length > 1 && (
                     <ul className="mt-2 space-y-2 border-s-2 border-slate-200 dark:border-slate-800 ps-2.5">
                       {g.items.slice(1).map((a) => (
@@ -255,9 +245,6 @@ export default function ArticleFilterList({ articles, storyId, sidebarSync }: Ar
                           >
                             {a.title_fa || a.title_original}
                           </a>
-                          {storyId && (
-                            <ArticleRelevanceButton storyId={storyId} articleId={a.id} />
-                          )}
                         </li>
                       ))}
                     </ul>

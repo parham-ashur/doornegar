@@ -433,7 +433,7 @@ export default async function StoryDetailPage({
           <h2 className="mt-6 mb-4 text-base font-black text-slate-900 dark:text-white border-b border-slate-200 dark:border-slate-800 pb-3">
             مقالات مرتبط
           </h2>
-          <ArticleFilterList articles={story.articles} storyId={id} />
+          <ArticleFilterList articles={story.articles} />
         </div>
 
         {/* LEFT column (desktop sidebar only): stats → spectrum. Hidden on
