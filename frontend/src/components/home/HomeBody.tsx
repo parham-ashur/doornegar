@@ -753,6 +753,11 @@ export default async function HomeBody({
                 <p className="mt-1.5 text-[15px] text-slate-400">
                   {conservativeBlind.diaspora_pct > 0 ? "بیشتر" : "فقط"} روایت درون‌مرزی · {conservativeBlind.article_count} مقاله
                 </p>
+                {allAnalyses[conservativeBlind.id]?.briefing_fa && (
+                  <p className="mt-1.5 text-[14px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-2">
+                    {allAnalyses[conservativeBlind.id]!.briefing_fa}
+                  </p>
+                )}
               </div>
             </Link>
           ))}
@@ -777,6 +782,11 @@ export default async function HomeBody({
                 <p className="mt-1.5 text-[15px] text-orange-500">
                   {oppositionBlind.state_pct > 0 ? "بیشتر" : "فقط"} روایت برون‌مرزی · {oppositionBlind.article_count} مقاله
                 </p>
+                {allAnalyses[oppositionBlind.id]?.briefing_fa && (
+                  <p className="mt-1.5 text-[14px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-2">
+                    {allAnalyses[oppositionBlind.id]!.briefing_fa}
+                  </p>
+                )}
               </div>
             </Link>
           ))}
@@ -795,6 +805,7 @@ export default async function HomeBody({
                 const analysis = allAnalyses[s.id];
                 const stateSummary = analysis?.state_summary_fa;
                 const diasporaSummary = analysis?.diaspora_summary_fa;
+                const doornama = analysis?.briefing_fa;
                 const tg = leftTextTelegramById[s.id];
                 return (
                   <div key={s.id} className={`py-5 ${i > 0 ? "border-t border-slate-100 dark:border-slate-800/60" : ""}`}>
@@ -807,20 +818,30 @@ export default async function HomeBody({
                     ))}
                     <UpdateBadge story={s} className="mt-2" />
                     <Meta story={s} />
-                    {/* Two-side bias comparison — hero-style card without image */}
+                    {/* Two-side bias comparison — hero-style card without image.
+                        دورنما (2 lines) leads when it exists; the two-side
+                        comparison below drops from 4 lines to 3 to make room. */}
                     {stateSummary || diasporaSummary ? (
                       <div className="mt-3">
                         <UpdateDeltaCallout story={s} field="bias" />
-                        <NarrativeSides story={s} stateSummary={stateSummary} diasporaSummary={diasporaSummary} clampClass="line-clamp-4" />
+                        {doornama && (
+                          <p className="mb-2 text-[15px] leading-6 text-slate-600 dark:text-slate-300 line-clamp-2">{doornama}</p>
+                        )}
+                        <NarrativeSides story={s} stateSummary={stateSummary} diasporaSummary={diasporaSummary} clampClass="line-clamp-3" />
                       </div>
                     ) : (() => {
                       // Body fallback chain so an entry without a two-side
                       // comparison is never a bare title (Parham 2026-06-14).
                       // Meta above already carries the coverage stats, so the
-                      // missing piece is BODY text: prefer the story's neutral
+                      // missing piece is BODY text: دورنما first (a story can
+                      // have bias_explanation_fa without state/diaspora and
+                      // still get a briefing), then the story's neutral
                       // summary (2 lines, present on ~93% of homepage stories),
-                      // then a single bias bullet. If neither exists, Meta still
+                      // then a single bias bullet. If none exist, Meta still
                       // gives the entry substance, so render nothing extra.
+                      if (doornama) {
+                        return <p className="mt-2 text-[15px] leading-6 text-slate-600 dark:text-slate-300 line-clamp-2">{doornama}</p>;
+                      }
                       const summary = allSummaries[s.id];
                       if (summary && summary.trim().length > 30) {
                         return <p className="mt-2 text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-2">{summary}</p>;
@@ -894,20 +915,24 @@ export default async function HomeBody({
                             <p className="text-[15px] text-outside-border dark:text-outside-border-dark font-medium mt-1">برون‌مرزی</p>
                           </div>
                         </div>
-                        {/* Replace the generic context sentence with
-                            the actual two-side summaries — each up to
-                            2 lines, color-coded markers to match the
-                            side above. Reads as: "here are the boxes,
-                            here's what each side actually says." */}
+                        {/* دورنما preview (2 lines) leads when it exists —
+                            same substitution priority as the hero card.
+                            Two-side summaries drop to 1 line each (from 2)
+                            to make room without growing the card. */}
+                        {item.storyId && allAnalyses[item.storyId]?.briefing_fa && (
+                          <p className="mt-3 text-[15px] leading-6 text-slate-600 dark:text-slate-300 line-clamp-2">
+                            {allAnalyses[item.storyId]!.briefing_fa}
+                          </p>
+                        )}
                         {(item.stateSummary || item.diasporaSummary) && (
-                          <div className="mt-3 space-y-1">
+                          <div className="mt-2 space-y-1">
                             {item.stateSummary && (
-                              <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-2">
+                              <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-1">
                                 <span className="text-inside-border dark:text-inside-border-dark font-bold">(درون‌مرزی) </span>{item.stateSummary}
                               </p>
                             )}
                             {item.diasporaSummary && (
-                              <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-2">
+                              <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-1">
                                 <span className="text-outside-border dark:text-outside-border-dark font-bold">(برون‌مرزی) </span>{item.diasporaSummary}
                               </p>
                             )}
@@ -955,11 +980,12 @@ export default async function HomeBody({
         <div>
           {mostViewed.map((s, i) => {
             const analysis = allAnalyses[s.id];
-            const stateS = analysis?.state_summary_fa;
-            const diasporaS = analysis?.diaspora_summary_fa;
+            const doornama = analysis?.briefing_fa;
+            const stateS = doornama ? null : analysis?.state_summary_fa;
+            const diasporaS = doornama ? null : analysis?.diaspora_summary_fa;
             const tg = mostViewedTelegramById[s.id];
             let fallbackBullets: string[] = [];
-            if (!stateS && !diasporaS) {
+            if (!doornama && !stateS && !diasporaS) {
               const bias = analysis?.bias_explanation_fa;
               fallbackBullets = splitBiasPoints(bias).slice(0, 2);
             }
@@ -1002,6 +1028,11 @@ export default async function HomeBody({
                         )}
                       </p>
                     )}
+                    {doornama && (
+                      <p className="text-[15px] leading-6 text-slate-600 dark:text-slate-300 mt-1.5 line-clamp-2">
+                        {doornama}
+                      </p>
+                    )}
                     {stateS && (
                       <p className="text-[15px] leading-6 text-slate-500 dark:text-slate-400 mt-1.5 line-clamp-2">
                         <span className="text-inside-border dark:text-inside-border-dark font-bold">• </span>{stateS}
@@ -1012,7 +1043,7 @@ export default async function HomeBody({
                         <span className="text-outside-border dark:text-outside-border-dark font-bold">• </span>{diasporaS}
                       </p>
                     )}
-                    {!stateS && !diasporaS && fallbackBullets.map((b, j) => (
+                    {!doornama && !stateS && !diasporaS && fallbackBullets.map((b, j) => (
                       <p key={j} className="text-[15px] leading-6 text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-2">• {b}</p>
                     ))}
                     {tg?.predictions && tg.predictions.length > 0 && (
@@ -1257,6 +1288,11 @@ function MobileHome({
                     <p className="mt-1 text-[15px] text-slate-400">
                       {conservativeBlind.diaspora_pct > 0 ? "بیشتر" : "فقط"} روایت درون‌مرزی · {conservativeBlind.article_count} مقاله
                     </p>
+                    {allAnalyses[conservativeBlind.id]?.briefing_fa && (
+                      <p className="mt-1 text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">
+                        {allAnalyses[conservativeBlind.id]!.briefing_fa}
+                      </p>
+                    )}
                   </div>
                 </div>
               </Link>
@@ -1283,6 +1319,11 @@ function MobileHome({
                     <p className="mt-1 text-[15px] text-orange-500">
                       {oppositionBlind.state_pct > 0 ? "بیشتر" : "فقط"} روایت برون‌مرزی · {oppositionBlind.article_count} مقاله
                     </p>
+                    {allAnalyses[oppositionBlind.id]?.briefing_fa && (
+                      <p className="mt-1 text-[13px] leading-5 text-slate-500 dark:text-slate-400 line-clamp-2">
+                        {allAnalyses[oppositionBlind.id]!.briefing_fa}
+                      </p>
+                    )}
                   </div>
                 </div>
               </Link>
@@ -1315,6 +1356,11 @@ function MobileHome({
                       {s.state_pct > 0 && <span className="text-inside-border dark:text-inside-border-dark"> · درون‌مرزی {tabularNum(s.state_pct)}٪</span>}
                       {s.diaspora_pct > 0 && <span className="text-outside-border dark:text-outside-border-dark"> · برون‌مرزی {tabularNum(s.diaspora_pct)}٪</span>}
                     </p>
+                    {allAnalyses[s.id]?.briefing_fa && (
+                      <p className="mt-1 text-[14px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-2">
+                        {allAnalyses[s.id]!.briefing_fa}
+                      </p>
+                    )}
                   </div>
                 </Link>
               ),
@@ -1353,15 +1399,20 @@ function MobileHome({
                       <p className="text-[12px] text-outside-border dark:text-outside-border-dark font-medium mt-1">برون‌مرزی</p>
                     </div>
                   </div>
+                  {item.storyId && allAnalyses[item.storyId]?.briefing_fa && (
+                    <p className="mt-2.5 text-[12px] leading-6 text-slate-600 dark:text-slate-300 line-clamp-2">
+                      {allAnalyses[item.storyId]!.briefing_fa}
+                    </p>
+                  )}
                   {(item.stateSummary || item.diasporaSummary) && (
-                    <div className="mt-2.5 space-y-1">
+                    <div className="mt-2 space-y-1">
                       {item.stateSummary && (
-                        <p className="text-[12px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-2">
+                        <p className="text-[12px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-1">
                           <span className="text-inside-border dark:text-inside-border-dark font-bold">(درون‌مرزی) </span>{item.stateSummary}
                         </p>
                       )}
                       {item.diasporaSummary && (
-                        <p className="text-[12px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-2">
+                        <p className="text-[12px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-1">
                           <span className="text-outside-border dark:text-outside-border-dark font-bold">(برون‌مرزی) </span>{item.diasporaSummary}
                         </p>
                       )}
@@ -1391,10 +1442,12 @@ function MobileHome({
           <h2 className="text-[20px] font-black text-slate-900 dark:text-white mb-3">در روزهای گذشته ...</h2>
           <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
             {briefingStories.map((s) => {
-              // Same body fallback as the desktop briefing: neutral summary
-              // (2 lines) preferred over a lone bias bullet so the entry isn't
-              // a title-only stub (Parham 2026-06-14).
+              // Same body fallback as the desktop briefing: دورنما first (2
+              // lines), then neutral summary (2 lines), then a lone bias
+              // bullet, so the entry isn't a title-only stub (Parham
+              // 2026-06-14).
               const summary = summaries[s.id];
+              const doornama = allAnalyses[s.id]?.briefing_fa;
               const bias = allAnalyses[s.id]?.bias_explanation_fa;
               const firstPoint = splitBiasPoints(bias)[0];
               return wrapStory(
@@ -1410,7 +1463,9 @@ function MobileHome({
                       {s.state_pct > 0 && <span className="text-inside-border dark:text-inside-border-dark"> · درون‌مرزی {tabularNum(s.state_pct)}٪</span>}
                       {s.diaspora_pct > 0 && <span className="text-outside-border dark:text-outside-border-dark"> · برون‌مرزی {tabularNum(s.diaspora_pct)}٪</span>}
                     </p>
-                    {summary && summary.trim().length > 30 ? (
+                    {doornama ? (
+                      <p className="mt-1.5 text-[15px] leading-6 text-slate-600 dark:text-slate-300 line-clamp-2">{doornama}</p>
+                    ) : summary && summary.trim().length > 30 ? (
                       <p className="mt-1.5 text-[15px] leading-6 text-slate-500 dark:text-slate-400 line-clamp-2">{summary}</p>
                     ) : firstPoint ? (
                       <p className="mt-1.5 text-[15px] leading-6 text-slate-400 dark:text-slate-500 line-clamp-1">• {firstPoint}</p>
