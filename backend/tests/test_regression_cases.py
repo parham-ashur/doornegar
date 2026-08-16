@@ -1209,6 +1209,29 @@ class TestFrozenRecentlyBumpedExcludesManualAttach:
         assert "s.last_updated_at >= NOW() - INTERVAL '1 hour'" in block
 
 
+class TestLiveHeroExcludesBlindspot:
+    """2026-08-16: /api/v1/stories/trending filters `is_blindspot.is_(False)`
+    (stories.py ~L252) before the hero picker ever runs — a pinned story
+    that later flips to is_blindspot=True (automated matcher merges in
+    articles that skew its state/diaspora split past 80/20) becomes
+    invisible to every hero fallback tier regardless of priority. Found
+    live: 543ecffa was priority=50 (the 2026-08-14/15 pinned hero) but had
+    flipped to is_blindspot=True (state_pct 80) — the stale_frozen_homepage
+    canary's live_hero sub-query still counted it as a live hero because it
+    never checked is_blindspot, so the canary read healthy while the pin
+    was actually dead on the real homepage."""
+
+    def _admin_src(self):
+        from pathlib import Path
+        return (Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py").read_text()
+
+    def test_live_hero_query_excludes_blindspot(self):
+        src = self._admin_src()
+        i = src.find("AS live_hero")
+        block = src[max(0, i - 400):i]
+        assert "is_blindspot IS FALSE" in block
+
+
 class TestTrendingFreshnessMeasuresActivity:
     """2026-06-10: trending_freshness fired RED (9.5d) during the Iran-Israel
     war — a FALSE alarm. It measured story-START age (first_published_at), but

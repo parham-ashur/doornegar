@@ -5398,7 +5398,18 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
     # (above) this flags the freeze-cliff condition where an ongoing story has
     # frozen and fresh coverage is orphaning. Mirrors the homepage scope
     # (article_count>=5, archived_at IS NULL, 14d window). live_hero = a pinned
-    # (priority>=_MERGE_PIN_PRIORITY_FLOOR), non-frozen, fresh, >=5 story.
+    # (priority>=_MERGE_PIN_PRIORITY_FLOOR), non-frozen, fresh, >=5, non-blindspot
+    # story. The is_blindspot exclusion was added 2026-08-16: /api/v1/stories
+    # /trending filters `Story.is_blindspot.is_(False)` before the hero picker
+    # ever runs (stories.py ~L252), so a pinned story that later flips to
+    # is_blindspot=True (e.g. the automated matcher merges in articles that
+    # skew its state/diaspora split past 80/20) becomes permanently invisible
+    # to every hero fallback tier regardless of priority — found live on
+    # 543ecffa, priority=50 but is_blindspot=True (state_pct 80), while this
+    # canary still reported live_hero=1. Canary SQL must mirror the real
+    # production code path (feedback_canary_design) — it didn't check
+    # is_blindspot at all, so it can't tell a pin that still works from one
+    # that's been silently defeated.
     _stale = (await db.execute(_t("""
         SELECT
           COUNT(*) FILTER (
@@ -5413,6 +5424,7 @@ async def health_overview(db: AsyncSession = Depends(get_db)):
           COUNT(*) FILTER (
             WHERE article_count >= 5 AND archived_at IS NULL
               AND frozen_at IS NULL AND priority >= 40
+              AND is_blindspot IS FALSE
               AND last_updated_at >= NOW() - INTERVAL '2 days'
           ) AS live_hero
         FROM stories
