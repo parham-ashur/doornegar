@@ -398,6 +398,41 @@ class TestDoornamaBackfill:
         assert "doornama_backfilled" in src, "backfill stat not reported"
 
 
+class TestDoornamaNonHeroSurvivesResummarize:
+    """2026-08-17: 774296d7's hand-written دورنما (written days earlier via
+    PATCH /admin/stories/{id}, part of the project_doornama.md 2026-08-16
+    standing task extending briefing_fa to any homepage story, not just the
+    hero) was found silently gone from the DB — not an ISR cache lag as a
+    prior session concluded. ROOT CAUSE: step_summarize's per-story re-
+    analysis loop (auto_maintenance.py) rebuilds the `extras` JSONB dict
+    FRESH from the LLM's `analysis` output; briefing_fa is only ever copied
+    into `extras` inside the `if story.id in doornama_top_ids` block, which
+    is scoped to settings.doornama_top_n (hero-only, =1). Any OTHER
+    homepage-eligible story that qualifies for re-analysis (hash change,
+    volume/shrink trigger, anchor refresh) gets its `summary_en` blob
+    replaced wholesale, silently dropping a manually-written non-hero
+    briefing_fa. Same bug independently present in
+    POST /admin/force-resummarize (admin.py), which only preserves
+    briefing_fa for story_ids[0] (the batch hero). CURE: both write sites
+    now carry old_extras["briefing_fa"] forward when the doornama-generation
+    block didn't already set one — mirroring the existing manual_image_url
+    carry-forward pattern right next to it."""
+
+    def test_step_summarize_preserves_non_hero_briefing(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "auto_maintenance.py").read_text()
+        assert (
+            'if old_extras.get("briefing_fa") and not extras.get("briefing_fa")' in src
+        ), "non-hero briefing_fa carry-forward missing from step_summarize"
+
+    def test_force_resummarize_preserves_non_hero_briefing(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py").read_text()
+        assert (
+            "prior_briefing_fa" in src and "elif prior_briefing_fa:" in src
+        ), "non-hero briefing_fa carry-forward missing from /admin/force-resummarize"
+
+
 class TestMetaTitleGuardrail:
     """2026-06-03: three homepage stories carried titles like «تحلیل سوگیری در
     پوشش خبری اعدام فتح‌الله آوری و مقایسه رویکرد رسانه‌ها» — describing OUR bias

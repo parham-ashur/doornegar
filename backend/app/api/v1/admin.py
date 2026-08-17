@@ -857,12 +857,26 @@ async def _run_force_resummarize_job(story_ids: list[str], chosen_model: str) ->
                         include_analyst_factors=True,
                     )
                     story.summary_fa = analysis.get("summary_fa")
-                    # Preserve manual_image_url set via update_image
+                    # Preserve manual_image_url set via update_image, and a
+                    # hand-written دورنما on a non-hero story in this batch
+                    # (project_doornama.md 2026-08-16: briefing_fa is no
+                    # longer hero-only on the read side — Claude/Niloofar
+                    # write it for any homepage story). Without this, any
+                    # story here EXCEPT story_ids[0] loses its briefing_fa
+                    # the moment `extras` below is rebuilt fresh from
+                    # `analysis`, since the hero-only block further down
+                    # only ever sets it for sid == story_ids[0]. Same bug
+                    # class fixed in auto_maintenance.py step_summarize
+                    # 2026-08-17.
                     manual_image = None
+                    prior_briefing_fa = None
+                    prior_briefing_hash = None
                     if story.summary_en:
                         try:
                             _prev = _json.loads(story.summary_en)
                             manual_image = _prev.get("manual_image_url")
+                            prior_briefing_fa = _prev.get("briefing_fa")
+                            prior_briefing_hash = _prev.get("briefing_hash")
                         except Exception:
                             pass
                     extras = {
@@ -912,6 +926,10 @@ async def _run_force_resummarize_job(story_ids: list[str], chosen_model: str) ->
                         if brief_result and brief_result.get("briefing_fa"):
                             extras["briefing_fa"] = brief_result["briefing_fa"]
                             extras["briefing_hash"] = brief_result.get("briefing_hash")
+                    elif prior_briefing_fa:
+                        extras["briefing_fa"] = prior_briefing_fa
+                        if prior_briefing_hash:
+                            extras["briefing_hash"] = prior_briefing_hash
 
                     story.summary_en = _json.dumps(extras, ensure_ascii=False)
                     await db.commit()

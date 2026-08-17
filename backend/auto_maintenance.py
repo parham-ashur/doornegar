@@ -2372,6 +2372,21 @@ async def step_summarize():
                 # was already read above for neutrality carry-forward.
                 if old_extras.get("manual_image_url") and not extras.get("manual_image_url"):
                     extras["manual_image_url"] = old_extras["manual_image_url"]
+                # Preserve a hand-written دورنما on NON-hero stories (Claude/
+                # Niloofar's chat-driven briefing writes — project_doornama.md
+                # 2026-08-16 standing task extended briefing_fa to any story,
+                # not just the automated doornama_top_n=1 hero). The
+                # doornama_top_ids block above only ever sets briefing_fa for
+                # the hero-scoped automated pipeline; without this carry-
+                # forward, the very next resummarize of a non-hero story wipes
+                # any manually-written briefing since `extras` is built fresh
+                # from the LLM's analysis output. Confirmed live 2026-08-17:
+                # 774296d7's hand-written briefing (written days earlier) was
+                # silently gone after the next cron pass.
+                if old_extras.get("briefing_fa") and not extras.get("briefing_fa"):
+                    extras["briefing_fa"] = old_extras["briefing_fa"]
+                    if old_extras.get("briefing_hash"):
+                        extras["briefing_hash"] = old_extras["briefing_hash"]
                 story.summary_en = _json.dumps(extras, ensure_ascii=False)
                 story.llm_failed_at = None  # clear any previous failure
                 await db.commit()
