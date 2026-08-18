@@ -2,7 +2,10 @@
  * Related stories — horizontal-scroll slider shown at the bottom of a
  * story page. Populated from the `/api/v1/stories/{id}/related`
  * endpoint, which returns arc siblings first (curated narrative
- * grouping) and fills the rest with centroid-cosine neighbors.
+ * grouping) and fills the rest with same-event neighbors (calibrated
+ * cosine + title-token gate, not raw cosine — see the endpoint
+ * docstring). Text-only cards, top 3 max, no cover image (Parham
+ * 2026-08-18).
  *
  * Snap-scroll on mobile, edge-to-edge via `-mx-4` so cards peek off
  * the right edge on small screens.
@@ -17,7 +20,6 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import SafeImageStatic from "@/components/common/SafeImageStatic";
 import type { RelatedStory } from "@/lib/api";
 import { toFa } from "@/lib/utils";
 
@@ -80,18 +82,12 @@ export default function RelatedStoriesSlider({
                 href={href(s.id)}
                 className="block border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/40 hover:border-blue-400 dark:hover:border-blue-600 transition-colors"
               >
-                <div className="relative aspect-[16/10] bg-slate-100 dark:bg-slate-800 overflow-hidden">
-                  <SafeImageStatic
-                    src={s.image_url}
-                    sizes="(max-width: 640px) 72vw, 256px"
-                  />
+                <div className="p-3">
                   {isArcSibling && (
-                    <span className="absolute top-2 right-2 text-[10px] font-bold px-2 py-0.5 bg-blue-600 text-white">
+                    <span className="inline-block mb-2 text-[10px] font-bold px-2 py-0.5 bg-blue-600 text-white">
                       روایت نزدیک
                     </span>
                   )}
-                </div>
-                <div className="p-3">
                   <h3 className="text-[15px] leading-6 font-bold text-slate-900 dark:text-slate-100 group-hover:text-blue-700 dark:group-hover:text-blue-300 line-clamp-3">
                     {s.title_fa || s.title_en}
                   </h3>
@@ -109,11 +105,13 @@ export default function RelatedStoriesSlider({
                 </div>
               </Link>
               {feedbackMode && (
-                <RelatedFeedback
-                  parentStoryId={storyId}
-                  relatedStoryId={s.id}
-                  relatedTitle={s.title_fa || s.title_en || ""}
-                />
+                <div className="mt-1">
+                  <RelatedFeedback
+                    parentStoryId={storyId}
+                    relatedStoryId={s.id}
+                    relatedTitle={s.title_fa || s.title_en || ""}
+                  />
+                </div>
               )}
             </div>
           );
@@ -154,7 +152,7 @@ function RelatedFeedback({
     } catch {}
   };
   return (
-    <div className="absolute top-2 left-2 z-10 flex flex-col gap-1 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
+    <div className="flex gap-1">
       <button
         type="button"
         title="نامرتبط با این خبر"

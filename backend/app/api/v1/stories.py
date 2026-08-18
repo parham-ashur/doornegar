@@ -810,18 +810,41 @@ async def article_positions(
 async def get_related_stories(
     request: Request,
     story_id: uuid.UUID,
-    limit: int = Query(8, ge=1, le=20),
+    # Parham 2026-08-18: hard-capped to top 3. Also drops the has-image
+    # requirement (images were removed from the related-stories card
+    # entirely) and the naive cosine>=0.62 gate — see below.
+    limit: int = Query(3, ge=1, le=3),
     db: AsyncSession = Depends(get_db),
 ):
     """Return stories related to `story_id`, arc-siblings first, then
-    cosine-similar neighbors by centroid embedding.
+    same-event neighbors by centroid embedding + title-token overlap.
 
     Used by the bottom-of-page «خبرهای مرتبط» slider on story pages.
     Excludes the source story, hidden stories (article_count<5), and
     de-duplicates when an arc sibling is also a close cosine match.
+
+    Parham 2026-08-18: raw cosine>=0.62 alone was measured live on this
+    corpus (see check against production data that day) to match totally
+    unrelated stories at cosine 0.72-0.79 with ZERO shared vocabulary —
+    e.g. a domestic murder-arrest story matched to "Iran prepares to
+    expand the war". This is the exact confusion zone documented in
+    TestMergeTinyUsesCalibratedSameEventTest (tests/test_war_audit_fixes.py):
+    a 14-day replay found unrelated Persian domestic news sits at
+    0.53-0.73 centroid cosine, so a bare threshold in that range is not a
+    relatedness signal by itself. Now reuses the same calibrated
+    `homepage_dedup._same_event` gate (cosine AND title-jaccard AND a
+    shared event-specific token) that already guards
+    `_merge_tiny_by_cosine` and `step_dedupe_homepage_events` — one
+    calibration, three consumers, per that test's own philosophy.
     """
     await _require_homepage_eligible(story_id, db)
-    from app.nlp.embeddings import cosine_similarity
+    from app.services.homepage_dedup import (
+        DedupRow,
+        _same_event,
+        DEDUP_COSINE_MIN,
+        DEDUP_JACCARD_MIN,
+        DEDUP_MIN_SHARED_TOKENS,
+    )
 
     source = (await db.execute(
         select(Story)
@@ -904,7 +927,13 @@ async def get_related_stories(
             .order_by(Story.first_published_at.desc().nullslast())
             .limit(500)
         )
-        src_vec = source.centroid_embedding
+        from app.services.homepage_dedup import centroid_cosine
+
+        source_row = DedupRow(
+            id=source.id, title_fa=source.title_fa, centroid=source.centroid_embedding,
+            priority=0, trending_score=0, last_updated_at=None,
+            article_count=source.article_count or 0,
+        )
         scored: list[tuple[float, Story]] = []
         for s in cand_result.scalars().all():
             if s.id in seen:
@@ -912,12 +941,18 @@ async def get_related_stories(
             c = s.centroid_embedding
             if not isinstance(c, list) or not c or any(v is None for v in c):
                 continue
-            try:
-                sim = cosine_similarity(src_vec, c)
-            except (TypeError, ValueError):
+            cand_row = DedupRow(
+                id=s.id, title_fa=s.title_fa, centroid=c,
+                priority=0, trending_score=0, last_updated_at=None,
+                article_count=s.article_count or 0,
+            )
+            if not _same_event(
+                source_row, cand_row,
+                cos_min=DEDUP_COSINE_MIN, jac_min=DEDUP_JACCARD_MIN,
+                min_shared=DEDUP_MIN_SHARED_TOKENS,
+            ):
                 continue
-            if sim >= 0.62:
-                scored.append((sim, s))
+            scored.append((centroid_cosine(source.centroid_embedding, c) or 0.0, s))
         scored.sort(key=lambda t: -t[0])
         for _, s in scored[:need]:
             picked_ids.append(s.id)
@@ -926,36 +961,21 @@ async def get_related_stories(
     if not picked_ids:
         return {"stories": []}
 
-    # Phase G.3.2 Phase 2 (Parham 2026-05-12) — fetch story cores only;
-    # image_url comes from Story.homepage_aggregates (denormalized by
-    # cron), not by iterating Article rows. Saves ~5 MB per call when
-    # related-stories returns 12 cards.
+    # Fetch story cores only. Parham 2026-08-18: related-story cards no
+    # longer show an image, so homepage_aggregates (the blob that used
+    # to supply image_url) is deferred too — one less ~KB-ish column per
+    # row on top of the existing centroid/anchor/telegram defers.
     detail_result = await db.execute(
         select(Story)
-        .options(*_story_listing_defers())
+        .options(*_story_listing_defers(), defer(Story.homepage_aggregates))
         .where(Story.id.in_(picked_ids))
     )
     by_id = {s.id: s for s in detail_result.scalars().all()}
 
-    def _pick_real_image(s: Story) -> str | None:
-        # Only real article images — NO logo fallback. Reads from the
-        # homepage_aggregates blob (computed by cron). has_real_image
-        # flag distinguishes "picked from article" (True) from "logo
-        # fallback" (False); we only return the URL when it's real.
-        blob = getattr(s, "homepage_aggregates", None)
-        if isinstance(blob, dict) and blob.get("has_real_image"):
-            img = blob.get("image_url")
-            if img:
-                return img
-        return None
-
     out = []
-    for sid in picked_ids:
+    for sid in picked_ids[:limit]:
         s = by_id.get(sid)
         if not s:
-            continue
-        img = _pick_real_image(s)
-        if img is None:
             continue
         out.append({
             "id": str(s.id),
@@ -966,7 +986,6 @@ async def get_related_stories(
             "source_count": s.source_count,
             "first_published_at": s.first_published_at.isoformat() if s.first_published_at else None,
             "arc_id": str(s.arc_id) if s.arc_id else None,
-            "image_url": img,
         })
     return {"stories": out, "count": len(out)}
 

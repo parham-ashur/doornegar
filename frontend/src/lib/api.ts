@@ -102,10 +102,9 @@ export type RelatedStory = {
   source_count: number;
   first_published_at: string | null;
   arc_id: string | null;
-  image_url: string | null;
 };
 
-export async function getRelatedStories(id: string, limit = 8) {
+export async function getRelatedStories(id: string, limit = 3) {
   return fetchAPI<{ stories: RelatedStory[]; count: number }>(
     `/api/v1/stories/${id}/related?limit=${limit}`,
     { revalidate: 600 },

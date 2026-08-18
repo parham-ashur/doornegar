@@ -185,7 +185,7 @@ export default async function StoryDetailPage({
     const [storyResult, analysisResult, relatedResult] = await Promise.all([
       getStory(id),
       getStoryAnalysis(id).catch(() => null),
-      getRelatedStories(id, 8).catch(() => ({ stories: [] })),
+      getRelatedStories(id, 3).catch(() => ({ stories: [] })),
     ]);
     story = storyResult;
     analysis = analysisResult;
