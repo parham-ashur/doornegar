@@ -2768,10 +2768,23 @@ async def step_story_quality():
                     _defer_sq(Article.summary),
                 ).selectinload(Article.source),
             )
+            # Anchored stories excluded below (Parham 2026-08-18): this
+            # Phase blindly nulls summary_fa/summary_en with no anchor
+            # awareness and no دورنما handling, leaving a manually-curated
+            # story blank until Phase 2 (bounded to 5/run) catches up —
+            # and Phase 2 never writes briefing_fa, so a hand-written
+            # دورنما is lost for good. Confirmed live: story 6087f262
+            # (seeded + hand narrative + دورنما 2026-08-17) grew 4→17
+            # articles overnight and was wiped by this exact code before
+            # Phase 2 got to it. step_summarize's own VOLUME_TRIGGER
+            # refresh already handles "anchored story grew a lot"
+            # correctly (anchor-aware + briefing_fa carry-forward,
+            # 2026-08-17 fix) — leave anchored stories to that path.
             .where(
                 Story.id.in_(homepage_ids),
                 Story.summary_fa.isnot(None),
                 Story.is_edited.is_(False),
+                Story.summary_anchor.is_(None),
             )
         )
         for story in result.scalars().all():

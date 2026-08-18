@@ -433,6 +433,46 @@ class TestDoornamaNonHeroSurvivesResummarize:
         ), "non-hero briefing_fa carry-forward missing from /admin/force-resummarize"
 
 
+class TestStoryQualitySparesAnchoredSummaries:
+    """2026-08-18: story 6087f262 (seeded 2026-08-17 with a hand-written
+    summary_fa/diaspora_summary_fa/bias_explanation_fa/briefing_fa, part of
+    the daily Niloofar+دورنما routine) grew from 4 to 17 articles overnight
+    (a merge_tiny_cosine absorption + normal clustering) and was found with
+    summary_fa AND summary_en both hard-NULLed — not just briefing_fa this
+    time, EVERYTHING. ROOT CAUSE: step_story_quality's Phase 1 (auto_
+    maintenance.py) unconditionally sets `story.summary_fa = None` and
+    `story.summary_en = None` whenever a homepage story's live article count
+    has grown >= 3 past its cached article_count, gated only on
+    `is_edited.is_(False)` — with NO summary_anchor check at all. Because
+    the chat-driven PATCH workflow deliberately leaves is_edited False (so
+    step_summarize's anchor-aware refresh can still run — see
+    project_summary_anchor.md), any manually-curated story that later grows
+    is vulnerable: Phase 1 nulls it immediately, then Phase 2 (bounded to
+    5/run, priority-ordered) may not get to it for a while, leaving the
+    story completely blank in the interim — and Phase 2's own regeneration
+    never writes briefing_fa at all (no doornama call in this function),
+    so even a successful Phase-2 refill permanently loses the دورنما.
+    CURE: excluded `Story.summary_anchor.is_(None)` from Phase 1's query —
+    step_summarize's own VOLUME_TRIGGER refresh already handles "anchored
+    story grew a lot" correctly (anchor-aware regeneration + the
+    2026-08-17 briefing_fa carry-forward fix), so anchored stories are
+    left to that path instead of this cruder wipe-and-hope one."""
+
+    def test_phase1_stale_clear_excludes_anchored_stories(self):
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "auto_maintenance.py").read_text()
+        # Anchor for the exact query block: the Phase 1 stale-clear filter.
+        marker = "Story.summary_fa.isnot(None),\n                Story.is_edited.is_(False),"
+        idx = src.find(marker)
+        assert idx != -1, "Phase 1 stale-clear query shape changed — update this test's anchor"
+        window = src[idx: idx + 600]
+        assert "Story.summary_anchor.is_(None)" in window, (
+            "step_story_quality Phase 1 no longer excludes anchored stories from the "
+            "summary_fa/summary_en null-out — a manually-curated story with a "
+            "summary_anchor (chat-driven دورنما/narrative writes) can be wiped blank again"
+        )
+
+
 class TestMetaTitleGuardrail:
     """2026-06-03: three homepage stories carried titles like «تحلیل سوگیری در
     پوشش خبری اعدام فتح‌الله آوری و مقایسه رویکرد رسانه‌ها» — describing OUR bias
