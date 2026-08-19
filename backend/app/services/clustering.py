@@ -1213,6 +1213,7 @@ async def _match_to_existing_stories(
     articles_without_embedding: list[Article] = []
     auto_match_pairs: list[tuple[Article, uuid.UUID]] = []
 
+    skipped_not_yet_embedded = 0
     auto_match_count = 0
     auto_reject_count = 0
     negative_block_count = 0
@@ -1268,6 +1269,25 @@ async def _match_to_existing_stories(
             or not any(v != 0.0 for v in emb[:5])
         )
         if is_bad:
+            # processed_at IS NULL means NLP hasn't reached this article
+            # yet (still in this run's or a prior run's batch-size
+            # backlog — see nlp_pipeline.py's processed_at retry
+            # contract) — it is NOT an irrecoverable embedding failure.
+            # The `articles_without_embedding` fallback below skips the
+            # cosine/anchor gate entirely and lets the LLM pick from
+            # EVERY candidate story on title alone — the one ungated
+            # path in this whole matcher. It exists for articles that
+            # will NEVER get an embedding (empty content_text, which is
+            # the only case where nlp_pipeline stamps processed_at
+            # despite embed failure). Sending still-pending articles
+            # through it too was live-contaminating established stories
+            # every run (2026-08-19 audit: a same-day unembedded Kuwait-
+            # detainee article LLM-matched into an unrelated France-
+            # diplomats story with zero shared vocabulary). Skip here;
+            # it retries with full gating once step_process embeds it.
+            if article.processed_at is None:
+                skipped_not_yet_embedded += 1
+                continue
             articles_without_embedding.append(article)
             continue
 
@@ -1417,6 +1437,7 @@ async def _match_to_existing_stories(
         f"geo-theater-blocked: {locus_block_count}, "
         f"to LLM: {len(article_candidates)} articles × {total_candidate_pairs} pairs "
         f"(+{len(articles_without_embedding)} without embedding), "
+        f"skipped-not-yet-embedded: {skipped_not_yet_embedded}, "
         f"{len(articles) - pre_filtered_articles - auto_match_count} articles → new cluster"
     )
     # Cycle-1 audit Island 3: surface threshold-tier distribution.

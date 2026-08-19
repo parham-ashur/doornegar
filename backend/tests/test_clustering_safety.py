@@ -281,6 +281,56 @@ class TestSmallTargetSignalRequirement:
 
 
 # ═════════════════════════════════════════════════════════════════════
+# 4b. Not-yet-embedded articles must not take the no-anchor LLM fallback
+# ═════════════════════════════════════════════════════════════════════
+
+class TestPendingEmbeddingSkipsNoAnchorFallback:
+    """`articles_without_embedding` sends an article to the LLM against
+    EVERY candidate story with no cosine or title-anchor pre-filter —
+    the one ungated path in the whole matcher. It exists for articles
+    that will NEVER get an embedding (empty content_text — the only
+    case nlp_pipeline stamps processed_at despite embed failure; see
+    feedback_processed_at_trap.md). Before the 2026-08-19 fix it also
+    caught articles NLP simply hadn't reached yet (processed_at NULL,
+    still in that day's NLP batch-cap backlog) and threw them at the
+    same anchor-free path — live-caught contaminating an established
+    France-diplomats story with an unrelated Kuwait-detainee article
+    the same morning it was ingested. Fix: only take the fallback when
+    processed_at is set (a real, settled failure); still-pending
+    articles are skipped this run and retry next run once step_process
+    embeds them, going through full cosine + anchor gating like
+    everything else."""
+
+    def test_is_bad_branch_checks_processed_at_before_fallback(self):
+        body = _matcher_body()
+        idx = body.find("if is_bad:")
+        assert idx >= 0, "matcher must still have the is_bad branch"
+        # The processed_at guard must appear inside the is_bad branch,
+        # before the article ever reaches articles_without_embedding.
+        window = body[idx: idx + 1500]
+        assert "processed_at is None" in window, (
+            "is_bad branch must skip articles with processed_at IS NULL "
+            "(not yet embedded) instead of routing them into the "
+            "anchor-free articles_without_embedding fallback."
+        )
+        assert window.find("processed_at is None") < window.find(
+            "articles_without_embedding.append(article)"
+        ), (
+            "the processed_at guard must run BEFORE appending to "
+            "articles_without_embedding, so pending articles never "
+            "reach the no-anchor fallback."
+        )
+
+    def test_skipped_counter_exists_and_is_logged(self):
+        body = _matcher_body()
+        assert "skipped_not_yet_embedded" in body, (
+            "matcher should count skipped-pending-embedding articles "
+            "for dashboard/log visibility, mirroring every other gate "
+            "(auto_reject_count, anchor_block_count, etc.)"
+        )
+
+
+# ═════════════════════════════════════════════════════════════════════
 # 5. homepage_scope is the single source of truth for spend gating
 # ═════════════════════════════════════════════════════════════════════
 
