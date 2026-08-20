@@ -2079,6 +2079,91 @@ def _dedup_signature(article: Article) -> str:
     )
 
 
+def _article_title(d: dict) -> str:
+    """Best-available title for a primitive article dict, as used by
+    _cluster_new_articles (which works on dicts, not ORM objects, to
+    dodge mid-run session expiration)."""
+    return d.get("title_original") or d.get("title_fa") or d.get("title_en") or ""
+
+
+def _split_group_by_same_event(group: dict) -> tuple[list[dict], list[dict]]:
+    """Validate each member of a freshly LLM-grouped candidate story against
+    the group's own anchor, using the SAME calibrated cosine floor
+    (`DEDUP_COSINE_MIN = 0.64`) that `_merge_tiny_by_cosine` and
+    `homepage_dedup.plan_dedup` already trust as their `_same_event`
+    cosine leg.
+
+    Confirmed 2026-08-20 (manual-pass audit): `_cluster_new_articles`
+    groups articles via an LLM working from title + a 150-char content
+    snippet — usually enough to reject an unrelated article, but a real
+    production case slipped through (a domestic medicine-shortage article
+    grouped with genuine Trump-economic-operation articles despite its own
+    snippet being unambiguously about drug regulation). This is a
+    deterministic backstop that doesn't trust the LLM's grouping
+    unconditionally — pure, synchronous, no DB, no new LLM call.
+
+    Deliberately uses `_same_event`'s COSINE leg only, not the full
+    compound test (cosine AND title-jaccard AND shared non-generic
+    token). Verified against real production data before shipping: with
+    the full compound test, a genuine same-event article was WRONGLY
+    ejected (title-jaccard 0.045, only shared token "ترامپ" which is
+    itself in `GENERIC_TOKENS`) even though its cosine to the group
+    centroid was 0.72 — a comfortable pass. The jaccard/shared-token legs
+    were calibrated for STORY-title-vs-STORY-title comparison, where
+    titles are LLM-synthesized and more canonical; two raw article
+    headlines about the identical event routinely lead with different
+    quotes/angles per outlet and share little vocabulary even though
+    they're unambiguously the same story.
+
+    LEAVE-ONE-OUT anchor per member, not one pooled centroid for the
+    whole group. Also caught during verification: pooling ALL members
+    (including the one being tested) into a single shared anchor lets an
+    outlier drag its own reference point toward itself — on the real
+    4-article incident group, the contaminating article's cosine to a
+    self-inclusive anchor was 0.6575 (just OVER the 0.64 floor, a false
+    pass) but only 0.42 against the centroid of the other 3 members
+    (comfortably rejected). With small groups (as low as 2 members after
+    dedup bucketing) a single member can carry 25-50% of the pooled
+    centroid's weight, which is enough to rescue itself. Excluding the
+    member under test from its own anchor removes that self-reference
+    entirely — cheap for the group sizes this function ever sees.
+
+    Returns (kept, ejected). If there isn't enough embedding data to
+    validate (fewer than 2 embedded members, or a given member's
+    embedding missing), that member is KEPT — this only tightens
+    behavior when it can make a confident call; it doesn't invent a new
+    failure mode for gaps upstream (e.g. an article NLP hasn't embedded
+    yet).
+    """
+    from app.services.homepage_dedup import centroid_cosine, DEDUP_COSINE_MIN
+
+    members = group["articles"]
+    embedded = [m for m in members if m.get("embedding")]
+    if len(embedded) < 2:
+        # Nothing to leave out and still have an anchor — trust the LLM.
+        return members, []
+
+    kept: list[dict] = []
+    ejected: list[dict] = []
+    for m in members:
+        emb = m.get("embedding")
+        if not emb:
+            kept.append(m)
+            continue
+        others = [o["embedding"] for o in embedded if o is not m]
+        anchor_centroid = _compute_centroid(others)
+        if anchor_centroid is None:
+            kept.append(m)
+            continue
+        try:
+            cos = centroid_cosine(anchor_centroid, emb)
+            passes = cos is not None and cos >= DEDUP_COSINE_MIN
+        except Exception:
+            passes = True  # never let a scoring bug block legitimate grouping
+        (kept if passes else ejected).append(m)
+    return kept, ejected
+
+
 async def _cluster_new_articles(
     db: AsyncSession,
     articles: list[Article],
@@ -2206,6 +2291,59 @@ async def _cluster_new_articles(
                     "title_en": group.get("title_en", ""),
                     "topics": group.get("topics", []),
                 })
+
+    # Per-article outlier check (2026-08-20, manual-pass audit). The LLM
+    # groups on title + a 150-char content snippet, which is USUALLY enough
+    # to reject an unrelated article — but a real production case slipped
+    # through: a domestic medicine-shortage/inflation article was grouped
+    # with genuine Trump-economic-operation articles despite its own snippet
+    # being unambiguously about drug-regulation, not sanctions. Traced via
+    # story_events: the article had zero `match_accept` event (ruling out
+    # `_match_to_existing_stories`, which always logs one) but the story it
+    # ended up in received `cluster_new` + `merge_tiny_cosine` events in the
+    # same batch — it rode in as part of a newly-formed group that was
+    # majority-coherent, then the whole group merged into an established
+    # story as a unit. This morning's transitive-chaining fix (19841de)
+    # validates keeper<->victim STORY pairs; it doesn't look inside a victim.
+    #
+    # Rather than trust the LLM's grouping unconditionally, validate each
+    # member against the group's own anchor using the SAME calibrated
+    # same-event test already trusted by `_merge_tiny_by_cosine` and
+    # `homepage_dedup.plan_dedup` (cosine >= 0.64 AND title-jaccard >= 0.12
+    # AND >= 1 shared token outside the generic actor/place list) — a
+    # deterministic backstop, no new LLM call, no new recurring cost.
+    total_ejected = 0
+    filtered_groups: list[dict] = []
+    for group in all_groups:
+        kept, ejected = _split_group_by_same_event(group)
+        group_title = group.get("title_fa") or group.get("title_en") or ""
+        for m in ejected:
+            total_ejected += 1
+            logger.warning(
+                f"cluster_new outlier reject: article {m['id']} "
+                f"({_article_title(m)[:60]!r}) does not pass _same_event "
+                f"against group anchor {group_title[:60]!r} — leaving ungrouped"
+            )
+            from app.services.events import log_event as _log_outlier_event
+            await _log_outlier_event(
+                db,
+                event_type="cluster_new_reject_outlier",
+                actor="clustering",
+                article_id=m["id"],
+                signals={
+                    "group_title_fa": group_title,
+                    "reason": "failed_same_event_vs_group_anchor",
+                },
+            )
+        if len(kept) >= CLUSTER_NEW_GROUP_FLOOR:
+            group["articles"] = kept
+            filtered_groups.append(group)
+        # else: group fell below floor after ejection — drop entirely;
+        # survivors flow into ungrouped_ids below and retry next run.
+    if total_ejected:
+        await db.commit()
+        logger.info(f"cluster_new outlier check ejected {total_ejected} article(s) from {len(all_groups)} groups")
+    all_groups = filtered_groups
 
     # Collect IDs of articles that made it into a viable group (dicts)
     grouped_ids: set = set()

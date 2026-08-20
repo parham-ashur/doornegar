@@ -4909,3 +4909,162 @@ class TestMergeTinyRejectsTransitiveChaining:
         # the fix's contract is: only merge a victim into the keeper when
         # (keeper, victim) itself is a verified pair.
         assert _same_event(a, c, **kw) is False
+
+
+class TestClusterNewRejectsOutlierAtFormationTime:
+    """2026-08-20 (manual-pass audit, finding #2): contamination can enter
+    at story-FORMATION time, not just at merge time. `_cluster_new_articles`
+    groups articles via an LLM working from title + a 150-char content
+    snippet — usually enough, but a real production case slipped through: a
+    domestic medicine-shortage article (own snippet unambiguously about drug
+    regulation) was grouped with genuine Trump-economic-operation articles.
+    Traced via story_events: the article had zero `match_accept` event
+    (ruling out `_match_to_existing_stories`, which always logs one) but the
+    story it landed in received `cluster_new` + `merge_tiny_cosine` events in
+    the same batch — it rode in as part of a newly-formed group that was
+    majority-coherent, then the whole group merged into an established story
+    as a unit. This morning's transitive-chaining fix (19841de) validates
+    keeper<->victim STORY pairs; it doesn't look inside a victim's members.
+
+    Fix: `_split_group_by_same_event` validates each member of a freshly
+    LLM-grouped story against the group's own anchor before the group is
+    ever turned into a Story row, reusing the SAME calibrated cosine floor
+    (DEDUP_COSINE_MIN=0.64) `_merge_tiny_by_cosine` and
+    `homepage_dedup.plan_dedup` already trust — cosine leg only (not the
+    full jaccard/shared-token compound test, which was calibrated for
+    STORY-title-vs-STORY-title comparison and produces false positives at
+    raw-headline granularity — verified against real production data before
+    shipping), and LEAVE-ONE-OUT per member (pooling the member being
+    tested into its own anchor let the real outlier rescue itself: 0.6575
+    self-inclusive vs 0.42 leave-one-out on the actual incident data)."""
+
+    def test_llm_grouping_input_includes_content_snippet_not_headline_only(self):
+        # Guards against re-introducing the original (wrong) hypothesis
+        # that the grouping LLM sees headlines only — it doesn't, and the
+        # fix design (cosine-only, leave-one-out) depends on that being
+        # correctly understood. If this ever regresses to true
+        # headline-only, the outlier check becomes even more load-bearing,
+        # not less, so it's still safe — but the docstring reasoning above
+        # would need updating.
+        import inspect
+        from app.services.clustering import _build_articles_block
+        src = inspect.getsource(_build_articles_block)
+        assert "content_text" in src, (
+            "_build_articles_block must still pull content_text (not just "
+            "title) into the clustering-LLM prompt"
+        )
+
+    def _make_member(self, id_, title, embedding):
+        return {
+            "id": id_, "title_original": title, "title_fa": title,
+            "title_en": None, "embedding": embedding,
+        }
+
+    def test_ejects_clear_outlier_from_group(self):
+        from app.services.clustering import _split_group_by_same_event
+        g1 = self._make_member("g1", "ترامپ عملیات اقتصادی علیه ایران را اعلام کرد", [1.0, 0.2, 0.0])
+        g2 = self._make_member("g2", "هر کشوری به ایران کمک کند با پیامد روبرو می‌شود", [0.9, 0.3, 0.0])
+        g3 = self._make_member("g3", "عواقب اقتصادی شدید برای کمک‌کنندگان به ایران", [0.95, 0.25, 0.05])
+        outlier = self._make_member("outlier", "ابربحران کمبود دارو در داخل کشور", [0.35, 0.0, 0.9])
+        group = {"articles": [g1, g2, g3, outlier], "title_fa": "test group"}
+
+        kept, ejected = _split_group_by_same_event(group)
+        kept_ids = {m["id"] for m in kept}
+        assert kept_ids == {"g1", "g2", "g3"}, kept_ids
+        assert [m["id"] for m in ejected] == ["outlier"]
+
+    def test_leave_one_out_prevents_self_rescue(self):
+        """The exact failure mode a naive pooled-centroid design has: an
+        outlier pulls its own reference point toward itself. This test
+        fails if someone "simplifies" the implementation back to a single
+        shared anchor computed from ALL members including the one under
+        test."""
+        from app.services.clustering import _split_group_by_same_event
+        from app.services.homepage_dedup import centroid_cosine, DEDUP_COSINE_MIN
+
+        g1 = [1.0, 0.2, 0.0]
+        g2 = [0.9, 0.3, 0.0]
+        outlier = [0.35, 0.0, 0.9]
+
+        # Sanity: a self-inclusive pooled anchor WOULD wrongly pass this
+        # outlier — if this assertion ever fails, the test fixture no
+        # longer demonstrates the bug this fix guards against.
+        import numpy as np
+        pooled = np.mean([g1, g2, outlier], axis=0)
+        pooled = (pooled / np.linalg.norm(pooled)).tolist()
+        assert centroid_cosine(pooled, outlier) >= DEDUP_COSINE_MIN, (
+            "fixture no longer reproduces the self-rescue failure mode — "
+            "adjust the vectors"
+        )
+
+        group = {
+            "articles": [
+                self._make_member("g1", "t1", g1),
+                self._make_member("g2", "t2", g2),
+                self._make_member("outlier", "t3", outlier),
+            ],
+            "title_fa": "test",
+        }
+        kept, ejected = _split_group_by_same_event(group)
+        assert [m["id"] for m in ejected] == ["outlier"], (
+            "leave-one-out anchor must reject the outlier even though a "
+            "self-inclusive pooled anchor would have passed it"
+        )
+
+    def test_all_genuine_group_keeps_everyone(self):
+        from app.services.clustering import _split_group_by_same_event
+        g1 = self._make_member("g1", "t1", [1.0, 0.1, 0.0])
+        g2 = self._make_member("g2", "t2", [0.95, 0.15, 0.0])
+        g3 = self._make_member("g3", "t3", [0.9, 0.2, 0.05])
+        group = {"articles": [g1, g2, g3], "title_fa": "test"}
+        kept, ejected = _split_group_by_same_event(group)
+        assert len(ejected) == 0
+        assert len(kept) == 3
+
+    def test_missing_embedding_member_not_penalized(self):
+        from app.services.clustering import _split_group_by_same_event
+        g1 = self._make_member("g1", "t1", [1.0, 0.2, 0.0])
+        g2 = self._make_member("g2", "t2", [0.9, 0.3, 0.0])
+        no_emb = self._make_member("no_emb", "t3", None)
+        group = {"articles": [g1, g2, no_emb], "title_fa": "test"}
+        kept, ejected = _split_group_by_same_event(group)
+        assert "no_emb" in {m["id"] for m in kept}
+        assert len(ejected) == 0
+
+    def test_fewer_than_two_embedded_members_skips_check(self):
+        from app.services.clustering import _split_group_by_same_event
+        g1 = self._make_member("g1", "t1", [1.0, 0.2, 0.0])
+        no_emb = self._make_member("no_emb", "t2", None)
+        group = {"articles": [g1, no_emb], "title_fa": "test"}
+        kept, ejected = _split_group_by_same_event(group)
+        assert len(kept) == 2
+        assert len(ejected) == 0
+
+    def test_wired_into_cluster_new_before_floor_check(self):
+        import inspect
+        from app.services.clustering import _cluster_new_articles
+        src = inspect.getsource(_cluster_new_articles)
+        split_idx = src.find("_split_group_by_same_event(group)")
+        floor_idx = src.find("if len(group_articles) >= CLUSTER_NEW_GROUP_FLOOR:")
+        grouped_ids_idx = src.find("grouped_ids: set = set()")
+        assert split_idx >= 0, "_cluster_new_articles must call the outlier check"
+        assert floor_idx >= 0 and floor_idx < split_idx, (
+            "outlier check must run AFTER groups are formed"
+        )
+        assert grouped_ids_idx >= 0 and split_idx < grouped_ids_idx, (
+            "outlier check must run BEFORE grouped_ids/ungrouped_ids are "
+            "computed, so ejected articles flow into the existing "
+            "cluster_attempts-bump retry path automatically"
+        )
+
+    def test_ejected_articles_logged_to_story_events(self):
+        import inspect
+        from app.services.clustering import _cluster_new_articles
+        src = inspect.getsource(_cluster_new_articles)
+        idx = src.find("_split_group_by_same_event(group)")
+        window = src[idx:idx + 1200]
+        assert "cluster_new_reject_outlier" in window, (
+            "ejected articles must be logged to story_events for future "
+            "forensic tracing (this exact incident was only diagnosable "
+            "because a similar event trail existed for the merge step)"
+        )
