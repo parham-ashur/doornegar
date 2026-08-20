@@ -326,6 +326,34 @@ class TestDetachArticlesEndpoint:
             "Silent mutations are how the audit trail rots."
         )
 
+    def test_endpoint_recomputes_homepage_aggregates(self):
+        """2026-08-20 fix: is_blindspot / homepage_aggregates were
+        otherwise refreshed only once per cron (step_recompute_homepage_
+        aggregates), using a DIFFERENT source-percentage-based algorithm
+        than the article-count one clustering.py uses at attach time. A
+        detach that shifts the surviving source mix (e.g. removing the
+        last diaspora article from a story) left a stale, wrong
+        is_blindspot on the homepage for up to ~24h with no code path
+        touching it in between. Same incident class as the recount /
+        last_updated_at gaps fixed 2026-08-14/15 (see
+        feedback_admin_endpoint_parity memory) — an admin endpoint that
+        mutates a story's article set must mirror every side effect the
+        automated path performs, not just the ones already caught.
+        """
+        src = (
+            Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py"
+        ).read_text()
+        idx = src.find("async def detach_articles_from_stories(")
+        assert idx >= 0
+        end = src.find("\n\n\n", idx)
+        body = src[idx : end if end > 0 else len(src)]
+        assert "recompute_story_aggregates" in body, (
+            "detach_articles_from_stories must call "
+            "recompute_story_aggregates for each affected story so "
+            "is_blindspot / homepage_aggregates reflect the new article "
+            "set immediately, not after the next cron."
+        )
+
 
 class TestNiloofarWorldviewEndpoints:
     """Niloofar (Claude-driven) synthesis path bypasses the gpt-4o-mini
@@ -518,6 +546,30 @@ class TestAttachArticlesEndpoint:
             "response must surface the source-story recounts so a caller "
             "(chat-driven Niloofar curation) can verify the merge left no "
             "zombie counts behind."
+        )
+
+    def test_endpoint_recomputes_homepage_aggregates(self):
+        """2026-08-20 fix: attaching articles is exactly the case that
+        flips a source-mix percentage (e.g. curating fresh diaspora
+        coverage onto a state-heavy pin) — but is_blindspot /
+        homepage_aggregates only refreshed once per cron before this
+        fix. A pinned hero seeded one day, then left untouched, read as
+        a blindspot and dropped out of live_hero for a full day because
+        nothing recomputed it in between (2026-08-20 incident). Must
+        recompute for BOTH the target story and every source story
+        articles were moved away from — a merge changes both sides'
+        composition.
+        """
+        src = (
+            Path(__file__).parent.parent / "app" / "api" / "v1" / "admin.py"
+        ).read_text()
+        idx = src.find("async def attach_articles_to_story(")
+        end = src.find("\n\n\n", idx)
+        body = src[idx : end if end > 0 else len(src)]
+        assert body.count("recompute_story_aggregates") >= 2, (
+            "/articles/attach must call recompute_story_aggregates for "
+            "both the target story and any source story articles moved "
+            "away from — not just recount the article totals."
         )
 
 

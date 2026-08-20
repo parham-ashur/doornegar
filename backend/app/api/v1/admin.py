@@ -3231,6 +3231,7 @@ async def detach_articles_from_stories(
     # translations so the next cron re-translates from the new
     # article set. is_edited slots (manual overrides) are preserved.
     from app.services.translate_multilocale import clear_translations_for_story
+    from app.services.homepage_aggregates import recompute_story_aggregates
 
     # Recount each affected story so cached article_count + the
     # `oversized_active_stories` canary stay accurate.
@@ -3245,6 +3246,17 @@ async def detach_articles_from_stories(
         old_count = int(story.article_count or 0)
         story.article_count = live
         await clear_translations_for_story(db, sid)
+        # is_blindspot / homepage_aggregates otherwise only refresh once per
+        # cron (step_recompute_homepage_aggregates) — a detach that shifts
+        # the surviving source mix (e.g. removing the last diaspora article)
+        # would leave a stale, wrong is_blindspot on the homepage for up to
+        # ~24h. Recompute inline; no LLM cost, pure DB read+write. Skips
+        # itself gracefully (returns False, doesn't raise) if the story now
+        # has zero articles. (2026-08-20, same incident class as the
+        # attach-side last_updated_at/recount gaps fixed 2026-08-14/15 —
+        # see feedback_admin_endpoint_parity memory.)
+        if live > 0:
+            await recompute_story_aggregates(db, sid)
         recounts.append({
             "story_id": str(sid),
             "old_count": old_count,
@@ -3427,7 +3439,16 @@ async def attach_articles_to_story(
     # narrative composition AND the source stories' (articles moved
     # away from them). Clear EN/FR translations on all affected stories.
     from app.services.translate_multilocale import clear_translations_for_story
+    from app.services.homepage_aggregates import recompute_story_aggregates
     await clear_translations_for_story(db, target_story_uuid)
+    # is_blindspot / homepage_aggregates otherwise only refresh once per
+    # cron (step_recompute_homepage_aggregates) — attaching articles is
+    # exactly the case that flips a source-mix percentage (e.g. curating
+    # fresh diaspora coverage onto a state-heavy pin), and leaving it stale
+    # for up to ~24h caused a pinned hero to read as a blindspot and drop
+    # out of `live_hero` for a full day (2026-08-20 incident). No LLM cost.
+    if found_ids:
+        await recompute_story_aggregates(db, target_story_uuid)
     for prev_sid_str in moved_from_counter:
         if prev_sid_str == "ORPHAN":
             continue
@@ -3436,6 +3457,11 @@ async def attach_articles_to_story(
         except (ValueError, TypeError):
             continue
         await clear_translations_for_story(db, prev_sid)
+        prev_still_live = (await db.execute(
+            select(func.count(Article.id)).where(Article.story_id == prev_sid)
+        )).scalar() or 0
+        if prev_still_live > 0:
+            await recompute_story_aggregates(db, prev_sid)
 
     await _log_event(
         db,
