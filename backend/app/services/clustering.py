@@ -2416,13 +2416,17 @@ async def _merge_tiny_by_cosine(db: AsyncSession, threshold: float = 0.60) -> in
         )
         for s in stories
     ]
+    pair_passed: set[tuple[str, str]] = set()
     for i in range(len(drows)):
         for j in range(i + 1, len(drows)):
             try:
                 if _same_event_test(drows[i], drows[j]):
                     union(drows[i].id, drows[j].id)
+                    pair_passed.add((drows[i].id, drows[j].id))
+                    pair_passed.add((drows[j].id, drows[i].id))
             except Exception:
                 continue
+    by_id = {d.id: d for d in drows}
 
     # Group by root
     groups: dict[str, list[Story]] = {}
@@ -2442,6 +2446,31 @@ async def _merge_tiny_by_cosine(db: AsyncSession, threshold: float = 0.60) -> in
         keeper = group[0]
         from app.services.events import log_event as _log_event_tiny
         for victim in group[1:]:
+            # Transitive-closure guard (2026-08-20). Union-find groups a
+            # whole CHAIN of pairwise-passing tiny stories (A-B passes,
+            # B-C passes → A, B, C all merge), but a pairwise test that's
+            # calibrated to be safe for one edge says nothing about the
+            # endpoints of a multi-hop chain — homepage_dedup.plan_dedup's
+            # docstring already documents this exact failure ("a 2026-06-16
+            # dry-run showed transitive same-event grouping catastrophically
+            # over-merges the dense war/deal topic space"), which is why
+            # THAT function deliberately never chains, only ever acting on
+            # an explicitly pinned anchor. This function had no such guard.
+            # Caught live 2026-08-20: one cron batch chained "US charges 17
+            # Iranians with cyber theft" through 7 unrelated victims (UAE
+            # trade suspension, a Barzani-office drone attack, US-Hamas
+            # disarmament talks...) that shared nothing with the keeper
+            # except generic Iran-US vocabulary bridging through
+            # intermediate stories. Require the keeper to pass the SAME
+            # direct pairwise test against each victim — not just be
+            # transitively reachable — before merging it in. A victim that
+            # fails is left alone for a future pass (it may still merge
+            # correctly against a different, more on-topic keeper later).
+            if (keeper_row := by_id.get(str(keeper.id))) is not None and (
+                victim_row := by_id.get(str(victim.id))
+            ) is not None:
+                if (keeper_row.id, victim_row.id) not in pair_passed:
+                    continue
             await db.execute(update(Article).where(Article.story_id == victim.id).values(story_id=keeper.id))
             await db.execute(update(TelegramPost).where(TelegramPost.story_id == victim.id).values(story_id=keeper.id))
             await db.execute(update(RaterFeedback).where(RaterFeedback.story_id == victim.id).values(story_id=keeper.id))

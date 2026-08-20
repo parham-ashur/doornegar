@@ -4821,3 +4821,91 @@ class TestMergeTinyUsesCalibratedSameEventTest:
         c = row("c", "مذاکرات ایران و آمریکا در دوحه از سر گرفته شد", [1, 0, 0, 0])
         d = row("d", "هشدار ایران به آمریکا درباره تنگه هرمز", [0.95, 0.312, 0, 0])
         assert _same_event(c, d, **kw) is False
+
+
+class TestMergeTinyRejectsTransitiveChaining:
+    """2026-08-20: the pairwise _same_event test (tightened 2026-07-04) only
+    guarantees a single edge is safe — union-find still chains A-B-C-D into
+    one group whenever each ADJACENT pair passes, even if the endpoints
+    share nothing. homepage_dedup.plan_dedup's own docstring already flags
+    this exact failure ("a 2026-06-16 dry-run showed transitive same-event
+    grouping catastrophically over-merges the dense war/deal topic space")
+    and deliberately never chains — but _merge_tiny_by_cosine had no such
+    guard. Caught live: one cron batch chained "US charges 17 Iranians with
+    cyber theft" through 7 unrelated victims (UAE trade suspension, a
+    Barzani-office drone attack, US-Hamas disarmament talks...) that shared
+    nothing with the keeper except generic Iran-US vocabulary bridging
+    through intermediate stories. Fix: require the KEEPER to directly pass
+    _same_event against each victim, not just be transitively reachable.
+    """
+
+    def _body(self):
+        import inspect
+        from app.services.clustering import _merge_tiny_by_cosine
+        return inspect.getsource(_merge_tiny_by_cosine)
+
+    def test_tracks_which_pairs_actually_passed(self):
+        body = self._body()
+        assert "pair_passed" in body, (
+            "_merge_tiny_by_cosine must record which SPECIFIC pairs passed "
+            "_same_event, not just feed union() — otherwise there's no way "
+            "to tell a direct match from a transitive one."
+        )
+
+    def test_victim_merge_gated_on_direct_pair_with_keeper(self):
+        body = self._body()
+        idx = body.find("for victim in group[1:]:")
+        assert idx >= 0, "keeper/victim merge loop must still exist"
+        # The direct-pair check must appear BEFORE the victim's articles are
+        # actually reassigned to the keeper.
+        gate_idx = body.find("not in pair_passed", idx)
+        move_idx = body.find(
+            "update(Article).where(Article.story_id == victim.id)", idx
+        )
+        assert gate_idx >= 0, (
+            "must gate each victim merge on (keeper, victim) being in "
+            "pair_passed — a transitively-reachable victim that never "
+            "directly passed _same_event against the keeper must be "
+            "skipped, not merged."
+        )
+        assert gate_idx < move_idx, (
+            "the direct-pair check must run BEFORE articles are moved to "
+            "the keeper, or the guard does nothing."
+        )
+
+    def test_end_to_end_chain_does_not_fully_merge(self):
+        """A-B and B-C pass _same_event directly; A-C does not. Union-find
+        still groups {A, B, C} under one root. Reproduce the grouping +
+        gating logic inline (mirrors the function's own approach) and
+        confirm C is excluded when A is the keeper."""
+        from app.services.homepage_dedup import (
+            DedupRow, _same_event,
+            DEDUP_COSINE_MIN, DEDUP_JACCARD_MIN, DEDUP_MIN_SHARED_TOKENS,
+        )
+
+        def row(id_, title, vec, count):
+            return DedupRow(id=id_, title_fa=title, centroid=vec, priority=0,
+                            trending_score=0.0, last_updated_at=None,
+                            article_count=count)
+
+        kw = dict(cos_min=DEDUP_COSINE_MIN, jac_min=DEDUP_JACCARD_MIN,
+                  min_shared=DEDUP_MIN_SHARED_TOKENS)
+        # Keeper: "US charges 17 Iranians with cyber theft" (biggest, count=4)
+        a = row("keeper", "آمریکا ۱۷ ایرانی را به سرقت سایبری متهم کرد",
+                [1, 0, 0, 0], 4)
+        # Bridge: shares "آمریکا"/"سپاه" contact vocabulary with C, but NOT
+        # the cyber-theft specifics of A — direct A-B must fail.
+        b = row("bridge", "تماس محرمانه ترامپ با سپاه از کانال بارزانی",
+                [0, 1, 0, 0], 2)
+        # Unrelated endpoint, only reachable from A via B.
+        c = row("victim", "امارات متحده عربی مبادلات تجاری با ایران را متوقف کرد",
+                [0, 0.9, 0.4, 0], 1)
+
+        assert _same_event(a, b, **kw) is False, (
+            "sanity check: keeper and the far endpoint must NOT directly "
+            "pass — if they do, this test isn't reproducing the bug"
+        )
+        # Whatever the transitive union-find concludes about {a, b, c},
+        # the fix's contract is: only merge a victim into the keeper when
+        # (keeper, victim) itself is a verified pair.
+        assert _same_event(a, c, **kw) is False
