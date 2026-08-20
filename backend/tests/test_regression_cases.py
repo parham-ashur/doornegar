@@ -1676,6 +1676,60 @@ class TestContentExtractionTitleOverlapGuard:
         )
 
 
+class TestContentExtractionLowSignalOverlap2026_08_20:
+    """2026-08-20 manual-pass audit found the 2026-07-16 guard above still
+    let 2 real wrong-page extractions through in production, both on
+    iranintl.com: a UAE-trade-halt article whose stored content_text was
+    actually an unrelated Austria/Greece-diplomacy piece, and an
+    FT-Europe-scoop article whose stored content_text was actually about
+    Trump's own negotiation-halt strategy shift. Root cause: the single
+    shared token in each case was a near-universal word for this outlet's
+    Iran-diplomacy-heavy feed ("داد" — the light verb in "... خبر داد",
+    missing from the stopword list; "تهران"/"روابط" — real words, but too
+    common across this feed to prove same-page). Fixed by adding "داد" to
+    the stopword list and requiring at least one shared token outside a
+    small low-signal set for country-name-heavy overlaps."""
+
+    def test_rejects_real_uae_trade_vs_austria_greece_mismatch(self):
+        from app.services.nlp_pipeline import _extraction_matches_title
+        title = "امارات متحده عربی روابط تجاری با تهران را تعلیق می‌کند"
+        wrong_content = (
+            "اما ادامه بن‌بست در مذاکرات اکنون واشینگتن را به گسترش دایره "
+            "دیپلماتیک ترغیب کرده است. بر اساس گزارش‌های رسانه‌ای، در روزهای "
+            "اخیر اتریش و یونان، پس از رایزنی با مارکو روبیو، وزیر امور خارجه "
+            "آمریکا، هر یک جداگانه تماس‌هایی با تهران برقرار کرده‌اند."
+        )
+        assert _extraction_matches_title(wrong_content, title) is False
+
+    def test_rejects_real_ft_europe_vs_trump_strategy_mismatch(self):
+        from app.services.nlp_pipeline import _extraction_matches_title
+        title = (
+            "فایننشال‌تایمز از طرح تهران برای کشاندن دامنه جنگ به اروپا "
+            "در صورت تشدید تنش‌ها خبر داد"
+        )
+        wrong_content = (
+            "در این گزارش گفته شده ترامپ پس از آنکه هفته‌ها تلاش کرد با ابراز "
+            "خوش‌بینی، تحولات مثبتی در رابطه با ایران را به واقعیت تبدیل کند "
+            "اما این تلاش او چندان موفق نبوده و اکنون به نظر می‌رسد او رویکرد "
+            "تازه‌ای در پیش گرفته است."
+        )
+        assert _extraction_matches_title(wrong_content, title) is False
+
+    def test_low_signal_term_alone_insufficient(self):
+        from app.services.nlp_pipeline import _extraction_matches_title
+        # "تهران" shared but nothing else — must still reject.
+        title = "خبر مهم تهران امروز منتشر شد"
+        unrelated_content = "گزارشی کاملا بی‌ربط از تهران و آب‌وهوا"
+        assert _extraction_matches_title(unrelated_content, title) is False
+
+    def test_low_signal_term_plus_distinctive_term_still_accepts(self):
+        from app.services.nlp_pipeline import _extraction_matches_title
+        # "تهران" plus a real distinctive shared term ("بودجه") should pass.
+        title = "بودجه شهرداری تهران برای سال آینده تصویب شد"
+        matching_content = "شورای شهر بودجه شهرداری تهران را برای سال آینده تصویب کرد."
+        assert _extraction_matches_title(matching_content, title) is True
+
+
 class TestEmbeddingJsonbNoneAsNull:
     """2026-07-16: Article.embedding is a nullable JSONB column. Without
     none_as_null=True, SQLAlchemy serializes `article.embedding = None`

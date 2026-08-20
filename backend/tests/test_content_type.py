@@ -234,6 +234,52 @@ class TestOffDomainContent2026_06_20:
         assert v is None or v.label != "off_topic"
 
 
+class TestBBCLiveBlogBundling2026_08_20:
+    """BBC Persian /live/ pages get re-ingested repeatedly as BBC appends new,
+    unrelated items throughout the day (Trump's Iran statement + France
+    expelling a diplomat + Hemmati's remarks + Hormuz traffic all landed in
+    one 8KB body during the manual-pass audit). Embedding on that blob glues
+    onto whatever cluster is nearby. But /live/ alone isn't safe — BBC also
+    publishes short single-topic breaking updates under the same URL shape.
+    A length floor (5000, audited against all 24 live DB rows: bundled ones
+    were all >=7000 chars, single-topic ones all <=2000) must separate them."""
+
+    def test_long_live_blog_dropped_as_aggregation(self):
+        art = _stub(
+            title="ترامپ از آغاز «عملیات اقتصادی خردکننده و بی‌سابقه» علیه ایران خبر داد",
+            body="خ" * 8120,  # real bundled article was 8120 chars
+            url="https://www.bbc.co.uk/persian/live/c6wymr813k17t?at_medium=RSS",
+        )
+        v = ct.heuristic_classify(art)
+        assert v is not None and v.label == "aggregation"
+        assert v.confidence >= 0.85
+
+    def test_short_live_update_not_dropped(self):
+        # A real single-topic breaking update under the same /live/ URL shape
+        # (1617 chars in the audited sample) must NOT be swept up.
+        art = _stub(
+            title="ترامپ می‌گوید نیروی دریایی آمریکا «تمام تنگه هرمز را می‌بیند»",
+            body=(
+                "دونالد ترامپ، رئیس‌جمهور آمریکا اعلام کرد نیروی دریایی این کشور "
+                "کنترل کامل بر تنگه هرمز دارد و هیچ نقطه کوری وجود ندارد."
+            ),
+            url="https://www.bbc.co.uk/persian/live/cabc12345?at_medium=RSS",
+        )
+        v = ct.heuristic_classify(art)
+        assert v is None or v.label != "aggregation"
+
+    def test_non_bbc_live_url_not_affected(self):
+        # The URL pattern is bbc.co.uk-scoped — a long article from any other
+        # source (or a non-live BBC page) must not be swept up by this check.
+        art = _stub(
+            title="گزارش بلند درباره اقتصاد ایران",
+            body="خ" * 8120,
+            url="https://www.iranintl.com/live/202608201234",
+        )
+        v = ct.heuristic_classify(art)
+        assert v is None or v.label != "aggregation"
+
+
 class TestMoUNotOpinion2026_06_20:
     """«یادداشت تفاهم» (Memorandum of Understanding — the Iran-US deal) was
     matching the «یادداشت» op-ed prefix and being dropped as opinion, starving

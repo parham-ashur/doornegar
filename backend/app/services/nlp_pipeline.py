@@ -40,8 +40,27 @@ _OVERLAP_STOPWORDS = {
     "همچنین", "را", "به", "از", "در", "با", "هم", "اند", "بودند", "کند",
     "کنند", "شود", "شوند", "هستند", "باید", "پس", "اگر", "چون", "وی",
     "او", "ما", "شما", "آنها", "یک", "دو", "سه", "نه", "بلکه",
+    # Added 2026-08-20 (manual-pass audit): "داد" (light verb, "announced/
+    # gave" — as in the boilerplate "... خبر داد") was missing from this
+    # list despite "کرد"/"شد"/"بود" already being here. It was the ONLY
+    # shared token between an iranintl.com article's real title and a
+    # completely unrelated wrong-page extraction, letting a false match
+    # through the guard below.
+    "داد",
 }
 _OVERLAP_TOKEN_RE = re.compile(r"[\s،؛:«»\"'.,!?()\[\]/\\-]+")
+
+# Added 2026-08-20 (manual-pass audit, 2nd iranintl.com wrong-page-extraction
+# case): unlike _OVERLAP_STOPWORDS (function words, never distinctive),
+# these are real content words that are still too common across a single
+# outlet's Iran-diplomacy-heavy feed to prove two articles are the same
+# page — "تهران"/"روابط" were the ONLY shared tokens between a UAE-trade
+# article's title and an unrelated Austria/Greece-diplomacy extraction that
+# happened to also mention Tehran and "relations". Unlike the stopwords
+# above, these CAN still count when paired with at least one other, more
+# specific shared token — they just can't be the entire evidence on their
+# own, which is what `_extraction_matches_title` checks below.
+_LOW_SIGNAL_OVERLAP_TERMS = {"تهران", "ایران", "آمریکا", "روابط"}
 
 
 def _extraction_matches_title(content: str, title: str | None) -> bool:
@@ -58,6 +77,14 @@ def _extraction_matches_title(content: str, title: str | None) -> bool:
     with zero content-word overlap with the extracted text is the
     signature of this failure — reject and fall back to the RSS
     summary rather than silently store cross-contaminated content.
+
+    Tightened 2026-08-20: a single shared token was too weak on
+    iranintl.com's dense Iran-diplomacy coverage, where "تهران"/"ایران"/
+    "آمریکا"/"روابط" show up in nearly every article regardless of the
+    specific event. Two confirmed wrong-page extractions (a UAE-trade
+    story and an FT-Europe-scoop story) both passed the old single-token
+    check purely on one of these low-signal terms. Now requires at least
+    one shared token OUTSIDE that low-signal set.
     """
     def _tokens(s: str) -> set[str]:
         return {
@@ -68,7 +95,8 @@ def _extraction_matches_title(content: str, title: str | None) -> bool:
     title_tokens = _tokens(title or "")
     if not title_tokens:
         return True  # nothing distinctive to check against — don't block
-    return bool(title_tokens & _tokens((content or "")[:1000]))
+    shared = title_tokens & _tokens((content or "")[:1000])
+    return bool(shared - _LOW_SIGNAL_OVERLAP_TERMS)
 
 
 async def process_unprocessed_articles(db: AsyncSession, batch_size: int = 50) -> dict:

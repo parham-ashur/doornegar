@@ -226,6 +226,22 @@ _ROUNDUP_TITLE_PATTERNS = (
     "مرور مطبوعات", "نگاهی به مطبوعات", "گزیده اخبار", "بسته خبری",
     "تیتر روزنامه‌ها", "مهم‌ترین عناوین", "مرور رسانه‌ها",
 )
+# BBC Persian rolling live-blog pages (2026-08-20, manual-pass audit finding).
+# URL slug is /persian/live/<id> — the SAME url is re-ingested repeatedly as
+# BBC appends new unrelated items throughout the day (Trump's Iran statement +
+# France expelling a diplomat + Hemmati's remarks + Hormuz traffic all landed
+# in one 8KB body). Embedding on that blob sits near "general Iran news" and
+# glues onto whatever cluster is nearby — the same cluster-pollution shape as
+# _ROUNDUP_TITLE_PATTERNS above, just without a title tell.
+#
+# /live/ alone is NOT a safe signal: BBC also publishes short single-topic
+# breaking updates under the same URL pattern (e.g. a single Trump quote,
+# ~1-2KB). A length floor separates the two cleanly — audited all 24
+# bbc-persian /live/ articles in the DB: every genuinely bundled one was
+# >=7000 chars, every single-topic one was <=2000 chars, nothing in between.
+# 5000 sits in that gap with margin on both sides.
+_BBC_LIVE_URL_PATTERN = "bbc.co.uk/persian/live/"
+_BBC_LIVE_BODY_LEN_FLOOR = 5000
 # Persian quote chars («...») that aggregators string together.
 _PERSIAN_QUOTE_RE = re.compile(r"«[^»]+»")
 
@@ -309,6 +325,13 @@ def heuristic_classify(article: Article) -> _Verdict | None:
     for kw in _ROUNDUP_TITLE_PATTERNS:
         if kw in title:
             return _Verdict("aggregation", 0.9)
+
+    # 0c. BBC Persian rolling live-blog pages → aggregation (drop). See
+    #     _BBC_LIVE_URL_PATTERN comment for the audit that established the
+    #     length floor. Same cluster-pollution shape as 0b, URL-scoped so it
+    #     can never affect any other source.
+    if _BBC_LIVE_URL_PATTERN in url and len(body) >= _BBC_LIVE_BODY_LEN_FLOOR:
+        return _Verdict("aggregation", 0.9)
 
     # 1. URL-slug patterns — highest precision when they fire.
     for pat in _OPINION_URL_PATTERNS:
