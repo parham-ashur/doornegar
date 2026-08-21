@@ -5068,3 +5068,68 @@ class TestClusterNewRejectsOutlierAtFormationTime:
             "forensic tracing (this exact incident was only diagnosable "
             "because a similar event trail existed for the merge step)"
         )
+
+
+class TestReclusterOrphansLogsEvents:
+    """2026-08-21: step_recluster_orphans attaches articles to existing
+    stories using only a 0.40 centroid-cosine threshold (no LLM check, no
+    title-overlap validation) and, before this fix, wrote ZERO story_events
+    — unlike every other attach path (cluster_new, merge_tiny_cosine, admin
+    attach/detach). This made it invisible to forensic audits.
+
+    Concretely: two homepage stories manually cleaned on 2026-08-19/20
+    (f16d469c, 6b8d711a) recontaminated within 24-48h — including several
+    of the EXACT SAME articles a human had just detached as off-topic,
+    since detaching an article doesn't blocklist it from being re-matched
+    here on a later run. Confirmed via story_events: both stories' event
+    history went silent immediately after the manual detach, despite the
+    article count growing by double digits before the next audit.
+
+    This fix only adds logging (zero behavior change to which articles
+    attach or the 0.40 threshold) — a deliberately narrow, zero-risk first
+    step. The threshold/validation gap itself is a separate, larger
+    decision flagged in project_clustering_contamination_2026-08.md for
+    explicit sign-off, mirroring the same _same_event-style validation
+    already used by merge_tiny_cosine (19841de) and _cluster_new_articles
+    (4944f0f) — deliberately NOT implemented here without that sign-off.
+    """
+
+    def test_logs_match_accept_event_per_attachment(self):
+        import inspect
+        from auto_maintenance import step_recluster_orphans
+        src = inspect.getsource(step_recluster_orphans)
+        assert "log_event" in src, (
+            "step_recluster_orphans must log a story_event for every "
+            "attachment it makes — this is the only attach path in the "
+            "pipeline that didn't, which is why recontamination via this "
+            "step went undiagnosed for 2+ days"
+        )
+        assert '"path": "recluster_orphans"' in src, (
+            "logged events must be taggable to this specific path, "
+            "matching the 'path' convention used by merge_tiny_cosine "
+            "and cluster_new_reject_outlier events"
+        )
+
+    def test_log_event_call_is_after_the_db_update(self):
+        import inspect
+        from auto_maintenance import step_recluster_orphans
+        src = inspect.getsource(step_recluster_orphans)
+        update_idx = src.find("update(Article).where(Article.id == art_id)")
+        log_idx = src.find("_log_event_orphan(")
+        assert update_idx >= 0 and log_idx >= 0
+        assert update_idx < log_idx, (
+            "the story_id UPDATE must run before the event log call, so "
+            "a logging failure (wrapped in its own SAVEPOINT) can never "
+            "prevent the actual attachment"
+        )
+
+    def test_logged_signal_includes_cosine_score(self):
+        import inspect
+        from auto_maintenance import step_recluster_orphans
+        src = inspect.getsource(step_recluster_orphans)
+        assert '"cosine": round(sim, 4)' in src, (
+            "the logged event must include the actual cosine score that "
+            "triggered the attach, so a future audit can tell a "
+            "borderline (0.40-0.45) match from a strong one without "
+            "re-deriving embeddings"
+        )

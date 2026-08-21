@@ -1279,7 +1279,7 @@ async def step_recluster_orphans():
                     best_sim = sim
                     best_story = sid
             if best_story and best_sim >= RETRY_THRESHOLD:
-                attached_ids[art_id] = best_story
+                attached_ids[art_id] = (best_story, best_sim)
                 capacity[best_story] -= 1
             elif best_story is None:
                 # Only attribute to capacity exhaustion when no story
@@ -1289,9 +1289,33 @@ async def step_recluster_orphans():
                 else:
                     skipped_full += 1
 
-        for art_id, sid in attached_ids.items():
+        # Event logging (2026-08-21): this step previously wrote no
+        # story_events at all, unlike every other attach path
+        # (cluster_new, merge_tiny_cosine, admin attach/detach). That
+        # made it invisible to audits — two homepage stories manually
+        # cleaned on 2026-08-19/20 silently recontaminated via this
+        # exact step (confirmed: previously-detached articles reattached
+        # here with zero pairwise validation beyond a 0.40 centroid-
+        # cosine threshold, since a detach doesn't blocklist the pairing
+        # and nothing here checks LLM/title-overlap agreement). Logging
+        # doesn't fix the loose threshold — see project_clustering_
+        # contamination_2026-08.md — but it's a zero-risk prerequisite:
+        # the next investigation needs to SEE these attachments to
+        # diagnose them, the way merge_tiny_cosine's events did for the
+        # 2026-08-20 transitive-chaining bug.
+        from app.services.events import log_event as _log_event_orphan
+
+        for art_id, (sid, sim) in attached_ids.items():
             await db.execute(
                 update(Article).where(Article.id == art_id).values(story_id=sid)
+            )
+            await _log_event_orphan(
+                db,
+                event_type="match_accept",
+                actor="pipeline",
+                story_id=sid,
+                article_id=art_id,
+                signals={"path": "recluster_orphans", "cosine": round(sim, 4)},
             )
         stats["attached"] = len(attached_ids)
         stats["skipped_capacity_exhausted"] = skipped_capacity_exhausted
